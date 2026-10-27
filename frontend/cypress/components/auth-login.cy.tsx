@@ -85,8 +85,8 @@ describe('LoginLogout Component Tests', () => {
 
     // Check accessibility labels are present
     cy.get('[aria-label="Login button"]').should('exist');
-    // Check for unknown user avatar content
-    cy.contains('UNK').should('exist');
+    // The signed-out avatar shows Joy's fallback Person icon and no text ("UNK" and the alt-derived "u" are both gone).
+    cy.get('[data-testid="login-logout-component"] .MuiAvatar-root').should('have.text', '').find('[data-testid="PersonIcon"]').should('exist');
   });
 
   it('handles different user status values', () => {

@@ -13,6 +13,7 @@ import { auth } from '@/auth';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutation';
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { trimReferenceTextFields } from '@/lib/reference-text';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
 
 // Mapping from dataType to primary key column name
@@ -167,14 +168,18 @@ interface CreatedRowAudit {
  *
  * An upsert overwrites the row before anything can read it, so an UPDATE here
  * carries no prior state — see recordMutation's oldRowState contract.
+ *
+ * Returns whether it actually recorded a mutation (false for an 'unchanged'
+ * slice), so a caller upserting multiple slices has one source of truth for
+ * whether any of them changed, instead of re-deriving it from `operation`.
  */
 async function recordTaxonomySliceUpsert(
   tx: TxExecutor,
   schema: string,
   slice: { sliceKey: string; id: number; operation: UpsertOperation; rowData: Record<string, unknown> },
   changedBy: string
-): Promise<void> {
-  if (slice.operation === 'unchanged') return;
+): Promise<boolean> {
+  if (slice.operation === 'unchanged') return false;
   const persistedRow = await loadSinglePersistedRow(tx, schema, slice.sliceKey, [
     { column: `${slice.sliceKey.charAt(0).toUpperCase()}${slice.sliceKey.slice(1)}ID`, value: slice.id }
   ]);
@@ -184,6 +189,7 @@ async function recordTaxonomySliceUpsert(
       ? { ...shared, operation: ChangelogOperation.INSERT, newRowState: persistedRow }
       : { ...shared, operation: ChangelogOperation.UPDATE, oldRowState: null, newRowState: persistedRow }
   );
+  return true;
 }
 
 /** One removed row awaiting its changelog entry. */
@@ -343,7 +349,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
     // pooled connection.
     const changedBy = await changelogChangedBy();
 
-    const updateIDs = await connectionManager.withTransaction(async tx => {
+    const { updateIDs, changed } = await connectionManager.withTransaction(async tx => {
       if (dataType === 'alltaxonomiesview') {
         let queryConfig;
         switch (dataType) {
@@ -354,9 +360,14 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             throw new Error('Incorrect view call');
         }
 
-        return await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig, tx.id, async slice =>
-          recordTaxonomySliceUpsert(tx, schema, slice as Parameters<typeof recordTaxonomySliceUpsert>[2], changedBy)
-        );
+        // recordTaxonomySliceUpsert's own return value is the one source of truth for
+        // whether a slice changed; the view as a whole changed iff any slice did.
+        let slicesChanged = false;
+        const sliceIDs = await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig, tx.id, async slice => {
+          const sliceChanged = await recordTaxonomySliceUpsert(tx, schema, slice as Parameters<typeof recordTaxonomySliceUpsert>[2], changedBy);
+          slicesChanged = slicesChanged || sliceChanged;
+        });
+        return { updateIDs: sliceIDs, changed: slicesChanged };
       }
 
       const mapper = MapperFactory.getMapper<any, any>(dataType);
@@ -371,11 +382,23 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         beforeLookup.push({ column: 'IsActive', value: oldRowData.IsActive });
       }
       const persistedBefore = await loadSinglePersistedRow(tx, schema, dataType, beforeLookup, { forUpdate: true });
-      const requestedChanges = mapper.demapData([newRow])[0];
+      const rawRequestedChanges = mapper.demapData([newRow])[0];
+      const requestedChanges = trimReferenceTextFields(dataType, rawRequestedChanges);
+      if (dataType === 'attributes') {
+        // An untouched code is the row's primary key and may be referenced elsewhere; only a code the
+        // user actually edited is normalized, so re-saving a legacy row never silently renames its key.
+        if (rawRequestedChanges.Code === previousGridIDKey) requestedChanges.Code = rawRequestedChanges.Code;
+        else if (typeof requestedChanges.Code === 'string' && requestedChanges.Code === '') throw new MutationRequestError('Attribute code cannot be blank');
+      }
       const newRowData = { ...persistedBefore, ...requestedChanges };
       const { [demappedGridID]: updatedGridIDKey, ...remainingProperties } = newRowData;
 
       let dataToUpdate;
+      // Set when the personnel branch inserts or deletes a censusactivepersonnel
+      // relation. The personnel row itself may be byte-for-byte unchanged (the
+      // grid re-sends the whole row for any edit), so this has to be tracked
+      // separately from the rowStatesDiffer check at the end.
+      let relationChanged = false;
       const censusCookie = await getCookie('censusID');
       // The census cookie is CLEARED by writing an empty string rather than by
       // deleting it (components/sidebar/censusselector, useOrgCensusDispatch), so
@@ -422,6 +445,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               previousGridIDKey
             ]);
             const persistedRelation = await loadSinglePersistedRow(tx, schema, 'censusactivepersonnel', [{ column: 'CAPID', value: insertResult.insertId }]);
+            relationChanged = true;
             await recordMutation({
               tx,
               schema,
@@ -435,6 +459,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           } else if (desiredActive === CENSUS_ACTIVE_DISABLED && existingRelation) {
             const deleteSQL = safeFormatQuery(schema, 'DELETE FROM ??.censusactivepersonnel WHERE CAPID = ?');
             await tx.query(deleteSQL, [existingRelation.CAPID]);
+            relationChanged = true;
             await recordMutation({
               tx,
               schema,
@@ -476,7 +501,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
       // A matched re-save is a successful request but not a mutation. Suppress a
       // false UPDATE event by comparing the database snapshots, not request data.
-      if (rowStatesDiffer(persistedBefore, persistedAfter)) {
+      const rowChanged = rowStatesDiffer(persistedBefore, persistedAfter);
+      if (rowChanged) {
         await recordMutation({
           tx,
           schema,
@@ -491,10 +517,15 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         });
       }
 
-      return { [dataType]: persistedAfter[demappedGridID] };
+      return { updateIDs: { [dataType]: persistedAfter[demappedGridID] }, changed: rowChanged || relationChanged };
     });
 
-    return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
+    // `changed` tells the client whether this PATCH actually recorded a
+    // mutation, distinct from `message`/`updatedIDs` above which describe a
+    // successfully MATCHED row regardless of whether anything moved (#481: a
+    // grid bug resent the persisted value unchanged, and the 200 body gave the
+    // client no way to tell that apart from a real edit).
+    return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs, changed }, { status: HTTPResponses.OK });
   } catch (error: any) {
     if (error instanceof MutationRequestError) return mutationErrorResponse(error);
     // A zero-row UPDATE must not report success: surface the NOT_FOUND status the
@@ -534,7 +565,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       const submittedRow = { ...newRow };
       delete submittedRow.isNew;
 
-      const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([submittedRow])[0];
+      const newRowData = trimReferenceTextFields(params.dataType, MapperFactory.getMapper<any, any>(params.dataType).demapData([submittedRow])[0]);
+      if (params.dataType === 'attributes' && typeof newRowData.Code === 'string' && newRowData.Code === '') {
+        throw new MutationRequestError('Attribute code cannot be blank');
+      }
       const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
 
       if (params.dataType === 'alltaxonomiesview') {

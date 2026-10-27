@@ -50,9 +50,10 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
-vi.mock('@/config/editplan/bulkanalyzer', () => ({
-  analyzeBulk: (...args: unknown[]) => mocks.analyzeBulk(...args)
-}));
+vi.mock('@/config/editplan/bulkanalyzer', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/config/editplan/bulkanalyzer')>();
+  return { ...actual, analyzeBulk: (...args: unknown[]) => mocks.analyzeBulk(...args) };
+});
 
 vi.mock('@/config/editplan/scopeguard', () => ({
   assertCanEditMeasurementScope: mocks.assertCanEditMeasurementScope,
@@ -236,15 +237,79 @@ describe('POST /api/revisionupload', () => {
       ],
       newRows: [],
       invalidRows: [],
+      collapsedRows: [],
       counts: {
         matched: 1,
         matchedWithChanges: 1,
         new: 0,
         invalid: 0,
+        collapsed: 0,
         total: 1
       },
-      bulkPlan: EMPTY_BULK_PLAN
+      bulkPlan: EMPTY_BULK_PLAN,
+      // Minted fresh by this route per #505 (randomUUID, so not a fixed
+      // literal here); asserted present/well-shaped by pattern. The
+      // uploadAttemptID/invalidRowsIntegrityHash contract itself — malformed/
+      // missing/mismatched — is exercised in depth by apply/route.test.ts,
+      // which is where a wrong value actually changes behavior (400/409).
+      uploadAttemptID: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+      invalidRowsIntegrityHash: expect.stringMatching(/^[0-9a-f]{64}$/)
     });
+  });
+
+  // #505 review round 2: route.ts used to mint a brand-new random
+  // uploadAttemptID on every call, with no way for a client re-matching the
+  // SAME attempt (as opposed to starting a new upload) to retain its
+  // identity. The per-attempt failed-row batchID (shared/invalidrowintegrity.ts)
+  // is derived from uploadAttemptID, so losing it on a re-match would orphan
+  // any evidence already tied to the first attempt.
+  it('reuses a valid previousUploadAttemptID as this response uploadAttemptID instead of minting a new one', async () => {
+    const PREVIOUS_UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
+
+    const response = await POST(
+      buildRequest({
+        rows: [{ tag: 'T1', stemtag: '1', spcode: 'QUAS', quadrat: '101', lx: '1', ly: '2', date: '2026-04-01', dbh: '10.0' }],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing',
+        previousUploadAttemptID: PREVIOUS_UPLOAD_ATTEMPT_ID
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.uploadAttemptID).toBe(PREVIOUS_UPLOAD_ATTEMPT_ID);
+  });
+
+  it('returns 400 when previousUploadAttemptID is present but not a valid UUID', async () => {
+    const response = await POST(
+      buildRequest({
+        rows: [{ tag: 'T1', stemtag: '1', spcode: 'QUAS', quadrat: '101', lx: '1', ly: '2', date: '2026-04-01', dbh: '10.0' }],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing',
+        previousUploadAttemptID: 'not-a-uuid'
+      })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'previousUploadAttemptID must be a valid UUID when present' });
+    expect(mocks.analyzeBulk).not.toHaveBeenCalled();
+  });
+
+  it('mints a fresh uploadAttemptID when previousUploadAttemptID is omitted (a genuinely new upload)', async () => {
+    const response = await POST(
+      buildRequest({
+        rows: [{ tag: 'T1', stemtag: '1', spcode: 'QUAS', quadrat: '101', lx: '1', ly: '2', date: '2026-04-01', dbh: '10.0' }],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.uploadAttemptID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   });
 
   it('falls back to tag + stemtag matching when stemid is absent', async () => {
@@ -365,7 +430,14 @@ describe('POST /api/revisionupload', () => {
     expect(body.invalidRows[0].reason).toMatch(/MeasuredDBH/);
   });
 
-  it('flags duplicate stemid rows within a single file as invalid instead of silently collapsing them', async () => {
+  // #505 regression: the first occurrence of a repeated stemid used to be
+  // invalidated right alongside its later duplicate(s), losing the one
+  // legitimate row entirely. The first occurrence must survive (here: as a
+  // newRow, since the stemid lookup resolves to no DB row) and only the
+  // later same-key row(s) with genuinely different content are rejected —
+  // with a stable csvIndex apply can later persist as a DUPLICATE_ENTRY
+  // failed measurement.
+  it('keeps the first occurrence of a duplicate stemid and flags only the later copy as invalid (#505)', async () => {
     mocks.executeQuery.mockResolvedValue([]);
 
     const response = await POST(
@@ -389,15 +461,18 @@ describe('POST /api/revisionupload', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
 
-    expect(body.invalidRows).toHaveLength(2);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0].csvIndex).toBe(1);
     expect(body.invalidRows[0].reason).toMatch(/duplicate stemid 100/);
-    expect(body.invalidRows[1].reason).toMatch(/duplicate stemid 100/);
-    expect(body.invalidRows.map((row: { csvIndex: number }) => row.csvIndex)).toEqual([0, 1]);
-    expect(body.newRows).toHaveLength(1);
-    expect(body.newRows[0].csvRow.stemid).toBe('200');
+    expect(body.collapsedRows).toHaveLength(0);
+    expect(body.newRows).toHaveLength(2);
+    expect(body.newRows.map((row: { csvIndex: number }) => row.csvIndex)).toEqual([0, 2]);
+    expect(body.newRows[0].csvRow.stemid).toBe('100');
+    expect(body.newRows[1].csvRow.stemid).toBe('200');
+    expect(body.counts).toMatchObject({ new: 2, invalid: 1, collapsed: 0, total: 3 });
   });
 
-  it('flags duplicate tag+stemtag rows within a single file as invalid', async () => {
+  it('keeps the first occurrence of a duplicate tag+stemtag and flags only the later copy as invalid (#505)', async () => {
     mocks.executeQuery.mockResolvedValue([]);
 
     const response = await POST(
@@ -420,9 +495,81 @@ describe('POST /api/revisionupload', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
 
-    expect(body.invalidRows).toHaveLength(2);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0].csvIndex).toBe(1);
     expect(body.invalidRows[0].reason).toMatch(/duplicate tag\+stemtag/);
-    expect(body.newRows).toHaveLength(0);
+    expect(body.newRows).toHaveLength(1);
+    expect(body.newRows[0].csvIndex).toBe(0);
+  });
+
+  // #505: an EXACT duplicate (identical content, not just the same key) must
+  // follow the same survive-first/invalidate-later rule as a content-differing
+  // duplicate — the bug this regresses against invalidated BOTH copies of an
+  // exact duplicate, losing the only legitimate occurrence.
+  it('keeps the first occurrence of an EXACT duplicate row (identical content) and flags only the later copy as invalid (#505)', async () => {
+    mocks.executeQuery.mockResolvedValue([]);
+
+    const identicalRow = { stemid: '300', tag: 't3', stemtag: 's', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '10.0', date: '2026-04-01' };
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'exact-duplicates.csv',
+            rows: [identicalRow, { ...identicalRow }]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.newRows).toHaveLength(1);
+    expect(body.newRows[0].csvIndex).toBe(0);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0].csvIndex).toBe(1);
+    expect(body.invalidRows[0].reason).toMatch(/duplicate stemid 300/);
+    expect(body.collapsedRows).toHaveLength(0);
+  });
+
+  // #505: a later row sharing a match key with an earlier row, differing only
+  // beyond coremeasurements' stored DECIMAL(12,6) precision (export-tool float
+  // rounding noise in the 7th+ decimal), must collapse into the earlier row
+  // instead of invalidating either copy — this is accounting-only, not a
+  // failure, and must show up in counts.collapsed/total.
+  it('collapses a later row into the earlier occurrence when they differ only beyond stored DECIMAL(12,6) precision (#505)', async () => {
+    mocks.executeQuery.mockResolvedValue([]);
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'precision-noise.csv',
+            rows: [
+              { stemid: '400', tag: 't4', stemtag: 's', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '44.000000', date: '2026-04-01' },
+              { stemid: '400', tag: 't4', stemtag: 's', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '44.0000004', date: '2026-04-01' }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.invalidRows).toHaveLength(0);
+    expect(body.newRows).toHaveLength(1);
+    expect(body.newRows[0].csvIndex).toBe(0);
+    expect(body.collapsedRows).toHaveLength(1);
+    expect(body.collapsedRows[0]).toMatchObject({ csvIndex: 1, collapsedIntoCsvIndex: 0 });
+    expect(body.counts).toMatchObject({ new: 1, invalid: 0, collapsed: 1, total: 2 });
   });
 
   it('routes unmatched stemid rows to newRows with a stemid-not-found reason', async () => {
@@ -551,9 +698,6 @@ describe('POST /api/revisionupload', () => {
           }
         ];
       }
-      if (query.includes('FROM ??.species')) {
-        return [{ Code: 'newspc' }];
-      }
       return [];
     });
 
@@ -608,7 +752,7 @@ describe('POST /api/revisionupload', () => {
     expect(bulkInput.matched[0].newRow).toEqual({ SpeciesCode: 'NEWSPC' });
   });
 
-  it('demotes matched rows to invalidRows when their spcode change targets an unknown species (regression: must not 500 the whole batch with SpeciesNotFoundError: CHANGED)', async () => {
+  it('demotes matched rows to invalidRows when their spcode change targets an unknown species (regression: #427 batch grouping, not a route-level species pre-check, is the single source of truth — the unknown-species row must still reach analyzeBulk)', async () => {
     mocks.executeQuery.mockImplementation(async (query: string, _params?: unknown[]) => {
       if (query.includes('cm.StemGUID IN')) {
         return [
@@ -658,12 +802,45 @@ describe('POST /api/revisionupload', () => {
           }
         ];
       }
-      if (query.includes('FROM ??.species')) {
-        // Only 'realspc' resolves; 'changed' (the bad code from row 1) does not.
-        return [{ Code: 'realspc' }];
-      }
       return [];
     });
+
+    // analyzeBulk (mocked here, but see bulkanalyzer.ts phase 1 for the real
+    // implementation) is the ONLY place that decides a species code is
+    // unknown: it converts a thrown SpeciesNotFoundError into this
+    // status:'invalid' rowPlan. Row 1 (REALSPC) resolves and matches fine.
+    mocks.analyzeBulk
+      .mockResolvedValueOnce({
+        ...EMPTY_BULK_PLAN,
+        rowCount: 2,
+        rowPlans: [
+          { rowIndex: 0, targetID: 701, status: 'invalid', reason: 'Species not found: CHANGED' },
+          {
+            rowIndex: 1,
+            targetID: 702,
+            status: 'matched',
+            plan: {
+              dataType: 'measurementssummary',
+              targetID: 702,
+              fieldChanges: [{ field: 'SpeciesCode', from: 'SLOATE', to: 'REALSPC' }],
+              effects: [],
+              errors: [],
+              canApply: true,
+              maxSeverity: 'info',
+              planHash: 'inner-plan-702',
+              generatedAt: '2026-04-20T00:00:00.000Z'
+            }
+          }
+        ]
+      })
+      // Second call: route re-runs analyzeBulk on the surviving row only,
+      // exactly like the TreeStemResolution demote-and-re-run path.
+      .mockResolvedValueOnce({
+        ...EMPTY_BULK_PLAN,
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: 702, status: 'matched' }],
+        planHash: 'plan-after-species-demotion'
+      });
 
     const response = await POST(
       buildRequest({
@@ -682,11 +859,6 @@ describe('POST /api/revisionupload', () => {
       })
     );
 
-    // Under the old behavior `applySpeciesRules` threw SpeciesNotFoundError:
-    // CHANGED out of analyzeBulk, the route had no catch for it, and the
-    // entire batch died with 500. Now the bad row becomes a regular invalid
-    // row that the upload review's "Invalid" tab can render — and the second
-    // row (with a known species) is preserved as a normal matched edit.
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.matchedRows).toHaveLength(1);
@@ -697,13 +869,21 @@ describe('POST /api/revisionupload', () => {
       reason: 'Species not found: CHANGED'
     });
 
-    // Crucial: the bulk-plan analyzer must only see the surviving row, not
-    // the species-bad one — otherwise applySpeciesRules would still throw
-    // SpeciesNotFoundError mid-analysis.
-    const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
-    const bulkInput = analyzeArgs[5] as { matched: Array<{ targetID: number }> };
-    expect(bulkInput.matched).toHaveLength(1);
-    expect(bulkInput.matched[0].targetID).toBe(702);
+    expect(mocks.analyzeBulk, 'route-level pre-validation must not strip the unknown-species row before analyzeBulk ever sees it').toHaveBeenCalledTimes(2);
+    const firstCallInput = (mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number; explicitSpeciesCode?: string | null }>;
+    };
+    expect(
+      firstCallInput.matched.map(m => m.targetID),
+      'both rows, including the unknown-species one, must reach the FIRST analyzeBulk call so #427 batch grouping can see them'
+    ).toEqual([701, 702]);
+    expect(firstCallInput.matched.map(m => m.explicitSpeciesCode)).toEqual(['CHANGED', 'REALSPC']);
+
+    const secondCallInput = (mocks.analyzeBulk.mock.calls[1] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number }>;
+    };
+    expect(secondCallInput.matched.map(m => m.targetID)).toEqual([702]);
+    expect(body.bulkPlan.planHash).toBe('plan-after-species-demotion');
   });
 
   it('demotes matched rows whose plan has a blocking TreeStemResolution error into invalidRows and re-runs the bulk plan on the survivors (regression: a quadrat-not-found row should land in the Invalid tab, not block the whole batch)', async () => {
@@ -850,6 +1030,530 @@ describe('POST /api/revisionupload', () => {
     // CSV index), so apply's analyzeBulk on the same input shape will hash
     // identically.
     expect(secondCallInput.invalid.map(i => i.rowIndex)).toEqual([0]);
+  });
+
+  const GROUP_CONFLICT_TREE_ID = 42;
+  const GROUP_CONFLICT_ROW_INDEXES = [0, 1];
+  const GROUP_SPECIES_CONFLICT_ERROR = {
+    kind: 'TreeStemResolution',
+    subject: 'species',
+    reason: 'group_species_conflict',
+    field: 'SpeciesCode',
+    message: `Tree T#${GROUP_CONFLICT_TREE_ID} (TreeTag "T1") has conflicting species corrections requested in this batch: "BBB", "CCC". Submit one species per tree in a single batch.`,
+    severity: 'destructive',
+    blocking: true,
+    treeID: GROUP_CONFLICT_TREE_ID,
+    rowIndex: GROUP_CONFLICT_ROW_INDEXES[0],
+    rowIndexes: GROUP_CONFLICT_ROW_INDEXES
+  } as const;
+
+  function mockTwoStemDbRows() {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 901,
+            StemGUID: 5283335,
+            IsActive: 1,
+            MeasuredDBH: 12.5,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T1',
+            RawStemTag: 'S1',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T1',
+            StemTag: 'S1',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          },
+          {
+            CoreMeasurementID: 902,
+            StemGUID: 5283336,
+            IsActive: 1,
+            MeasuredDBH: 14.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T2',
+            RawStemTag: 'S2',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T2',
+            StemTag: 'S2',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          }
+        ];
+      }
+      return [];
+    });
+  }
+
+  function postTwoStemRequest() {
+    return POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'group-species-conflict.csv',
+            rows: [
+              { stemid: '5283335', spcode: 'BBB' },
+              { stemid: '5283336', spcode: 'CCC' }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+  }
+
+  it('skips the demote-and-re-run entirely when the plan carries a batch-level group blocker (#427), keeping the row that would have been demoted inside matchedRows and preserving the group error in the response', async () => {
+    mockTwoStemDbRows();
+
+    // Row 0 (target 901) individually threw TargetNotFoundError/SpeciesNotFoundError
+    // in phase 1 (status:'invalid'), which would normally be demoted; row 1
+    // (target 902) matched fine. Both also triggered phase 2's group conflict.
+    mocks.analyzeBulk.mockResolvedValueOnce({
+      ...EMPTY_BULK_PLAN,
+      rowCount: 2,
+      rowPlans: [
+        {
+          rowIndex: 0,
+          targetID: 901,
+          status: 'invalid',
+          reason: 'Row 1: species "BBB" was not found'
+        },
+        {
+          rowIndex: 1,
+          targetID: 902,
+          status: 'matched',
+          plan: {
+            dataType: 'measurementssummary',
+            targetID: 902,
+            fieldChanges: [{ field: 'SpeciesCode', from: 'AAA', to: 'CCC' }],
+            effects: [],
+            errors: [],
+            canApply: true,
+            maxSeverity: 'info',
+            planHash: 'inner-plan-902',
+            generatedAt: '2026-04-20T00:00:00.000Z'
+          }
+        }
+      ],
+      errors: [GROUP_SPECIES_CONFLICT_ERROR],
+      maxSeverity: 'destructive',
+      planHash: 'plan-with-group-blocker'
+    });
+
+    const response = await postTwoStemRequest();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(
+      mocks.analyzeBulk,
+      'a batch-level group blocker already makes canApply false; re-running on survivors only would drop row 0 explicitSpeciesCode and silently erase the conflict'
+    ).toHaveBeenCalledTimes(1);
+    const firstCallInput = (mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number; explicitSpeciesCode?: string | null }>;
+    };
+    expect(
+      firstCallInput.matched.map(m => m.targetID),
+      'the row that would normally be demoted (901, unknown species "BBB") must reach analyzeBulk alongside the valid correction row (902) — not an empty/near-empty input'
+    ).toEqual([901, 902]);
+    expect(firstCallInput.matched.map(m => m.explicitSpeciesCode)).toEqual(['BBB', 'CCC']);
+    expect(
+      body.matchedRows.map((r: { coreMeasurementID: number }) => r.coreMeasurementID),
+      'row 901 would normally be demoted into invalidRows, but must stay in matchedRows while a group blocker is present'
+    ).toEqual([901, 902]);
+    expect(
+      body.invalidRows,
+      'the would-be-demoted row must not be pushed into invalidRows without also leaving matchedRows (would double-count it in counts)'
+    ).toHaveLength(0);
+    expect(body.counts).toMatchObject({ matched: 2, invalid: 0, total: 2 });
+    expect(body.bulkPlan.errors).toEqual([GROUP_SPECIES_CONFLICT_ERROR]);
+  });
+
+  it('still demotes and re-runs when the only blocking error is a non-group TreeStemResolution reason (regression: the #427 gate must match only reason values prefixed "group_", not any blocking error)', async () => {
+    mockTwoStemDbRows();
+
+    mocks.analyzeBulk
+      .mockResolvedValueOnce({
+        ...EMPTY_BULK_PLAN,
+        rowCount: 2,
+        rowPlans: [
+          {
+            rowIndex: 0,
+            targetID: 901,
+            status: 'invalid',
+            reason: 'Matching stem exists in a different quadrat'
+          },
+          {
+            rowIndex: 1,
+            targetID: 902,
+            status: 'matched',
+            plan: {
+              dataType: 'measurementssummary',
+              targetID: 902,
+              fieldChanges: [{ field: 'SpeciesCode', from: 'AAA', to: 'CCC' }],
+              effects: [],
+              errors: [],
+              canApply: true,
+              maxSeverity: 'info',
+              planHash: 'inner-plan-902',
+              generatedAt: '2026-04-20T00:00:00.000Z'
+            }
+          }
+        ],
+        errors: [
+          {
+            kind: 'TreeStemResolution',
+            subject: 'stem',
+            reason: 'different_quadrat',
+            field: 'QuadratName',
+            message: 'Matching stem exists in a different quadrat',
+            severity: 'destructive',
+            blocking: true,
+            rowIndex: 0
+          }
+        ],
+        maxSeverity: 'destructive'
+      })
+      .mockResolvedValueOnce({
+        ...EMPTY_BULK_PLAN,
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: 902, status: 'matched' }],
+        planHash: 'plan-after-demotion-non-group'
+      });
+
+    const response = await postTwoStemRequest();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(
+      mocks.analyzeBulk,
+      'a non-group blocking error must not engage the #427 gate; demotion+re-run is still required so classify and apply hash the same survivor-only input'
+    ).toHaveBeenCalledTimes(2);
+    expect(body.matchedRows.map((r: { coreMeasurementID: number }) => r.coreMeasurementID)).toEqual([902]);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0]).toMatchObject({ csvIndex: 0, reason: 'Matching stem exists in a different quadrat' });
+    expect(body.bulkPlan.planHash).toBe('plan-after-demotion-non-group');
+  });
+
+  it('keeps an unknown-explicit species row from file 2 in the SAME batch analyzeBulk call as a correction requested in file 1 (regression: #427 grouping must see every file in the request, not just the file a row originated in)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 951,
+            StemGUID: 6000001,
+            IsActive: 1,
+            MeasuredDBH: 12.5,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T9',
+            RawStemTag: 'S1',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T9',
+            StemTag: 'S1',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          },
+          {
+            CoreMeasurementID: 952,
+            StemGUID: 6000002,
+            IsActive: 1,
+            MeasuredDBH: 14.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T9',
+            RawStemTag: 'S2',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T9',
+            StemTag: 'S2',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          }
+        ];
+      }
+      return [];
+    });
+
+    // The file-1 row (951, requesting "BBB") is the correction request; the
+    // file-2 row (952, requesting unknown "ZZZZ") is the sibling that must
+    // still reach the same batch call so #427 grouping can see both.
+    mocks.analyzeBulk
+      .mockResolvedValueOnce({
+        ...EMPTY_BULK_PLAN,
+        rowCount: 2,
+        rowPlans: [
+          {
+            rowIndex: 0,
+            targetID: 951,
+            status: 'matched',
+            plan: {
+              dataType: 'measurementssummary',
+              targetID: 951,
+              fieldChanges: [{ field: 'SpeciesCode', from: 'AAA', to: 'BBB' }],
+              effects: [],
+              errors: [],
+              canApply: true,
+              maxSeverity: 'info',
+              planHash: 'inner-plan-951',
+              generatedAt: '2026-04-20T00:00:00.000Z'
+            }
+          },
+          { rowIndex: 1, targetID: 952, status: 'invalid', reason: 'Species not found: ZZZZ' }
+        ]
+      })
+      .mockResolvedValueOnce({
+        ...EMPTY_BULK_PLAN,
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: 951, status: 'matched' }],
+        planHash: 'plan-after-multifile-demotion'
+      });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          { fileName: 'file-1.csv', rows: [{ stemid: '6000001', spcode: 'BBB' }] },
+          { fileName: 'file-2.csv', rows: [{ stemid: '6000002', spcode: 'ZZZZ' }] }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(mocks.analyzeBulk, 'file-1 and file-2 rows must combine into a SINGLE batch analyzeBulk call, not one call per file').toHaveBeenCalledTimes(2);
+    const firstCallInput = (mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number; explicitSpeciesCode?: string | null }>;
+    };
+    expect(
+      firstCallInput.matched.map(m => m.targetID),
+      'the file-2 row (952) must reach the same analyzeBulk call as the file-1 row (951), proving per-file classification does not isolate batch grouping'
+    ).toEqual([951, 952]);
+    expect(firstCallInput.matched.map(m => m.explicitSpeciesCode)).toEqual(['BBB', 'ZZZZ']);
+
+    expect(body.matchedRows.map((r: { coreMeasurementID: number }) => r.coreMeasurementID)).toEqual([951]);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0]).toMatchObject({ reason: 'Species not found: ZZZZ' });
+    expect(body.bulkPlan.planHash).toBe('plan-after-multifile-demotion');
+  });
+
+  it('surfaces an unrelated unknown-species row into invalidRows while a batch-level group blocker is present, without erasing the group conflict (regression: surfacing invalid rows and preserving the group blocker are separate concerns)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 901,
+            StemGUID: 5283335,
+            IsActive: 1,
+            MeasuredDBH: 12.5,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T1',
+            RawStemTag: 'S1',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T1',
+            StemTag: 'S1',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          },
+          {
+            CoreMeasurementID: 902,
+            StemGUID: 5283336,
+            IsActive: 1,
+            MeasuredDBH: 14.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T1',
+            RawStemTag: 'S2',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T1',
+            StemTag: 'S2',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          },
+          {
+            CoreMeasurementID: 903,
+            StemGUID: 5283337,
+            IsActive: 1,
+            MeasuredDBH: 9.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T3',
+            RawStemTag: 'S3',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T3',
+            StemTag: 'S3',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          }
+        ];
+      }
+      return [];
+    });
+
+    // Rows 0/1 (901/902) conflict on tree T1's species ("BBB" vs "CCC") and
+    // are named by the group blocker's rowIndexes — they must survive any
+    // demotion. Row 2 (903, unrelated tree T3) independently requests an
+    // unknown species and is a genuine demotion candidate.
+    mocks.analyzeBulk
+      .mockResolvedValueOnce({
+        ...EMPTY_BULK_PLAN,
+        rowCount: 3,
+        rowPlans: [
+          { rowIndex: 0, targetID: 901, status: 'invalid', reason: 'Row 1: species "BBB" was not found' },
+          {
+            rowIndex: 1,
+            targetID: 902,
+            status: 'matched',
+            plan: {
+              dataType: 'measurementssummary',
+              targetID: 902,
+              fieldChanges: [{ field: 'SpeciesCode', from: 'AAA', to: 'CCC' }],
+              effects: [],
+              errors: [],
+              canApply: true,
+              maxSeverity: 'info',
+              planHash: 'inner-plan-902',
+              generatedAt: '2026-04-20T00:00:00.000Z'
+            }
+          },
+          { rowIndex: 2, targetID: 903, status: 'invalid', reason: 'Species not found: ZZZZ' }
+        ],
+        errors: [GROUP_SPECIES_CONFLICT_ERROR],
+        maxSeverity: 'destructive'
+      })
+      .mockResolvedValueOnce({
+        ...EMPTY_BULK_PLAN,
+        rowCount: 2,
+        rowPlans: [
+          { rowIndex: 0, targetID: 901, status: 'invalid', reason: 'Row 1: species "BBB" was not found' },
+          {
+            rowIndex: 1,
+            targetID: 902,
+            status: 'matched',
+            plan: {
+              dataType: 'measurementssummary',
+              targetID: 902,
+              fieldChanges: [{ field: 'SpeciesCode', from: 'AAA', to: 'CCC' }],
+              effects: [],
+              errors: [],
+              canApply: true,
+              maxSeverity: 'info',
+              planHash: 'inner-plan-902',
+              generatedAt: '2026-04-20T00:00:00.000Z'
+            }
+          }
+        ],
+        errors: [GROUP_SPECIES_CONFLICT_ERROR],
+        maxSeverity: 'destructive',
+        planHash: 'plan-group-blocker-with-unrelated-demotion'
+      });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'group-plus-unrelated-unknown.csv',
+            rows: [
+              { stemid: '5283335', spcode: 'BBB' },
+              { stemid: '5283336', spcode: 'CCC' },
+              { stemid: '5283337', spcode: 'ZZZZ' }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    // The re-run DOES fire here (row 903 is a genuine, group-unrelated
+    // demotion), unlike the group-blocker-only test above. What must NOT
+    // happen is the group-implicated rows (901, 902) being dropped from the
+    // re-run input — see route.ts's groupImplicatedRowIndexes exclusion.
+    expect(
+      mocks.analyzeBulk,
+      'an unrelated demotable row still triggers a re-run; only group-implicated rows are protected from demotion'
+    ).toHaveBeenCalledTimes(2);
+    const firstCallInput = (mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number; explicitSpeciesCode?: string | null }>;
+    };
+    expect(firstCallInput.matched.map(m => m.targetID)).toEqual([901, 902, 903]);
+    expect(firstCallInput.matched.map(m => m.explicitSpeciesCode)).toEqual(['BBB', 'CCC', 'ZZZZ']);
+
+    const secondCallInput = (mocks.analyzeBulk.mock.calls[1] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number; explicitSpeciesCode?: string | null }>;
+    };
+    expect(
+      secondCallInput.matched.map(m => m.targetID),
+      'the group-implicated rows (901, 902) must survive the re-run — dropping either would silently erase the group conflict'
+    ).toEqual([901, 902]);
+    expect(secondCallInput.matched.map(m => m.explicitSpeciesCode)).toEqual(['BBB', 'CCC']);
+
+    expect(body.matchedRows.map((r: { coreMeasurementID: number }) => r.coreMeasurementID)).toEqual([901, 902]);
+    expect(body.invalidRows, 'the unrelated unknown-species row (903) must be surfaced into invalidRows').toHaveLength(1);
+    expect(body.invalidRows[0]).toMatchObject({ csvIndex: 2, reason: 'Species not found: ZZZZ' });
+    expect(body.bulkPlan.errors, 'the group blocker must still be present in the final response').toEqual([GROUP_SPECIES_CONFLICT_ERROR]);
+    expect(body.bulkPlan.planHash).toBe('plan-group-blocker-with-unrelated-demotion');
   });
 
   it('does not send leading-zero-mangled identity fields into the analyzer payload (regression: round-trip CSV must not surface fake bulk-plan changes for tag/stemtag/quadrat)', async () => {
@@ -1006,9 +1710,6 @@ describe('POST /api/revisionupload', () => {
             LocalY: 2.4
           }
         ];
-      }
-      if (query.includes('FROM ??.species')) {
-        return [{ Code: 'aaaaaa' }];
       }
       return [];
     });
@@ -1251,9 +1952,6 @@ describe('POST /api/revisionupload', () => {
             LocalY: 7.39
           }
         ];
-      }
-      if (query.includes('FROM ??.species')) {
-        return [{ Code: 'crud2' }];
       }
       return [];
     });
@@ -1599,6 +2297,99 @@ describe('POST /api/revisionupload', () => {
     expect(r6).toBeTruthy();
     expect(r6.severity).toBe('destructive');
     expect(body.bulkPlan.maxSeverity).toBe('destructive');
+  });
+
+  it('carries explicitSpeciesCode into the bulk input for matched rows, even when the spcode cell is unchanged and dropped from newRow (#427 batch species-correction grouping needs the sibling signal computeDiff throws away)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 801,
+            StemGUID: 801,
+            IsActive: 1,
+            MeasuredDBH: 10.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T1',
+            RawStemTag: 'S1',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T1',
+            StemTag: 'S1',
+            SpeciesCode: 'QUEMAR',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          },
+          {
+            CoreMeasurementID: 802,
+            StemGUID: 802,
+            IsActive: 1,
+            MeasuredDBH: 11.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T2',
+            RawStemTag: 'S1',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T2',
+            StemTag: 'S1',
+            SpeciesCode: 'QUEMAR',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          }
+        ];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'explicit-species.csv',
+            rows: [
+              // Row 0: spcode retyped with a case-only match against the DB
+              // value — computeDiff reports no change, so newRow has no
+              // SpeciesCode, but the request still explicitly named 'quemar'.
+              { stemid: '801', spcode: 'quemar' },
+              // Row 1: blank spcode — genuinely unspecified.
+              { stemid: '802', spcode: '' }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.matchedRows).toHaveLength(2);
+    expect(body.matchedRows[0].changes).toEqual({});
+
+    const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
+    const bulkInput = analyzeArgs[5] as {
+      matched: Array<{ targetID: number; newRow: Record<string, unknown>; explicitSpeciesCode?: string | null }>;
+    };
+    expect(bulkInput.matched).toHaveLength(2);
+
+    const row0 = bulkInput.matched.find(m => m.targetID === 801)!;
+    expect(row0.newRow).toEqual({});
+    expect(row0.explicitSpeciesCode).toBe('quemar');
+
+    const row1 = bulkInput.matched.find(m => m.targetID === 802)!;
+    expect(row1.explicitSpeciesCode).toBeNull();
   });
 
   it('rejects files that do not contain stemid values or tag + stemtag headers', async () => {

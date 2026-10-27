@@ -44,7 +44,7 @@ export default defineConfig({
       // MySQL servers split the port (e.g. native mysqld on IPv4, docker proxy
       // on IPv6), the TEST_DB_* harness and ConnectionManager silently talk to
       // DIFFERENT servers and every cross-stack test fails with
-      // "Unknown database 'forestgeo_test_N'".
+      // "Unknown database 'forestgeo_test_<namespace>_1'".
       TEST_DB_HOST: '127.0.0.1'
     },
 

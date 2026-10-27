@@ -189,14 +189,19 @@ function buildInput(schema: string, plotID: number, censusID: number, coreMeasur
 }
 
 async function loadCoreMeasurement(connection: Connection, coreMeasurementID: number): Promise<Record<string, unknown>> {
-  const [rows] = await connection.query<RowDataPacket[]>('SELECT * FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1', [coreMeasurementID]);
+  // MeasurementDateYmd is formatted server-side so the assertion reads the
+  // stored calendar day without going through the driver's Date decoding.
+  const [rows] = await connection.query<RowDataPacket[]>(
+    "SELECT *, DATE_FORMAT(MeasurementDate, '%Y-%m-%d') AS MeasurementDateYmd FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1",
+    [coreMeasurementID]
+  );
   if (rows.length === 0) throw new Error('coremeasurements row vanished');
   return rows[0] as Record<string, unknown>;
 }
 
 async function loadErrorLogRows(connection: Connection, coreMeasurementID: number): Promise<RowDataPacket[]> {
   const [rows] = await connection.query<RowDataPacket[]>(
-    `SELECT mel.MeasurementID, mel.ErrorID, mel.IsResolved, me.ErrorSource, me.ErrorCode, me.ErrorMessage
+    `SELECT mel.MeasurementID, mel.ErrorID, mel.IsResolved, mel.ResolvedAt, me.ErrorSource, me.ErrorCode, me.ErrorMessage
      FROM measurement_error_log mel
      JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
      WHERE mel.MeasurementID = ?
@@ -204,6 +209,31 @@ async function loadErrorLogRows(connection: Connection, coreMeasurementID: numbe
     [coreMeasurementID]
   );
   return rows;
+}
+
+// Links an existing ingestion-source measurement_errors definition to a
+// coremeasurements row as unresolved — the same shape bulk ingestion or a
+// prior failed revalidation pass would have produced. Throws if the code
+// isn't in the catalog yet so a typo in a test fails loudly instead of
+// silently linking nothing.
+async function linkIngestionError(connection: Connection, coreMeasurementID: number, errorCode: string): Promise<void> {
+  const [errorRows] = await connection.query<RowDataPacket[]>(
+    `SELECT ErrorID FROM measurement_errors WHERE ErrorSource = 'ingestion' AND ErrorCode = ? LIMIT 1`,
+    [errorCode]
+  );
+  if (errorRows.length === 0) {
+    throw new Error(`linkIngestionError: no measurement_errors definition for ingestion:${errorCode}`);
+  }
+  await connection.query<ResultSetHeader>(`INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, 0)`, [
+    coreMeasurementID,
+    errorRows[0].ErrorID
+  ]);
+}
+
+function findErrorRow(rows: RowDataPacket[], errorCode: string): RowDataPacket {
+  const row = rows.find(r => r.ErrorCode === errorCode);
+  if (!row) throw new Error(`findErrorRow: no measurement_error_log row for ${errorCode}`);
+  return row;
 }
 
 describe('writeFailedMeasurements (integration)', () => {
@@ -350,16 +380,14 @@ describe('writeFailedMeasurements (integration)', () => {
       await cm.commitTransaction(txID);
 
       const afterCm = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
-      const storedDate = afterCm.MeasurementDate;
-      // MySQL DATE columns return Date objects from mysql2; normalize either way.
-      const storedDateAsIso = storedDate instanceof Date ? storedDate.toISOString().split('T')[0] : String(storedDate).split('T')[0].split(' ')[0];
-      expect(storedDateAsIso).toBe(NEW_DATE_YMD);
+      expect(afterCm.MeasurementDateYmd, 'stored SQL DATE retains the requested calendar day').toBe(NEW_DATE_YMD);
 
       // afterState reflects the normalized date.
-      const afterStoredDate = (result.afterState[0].row as any).MeasurementDate;
-      const afterStoredDateAsIso =
-        afterStoredDate instanceof Date ? afterStoredDate.toISOString().split('T')[0] : String(afterStoredDate).split('T')[0].split(' ')[0];
-      expect(afterStoredDateAsIso).toBe(NEW_DATE_YMD);
+      const afterStateDate = (result.afterState[0].row as Record<string, unknown>).MeasurementDate;
+      expect(afterStateDate, 'afterState carries the mysql2-decoded Date').toBeInstanceOf(Date);
+      expect((afterStateDate as Date).toISOString().slice(0, 10), 'afterState Date decodes to the requested day under the harness UTC driver pin').toBe(
+        NEW_DATE_YMD
+      );
     });
   });
 
@@ -478,9 +506,7 @@ describe('writeFailedMeasurements (integration)', () => {
       expect(afterCm.UploadFileID).toBe(INITIAL_UPLOAD_FILE_ID);
       expect(afterCm.UploadBatchID).toBe(INITIAL_UPLOAD_BATCH_ID);
 
-      const storedDate = afterCm.MeasurementDate;
-      const storedDateAsIso = storedDate instanceof Date ? storedDate.toISOString().split('T')[0] : String(storedDate).split('T')[0].split(' ')[0];
-      expect(storedDateAsIso).toBe(NEW_DATE_YMD);
+      expect(afterCm.MeasurementDateYmd, 'stored SQL DATE retains the requested calendar day').toBe(NEW_DATE_YMD);
     });
   });
 
@@ -546,6 +572,161 @@ describe('writeFailedMeasurements (integration)', () => {
       const txID = await cm.beginTransaction();
       await expect(writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(/not found or StemGUID is not NULL/);
       await cm.rollbackTransaction(txID);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // issue #307 — refreshIngestionErrorsForMeasurement must retain any
+  // ingestion error the row validator did not actually re-derive AND
+  // actually re-check this call. Before this fix, every writer call ran a
+  // blanket "resolve every unresolved ingestion error for this row" before
+  // re-inserting only the fresh findings, so a duplicate, a prior SQL
+  // exception, or an interrupted-upload row could be silently marked
+  // resolved by an unrelated correction (e.g. editing Comments only) even
+  // though nothing re-checked whether the duplicate/exception condition was
+  // still true.
+  // ---------------------------------------------------------------------
+  describe('issue #307: retains ingestion errors the row validator did not re-check', () => {
+    it('retains DUPLICATE_ENTRY through an unrelated edit while a genuinely-fixed MISSING_FIELD_TREETAG resolves', async () => {
+      // The seeded fixture already links MISSING_FIELD_TREETAG unresolved
+      // even though RawTreeTag is non-empty (RTF001) — this mirrors a row
+      // whose tag was fixed by a prior edit that the error log hasn't caught
+      // up with yet. Add DUPLICATE_ENTRY, a code revalidateEditedFailedRow
+      // never checks for, alongside it.
+      await linkIngestionError(connection, fixture.coreMeasurementID, 'DUPLICATE_ENTRY');
+
+      const plan = buildPlan([{ field: 'Comments', from: INITIAL_RAW_COMMENTS, to: 'unrelated note' }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { Comments: 'unrelated note' });
+
+      const txID = await cm.beginTransaction();
+      await writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const errorRows = await loadErrorLogRows(connection, fixture.coreMeasurementID);
+
+      const treeTagRow = findErrorRow(errorRows, 'MISSING_FIELD_TREETAG');
+      expect(Number(treeTagRow.IsResolved), 'Tag is non-empty and MISSING_FIELD_TREETAG is unconditionally re-checked, so it must resolve').toBe(1);
+      expect(treeTagRow.ResolvedAt).not.toBeNull();
+
+      const duplicateRow = findErrorRow(errorRows, 'DUPLICATE_ENTRY');
+      expect(Number(duplicateRow.IsResolved), 'revalidateEditedFailedRow never checks for duplicates, so DUPLICATE_ENTRY must stay linked').toBe(0);
+      expect(duplicateRow.ResolvedAt).toBeNull();
+
+      // Description must reflect the *effective* set — only what is still
+      // unresolved — not the stale TreeTag message and not nothing.
+      const afterCm = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(String(afterCm.Description)).toContain('Duplicate measurement row detected');
+      expect(String(afterCm.Description)).not.toContain('TreeTag');
+    });
+
+    it('retains SQL_EXCEPTION across a correction — a prior upload-time DB failure is not something a row edit can prove resolved', async () => {
+      await linkIngestionError(connection, fixture.coreMeasurementID, 'SQL_EXCEPTION');
+
+      const plan = buildPlan([{ field: 'Comments', from: INITIAL_RAW_COMMENTS, to: 'triage note' }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { Comments: 'triage note' });
+
+      const txID = await cm.beginTransaction();
+      await writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const sqlExceptionRow = findErrorRow(await loadErrorLogRows(connection, fixture.coreMeasurementID), 'SQL_EXCEPTION');
+      expect(Number(sqlExceptionRow.IsResolved), 'SQL_EXCEPTION describes an upload attempt, not row validity; a row edit must not clear it').toBe(0);
+      expect(sqlExceptionRow.ResolvedAt).toBeNull();
+    });
+
+    it('retains INTERRUPTED_UPLOAD across a correction — the row itself was never judged, so an edit cannot prove it valid', async () => {
+      // INTERRUPTED_UPLOAD is not in the schema's seed list (an interrupted
+      // upload is rare enough that the baseline catalog omits it); insert the
+      // same definition ensureMeasurementErrorDefinition would create the
+      // first time setupbulkfailure recorded one.
+      await connection.query(
+        `INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES ('ingestion', 'INTERRUPTED_UPLOAD', 'Upload was interrupted before this row was processed')`
+      );
+      await linkIngestionError(connection, fixture.coreMeasurementID, 'INTERRUPTED_UPLOAD');
+
+      const plan = buildPlan([{ field: 'Comments', from: INITIAL_RAW_COMMENTS, to: 'triage note 2' }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { Comments: 'triage note 2' });
+
+      const txID = await cm.beginTransaction();
+      await writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const interruptedRow = findErrorRow(await loadErrorLogRows(connection, fixture.coreMeasurementID), 'INTERRUPTED_UPLOAD');
+      expect(Number(interruptedRow.IsResolved)).toBe(0);
+      expect(interruptedRow.ResolvedAt).toBeNull();
+    });
+
+    it('does not revive an already-resolved error merely by revalidating the row again', async () => {
+      // Simulate a prior explicit reingest (or an earlier correction) having
+      // already resolved MISSING_FIELD_TREETAG.
+      await connection.query(`UPDATE measurement_error_log SET IsResolved = 1, ResolvedAt = NOW() WHERE MeasurementID = ?`, [fixture.coreMeasurementID]);
+      const resolvedAtBefore = findErrorRow(await loadErrorLogRows(connection, fixture.coreMeasurementID), 'MISSING_FIELD_TREETAG').ResolvedAt;
+      expect(resolvedAtBefore).not.toBeNull();
+
+      // An edit that leaves Tag non-empty re-checks MISSING_FIELD_TREETAG,
+      // finds it clean, and (per the retention contract) attempts to resolve
+      // it again via resolveCheckedMeasurementErrors — which only targets
+      // IsResolved = FALSE rows, so an already-resolved row must be left
+      // exactly as it was, not re-touched.
+      const plan = buildPlan([{ field: 'Comments', from: INITIAL_RAW_COMMENTS, to: 'second edit' }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { Comments: 'second edit' });
+
+      const txID = await cm.beginTransaction();
+      await writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const treeTagRowAfter = findErrorRow(await loadErrorLogRows(connection, fixture.coreMeasurementID), 'MISSING_FIELD_TREETAG');
+      expect(Number(treeTagRowAfter.IsResolved)).toBe(1);
+      // resolveCheckedMeasurementErrors filters on IsResolved = FALSE, so an
+      // already-resolved row must not be re-touched (ResolvedAt unchanged).
+      expect(new Date(treeTagRowAfter.ResolvedAt).getTime()).toBe(new Date(resolvedAtBefore).getTime());
+
+      const afterCm = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(String(afterCm.Description)).not.toContain('TreeTag');
+    });
+
+    it("does not touch a different measurement's unresolved errors when revalidating one row", async () => {
+      // A second, independent failed row carrying its own DUPLICATE_ENTRY —
+      // resolveCheckedMeasurementErrors must be scoped by MeasurementID, not
+      // just ErrorCode/source, or fixing one duplicate would silently clear
+      // every other row's duplicate flag too.
+      const [otherRes] = await connection.query<ResultSetHeader>(
+        `INSERT INTO coremeasurements
+           (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate,
+            RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+            RawCodes, RawComments, Description, IsValidated, IsActive)
+         VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)`,
+        [
+          fixture.censusID,
+          INITIAL_DBH,
+          INITIAL_HOM,
+          INITIAL_DATE,
+          'RTF002',
+          'RSF2',
+          INITIAL_RAW_SPCODE,
+          INITIAL_RAW_QUADRAT,
+          INITIAL_RAW_X,
+          INITIAL_RAW_Y,
+          INITIAL_RAW_CODES,
+          INITIAL_RAW_COMMENTS,
+          'other row initial failure'
+        ]
+      );
+      const otherCoreMeasurementID = otherRes.insertId;
+      await linkIngestionError(connection, otherCoreMeasurementID, 'DUPLICATE_ENTRY');
+
+      const plan = buildPlan([{ field: 'Comments', from: INITIAL_RAW_COMMENTS, to: 'only touching fixture row' }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, {
+        Comments: 'only touching fixture row'
+      });
+
+      const txID = await cm.beginTransaction();
+      await writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const otherRowError = findErrorRow(await loadErrorLogRows(connection, otherCoreMeasurementID), 'DUPLICATE_ENTRY');
+      expect(Number(otherRowError.IsResolved), "the other measurement's DUPLICATE_ENTRY must be untouched").toBe(0);
+      expect(otherRowError.ResolvedAt).toBeNull();
     });
   });
 });

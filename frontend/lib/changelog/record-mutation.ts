@@ -60,9 +60,12 @@ export type RecordMutationOptions =
     })
   | (RecordMutationBase & { operation: ChangelogOperation.DELETE; oldRowState: ChangelogRowState });
 
+// OldRowState/NewRowState bind through CONVERT(? USING utf8mb4): this prepared
+// statement otherwise hit ER_INVALID_JSON_CHARSET (3144) against real MySQL.
+// CONVERT(NULL USING utf8mb4) is still NULL, preserving SQL NULL on the absent side.
 const INSERT_CHANGELOG_ROW = `INSERT INTO ??.unifiedchangelog
    (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
- VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, ?)`;
+ VALUES (?, ?, ?, CONVERT(? USING utf8mb4), CONVERT(? USING utf8mb4), NOW(), ?, ?, ?)`;
 
 function serializeRowState(state: ChangelogRowState | null | undefined): string | null {
   // `null`, not the string 'null': the absent side of the change must read as

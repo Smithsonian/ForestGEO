@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { loadCanonicalDestinationDdl } from './helpers/ctfs-destination-ddl';
 import { readOpsScriptSections, executeSection, executeSectionStatements, collectMetrics } from './helpers/ops-script-sections';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -451,10 +452,7 @@ const createdDatabases: string[] = [];
 afterAll(async () => {
   if (createdDatabases.length === 0) return;
   const conn = await mysql.createConnection({
-    host: DEFAULT_TEST_CONFIG.host,
-    user: DEFAULT_TEST_CONFIG.user,
-    password: DEFAULT_TEST_CONFIG.password,
-    port: DEFAULT_TEST_CONFIG.port
+    ...testDbServerOptions()
   });
   try {
     const [rows] = await conn.query<mysql.RowDataPacket[]>('SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN (?)', [createdDatabases]);

@@ -31,6 +31,12 @@ import { createAndUpdateCensusList, OrgCensusRDS, reconcileCurrentCensusSelectio
 import ailogger from '@/ailogger';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { useSession } from 'next-auth/react';
+import {
+  CENSUS_DELETE_GENERIC_FAILURE_MESSAGE,
+  CENSUS_DELETE_STALE_LIST_STATUSES,
+  getCensusDeleteBlockReason,
+  readCensusDeleteRejectionMessage
+} from '@/config/censusdeletion';
 import { formatDisplayDate } from '@/config/dateformats';
 
 interface ProgressTachoType {
@@ -46,6 +52,8 @@ interface StemTypesType {
   CountNewRecruits: number;
   isFirstCensus: boolean;
 }
+
+const CENSUS_DELETE_ENABLED_TOOLTIP = 'Delete all measurement data for this census';
 
 const CENSUS_HUB_LINKS = [
   { label: 'View Data', href: '/measurementshub/summary', icon: VisibilityIcon, description: 'Browse measurement records' },
@@ -198,6 +206,19 @@ export default function CensusOverviewPage() {
           body: JSON.stringify({ schema: currentSite.schemaName, censusID: targetCensusID, type: deleteType })
         });
         if (!response.ok) {
+          const rejectionMessage = await readCensusDeleteRejectionMessage(response);
+          if (rejectionMessage) {
+            ailogger.warn(`Census delete refused by the server (HTTP ${response.status}): ${rejectionMessage}`);
+            setDeleteError(rejectionMessage);
+            if (CENSUS_DELETE_STALE_LIST_STATUSES.includes(response.status)) {
+              try {
+                await refreshCensusList();
+              } catch (refreshError) {
+                ailogger.warn(`Census list refresh after a refused delete failed: ${refreshError instanceof Error ? refreshError.message : refreshError}`);
+              }
+            }
+            return;
+          }
           throw new Error(`Failed to clear census: ${response.status}`);
         }
         setCensusToDelete(null);
@@ -211,7 +232,7 @@ export default function CensusOverviewPage() {
         }
       } catch (error) {
         ailogger.error('Failed to delete census', error instanceof Error ? error : undefined);
-        setDeleteError('Failed to delete census. Please try again.');
+        setDeleteError(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE);
       } finally {
         setLoading(false);
         setIsDeletingCensus(false);
@@ -220,15 +241,16 @@ export default function CensusOverviewPage() {
     [censusToDelete, currentSite?.schemaName, refreshCensusList, setLoading]
   );
 
-  const latestPlotCensusNumber =
-    Array.isArray(censusListContext) && censusListContext.length > 0
-      ? censusListContext.reduce((currentMax, census) => Math.max(currentMax, census?.plotCensusNumber ?? 0), 0)
-      : 0;
-  const isLatestCensus = latestPlotCensusNumber > 0 && (currentCensus?.plotCensusNumber ?? 0) === latestPlotCensusNumber;
+  const deleteErrorAlert = deleteError && (
+    <Alert color="danger" variant="soft" data-testid="census-overview-delete-error">
+      {deleteError}
+    </Alert>
+  );
 
   if (!currentSite || !currentPlot || !currentCensus) {
     return (
       <Box sx={{ p: 3 }}>
+        {deleteErrorAlert}
         <Typography level="h4" color="neutral">
           Please select a site, plot, and census to view the census overview.
         </Typography>
@@ -241,15 +263,11 @@ export default function CensusOverviewPage() {
   const censusID = currentCensus.dateRanges?.[0]?.censusID;
   const userStatus = session?.user?.userStatus;
   const canReload = userStatus === 'global' || userStatus === 'db admin';
-  const canDeleteCensus = canReload;
+  const censusDeleteBlockReason = getCensusDeleteBlockReason(currentCensus, censusListContext, userStatus);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {deleteError && (
-        <Alert color="danger" variant="soft" data-testid="census-overview-delete-error">
-          {deleteError}
-        </Alert>
-      )}
+      {deleteErrorAlert}
 
       {/* Header */}
       <Stack direction="row" alignItems="center" spacing={2} sx={{ justifyContent: 'space-between' }}>
@@ -278,22 +296,13 @@ export default function CensusOverviewPage() {
               canReload={canReload}
             />
             <RebuildViewFullTableButton schema={currentSite.schemaName} />
-            <Tooltip
-              title={
-                !canDeleteCensus
-                  ? 'Only global and database administrators can delete census measurements.'
-                  : isLatestCensus
-                    ? 'Delete all measurement data for this census'
-                    : 'Only the latest census can be deleted. Delete newer censuses first.'
-              }
-              placement="top"
-            >
+            <Tooltip title={censusDeleteBlockReason ?? CENSUS_DELETE_ENABLED_TOOLTIP} placement="top">
               <span>
                 <Button
                   color="danger"
                   variant="outlined"
                   startDecorator={<DeleteForeverIcon />}
-                  disabled={!canDeleteCensus || !isLatestCensus}
+                  disabled={censusDeleteBlockReason !== null}
                   onClick={() => handleCensusDelete(currentCensus)}
                   data-testid="census-overview-delete-button"
                 >

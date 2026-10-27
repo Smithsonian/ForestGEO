@@ -16,10 +16,12 @@ import { isColumnMappingShape, mappingMatchesSource, seedMapping, validateMappin
 import { ArcgisMappingRequiredResponse, PREFLIGHT_STATUS_MAPPING_REQUIRED } from '@/lib/arcgis/types';
 import type { ArcgisSourceMetadata, ColumnMapping } from '@/lib/column-mapping/types';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
+import { readUploadFormData } from '@/lib/uploads/upload-request-body';
+import { MAX_UPLOAD_FILE_BYTES, uploadFileTooLargeMessage } from '@/lib/uploads/upload-request-limits';
 
 export const runtime = 'nodejs';
 
-const MAX_ARCGIS_FILE_SIZE = 100 * 1024 * 1024;
+const ARCGIS_PREFLIGHT_ROUTE = '/api/arcgis/preflight';
 
 const INVALID_MAPPING_PAYLOAD = 'Invalid mapping payload.';
 
@@ -51,13 +53,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Authenticated session has no user identifier' }, { status: HTTPResponses.UNAUTHORIZED });
   }
 
-  let formData: FormData;
-  try {
-    formData = await request.formData();
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: `Invalid ArcGIS pre-flight request: ${message}` }, { status: HTTPResponses.INVALID_REQUEST });
-  }
+  const { formData, rejection } = await readUploadFormData(request, {
+    route: ARCGIS_PREFLIGHT_ROUTE,
+    schema: null,
+    fileName: null,
+    sourceFormat: SourceFormat.arcgis_xlsx
+  });
+  if (rejection) return rejection;
 
   const schema = getStringField(formData, 'schema');
   const plotID = parsePositiveInteger(formData.get('plotID'));
@@ -77,11 +79,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (fileIDError) {
     return NextResponse.json({ error: fileIDError, code: 'MEASUREMENT_FILE_NAME_TOO_LONG' }, { status: HTTPResponses.INVALID_REQUEST });
   }
-  if (file.size > MAX_ARCGIS_FILE_SIZE) {
-    return NextResponse.json(
-      { error: `File too large. Maximum size is ${MAX_ARCGIS_FILE_SIZE / (1024 * 1024)}MB` },
-      { status: HTTPResponses.PAYLOAD_TOO_LARGE }
-    );
+  if (file.size > MAX_UPLOAD_FILE_BYTES) {
+    return NextResponse.json({ error: uploadFileTooLargeMessage(file.size, SourceFormat.arcgis_xlsx) }, { status: HTTPResponses.PAYLOAD_TOO_LARGE });
   }
 
   const mappingRaw = formData.get('mapping');

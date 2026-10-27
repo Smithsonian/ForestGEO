@@ -32,6 +32,8 @@ const MEMBER_EMAIL = 'member@forestgeo.test';
 
 const TEST_SESSION_ID = 'session-1';
 const TEST_PLOT_ID = 22;
+/** The sqlpacketload per-chunk family scope sample (mirrors FAMILY_SCOPE_SAMPLE_SQL in route.test.ts). */
+const FAMILY_SCOPE_SAMPLE_SQL_FRAGMENT = 'SELECT PlotID AS plotID, CensusID AS censusID';
 const TEST_CENSUS_ID = 32;
 const TEST_BATCH_ID = 'batch-1';
 const TEST_FILE_NAME = 'SERC_census1_2025.csv';
@@ -58,7 +60,8 @@ vi.mock('@/lib/db/connectionmanager', () => {
   const beginTransaction = vi.fn().mockResolvedValue('tx-test');
   const commitTransaction = vi.fn().mockResolvedValue(undefined);
   const rollbackTransaction = vi.fn().mockResolvedValue(undefined);
-  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction };
+  const acquireApplicationLock = vi.fn().mockResolvedValue(true);
+  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction, acquireApplicationLock };
   return { default: { getInstance: () => instance } };
 });
 
@@ -159,6 +162,7 @@ describe('POST /api/sqlpacketload authz', () => {
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+    mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
   });
 
   it('denies a non-admin user outside the schema scope with 403 BEFORE any SQL or the token check', async () => {
@@ -188,8 +192,9 @@ describe('POST /api/sqlpacketload authz', () => {
     let stagedRowCount = 0;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
+      if (text.includes(FAMILY_SCOPE_SAMPLE_SQL_FRAGMENT)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
-      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
       if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: stagedRowCount }];
       if (text.includes('COUNT(')) return [{ count: 0 }];
       if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };
@@ -206,6 +211,8 @@ describe('POST /api/sqlpacketload authz', () => {
     expect(res.status).toBe(HTTP_OK);
     const body = await res.json();
     expect(body.insertedCount).toBe(1);
+    // The file-upload summary serialization lock (#507) is taken on the request transaction.
+    expect(mockConnectionManager.acquireApplicationLock).toHaveBeenCalledWith(expect.any(String), 'tx-test', expect.any(Number));
     // Retained token check ran for the member on the measurements branch.
     expect(requireUploadSessionOwnershipMock).toHaveBeenCalledTimes(1);
   });

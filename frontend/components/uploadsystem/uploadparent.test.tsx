@@ -10,12 +10,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import UploadParent from './uploadparent';
-import { FormType } from '@/config/macros/formdetails';
+import UploadParent, { mergeFreshRevisionPlan } from './uploadparent';
+import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { UploadMode } from '@/config/uploadmodes';
+import { RevisionUploadResponse } from '@/config/revisionuploadtypes';
+import { BulkEditPlan } from '@/config/editplan/types';
 import React from 'react';
 
 // Mock AttributeStatusOptions and HC functions
@@ -124,6 +126,21 @@ vi.mock('@/app/contexts/userselectionprovider', () => ({
   useSiteContext: () => ({ schemaName: 'forestgeo_testing', siteName: 'Test Site' })
 }));
 
+// uploadparent.tsx actually reads context via '@/app/contexts/compat-hooks' (the
+// userselectionprovider mock above is unused by it but left in place for other
+// potential consumers). Mutable so the replacement-confirmation describe block below
+// can exercise real schema/plot/census values; every other describe block in this
+// file is unaffected since its new gate only activates for an explicit
+// UploadMode.CLEAN_REUPLOAD measurements upload, which none of them set.
+let compatCensusValue: any = { plotCensusNumber: 1, dateRanges: [{ censusID: 1 }] };
+let compatPlotValue: any = { plotID: 1, plotName: 'Test Plot' };
+let compatSiteValue: any = { schemaName: 'forestgeo_testing', siteName: 'Test Site' };
+vi.mock('@/app/contexts/compat-hooks', () => ({
+  useOrgCensusContext: () => compatCensusValue,
+  usePlotContext: () => compatPlotValue,
+  useSiteContext: () => compatSiteValue
+}));
+
 // Mock AI logger
 vi.mock('@/ailogger', () => ({
   default: {
@@ -149,7 +166,7 @@ vi.mock('@/app/hooks/useasyncuploadfeature', () => ({
 
 // Mock upload segment components
 vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
-  default: ({ uploadForm, setUploadForm, setReviewState, personnelRecording, setPersonnelRecording }: any) => (
+  default: ({ uploadForm, setUploadForm, setUploadMode, setReviewState, personnelRecording, setPersonnelRecording }: any) => (
     <div data-testid="upload-start">
       <button
         onClick={() => {
@@ -159,6 +176,10 @@ vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
       >
         Select Measurements
       </button>
+      {/* Only exercised by the cross-upload identity-reset test below, which needs
+          uploadMode restored to REVISIONS after a real resetToStart() (the reducer
+          clears it) to re-enter revision mode without remounting the component. */}
+      <button onClick={() => setUploadMode(UploadMode.REVISIONS)}>Select Revision Mode</button>
       {/* Mirrors the real UploadStart: selecting a form and finalizing are separate
           steps (see FinalizeSelectionsButton in uploadstart.tsx), and only finalizing
           advances reviewState to UPLOAD_FILES. */}
@@ -170,8 +191,12 @@ vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
-  default: ({ uploadForm, acceptedFiles, handleAddFile, handleRemoveFile, handleReplaceFile: _handleReplaceFile, handleInitialSubmit }: any) => (
+  default: ({ uploadForm, acceptedFiles, handleAddFile, handleRemoveFile, handleReplaceFile, handleInitialSubmit, dataViewActive, setDataViewActive }: any) => (
     <div data-testid="upload-parse-files">
+      <div data-testid="data-view-active">{dataViewActive}</div>
+      <div data-testid="selected-file-name">{acceptedFiles[dataViewActive - 1]?.name ?? 'none'}</div>
+      <button onClick={() => setDataViewActive(acceptedFiles.length)}>Select Last File</button>
+      <button onClick={() => setDataViewActive(2)}>Select Second File</button>
       <div data-testid="upload-parse-files-form-value">{uploadForm || 'none'}</div>
       <div data-testid="file-count">{acceptedFiles.length}</div>
       {acceptedFiles.map((file: any, index: number) => (
@@ -193,7 +218,43 @@ vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
       >
         Add File
       </button>
+      <button
+        onClick={() => {
+          const numberedFile = new File(['tag,stemtag,quadrat,dbh,date\nT001,S1,Q1,10,2024-01-01\n'], `file-${acceptedFiles.length + 1}.csv`, {
+            type: 'text/csv'
+          });
+          Object.assign(numberedFile, { path: `/${numberedFile.name}` });
+          handleAddFile(numberedFile as any);
+        }}
+      >
+        Add Numbered File
+      </button>
+      <button
+        onClick={() => {
+          // Issue #504: a NEW File object sharing the first file's name must still
+          // invalidate a pending replacement check/confirmation -- useFileManagement
+          // tracks files by array reference, not by name, so this proves the gate
+          // isn't fooled by name-only comparisons.
+          const first = acceptedFiles[0];
+          const replacement = new File(['tag,stemtag,quadrat,dbh,date\nT002,S2,Q1,12,2024-02-02\n'], first?.name ?? 'test.csv', {
+            type: 'text/csv',
+            lastModified: first?.lastModified
+          });
+          Object.assign(replacement, { path: '/test.csv' });
+          handleReplaceFile(0, replacement);
+        }}
+      >
+        Replace First File With New Object
+      </button>
       <button onClick={() => handleInitialSubmit()}>Continue Upload</button>
+    </div>
+  )
+}));
+
+vi.mock('@/components/uploadsystem/segments/uploadarcgispreflight', () => ({
+  default: ({ onProceed }: { onProceed: (reference: { importSessionId: string; fileName: string; rowCount: number }) => void }) => (
+    <div data-testid="upload-arcgis-preflight">
+      <button onClick={() => onProceed({ importSessionId: 'session-1', fileName: 'workbook.xlsx', rowCount: 5 })}>Proceed with import</button>
     </div>
   )
 }));
@@ -202,12 +263,13 @@ vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
 // because `vi.mock` factories are hoisted above the rest of the module: a plain
 // module-scope `const` referenced inside the factory below would still be in its
 // temporal dead zone when the factory actually runs.
-const { mockUploadFireSqlBehavior } = vi.hoisted(() => ({
+const { mockUploadFireSqlBehavior, mockUploadFireAzureBehavior } = vi.hoisted(() => ({
   mockUploadFireSqlBehavior: {
     mode: 'complete' as 'complete' | 'error',
     errorMessage: 'Upload failed',
     errorComponent: 'UploadFireSQL'
-  }
+  },
+  mockUploadFireAzureBehavior: { advanceToComplete: false }
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => {
@@ -248,9 +310,10 @@ vi.mock('@/components/uploadsystem/segments/uploaderror', () => ({
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadcomplete', () => ({
-  default: ({ handleCloseUploadModal }: any) => (
+  default: ({ handleCloseUploadModal, uploadOutcome }: any) => (
     <div data-testid="upload-complete">
       <div>Upload Complete!</div>
+      <div data-testid="upload-complete-outcome">{JSON.stringify(uploadOutcome ?? null)}</div>
       <button onClick={() => handleCloseUploadModal()}>Close</button>
     </div>
   )
@@ -264,9 +327,15 @@ vi.mock('@/components/uploadsystem/segments/uploadupdatevalidations', () => ({
   default: () => <div data-testid="upload-update-validations">Update Validations</div>
 }));
 
-vi.mock('@/components/uploadsystem/segments/uploadfireazure', () => ({
-  default: () => <div data-testid="upload-fire-azure">Fire Azure</div>
-}));
+vi.mock('@/components/uploadsystem/segments/uploadfireazure', () => {
+  const MockUploadFireAzure = ({ setReviewState }: any) => {
+    React.useEffect(() => {
+      if (mockUploadFireAzureBehavior.advanceToComplete) setReviewState(ReviewStates.COMPLETE);
+    }, [setReviewState]);
+    return <div data-testid="upload-fire-azure">Fire Azure</div>;
+  };
+  return { default: MockUploadFireAzure };
+});
 
 vi.mock('@/components/uploadsystem/segments/uploadreingestion', () => ({
   default: () => <div data-testid="upload-reingestion">Reingestion</div>
@@ -281,6 +350,7 @@ describe('UploadParent - Hook Integration Tests', () => {
     mockUploadFireSqlBehavior.mode = 'complete';
     mockUploadFireSqlBehavior.errorMessage = 'Upload failed';
     mockUploadFireSqlBehavior.errorComponent = 'UploadFireSQL';
+    mockUploadFireAzureBehavior.advanceToComplete = false;
   });
 
   describe('Hook Integration - useUploadState', () => {
@@ -347,8 +417,10 @@ describe('UploadParent - Hook Integration Tests', () => {
         { timeout: 5000 }
       );
 
-      // onUploadComplete callback should be called
-      expect(mockOnUploadComplete).toHaveBeenCalled();
+      // onUploadComplete fires from a passive effect that can commit after the COMPLETE markup above.
+      await waitFor(() => {
+        expect(mockOnUploadComplete).toHaveBeenCalledTimes(1);
+      });
     });
   });
 
@@ -395,6 +467,54 @@ describe('UploadParent - Hook Integration Tests', () => {
       await waitFor(() => {
         expect(screen.getByTestId('file-count')).toHaveTextContent('1');
       });
+    });
+
+    it.each([
+      ['the first file', 0],
+      ['the selected last file', 1]
+    ])('clamps the selected file to the remaining one after removing %s of two (#524 item 5)', async (_label, removedIndex) => {
+      const user = userEvent.setup();
+      const EXPECTED_SELECTED_FILE_VIEW = '1';
+      render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
+
+      await user.click(screen.getByText('Add File'));
+      await user.click(screen.getByText('Add File'));
+      await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('2'));
+      await user.click(screen.getByText('Select Last File'));
+      expect(screen.getByTestId('data-view-active')).toHaveTextContent('2');
+
+      await user.click(screen.getAllByText('Remove')[removedIndex]);
+      await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+      console.log(`[remove ${_label}] data-view-active=${screen.getByTestId('data-view-active').textContent}`);
+
+      expect(screen.getByTestId('data-view-active'), 'the selected-file index must point at the one remaining file').toHaveTextContent(
+        EXPECTED_SELECTED_FILE_VIEW
+      );
+    });
+
+    it('keeps the same file selected when an earlier file is removed from three (#524 item 5)', async () => {
+      const user = userEvent.setup();
+      const SECOND_FILE_VIEW = '2';
+      const FIRST_FILE_VIEW = '1';
+      const SECOND_FILE_NAME = 'file-2.csv';
+      render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
+
+      await user.click(screen.getByText('Add Numbered File'));
+      await user.click(screen.getByText('Add Numbered File'));
+      await user.click(screen.getByText('Add Numbered File'));
+      await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('3'));
+      await user.click(screen.getByText('Select Second File'));
+      expect(screen.getByTestId('data-view-active')).toHaveTextContent(SECOND_FILE_VIEW);
+      expect(screen.getByTestId('selected-file-name')).toHaveTextContent(SECOND_FILE_NAME);
+
+      await user.click(screen.getAllByText('Remove')[0]);
+      await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('2'));
+      console.log(
+        `[remove first of three] data-view-active=${screen.getByTestId('data-view-active').textContent} selected=${screen.getByTestId('selected-file-name').textContent}`
+      );
+
+      expect(screen.getByTestId('data-view-active'), 'the tab index must shift down with the removed earlier file').toHaveTextContent(FIRST_FILE_VIEW);
+      expect(screen.getByTestId('selected-file-name'), 'the previously selected file must still be the one shown').toHaveTextContent(SECOND_FILE_NAME);
     });
 
     it('should clear all files when returning to start', async () => {
@@ -513,8 +633,11 @@ describe('UploadParent - Hook Integration Tests', () => {
         { timeout: 5000 }
       );
 
-      // Verify all hooks worked together
-      expect(mockOnUploadComplete).toHaveBeenCalledTimes(1);
+      // Verify all hooks worked together; onUploadComplete fires from a passive effect
+      // that can commit after the COMPLETE markup above.
+      await waitFor(() => {
+        expect(mockOnUploadComplete).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('should skip to processing when skipToProcessing flag is set', async () => {
@@ -540,6 +663,7 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUploadFireAzureBehavior.advanceToComplete = false;
     originalFetch = global.fetch;
   });
 
@@ -619,18 +743,23 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     return { signals };
   }
 
+  // Shared by driveToRevisionMatch (first upload, fresh mount) and the
+  // cross-upload identity-reset test below (second upload, same mount).
+  async function addFileAndContinueUpload(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+    await user.click(screen.getByText('Continue Upload'));
+  }
+
   async function driveToRevisionMatch(user: ReturnType<typeof userEvent.setup>) {
     const renderResult = render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.REVISIONS} />);
 
-    await user.click(screen.getByText('Add File'));
-    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
-
-    await user.click(screen.getByText('Continue Upload'));
+    await addFileAndContinueUpload(user);
 
     return renderResult;
   }
 
-  it('opens on the New Rows tab for a new-only revision upload, and requires explicit confirmation before applying', async () => {
+  it('opens on the New Rows tab for a new-only revision upload, and inserts new rows only when the box in the confirmation dialog is checked', async () => {
     const user = userEvent.setup();
 
     const newRowCsvRow = { tag: 'T001', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01', spcode: null };
@@ -638,7 +767,17 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
       matchedRows: [],
       newRows: [{ csvRow: newRowCsvRow, csvIndex: 0, reason: 'no-match-key-in-db' }],
       invalidRows: [],
-      counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 }
+      counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 },
+      bulkPlan: {
+        dataType: 'measurementssummary',
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, status: 'new' }],
+        aggregateEffects: [],
+        maxSeverity: 'info',
+        planHash: 'new-only-plan-hash',
+        generatedAt: '2026-10-21T00:00:00Z',
+        duplicateDeletions: []
+      }
     };
     const applyResponse = {
       updatedCount: 0,
@@ -649,13 +788,14 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
       validationPending: false
     };
     const { applyRequestBodies, resolveMatch } = mockRevisionUploadFetch({ matchResponse, applyResponse, deferMatch: true });
+    const NEW_ROWS_TAB_TEXT = /will be inserted as new measurements if you include them when applying/;
 
     await driveToRevisionMatch(user);
 
     // UploadRevisionMatch must not mount until the match response exists -- while the
     // request is in flight, a matching-in-progress state should be visible instead.
     await waitFor(() => expect(screen.getByText(/matching revision rows/i)).toBeInTheDocument());
-    expect(screen.queryByText('Confirm new row insertion')).not.toBeInTheDocument();
+    expect(screen.queryByText(NEW_ROWS_TAB_TEXT)).not.toBeInTheDocument();
 
     resolveMatch();
 
@@ -667,24 +807,27 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     // real newRows-only response lands, the New Rows tab exists in the TabList but its
     // panel is never the selected one, so this text never renders and the wait below
     // times out.
-    await waitFor(() => expect(screen.getByText('Confirm new row insertion')).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText(NEW_ROWS_TAB_TEXT)).toBeInTheDocument(), { timeout: 3000 });
 
-    const applyButton = screen.getByTestId('revision-match-apply');
-    expect(applyButton).toBeDisabled();
+    const reviewButton = screen.getByTestId('revision-match-apply');
+    expect(reviewButton).toHaveTextContent('Review and apply…');
+    await user.click(reviewButton);
+    const confirmButton = await screen.findByTestId('impact-summary-apply');
+    expect(confirmButton).toBeDisabled();
 
-    await user.click(screen.getByText('Confirm new row insertion'));
-    expect(applyButton).not.toBeDisabled();
-
-    await user.click(applyButton);
+    await user.click(screen.getByRole('checkbox', { name: 'Also insert 1 new row' }));
+    expect(confirmButton).not.toBeDisabled();
+    await user.click(confirmButton);
 
     await waitFor(() => expect(applyRequestBodies).toHaveLength(1));
+    console.log(`[#525 item 9] apply body confirmNewRows=${String(applyRequestBodies[0].confirmNewRows)}`);
     expect(applyRequestBodies[0].confirmNewRows).toBe(true);
     expect(applyRequestBodies[0].newRows).toHaveLength(1);
 
     await waitFor(() => expect(screen.getByText('Revisions Applied')).toBeInTheDocument());
   });
 
-  it('opens on the Invalid tab for an invalid-only revision upload, and keeps Apply disabled', async () => {
+  it('opens on the Invalid tab for an invalid-only revision upload, and keeps Apply enabled so the rejected row is persisted', async () => {
     const user = userEvent.setup();
 
     const invalidCsvRow = { tag: 'T404', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01' };
@@ -706,7 +849,11 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     // exist in the DOM at all if Changes is not the tab that ended up selected.
     expect(screen.queryByText('No rows with changes were found.')).not.toBeInTheDocument();
 
-    expect(screen.getByTestId('revision-match-apply')).toBeDisabled();
+    // #505: an invalid-only upload is NOT a no-op -- the apply route persists
+    // every invalid row as a StemGUID=NULL failed-measurement audit row (see
+    // app/api/revisionupload/apply/route.ts). Apply must stay enabled or that
+    // persisted trace is unreachable for an invalid-only file.
+    expect(screen.getByTestId('revision-match-apply')).not.toBeDisabled();
   });
 
   it('opens on the Unchanged tab for an unchanged-only revision upload, and keeps Apply disabled', async () => {
@@ -777,4 +924,757 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
 
     expect(signals[0]?.aborted).toBe(true);
   });
+
+  // #505 review round 2, finding 2: a 409 plan-hash mismatch must bounce the
+  // UI back to the review screen carrying the apply route's AUTHORITATIVE
+  // freshInvalidRows/freshInvalidRowsIntegrityHash (not a client-reconstructed
+  // equivalent), demote the conflicting row out of matchedRows, and let the
+  // user retry apply with that exact set/hash while keeping the same
+  // uploadAttemptID throughout.
+  it('recovers from a 409 plan-hash conflict by adopting the server-authoritative invalidRows/hash and successfully re-applying', async () => {
+    const user = userEvent.setup();
+
+    const UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
+    const STALE_INVALID_ROWS_INTEGRITY_HASH = 'a'.repeat(64);
+    const FRESH_INVALID_ROWS_INTEGRITY_HASH = 'b'.repeat(64);
+    const rowA = { tag: 'T1', stemtag: 'S1', quadrat: 'Q1', dbh: '12.5', date: '2024-01-01' };
+    const rowB = { tag: 'T2', stemtag: 'S1', quadrat: 'Q1', dbh: '22.5', date: '2024-01-01' };
+
+    const matchResponse = {
+      matchedRows: [
+        {
+          csvIndex: 0,
+          csvRow: rowA,
+          coreMeasurementID: 101,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: '2024-01-01', rawCodes: null, description: null }
+        },
+        {
+          csvIndex: 1,
+          csvRow: rowB,
+          coreMeasurementID: 202,
+          changes: { dbh: { from: '20', to: '22.5' } },
+          existingValues: { measuredDBH: 20, measuredHOM: null, measurementDate: '2024-01-01', rawCodes: null, description: null }
+        }
+      ],
+      newRows: [],
+      invalidRows: [],
+      counts: { matched: 2, matchedWithChanges: 2, new: 0, invalid: 0, total: 2 },
+      uploadAttemptID: UPLOAD_ATTEMPT_ID,
+      invalidRowsIntegrityHash: STALE_INVALID_ROWS_INTEGRITY_HASH
+    };
+
+    // Row A was demoted by the apply-time TOCTOU re-check; row B is untouched.
+    const freshInvalidRows = [{ csvRow: rowA, csvIndex: 0, reason: 'Quadrat 999 was not found in this plot/census' }];
+    const conflictResponse = {
+      error: 'plan hash mismatch',
+      freshPlan: {
+        dataType: 'measurementssummary',
+        rowCount: 1,
+        rowPlans: [],
+        aggregateEffects: [],
+        maxSeverity: 'warn',
+        planHash: 'fresh-hash',
+        generatedAt: '2026-04-21T00:00:00Z',
+        duplicateDeletions: []
+      },
+      freshInvalidRows,
+      freshInvalidRowsIntegrityHash: FRESH_INVALID_ROWS_INTEGRITY_HASH
+    };
+    const applySuccessResponse = {
+      updatedCount: 1,
+      skippedCount: 0,
+      insertedCount: 0,
+      deletedDuplicateCount: 0,
+      failedRowCount: 1,
+      applyErrors: [],
+      validationPending: true
+    };
+
+    const applyRequestBodies: Array<Record<string, unknown>> = [];
+    let applyCallCount = 0;
+    const jsonResponse = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: new Headers({ 'content-type': 'application/json' }) });
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/revisionupload') {
+        return jsonResponse(matchResponse);
+      }
+      if (url === '/api/revisionupload/apply') {
+        applyCallCount += 1;
+        applyRequestBodies.push(init?.body ? JSON.parse(init.body as string) : {});
+        return applyCallCount === 1 ? jsonResponse(conflictResponse, 409) : jsonResponse(applySuccessResponse);
+      }
+      throw new Error(`Unexpected fetch call to ${url} in revision conflict recovery test`);
+    }) as unknown as typeof global.fetch;
+
+    await driveToRevisionMatch(user);
+
+    await waitFor(() => expect(screen.getByText('2 rows to update')).toBeInTheDocument(), { timeout: 3000 });
+
+    await user.click(screen.getByTestId('revision-match-apply'));
+
+    // First apply attempt 409s -- the UI must bounce back to the review
+    // screen (not stay on the apply screen, not silently drop row A) with
+    // row A demoted into the Invalid tab.
+    await waitFor(() => expect(applyRequestBodies).toHaveLength(1));
+    await waitFor(() => expect(screen.getByText('Invalid (1)')).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByText('1 rows to update')).toBeInTheDocument();
+
+    const retryApplyButton = screen.getByTestId('revision-match-apply');
+    expect(retryApplyButton).not.toBeDisabled();
+    await user.click(retryApplyButton);
+
+    // The merged result now carries the conflict's freshPlan as bulkPlan, so
+    // confirming apply routes through the ImpactSummary dialog instead of
+    // calling onApply directly -- confirm there to actually resubmit.
+    await waitFor(() => expect(screen.getByTestId('impact-summary-apply')).toBeInTheDocument());
+    await user.click(screen.getByTestId('impact-summary-apply'));
+
+    await waitFor(() => expect(applyRequestBodies).toHaveLength(2));
+
+    // The retried apply must submit the server's authoritative invalidRows/
+    // hash for row A, never the client's original (now-stale) empty
+    // invalidRows/hash -- and uploadAttemptID must survive unchanged through
+    // the whole conflict/retry cycle.
+    expect(applyRequestBodies[0].uploadAttemptID).toBe(UPLOAD_ATTEMPT_ID);
+    expect(applyRequestBodies[0].invalidRows).toEqual([]);
+    expect(applyRequestBodies[0].invalidRowsIntegrityHash).toBe(STALE_INVALID_ROWS_INTEGRITY_HASH);
+    expect(applyRequestBodies[1].uploadAttemptID).toBe(UPLOAD_ATTEMPT_ID);
+    expect(applyRequestBodies[1].invalidRows).toEqual(freshInvalidRows);
+    expect(applyRequestBodies[1].invalidRowsIntegrityHash).toBe(FRESH_INVALID_ROWS_INTEGRITY_HASH);
+    // Row A must not resurface as a matched row on the retried apply -- only
+    // row B (the real survivor) is submitted as matched.
+    expect((applyRequestBodies[1].matchedRows as Array<{ coreMeasurementID: number }>).map(row => row.coreMeasurementID)).toEqual([202]);
+
+    await waitFor(() => expect(screen.getByText('Revisions Applied')).toBeInTheDocument());
+    expect(screen.getByTestId('revision-apply-failed-count')).toHaveTextContent('1 rejected row(s) recorded as failed measurements');
+  });
+
+  // #505 route.ts previousUploadAttemptID contract: a re-match of the SAME
+  // selected upload must retain its attempt identity; a genuinely new
+  // upload (a fresh session) must never inherit one.
+  it('retains the uploadAttemptID across a same-upload refresh by sending it back as previousUploadAttemptID', async () => {
+    const user = userEvent.setup();
+
+    const FIRST_UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
+    const SECOND_UPLOAD_ATTEMPT_ID = '22222222-2222-4222-9222-222222222222';
+    const matchRequestBodies: Array<Record<string, unknown>> = [];
+    let matchCallCount = 0;
+    const jsonResponse = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url !== '/api/revisionupload') {
+        throw new Error(`Unexpected fetch call to ${url} in attempt-identity refresh test`);
+      }
+      matchCallCount += 1;
+      matchRequestBodies.push(init?.body ? JSON.parse(init.body as string) : {});
+      return jsonResponse({
+        matchedRows: [],
+        newRows: [{ csvRow: { tag: 'T001', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01' }, csvIndex: 0, reason: 'no-match-key-in-db' }],
+        invalidRows: [],
+        counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 },
+        uploadAttemptID: matchCallCount === 1 ? FIRST_UPLOAD_ATTEMPT_ID : SECOND_UPLOAD_ATTEMPT_ID,
+        invalidRowsIntegrityHash: 'a'.repeat(64)
+      });
+    }) as unknown as typeof global.fetch;
+
+    await driveToRevisionMatch(user);
+    // UploadRevisionMatch mounts only once the match response exists (uploadparent.tsx REVISION_MATCH case), with or without a toggle.
+    await waitFor(() => expect(screen.getByTestId('revision-match-apply')).toBeInTheDocument());
+
+    expect(matchRequestBodies).toHaveLength(1);
+    expect(matchRequestBodies[0].previousUploadAttemptID, 'the first match of a new upload must never send a prior attempt identity').toBeUndefined();
+
+    await user.click(screen.getByTestId('revision-match-refresh'));
+
+    await waitFor(() => expect(matchRequestBodies).toHaveLength(2));
+    expect(matchRequestBodies[1].previousUploadAttemptID, "refreshing the SAME upload must echo back the prior response's uploadAttemptID").toBe(
+      FIRST_UPLOAD_ATTEMPT_ID
+    );
+  });
+
+  // Regression target: a fresh component mount would trivially omit
+  // previousUploadAttemptID even if the ref-clearing logic were broken (the
+  // ref starts null regardless). This drives TWO uploads through the SAME
+  // mounted UploadParent via the real Cancel -> Return to Start -> re-select
+  // -> re-upload path, so a leaked ref would be caught: upload #2's match
+  // call must never echo back upload #1's attemptID.
+  it('omits previousUploadAttemptID for a second, genuinely new upload started via Cancel/Return to Start in the SAME mounted session', async () => {
+    const user = userEvent.setup();
+
+    const FIRST_UPLOAD_ATTEMPT_ID = '44444444-4444-4444-8444-444444444444';
+    const SECOND_UPLOAD_ATTEMPT_ID = '55555555-5555-4555-9555-555555555555';
+    const matchRequestBodies: Array<Record<string, unknown>> = [];
+    let matchCallCount = 0;
+    const jsonResponse = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url !== '/api/revisionupload') {
+        throw new Error(`Unexpected fetch call to ${url} in cross-upload identity-reset test`);
+      }
+      matchCallCount += 1;
+      matchRequestBodies.push(init?.body ? JSON.parse(init.body as string) : {});
+      return jsonResponse({
+        matchedRows: [],
+        newRows: [{ csvRow: { tag: 'T001', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01' }, csvIndex: 0, reason: 'no-match-key-in-db' }],
+        invalidRows: [],
+        counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 },
+        uploadAttemptID: matchCallCount === 1 ? FIRST_UPLOAD_ATTEMPT_ID : SECOND_UPLOAD_ATTEMPT_ID,
+        invalidRowsIntegrityHash: 'd'.repeat(64)
+      });
+    }) as unknown as typeof global.fetch;
+
+    // Deliberately NOT driveToRevisionMatch (it mounts a new component) --
+    // a single mount drives both uploads below.
+    render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.REVISIONS} />);
+
+    // Upload #1: establishes attempt A.
+    await addFileAndContinueUpload(user);
+    // UploadRevisionMatch mounts only once the match response exists (uploadparent.tsx REVISION_MATCH case), with or without a toggle.
+    await waitFor(() => expect(screen.getByTestId('revision-match-apply')).toBeInTheDocument());
+    expect(matchRequestBodies).toHaveLength(1);
+    expect(matchRequestBodies[0].previousUploadAttemptID).toBeUndefined();
+
+    // The REAL reset path: resetToStart() clears uploadMode too, so revision
+    // mode must be explicitly re-selected before re-entering handleInitialSubmit's
+    // revision branch -- exercising the actual production code (handleReturnToStart,
+    // handleInitialSubmit's currentUploadAttemptIDRef reset), not a remount.
+    await user.click(screen.getByText('Cancel'));
+    await waitFor(() => expect(screen.getByTestId('upload-start')).toBeInTheDocument());
+
+    await user.click(screen.getByText('Select Measurements'));
+    await user.click(screen.getByText('Select Revision Mode'));
+    await user.click(screen.getByText('Finalize Selection'));
+    await waitFor(() => expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument());
+
+    // Upload #2: a genuinely new upload, same mount.
+    await addFileAndContinueUpload(user);
+    await waitFor(() => expect(matchRequestBodies).toHaveLength(2));
+
+    expect(
+      matchRequestBodies[1].previousUploadAttemptID,
+      "a new upload started via the real reset path must never echo back the previous upload's attempt identity"
+    ).toBeUndefined();
+  });
+
+  it('hands the revision apply counts, failedRowCount included, to the completion screen (#525 item 4)', async () => {
+    const REVISION_APPLY_TO_COMPLETE_TIMEOUT_MS = 6000;
+    mockUploadFireAzureBehavior.advanceToComplete = true;
+    const user = userEvent.setup();
+    const changedRow = { tag: 'T525', stemtag: 'S1', quadrat: 'Q1', dbh: '12.5', date: '2024-01-01' };
+    const matchResponse = {
+      matchedRows: [
+        {
+          csvIndex: 0,
+          csvRow: changedRow,
+          coreMeasurementID: 525,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: '2024-01-01', rawCodes: null, description: null }
+        }
+      ],
+      newRows: [],
+      invalidRows: [{ csvRow: { tag: 'T404', stemtag: 'S1' }, csvIndex: 1, reason: 'No matching identity found in the active census' }],
+      counts: { matched: 1, matchedWithChanges: 1, new: 0, invalid: 1, total: 2 }
+    };
+    const applyResponse = {
+      updatedCount: 1,
+      skippedCount: 0,
+      insertedCount: 0,
+      deletedDuplicateCount: 0,
+      failedRowCount: 1,
+      applyErrors: [],
+      validationPending: false
+    };
+    mockRevisionUploadFetch({ matchResponse, applyResponse });
+
+    await driveToRevisionMatch(user);
+    await waitFor(() => expect(screen.getByText('1 rows to update')).toBeInTheDocument(), { timeout: 3000 });
+    // No bulkPlan in this response, so Apply calls onApply directly (still true after PR C).
+    await user.click(screen.getByTestId('revision-match-apply'));
+
+    const outcomeNode = await screen.findByTestId('upload-complete-outcome', {}, { timeout: REVISION_APPLY_TO_COMPLETE_TIMEOUT_MS });
+    const receivedOutcome = JSON.parse(outcomeNode.textContent ?? 'null');
+    console.log(`[#525 item 4] outcome UploadComplete received: ${JSON.stringify(receivedOutcome)}`);
+    expect(receivedOutcome).toEqual({
+      kind: 'revisions',
+      updatedCount: 1,
+      deletedDuplicateCount: 0,
+      insertedCount: 0,
+      failedRowCount: 1,
+      skippedCount: 0,
+      applyErrorCount: 0,
+      hasDuplicateCleanupOnlyRows: false
+    });
+  });
+});
+
+describe('mergeFreshRevisionPlan', () => {
+  const baseResult: RevisionUploadResponse = {
+    matchedRows: [],
+    newRows: [],
+    invalidRows: [],
+    collapsedRows: [],
+    counts: { matched: 0, matchedWithChanges: 0, new: 0, invalid: 0, collapsed: 0, total: 0 },
+    bulkPlan: {
+      dataType: 'measurementssummary',
+      rowCount: 0,
+      rowPlans: [],
+      aggregateEffects: [],
+      maxSeverity: 'info',
+      planHash: 'stale-hash',
+      generatedAt: '2026-04-21T00:00:00Z',
+      duplicateDeletions: []
+    },
+    uploadAttemptID: '11111111-1111-4111-8111-111111111111',
+    invalidRowsIntegrityHash: 'a'.repeat(64)
+  };
+
+  function buildFreshPlan(overrides: Partial<BulkEditPlan> = {}): BulkEditPlan {
+    return {
+      dataType: 'measurementssummary',
+      rowCount: 1,
+      rowPlans: [],
+      aggregateEffects: [],
+      maxSeverity: 'warn',
+      planHash: 'fresh-hash',
+      generatedAt: '2026-04-21T00:00:00Z',
+      duplicateDeletions: [],
+      ...overrides
+    };
+  }
+
+  it('adopts the server-authoritative freshInvalidRows/freshInvalidRowsIntegrityHash verbatim, without recomputing an equivalent set from freshPlan.rowPlans', () => {
+    const result: RevisionUploadResponse = {
+      ...baseResult,
+      matchedRows: [
+        {
+          csvIndex: 0,
+          csvRow: { tag: 'T1' },
+          coreMeasurementID: 101,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: null, rawCodes: null, description: null }
+        },
+        {
+          csvIndex: 1,
+          csvRow: { tag: 'T2' },
+          coreMeasurementID: 202,
+          changes: { dbh: { from: '20', to: '22.5' } },
+          existingValues: { measuredDBH: 20, measuredHOM: null, measurementDate: null, rawCodes: null, description: null }
+        }
+      ],
+      counts: { matched: 2, matchedWithChanges: 2, new: 0, invalid: 0, collapsed: 0, total: 2 }
+    };
+
+    const freshInvalidRows = [{ csvRow: { tag: 'T1' }, csvIndex: 0, reason: 'Quadrat 999 was not found in this plot/census' }];
+    const freshPlan = buildFreshPlan();
+
+    const merged = mergeFreshRevisionPlan(result, freshPlan, freshInvalidRows, 'b'.repeat(64));
+
+    expect(merged.invalidRows).toBe(freshInvalidRows);
+    expect(merged.invalidRowsIntegrityHash).toBe('b'.repeat(64));
+    expect(merged.matchedRows.map(row => row.coreMeasurementID)).toEqual([202]);
+    expect(merged.bulkPlan).toBe(freshPlan);
+    expect(merged.counts).toEqual({ matched: 1, matchedWithChanges: 1, new: 0, invalid: 1, collapsed: 0, total: 2 });
+    // uploadAttemptID must survive the merge untouched -- a re-applied attempt
+    // after a conflict is still the same attempt, not a new upload.
+    expect(merged.uploadAttemptID).toBe(baseResult.uploadAttemptID);
+  });
+
+  it('demotes a matched row by matching freshInvalidRows entries on csvIndex, never on its array position (regression: freshPlan.rowPlans is indexed over the survivor-only bulk input apply rebuilt, not the source CSV)', () => {
+    // csvIndex (10) deliberately differs from this row's array position (0)
+    // in both matchedRows and freshPlan.rowPlans.
+    const result: RevisionUploadResponse = {
+      ...baseResult,
+      matchedRows: [
+        {
+          csvIndex: 10,
+          csvRow: { tag: 'T1' },
+          coreMeasurementID: 101,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: null, rawCodes: null, description: null }
+        }
+      ],
+      counts: { matched: 1, matchedWithChanges: 1, new: 0, invalid: 0, collapsed: 0, total: 1 }
+    };
+    const freshInvalidRows = [{ csvRow: { tag: 'T1' }, csvIndex: 10, reason: 'Quadrat 999 was not found in this plot/census' }];
+
+    const merged = mergeFreshRevisionPlan(result, buildFreshPlan(), freshInvalidRows, 'c'.repeat(64));
+
+    expect(merged.matchedRows).toEqual([]);
+    expect(merged.invalidRows).toEqual(freshInvalidRows);
+  });
+
+  it("refreshes a surviving matched row's changes from freshPlan.rowPlans, keyed by coreMeasurementID", () => {
+    const result: RevisionUploadResponse = {
+      ...baseResult,
+      matchedRows: [
+        {
+          csvIndex: 0,
+          csvRow: { tag: 'T1' },
+          coreMeasurementID: 101,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: null, rawCodes: null, description: null }
+        }
+      ],
+      counts: { matched: 1, matchedWithChanges: 1, new: 0, invalid: 0, collapsed: 0, total: 1 }
+    };
+    const freshPlan = buildFreshPlan({
+      rowPlans: [
+        {
+          rowIndex: 0,
+          targetID: 101,
+          status: 'matched',
+          plan: {
+            dataType: 'measurementssummary',
+            targetID: 101,
+            fieldChanges: [{ field: 'dbh', from: '10', to: '13.0' }],
+            effects: [],
+            maxSeverity: 'info',
+            planHash: 'member-plan',
+            generatedAt: '2026-04-21T00:00:00Z'
+          }
+        }
+      ]
+    });
+
+    const merged = mergeFreshRevisionPlan(result, freshPlan, [], 'd'.repeat(64));
+
+    expect(merged.matchedRows[0].changes).toEqual({ dbh: { from: '10', to: '13.0' } });
+  });
+});
+
+// Issue #504: a header-only CSV was shown as "Valid" by client validation, submitted as
+// a measurements Clean Re-Upload, and the server-side census replacement silently
+// deleted every existing measurement. UploadParent now fetches the existing row count
+// for the exact plot+census being replaced before a Clean Re-Upload is allowed to
+// start, and requires a typed confirmation whenever that count is greater than zero.
+describe('UploadParent - Measurements Clean Re-Upload replacement confirmation (issue #504)', () => {
+  const mockOnReset = vi.fn();
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    originalFetch = global.fetch;
+    compatCensusValue = { plotCensusNumber: 3, dateRanges: [{ censusID: 1 }] };
+    compatPlotValue = { plotID: 1, plotName: 'Test Plot' };
+    compatSiteValue = { schemaName: 'forestgeo_testing', siteName: 'Test Site' };
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function mockReplacementPreviewFetch(responder: (url: string) => { ok: boolean; status?: number; json?: unknown } | Promise<Response>) {
+    const calls: string[] = [];
+    const impl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      calls.push(url);
+      if (!url.startsWith('/api/uploads/replacement-preview')) {
+        throw new Error(`Unexpected fetch call to ${url} in replacement-preview test`);
+      }
+      const result = responder(url);
+      if (result instanceof Promise) return result;
+      return new Response(JSON.stringify(result.json ?? {}), {
+        status: result.status ?? (result.ok ? 200 : 500),
+        headers: new Headers({ 'content-type': 'application/json' })
+      });
+    });
+    global.fetch = impl as unknown as typeof global.fetch;
+    return { calls, impl };
+  }
+
+  async function driveToCleanReuploadContinue(user: ReturnType<typeof userEvent.setup>) {
+    const renderResult = render(
+      <UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.CLEAN_REUPLOAD} />
+    );
+
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+
+    await user.click(screen.getByText('Continue Upload'));
+
+    return renderResult;
+  }
+
+  it('shows a typed confirmation naming the existing row count, blocks Continue until the exact phrase is typed, and proceeds to UPLOAD_SQL once confirmed', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 20 } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByText('Confirm measurement replacement')).toBeInTheDocument());
+    expect(screen.getByText('20')).toBeInTheDocument();
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('plotID=1');
+    expect(calls[0]).toContain('censusID=1');
+    expect(calls[0]).toContain('schema=forestgeo_testing');
+
+    const confirmButton = screen.getByTestId('measurement-replacement-confirm');
+    expect(confirmButton).toBeDisabled();
+
+    const input = screen.getByTestId('measurement-replacement-typed-confirm-input');
+    await user.type(input, 'DELETE 20');
+    expect(confirmButton).not.toBeDisabled();
+
+    await user.click(confirmButton);
+
+    await waitFor(() => expect(screen.getByTestId('upload-fire-sql')).toBeInTheDocument());
+    expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument();
+  });
+
+  it('Cancel preserves the file list and review state, and never starts the upload', async () => {
+    const user = userEvent.setup();
+    mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 20 } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByText('Confirm measurement replacement')).toBeInTheDocument());
+
+    await user.click(screen.getByTestId('measurement-replacement-cancel'));
+
+    await waitFor(() => expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument());
+
+    // Still on the file-parse screen with the same file -- Cancel must not have
+    // advanced reviewState or cleared the uploader's selections.
+    expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
+    expect(screen.getByTestId('file-count')).toHaveTextContent('1');
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('upload-error')).not.toBeInTheDocument();
+  });
+
+  it('proceeds straight to UPLOAD_SQL without any confirmation dialog when the existing row count is zero', async () => {
+    const user = userEvent.setup();
+    mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 0 } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByTestId('upload-fire-sql')).toBeInTheDocument());
+    expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument();
+  });
+
+  it('blocks with an error (never proceeding to UPLOAD_SQL) when the replacement-preview request fails', async () => {
+    const user = userEvent.setup();
+    mockReplacementPreviewFetch(() => ({ ok: false, status: 500, json: { error: 'boom' } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByTestId('upload-error')).toBeInTheDocument());
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+    expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument();
+  });
+
+  it('blocks with an error when the server reports a malformed (non-numeric/negative) count rather than treating it as zero', async () => {
+    const user = userEvent.setup();
+    mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: -1 } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByTestId('upload-error')).toBeInTheDocument());
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+  });
+
+  it('ignores a stale replacement-preview response once the scope it was requested for has changed (no dialog, no progression)', async () => {
+    const user = userEvent.setup();
+    let releaseFetch: (() => void) | undefined;
+    const deferred = new Promise<void>(resolve => {
+      releaseFetch = resolve;
+    });
+    const { calls } = mockReplacementPreviewFetch(async () => {
+      await deferred;
+      return new Response(JSON.stringify({ existingRowCount: 20 }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
+    });
+
+    await driveToCleanReuploadContinue(user);
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    // Change files while the first check is still in flight: adding a second file gives
+    // fileManagement.files a new reference, which the invalidation effect and filesSnapshot check are bound to.
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('2'));
+
+    releaseFetch?.();
+
+    // The stale response must not resurrect a confirmation dialog for the scope it
+    // was originally requested under, nor advance past UPLOAD_FILES.
+    await waitFor(() => {
+      expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('upload-error')).not.toBeInTheDocument();
+  });
+
+  it('invalidates a pending confirmation when a NEW File object replaces the existing one under the same name, and resets the typed text on the next request even though the count is unchanged', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 20 } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByText('Confirm measurement replacement')).toBeInTheDocument());
+    expect(calls).toHaveLength(1);
+
+    const firstInput = screen.getByTestId('measurement-replacement-typed-confirm-input');
+    await user.type(firstInput, 'DELETE 20');
+    expect(screen.getByTestId('measurement-replacement-confirm')).not.toBeDisabled();
+
+    // useFileManagement tracks files by array reference, not by name: swapping in a
+    // new File object (same name, same lastModified) must still invalidate the
+    // confirmation that was computed for the old object.
+    await user.click(screen.getByText('Replace First File With New Object'));
+
+    await waitFor(() => expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument());
+    expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+
+    // Re-trigger the check against the replacement file. The server reports the same
+    // existingRowCount (20) as before, so a naive "reset only when the count changes"
+    // implementation would leave the old 'DELETE 20' text sitting in the input --
+    // confirming would then look valid without the user ever having re-typed it for
+    // this new request.
+    await user.click(screen.getByText('Continue Upload'));
+
+    await waitFor(() => expect(screen.getByText('Confirm measurement replacement')).toBeInTheDocument());
+    expect(calls).toHaveLength(2);
+
+    const secondInput = screen.getByTestId('measurement-replacement-typed-confirm-input');
+    expect(secondInput).toHaveValue('');
+    expect(screen.getByTestId('measurement-replacement-confirm')).toBeDisabled();
+
+    await user.type(secondInput, 'DELETE 20');
+    await user.click(screen.getByTestId('measurement-replacement-confirm'));
+
+    await waitFor(() => expect(screen.getByTestId('upload-fire-sql')).toBeInTheDocument());
+  });
+
+  it('discards a stale replacement-preview response reporting existingRowCount 0 for a File that was replaced while the request was in flight, never auto-starting the upload', async () => {
+    const user = userEvent.setup();
+    let releaseFetch: (() => void) | undefined;
+    const deferred = new Promise<void>(resolve => {
+      releaseFetch = resolve;
+    });
+    const { calls } = mockReplacementPreviewFetch(async () => {
+      await deferred;
+      return new Response(JSON.stringify({ existingRowCount: 0 }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
+    });
+
+    await driveToCleanReuploadContinue(user);
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    // Swap in a NEW File object under the same name while the first check for the
+    // OLD File is still pending. useFileManagement's new array reference triggers the
+    // invalidation effect, bumping replacementCheckTokenRef before the stale request
+    // ever resolves.
+    await user.click(screen.getByText('Replace First File With New Object'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+
+    // Now resolve the OLD request. existingRowCount 0 would, for a current request,
+    // skip confirmation and proceed straight to UPLOAD_SQL (see the "proceeds straight
+    // to UPLOAD_SQL ... when the existing row count is zero" test above) -- so if the
+    // token check were missing or wrong, this stale response would auto-start the
+    // upload for the replaced File it was never actually computed for.
+    await act(async () => {
+      releaseFetch?.();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    // Still a single request was ever made (for the OLD file); the replacement never
+    // triggered its own check because the user never clicked Continue Upload again.
+    expect(calls).toHaveLength(1);
+    // Still at file selection, with exactly the one (replaced) file -- the stale
+    // response must not have advanced reviewState.
+    expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
+    expect(screen.getByTestId('file-count')).toHaveTextContent('1');
+    // Decisive: the upload must NOT have auto-started from the stale zero-count result.
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { label: 'a fractional count', existingRowCount: 3.5 },
+    { label: 'a count beyond Number.MAX_SAFE_INTEGER', existingRowCount: Number.MAX_SAFE_INTEGER + 1 },
+    { label: 'a count sent as a string', existingRowCount: '42' }
+  ])('blocks with an error (never zero, never proceeding) when the server reports $label for existingRowCount', async ({ existingRowCount }) => {
+    const user = userEvent.setup();
+    mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByTestId('upload-error')).toBeInTheDocument());
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+    expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument();
+  });
+
+  it('routes the ArcGIS "Proceed with import" action through the same replacement-confirmation gate as a CSV Clean Re-Upload', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 20 } }));
+
+    render(
+      <UploadParent
+        onReset={mockOnReset}
+        overrideUploadForm={FormType.measurements}
+        overrideUploadMode={UploadMode.CLEAN_REUPLOAD}
+        overrideSourceFormat={SourceFormat.arcgis_xlsx}
+      />
+    );
+
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+    await user.click(screen.getByText('Continue Upload'));
+
+    // handleInitialSubmit checks sourceFormat === arcgis_xlsx before the clean-reupload
+    // branch, so the ArcGIS workbook goes to its own preflight screen first; the
+    // replacement-preview check must not have fired yet.
+    await waitFor(() => expect(screen.getByTestId('upload-arcgis-preflight')).toBeInTheDocument());
+    expect(calls).toHaveLength(0);
+
+    await user.click(screen.getByText('Proceed with import'));
+
+    // onProceed wraps its work in requestCleanMeasurementsReplacementConfirmation, the
+    // exact same gate the CSV path uses -- it must not be bypassed for ArcGIS imports.
+    await waitFor(() => expect(screen.getByText('Confirm measurement replacement')).toBeInTheDocument());
+    expect(calls).toHaveLength(1);
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+
+    const input = screen.getByTestId('measurement-replacement-typed-confirm-input');
+    await user.type(input, 'DELETE 20');
+    await user.click(screen.getByTestId('measurement-replacement-confirm'));
+
+    await waitFor(() => expect(screen.getByTestId('upload-fire-sql')).toBeInTheDocument());
+  });
+
+  it('does not gate a Revisions upload behind the replacement-preview check', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 20 } }));
+    mockRevisionUploadFetchForGatingCheck();
+
+    render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.REVISIONS} />);
+
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+    await user.click(screen.getByText('Continue Upload'));
+
+    // Revisions goes through /api/revisionupload, never /api/uploads/replacement-preview.
+    await waitFor(() => expect(screen.getByText(/matching revision rows/i)).toBeInTheDocument());
+    expect(calls).toHaveLength(0);
+  });
+
+  function mockRevisionUploadFetchForGatingCheck() {
+    // Layered on top of mockReplacementPreviewFetch's global.fetch stub: Revisions
+    // mode must never call replacement-preview, so this only needs to keep
+    // /api/revisionupload from throwing as "unexpected" if the gate were ever
+    // (incorrectly) bypassed in the other direction.
+    const previous = global.fetch;
+    global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/revisionupload') {
+        return new Promise<Response>(() => {}); // never resolves; test only checks the loading state
+      }
+      return previous(input, init);
+    }) as unknown as typeof global.fetch;
+  }
 });

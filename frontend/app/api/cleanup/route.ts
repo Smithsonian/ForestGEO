@@ -45,11 +45,10 @@ interface CleanupResult {
 /**
  * Find orphaned temporary measurements (not associated with active session)
  */
-async function findOrphanedTemporaryMeasurements(schema: string): Promise<{ fileId: string; batchCount: number; rowCount: number }[]> {
+async function findOrphanedTemporaryMeasurements(schema: string): Promise<{ fileId: string; rowCount: number }[]> {
   const query = `
     SELECT
       tm.FileID as fileId,
-      COUNT(DISTINCT tm.BatchID) as batchCount,
       COUNT(*) as rowCount
     FROM ${schema}.temporarymeasurements tm
     LEFT JOIN ${schema}.upload_sessions us ON tm.FileID = us.file_id
@@ -66,7 +65,6 @@ async function findOrphanedTemporaryMeasurements(schema: string): Promise<{ file
     if (!Array.isArray(results)) return [];
     return results.map((row: any) => ({
       fileId: row.fileId,
-      batchCount: row.batchCount,
       rowCount: row.rowCount
     }));
   } catch (error: any) {

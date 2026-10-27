@@ -160,6 +160,28 @@ describe('Database Query Utilities', () => {
       expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(2);
     });
 
+    it('classifies a changed ON DUPLICATE KEY UPDATE as updated using the nonzero id MySQL returns for it, not 0', async () => {
+      // Matches the verified real-MySQL packet contract: a changed duplicate
+      // match reports affectedRows: 2 and the row's real (nonzero) id.
+      const data: { id?: number; name: string } = { name: 'Updated' };
+      (mockConnectionManager.executeQuery as any).mockResolvedValueOnce({ insertId: 456, affectedRows: 2 });
+
+      const result = await handleUpsert(mockConnectionManager, 'testSchema', 'users', data, 'id');
+
+      expect(result).toEqual({ id: 456, operation: 'updated' });
+      expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('resolves the real id by lookup when a changed update reports insertId 0 (unique index without its own AUTO_INCREMENT column)', async () => {
+      const data: { id?: number; name: string } = { name: 'Updated' };
+      (mockConnectionManager.executeQuery as any).mockResolvedValueOnce({ insertId: 0, affectedRows: 2 }).mockResolvedValueOnce([{ id: 789, name: 'Updated' }]);
+
+      const result = await handleUpsert(mockConnectionManager, 'testSchema', 'users', data, 'id');
+
+      expect(result).toEqual({ id: 789, operation: 'updated' });
+      expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(2);
+    });
+
     it('reports a duplicate upsert that changed no values as unchanged', async () => {
       const data: { id?: number; name: string } = { name: 'Existing' };
       (mockConnectionManager.executeQuery as any)

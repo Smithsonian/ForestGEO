@@ -12,6 +12,7 @@ import { failureErrorMapping } from '@/config/datagridhelpers';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment/moment';
+import { toCalendarDayString } from '@/config/dateformats';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { loadSelectableOptions, selectableAutocomplete, selectableOptionKeyForField } from '@/components/client/clientmacros';
 import ailogger from '@/ailogger';
@@ -21,8 +22,14 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
-import UndoToast from '@/components/editplan/undotoast';
-import { buildEditableFieldsDiffForSurface } from '@/components/datagrids/measurementscommonsutils';
+import UndoToast, { UndoRevertOutcome } from '@/components/editplan/undotoast';
+import { buildEditableFieldsDiffWithMetaForSurface, revertEditAndRefresh } from '@/components/datagrids/measurementscommonsutils';
+import { FIELD_ALIASES_BY_SURFACE, isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
+import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
+import { EditFlowPersistResult } from '@/config/datagridhelpers';
+
+// The date picker reads local fields, so a stored calendar day becomes local midnight of that day.
+export const dayToPickerMoment = (day: string | null) => (day ? moment(day, 'YYYY-MM-DD', true) : null);
 
 interface IsolatedFailedMeasurementsDataGridProps {
   onRowReingested?: () => void;
@@ -104,10 +111,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     schema: currentSite?.schemaName ?? '',
     plotID: currentPlot?.plotID ?? 0,
     censusID: activeCensusID ?? 0,
-    dataType: 'failedmeasurements',
-    onError: error => {
-      setEditFlowError(error.message);
-    }
+    dataType: 'failedmeasurements'
   });
 
   useEffect(() => {
@@ -213,21 +217,56 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
   );
 
   const applyEditViaPreviewFlow = useCallback(
-    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
+    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<EditFlowPersistResult> => {
       const failedMeasurementID = Number(newRow.failedMeasurementID ?? oldRow.failedMeasurementID);
       if (!Number.isFinite(failedMeasurementID) || failedMeasurementID <= 0) {
         throw new Error('Missing failedMeasurementID for edit');
       }
 
-      const editableDiff = buildEditableFieldsDiffForSurface(newRow, oldRow, 'failedmeasurements');
-      const reasons = computeFailureReasons(newRow);
-      const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons, currentFailureReasons: reasons };
-      let editOperationID: number | null = null;
+      const { diff: editableDiff, roundedNoOpFields } = buildEditableFieldsDiffWithMetaForSurface(newRow, oldRow, 'failedmeasurements');
 
-      if (Object.keys(editableDiff).length > 0) {
+      // A typed edit that rounds to the existing value at server precision (e.g. 1.234
+      // persisted, displayed/edited as 1.23) must not look like it persisted or leak
+      // into failure-reason computation, so restore the authoritative old value for
+      // every raw row key that resolves to a rounded no-op field before computing
+      // reasons on this effective row.
+      const effectiveRow: GridRowModel = { ...newRow };
+      if (roundedNoOpFields.length > 0) {
+        const aliases = FIELD_ALIASES_BY_SURFACE.failedmeasurements;
+        for (const rawKey of Object.keys(newRow)) {
+          const canonical = aliases[rawKey] ?? rawKey;
+          if (roundedNoOpFields.includes(canonical)) {
+            effectiveRow[rawKey] = oldRow[rawKey];
+          }
+        }
+      }
+
+      const reasons = computeFailureReasons(effectiveRow as FailedMeasurementsRDS);
+      const updatedRow: GridRowModel = { ...effectiveRow, failureReasons: reasons, currentFailureReasons: reasons };
+
+      const roundedFieldsList = roundedNoOpFields.join(', ');
+      const roundedExplanation = roundedNoOpFields.length > 0 ? `${roundedFieldsList} rounded to the existing value (server stores at fixed precision)` : null;
+      const hasEffectiveDiff = Object.keys(editableDiff).length > 0;
+
+      if (!hasEffectiveDiff && reasons.length > 0) {
+        // Nothing to persist, and the row still fails validation: no preview/apply, no
+        // reingest, no PATCH. (An empty diff with no remaining reasons is real work -
+        // reingestion - and falls through to the normal flow below instead.)
+        return {
+          row: updatedRow,
+          changed: false,
+          ...(roundedExplanation ? { infoMessage: `No change saved: ${roundedExplanation}.` } : {})
+        };
+      }
+
+      let editOperationID: number | null = null;
+      let persistenceCompleted = false;
+
+      if (hasEffectiveDiff) {
         try {
           const applyResult = await editFlow.beginEdit(failedMeasurementID, editableDiff);
           editOperationID = applyResult.editOperationID;
+          persistenceCompleted = true;
         } catch (error: unknown) {
           const err = error instanceof Error ? error : new Error(String(error));
           ailogger.error('Failed to save row via edit preview flow:', err);
@@ -242,6 +281,11 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
             const errorData = await reingestResponse.json().catch(() => ({ message: `HTTP ${reingestResponse.status}` }));
             throw new Error(errorData.message || `Failed to reingest row: ${reingestResponse.status}`);
           }
+
+          // The reingest is a completed mutation the instant the server confirms it - a
+          // failure in a step below (invalidation, reloading options, onRowReingested)
+          // is a partial save, not a plain retryable failure (see the catch block).
+          persistenceCompleted = true;
 
           await invalidateAfter('reingest', {
             siteSchema: currentSite?.schemaName,
@@ -261,11 +305,24 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
         setRefresh(true);
       } catch (error: unknown) {
         const err = error instanceof Error ? error : new Error(String(error));
-        ailogger.error('Failed to finalize row save:', err);
-        throw err;
+        const finalError = persistenceCompleted
+          ? new RowSaveFinalizationError(`Changes were saved, but ${err.message}`, updatedRow as Record<string, unknown>)
+          : err;
+        ailogger.error('Failed to finalize row save:', finalError);
+        throw finalError;
       }
 
-      return updatedRow;
+      return {
+        row: updatedRow,
+        changed: true,
+        ...(roundedExplanation
+          ? {
+              infoMessage: hasEffectiveDiff
+                ? `${roundedExplanation} and was not changed; other edits applied.`
+                : `${roundedExplanation}; the row was resubmitted for reingestion.`
+            }
+          : {})
+      };
     },
     [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts, onRowReingested, editFlow]
   );
@@ -343,9 +400,10 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     return [
       ...FailedMeasurementsGridColumns.map(column => {
         const isReasonColumn = ['currentFailureReasons', 'description', 'originalFailureReasons', 'failureReasons', 'lastValidatedAt'].includes(column.field);
+        const editable = column.editable !== false && isFieldEditableOnSurface('failedmeasurements', column.field);
         return {
           ...column,
-          editable: !isReasonColumn,
+          editable,
           renderCell: (params: any) => {
             if (isReasonColumn) {
               const displayValue = column.field === 'description' ? formatDetailedFailureDescription(params.value) : params.value;
@@ -396,7 +454,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
                       }}
                     >
                       {column.field === 'date'
-                        ? moment(params.value).format('YYYY-MM-DD')
+                        ? (toCalendarDayString(params.value) ?? '')
                         : ['dbh', 'hom', 'x', 'y'].includes(column.field)
                           ? Number(params.value).toFixed(2)
                           : params.value === '' || params.value === null
@@ -417,8 +475,9 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
                   <DatePicker
                     sx={{ flex: 1 }}
                     label={column.headerName}
-                    value={moment(params.value, 'YYYY-MM-DD')}
+                    value={dayToPickerMoment(toCalendarDayString(params.value))}
                     onChange={newValue => {
+                      // The picker works in local fields; save the same calendar day it displays.
                       params.api.setEditCellValue({ id: params.id, field: params.field, value: newValue ? newValue.format('YYYY-MM-DD') : null });
                     }}
                     slotProps={{
@@ -457,7 +516,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
             }
           },
           valueFormatter: (value: any) => (['dbh', 'hom', 'x', 'y'].includes(column.field) ? Number(value).toFixed(2) : value),
-          preProcessEditCellProps: (params: any) => (['dbh', 'hom', 'x', 'y'].includes(column.field) ? preprocessor(params) : {})
+          preProcessEditCellProps: (params: any) => (['dbh', 'hom', 'x', 'y'].includes(column.field) ? preprocessor(params) : params.props)
         };
       })
     ];
@@ -498,28 +557,24 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
       {undoToastOperationID !== null && (
         <UndoToast
           editOperationID={undoToastOperationID}
-          onUndo={async () => {
-            try {
-              const response = await fetch(`/api/edits/revert`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  schema: currentSite?.schemaName ?? '',
-                  plotID: currentPlot?.plotID ?? 0,
-                  censusID: activeCensusID ?? 0,
-                  editOperationID: undoToastOperationID
-                })
-              });
-              if (!response.ok) {
-                throw new Error(`revert failed (${response.status})`);
+          onUndo={(confirmedPlanHash?: string): Promise<UndoRevertOutcome> =>
+            revertEditAndRefresh(
+              {
+                schema: currentSite?.schemaName ?? '',
+                plotID: currentPlot?.plotID ?? 0,
+                censusID: activeCensusID ?? 0,
+                editOperationID: undoToastOperationID,
+                confirmedPlanHash
+              },
+              {
+                refreshAfterRevert: async () => setRefresh(true),
+                notify: ({ message, severity }) => {
+                  if (severity !== 'success') setEditFlowError(message);
+                },
+                logError: (message, error) => ailogger.error(message, error)
               }
-              setRefresh(true);
-            } catch (error: unknown) {
-              const err = error instanceof Error ? error : new Error(String(error));
-              ailogger.error('Undo failed:', err);
-              setEditFlowError(`Undo failed: ${err.message}`);
-            }
-          }}
+            )
+          }
           onDismiss={() => setUndoToastOperationID(null)}
         />
       )}

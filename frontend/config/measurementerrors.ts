@@ -6,6 +6,13 @@ import { MAX_STORED_DECIMAL, parseFiniteBase10Number } from '@/config/editplan/f
 export const INGESTION_ERROR_SOURCE = 'ingestion' as const;
 export const VALIDATION_ERROR_SOURCE = 'validation' as const;
 
+/**
+ * ErrorCodes emitted only by hardcoded bulk-ingestion SQL (Stage 10 soft
+ * validations, storedprocedures.sql:3418/3457) with no corresponding
+ * `sitespecificvalidations` Definition — no revalidation pass can recompute them.
+ */
+export const INGESTION_STAGE_ERROR_CODES = ['20', '21'] as const;
+
 export const FALLBACK_FAILURE_REASON = 'Unknown parse error';
 // coremeasurements.Description is varchar(255); an over-length bind under strict
 // sql_mode would fail the whole audit insert, so truncate rather than throw.
@@ -312,6 +319,72 @@ export async function resolveMeasurementErrors(
   await connectionManager.executeQuery(resolveSQL, [measurementID, source], transactionID);
 }
 
+/**
+ * Resolves only the named error codes for one measurement — the targeted
+ * counterpart to `resolveMeasurementErrors` (which clears every unresolved
+ * link for a source). An empty `errorCodes` list is a deliberate no-op, not
+ * "resolve everything": `refreshIngestionErrorsForMeasurement` relies on
+ * that to avoid resolving a code it never actually re-checked (issue #307).
+ *
+ * Binds each code as its own scalar placeholder — never a single `?` bound
+ * to an array — because ConnectionManager.executeQuery calls mysql2's
+ * `execute`, which does not expand array parameters inside `IN (?)`.
+ */
+export async function resolveCheckedMeasurementErrors(
+  connectionManager: ConnectionManager,
+  schema: string,
+  measurementID: number,
+  source: 'ingestion' | 'validation',
+  errorCodes: string[],
+  transactionID?: string
+): Promise<void> {
+  if (errorCodes.length === 0) return;
+
+  const codePlaceholders = errorCodes.map(() => '?').join(', ');
+  const resolveSQL = safeFormatQuery(
+    schema,
+    `UPDATE ??.measurement_error_log mel
+     JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+     SET mel.IsResolved = TRUE,
+         mel.ResolvedAt = NOW()
+     WHERE mel.MeasurementID = ?
+       AND me.ErrorSource = ?
+       AND me.ErrorCode IN (${codePlaceholders})
+       AND mel.IsResolved = FALSE`
+  );
+
+  await connectionManager.executeQuery(resolveSQL, [measurementID, source, ...errorCodes], transactionID);
+}
+
+/**
+ * Reads back one measurement's current unresolved errors for a source — the
+ * effective, deduplicated, deterministically-ordered set that survives a
+ * revalidation pass (retained + freshly re-derived). A plain SELECT of
+ * `IsResolved = FALSE` rows; reading it can never revive a row a prior pass
+ * already resolved.
+ */
+export async function fetchUnresolvedMeasurementErrors(
+  connectionManager: ConnectionManager,
+  schema: string,
+  measurementID: number,
+  source: 'ingestion' | 'validation',
+  transactionID?: string
+): Promise<RevalidationResult[]> {
+  const selectSQL = safeFormatQuery(
+    schema,
+    `SELECT me.ErrorCode AS errorCode, me.ErrorMessage AS errorMessage
+     FROM ??.measurement_error_log mel
+     JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+     WHERE mel.MeasurementID = ?
+       AND me.ErrorSource = ?
+       AND mel.IsResolved = FALSE
+     ORDER BY me.ErrorCode ASC`
+  );
+
+  const rows: Array<{ errorCode: string; errorMessage: string }> = await connectionManager.executeQuery(selectSQL, [measurementID, source], transactionID);
+  return rows.map(row => ({ errorCode: row.errorCode, errorMessage: row.errorMessage }));
+}
+
 export async function upsertMeasurementErrors(
   connectionManager: ConnectionManager,
   schema: string,
@@ -357,13 +430,39 @@ function buildRepeatedRowPattern(rowCount: number, rowPattern: string): string {
   return new Array(rowCount).fill(rowPattern).join(', ');
 }
 
+export interface IngestionFailureRowKey {
+  fileID: string | null;
+  batchID: string | null;
+  sourceRowIndex: number;
+}
+
+/**
+ * The (UploadFileID, UploadBatchID, SourceRowIndex) identity one
+ * IngestionFailureRowInput will land under — the same default this module
+ * applies internally (`row.sourceRowIndex ?? index + 1`), exported so a
+ * caller that must know the key BEFORE calling insertIngestionFailureRows
+ * (e.g. a bounded before/after audit) computes the identical value rather
+ * than duplicating this default.
+ */
+export function ingestionFailureRowKey(row: IngestionFailureRowInput, index: number): IngestionFailureRowKey {
+  return {
+    fileID: row.fileID ?? null,
+    batchID: row.batchID ?? null,
+    sourceRowIndex: row.sourceRowIndex ?? index + 1
+  };
+}
+
 function prepareIngestionFailureRows(rows: IngestionFailureRowInput[]): PreparedIngestionFailureRow[] {
   return rows.map((row, index) => ({
     resultIndex: index,
     row,
     normalizedDate: normalizeDate(row.date),
     description: normalizeFailureDescription(row.failureReason),
-    sourceRowIndex: row.sourceRowIndex ?? index + 1,
+    // The canonical default — see ingestionFailureRowKey's doc comment. Reads
+    // only .sourceRowIndex from the shared helper (not fileID/batchID) since
+    // this is the one place that still needs fileID/batchID exactly as given
+    // (possibly absent) rather than defaulted to null for a map key.
+    sourceRowIndex: ingestionFailureRowKey(row, index).sourceRowIndex,
     errors: classifyIngestionFailure(row.failureKind ?? 'parser_reject', row.failureReason)
   }));
 }
@@ -662,6 +761,11 @@ export interface RevalidationResult {
   errorMessage: string;
 }
 
+export interface RevalidationOutcome {
+  errors: RevalidationResult[];
+  checkedCodes: string[];
+}
+
 interface FailedRowFields {
   Tag?: string | null;
   StemTag?: string | null;
@@ -684,6 +788,41 @@ const FIELD_LENGTH_LIMITS = {
   Codes: 255
 } as const;
 
+/**
+ * Error codes that `revalidateEditedFailedRow` evaluates unconditionally on
+ * every call, regardless of which fields are populated — so a prior
+ * occurrence of any of these can always be resolved once it stops firing.
+ * Codes NOT in this list (DUPLICATE_ENTRY, SQL_EXCEPTION,
+ * INTERRUPTED_UPLOAD, MISSING_FIELD_LOCALX/LOCALY, FIELD_TOO_LONG, every
+ * reference/system code the row validator cannot re-derive, and any
+ * future/unknown code) are never auto-resolved by this helper — see issue
+ * #307: resolving a code the validator never actually re-checked is what let
+ * `Check if Ready` silently clear duplicates and interrupted-upload rows
+ * without re-validating them.
+ *
+ * FIELD_TOO_LONG is deliberately excluded even though it IS re-derived below
+ * (see the `errors.push` calls for it): this row checker measures length
+ * with JS `String.length`, which counts UTF-16 code units, while the
+ * stored-procedure ingestion rule that originally produced the stored error
+ * uses SQL `LENGTH()`, which counts bytes. Multi-byte characters (e.g. an
+ * 11-character accented tag is 11 JS code units but 22 SQL bytes) make the
+ * two disagree, so this checker could wrongly report "fits" for a value that
+ * ingestion would still reject. A fresh FIELD_TOO_LONG finding is still
+ * reported when this checker's (code-unit) measurement itself trips, but a
+ * *stored* FIELD_TOO_LONG can only be resolved by an explicit full
+ * reingestion, which re-runs the authoritative byte-length check.
+ */
+const UNCONDITIONALLY_REVALIDATED_CODES: readonly string[] = [
+  'MISSING_FIELD_TREETAG',
+  'MISSING_FIELD_STEMTAG',
+  'MISSING_FIELD_SPECIESCODE',
+  'MISSING_FIELD_QUADRATNAME',
+  'MISSING_FIELD_DATE',
+  'NEGATIVE_DBH',
+  'NEGATIVE_HOM',
+  'MISSING_MEASUREMENT_DATA'
+];
+
 // Raw failed-row measurements are persisted in DECIMAL(12,6) columns. Keep
 // runtime values inside that representable range so malformed API payloads
 // cannot turn a rejected-row audit insert into a second database failure.
@@ -704,8 +843,9 @@ export async function revalidateEditedFailedRow(
   censusID: number,
   fields: FailedRowFields,
   transactionID?: string
-): Promise<RevalidationResult[]> {
+): Promise<RevalidationOutcome> {
   const errors: RevalidationResult[] = [];
+  const checkedCodes = new Set<string>(UNCONDITIONALLY_REVALIDATED_CODES);
   const isEmpty = (v: string | null | undefined) => !v || String(v).trim() === '';
 
   // Field-presence checks (mirrors stored procedure early validation)
@@ -775,6 +915,8 @@ export async function revalidateEditedFailedRow(
       );
       const quadratResult: any[] = await connectionManager.executeQuery(quadratCheckSQL, [String(fields.Quadrat).trim(), plotID], transactionID);
       const quadratCount = Number(quadratResult?.[0]?.cnt ?? 0);
+      checkedCodes.add('INVALID_QUADRAT');
+      checkedCodes.add('AMBIGUOUS_QUADRAT');
       if (quadratCount === 0) {
         errors.push({ errorCode: 'INVALID_QUADRAT', errorMessage: INGESTION_ERROR_MESSAGES['INVALID_QUADRAT'] });
       } else if (quadratCount > 1) {
@@ -787,6 +929,8 @@ export async function revalidateEditedFailedRow(
     const speciesCheckSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as cnt FROM ??.species WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1');
     const speciesResult: any[] = await connectionManager.executeQuery(speciesCheckSQL, [String(fields.SpCode).trim()], transactionID);
     const speciesCount = Number(speciesResult?.[0]?.cnt ?? 0);
+    checkedCodes.add('INVALID_SPECIES');
+    checkedCodes.add('AMBIGUOUS_SPECIES');
     if (speciesCount === 0) {
       errors.push({ errorCode: 'INVALID_SPECIES', errorMessage: INGESTION_ERROR_MESSAGES['INVALID_SPECIES'] });
     } else if (speciesCount > 1) {
@@ -794,9 +938,23 @@ export async function revalidateEditedFailedRow(
     }
   }
 
-  // Cross-census hard-failure checks. These mirror the stored procedure logic
-  // used for old trees and must remain unresolved until the edited row no longer
-  // conflicts with the latest prior census record for the same TreeTag+StemTag.
+  // Cross-census hard-failure FINDINGS (not authoritative checks — see the
+  // `checkedCodes` note below). This lookup mirrors the stored procedure's
+  // intent (compare against the stem's prior-census record) but NOT its
+  // authoritative contract: the real ingestion path matches on the same
+  // PlotID plus the immediately previous *active* PlotCensusNumber
+  // (frontend/db/sql/storedprocedures.sql:1873, 2363, 2497), while this query
+  // only filters by `t.CensusID < censusID` ordered DESC, with no PlotID
+  // constraint at all. A TreeTag+StemTag that happens to match in a
+  // DIFFERENT plot's census history would be picked up here and could
+  // produce a false "no mismatch"/"no drift" finding. For that reason this
+  // block may still REPORT a fresh QUADRAT_MISMATCH/COORDINATE_DRIFT when it
+  // genuinely finds one, but it must NEVER add either code to `checkedCodes`
+  // — see issue #307 F4: only `refreshIngestionErrorsForMeasurement` codes
+  // that were authoritatively re-verified may resolve a stored error, and
+  // this lookup cannot make that guarantee. A stored QUADRAT_MISMATCH or
+  // COORDINATE_DRIFT can therefore only be cleared by an explicit full
+  // reingestion, which re-runs the stored procedure's real contract.
   if (!isEmpty(fields.Tag) && !isEmpty(fields.StemTag)) {
     const priorStemSQL = safeFormatQuery(
       schema,
@@ -825,24 +983,68 @@ export async function revalidateEditedFailedRow(
       const currentQuadrat = isEmpty(fields.Quadrat) ? null : String(fields.Quadrat).trim();
       const previousQuadrat = priorStem.PrevQuadratName ? String(priorStem.PrevQuadratName).trim() : null;
 
-      if (currentQuadrat && previousQuadrat && currentQuadrat !== previousQuadrat) {
-        errors.push({ errorCode: 'QUADRAT_MISMATCH', errorMessage: INGESTION_ERROR_MESSAGES['QUADRAT_MISMATCH'] });
-      } else {
-        const currentX = toFiniteNumber(fields.X);
-        const currentY = toFiniteNumber(fields.Y);
-        const previousX = toFiniteNumber(priorStem.PrevX);
-        const previousY = toFiniteNumber(priorStem.PrevY);
+      // Finite-input guards: these still correctly gate whether a fresh
+      // finding is even derivable (a missing quadrat or non-finite
+      // coordinate on either side makes the comparison meaningless), but —
+      // per F4 above — satisfying them no longer adds anything to
+      // `checkedCodes`.
+      if (currentQuadrat && previousQuadrat) {
+        if (currentQuadrat !== previousQuadrat) {
+          errors.push({ errorCode: 'QUADRAT_MISMATCH', errorMessage: INGESTION_ERROR_MESSAGES['QUADRAT_MISMATCH'] });
+        } else {
+          const currentX = toFiniteNumber(fields.X);
+          const currentY = toFiniteNumber(fields.Y);
+          const previousX = toFiniteNumber(priorStem.PrevX);
+          const previousY = toFiniteNumber(priorStem.PrevY);
 
-        if (currentX !== null && currentY !== null && previousX !== null && previousY !== null && Math.hypot(currentX - previousX, currentY - previousY) > 10) {
-          errors.push({ errorCode: 'COORDINATE_DRIFT', errorMessage: INGESTION_ERROR_MESSAGES['COORDINATE_DRIFT'] });
+          if (currentX !== null && currentY !== null && previousX !== null && previousY !== null) {
+            if (Math.hypot(currentX - previousX, currentY - previousY) > 10) {
+              errors.push({ errorCode: 'COORDINATE_DRIFT', errorMessage: INGESTION_ERROR_MESSAGES['COORDINATE_DRIFT'] });
+            }
+          }
         }
       }
     }
   }
 
-  return errors;
+  return { errors, checkedCodes: Array.from(checkedCodes) };
 }
 
+/**
+ * Re-checks one failed measurement's row-level ingestion errors and returns
+ * the *effective* current set — retained (unperformed-check or
+ * un-re-derivable) errors plus whatever the revalidation pass freshly found.
+ *
+ * `revalidateEditedFailedRow` produces two different things that must not be
+ * confused:
+ *   - FRESH FINDINGS (`errors`): best-effort row-level re-derivations,
+ *     including ones (FIELD_TOO_LONG, QUADRAT_MISMATCH, COORDINATE_DRIFT)
+ *     whose underlying lookup is known to be non-authoritative (see the
+ *     comments at their call sites). These are always reported/upserted when
+ *     they fire, so a brand-new occurrence is still surfaced immediately.
+ *   - AUTHORITATIVE RESOLVABLE CHECKS (`checkedCodes`): the subset of codes
+ *     this helper is willing to RESOLVE when they stop firing. A code only
+ *     belongs here if the row checker can reproduce the real ingestion
+ *     contract closely enough that "didn't fire this call" reliably means
+ *     "no longer true" — see `UNCONDITIONALLY_REVALIDATED_CODES` and the
+ *     conditional quadrat/species `checkedCodes.add(...)` calls. FIELD_TOO_LONG
+ *     and the cross-census QUADRAT_MISMATCH/COORDINATE_DRIFT codes are
+ *     deliberately EXCLUDED from `checkedCodes` even though they can be
+ *     freshly found, because their row-level check cannot match the stored
+ *     procedure's authoritative contract (byte-length vs. code-unit length;
+ *     same-PlotID + prior-active-PlotCensusNumber vs. a PlotID-less
+ *     `CensusID <` scan) — see issue #307 F3/F4.
+ *
+ * Only resolves a code if it is in `checkedCodes` for this call AND it did
+ * not reappear in `freshErrors`. Everything else — DUPLICATE_ENTRY,
+ * SQL_EXCEPTION, INTERRUPTED_UPLOAD, FIELD_TOO_LONG, QUADRAT_MISMATCH,
+ * COORDINATE_DRIFT, any reference/system/unknown code, or a supported code
+ * whose check was skipped because its input field was empty — stays
+ * unresolved until an explicit full reingestion. Reading
+ * `fetchUnresolvedMeasurementErrors` afterward
+ * cannot revive anything already resolved; it only reports what is still
+ * `IsResolved = FALSE`.
+ */
 export async function refreshIngestionErrorsForMeasurement(
   connectionManager: ConnectionManager,
   schema: string,
@@ -851,12 +1053,26 @@ export async function refreshIngestionErrorsForMeasurement(
   fields: FailedRowFields,
   transactionID?: string
 ): Promise<RevalidationResult[]> {
-  const validationErrors = await revalidateEditedFailedRow(connectionManager, schema, censusID, fields, transactionID);
+  await reconcileIngestionErrorsForMeasurement(connectionManager, schema, measurementID, censusID, fields, transactionID);
+  return fetchUnresolvedMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, transactionID);
+}
 
-  await resolveMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, transactionID);
-  await upsertMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, validationErrors, transactionID);
+/** The write half of `refreshIngestionErrorsForMeasurement`, for callers that do not read the unresolved errors back. */
+export async function reconcileIngestionErrorsForMeasurement(
+  connectionManager: ConnectionManager,
+  schema: string,
+  measurementID: number,
+  censusID: number,
+  fields: FailedRowFields,
+  transactionID?: string
+): Promise<void> {
+  const { errors: freshErrors, checkedCodes } = await revalidateEditedFailedRow(connectionManager, schema, censusID, fields, transactionID);
 
-  return validationErrors;
+  const freshCodes = new Set(freshErrors.map(error => error.errorCode));
+  const codesToResolve = checkedCodes.filter(code => !freshCodes.has(code));
+
+  await resolveCheckedMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, codesToResolve, transactionID);
+  await upsertMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, freshErrors, transactionID);
 }
 
 export function buildFailedMeasurementsBaseQuery(schema: string): string {

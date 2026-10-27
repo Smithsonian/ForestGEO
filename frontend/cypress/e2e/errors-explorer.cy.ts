@@ -282,4 +282,46 @@ describe('Errors Explorer', () => {
     cy.get('@errorRow').find('[data-field="speciesCode"] input').should('have.value', 'ANOPKL');
     cy.get('@refreshMeasurementsSummary.all').should('have.length', 0);
   });
+
+  it('keeps Codes editing, Save and Cancel in view and hides rarely used columns until Manage columns turns them on (#525 item 7)', () => {
+    const DEFAULT_HIDDEN_FIELDS = ['stemPlotX', 'stemPlotY', 'priorDBH', 'priorHOM', 'homChanged'];
+    const TIGHTENED_HEADER_FIELDS = ['hasContradiction', 'stemLocalX', 'stemLocalY', 'measuredDBH', 'measuredHOM', 'attributes'];
+    mockErrorsExplorerApi({ rows: [invalidSpeciesRow] });
+    openErrorsExplorer();
+
+    cy.get('[role="columnheader"]').then(headers => {
+      const headerFields = [...headers].map(header => header.getAttribute('data-field'));
+      cy.task('log', `[#525 item 7] header order: ${headerFields.join(', ')}`);
+      expect(headerFields.slice(0, 2)).to.deep.equal(['actions', 'attributes']);
+    });
+    DEFAULT_HIDDEN_FIELDS.forEach(field => cy.get(`[role="columnheader"][data-field="${field}"]`).should('not.exist'));
+    TIGHTENED_HEADER_FIELDS.forEach(field =>
+      cy.get(`[role="columnheader"][data-field="${field}"] .MuiDataGrid-columnHeaderTitle`).then(title => {
+        const element = title[0];
+        cy.task('log', `[#525 item 7] ${field} header scrollWidth=${element.scrollWidth} clientWidth=${element.clientWidth}`);
+        expect(element.scrollWidth, `${field} header must not truncate`).to.be.at.most(element.clientWidth);
+      })
+    );
+
+    getExplorerRow('Invalid species reference').as('errorRow');
+    cy.get('@errorRow').within(() => {
+      cy.get('[aria-label="Edit"]').click();
+    });
+    // Cypress treats an element clipped by an overflow ancestor as hidden, so be.visible proves no horizontal scroll is needed.
+    // The cell container renders in view mode too; the combobox input exists only in CodesEditCell's
+    // Joy Autocomplete, so this proves Codes is actually editable.
+    cy.get('@errorRow').find('[data-field="attributes"] input[role="combobox"]').should('be.visible');
+    cy.get('@errorRow').find('[aria-label="Save"]').should('be.visible');
+    cy.get('@errorRow').find('[aria-label="Cancel"]').should('be.visible');
+    cy.get('.MuiDataGrid-virtualScroller').its('0.scrollLeft').should('eq', 0);
+    cy.get('@errorRow').within(() => {
+      cy.get('[aria-label="Cancel"]').click();
+    });
+
+    cy.get('[role="columnheader"][data-field="attributes"]').trigger('mouseover');
+    cy.get('[role="columnheader"][data-field="attributes"] button[aria-label="Codes column menu"]').click({ force: true });
+    cy.contains('[role="menuitem"]', 'Manage columns').click();
+    cy.get('input[name="stemPlotX"]').check({ force: true });
+    cy.get('[role="columnheader"][data-field="stemPlotX"]').should('exist').and('contain', 'Plot X');
+  });
 });

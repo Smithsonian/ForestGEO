@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeDiff, ExistingMeasurementRow } from './matchdiff';
+import { compareSourceRows, computeDiff, ExistingMeasurementRow, readExplicitSpeciesCode } from './matchdiff';
 import type { FileRow } from '@/config/macros/formdetails';
 import { InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 
@@ -110,5 +110,187 @@ describe('computeDiff plot coordinates', () => {
     const csvRow = { dbh: '13.5' } as unknown as FileRow;
 
     expect(computeDiff(csvRow, dbRow).dbh).toEqual({ from: '12.345', to: '13.5' });
+  });
+});
+
+describe('readExplicitSpeciesCode', () => {
+  it('returns the trimmed original spelling, not canonicalized to the DB casing', () => {
+    const csvRow = { spcode: 'quemar' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBe('quemar');
+  });
+
+  it('trims surrounding whitespace without altering internal casing', () => {
+    const csvRow = { spcode: '  QuemAR  ' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBe('QuemAR');
+  });
+
+  it('returns null when spcode is missing from the row', () => {
+    const csvRow = {} as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null when spcode is undefined', () => {
+    const csvRow = { spcode: undefined } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null when spcode is an empty string', () => {
+    const csvRow = { spcode: '' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null when spcode is whitespace-only', () => {
+    const csvRow = { spcode: '   ' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null for the literal "NULL" placeholder in upper case', () => {
+    const csvRow = { spcode: 'NULL' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null for the literal "NULL" placeholder in lower case', () => {
+    const csvRow = { spcode: 'null' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null for the "NULL" placeholder surrounded by whitespace and mixed case', () => {
+    const csvRow = { spcode: '  Null  ' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('is still returned when computeDiff drops the same cell as an unchanged case-only match (the whole reason this function exists)', () => {
+    // DB stores the species code upper-case; the CSV author retyped it
+    // lower-case without actually changing species. computeDiff's spcode
+    // comparison is case-insensitive, so it reports no change — but a
+    // sibling batch row correcting this tree's species still needs to know
+    // this row explicitly asked for 'quemar', not merely that it is unset.
+    const dbRow = makeDbRow({ SpeciesCode: 'QUEMAR' });
+    const csvRow = { spcode: 'quemar' } as unknown as FileRow;
+
+    const changes = computeDiff(csvRow, dbRow);
+    expect(changes.spcode).toBeUndefined();
+
+    expect(readExplicitSpeciesCode(csvRow)).toBe('quemar');
+  });
+});
+
+describe('compareSourceRows numeric precision classification', () => {
+  it('classifies equal parsed numbers with different text as identical, never precision-equivalent', () => {
+    // '1' and '1.0' parse to the exact same number — the same stored value
+    // written two different ways, not export-tool noise beyond DECIMAL(12,6)
+    // precision. A later identical row is a genuine duplicate, not a collapse.
+    const a = { dbh: '1' } as unknown as FileRow;
+    const b = { dbh: '1.0' } as unknown as FileRow;
+
+    expect(compareSourceRows(a, b)).toBe('identical');
+  });
+
+  it('does NOT collapse a pair that rounds to different stored DECIMAL(12,6) values at the 7th decimal (MySQL half-up proof pair)', () => {
+    // CAST('1.2345665' AS DECIMAL(12,6)) = 1.234567 but
+    // CAST('1.2345664' AS DECIMAL(12,6)) = 1.234566 — two different stored
+    // values, so this pair is a genuine duplicate, never a collapse.
+    const a = { dbh: '1.2345665' } as unknown as FileRow;
+    const b = { dbh: '1.2345664' } as unknown as FileRow;
+
+    expect(compareSourceRows(a, b)).toBe('different');
+  });
+
+  it('collapses a pair that rounds half-up to the SAME stored DECIMAL(12,6) value at the 7th decimal', () => {
+    // Both round half-up to 44.123456 — the same stored row written twice
+    // with export-tool float noise past the stored precision.
+    const a = { dbh: '44.1234561' } as unknown as FileRow;
+    const b = { dbh: '44.1234564' } as unknown as FileRow;
+
+    expect(compareSourceRows(a, b)).toBe('precision-equivalent');
+  });
+
+  it('still classifies a real DBH change beyond stored precision as different', () => {
+    const a = { dbh: '12.345' } as unknown as FileRow;
+    const b = { dbh: '13.5' } as unknown as FileRow;
+
+    expect(compareSourceRows(a, b)).toBe('different');
+  });
+
+  it('expands exponent-notation text exactly rather than collapsing through a lossy double (regression: toFixed cannot be substituted for the half-up proof pair)', () => {
+    // '1.2345665e0' and '1.2345664e0' are the exact same half-up proof pair
+    // used above, just written in exponent notation. Number('1.2345665e0')
+    // and Number('1.2345664e0') both round through toFixed(6) to the same
+    // double-precision value, which would wrongly collapse this into
+    // 'precision-equivalent' instead of 'different'.
+    const a = { dbh: '1.2345665e0' } as unknown as FileRow;
+    const b = { dbh: '1.2345664e0' } as unknown as FileRow;
+
+    expect(compareSourceRows(a, b)).toBe('different');
+  });
+
+  it('collapses a precision-equivalent pair even when one side is exponent-notation text', () => {
+    // 4.41234561e1 === 44.1234561, the same precision-equivalent pair as
+    // above (both round half-up to 44.123456).
+    const a = { dbh: '4.41234561e1' } as unknown as FileRow;
+    const b = { dbh: '44.1234564' } as unknown as FileRow;
+
+    expect(compareSourceRows(a, b)).toBe('precision-equivalent');
+  });
+
+  it('collapses a precision-equivalent pair whose integer part differs only by a zero-padded export (regression: a stray leading zero must not turn an equivalent pair into "different")', () => {
+    // '003.1234561' and '3.1234564' both round half-up to the same stored
+    // DECIMAL(12,6) value (3.123456) — a zero-padded integer part from an
+    // export tool must not itself make the rounded text strings disagree.
+    const a = { dbh: '003.1234561' } as unknown as FileRow;
+    const b = { dbh: '3.1234564' } as unknown as FileRow;
+
+    expect(compareSourceRows(a, b)).toBe('precision-equivalent');
+  });
+
+  it('does NOT treat a pair as identical just because they parse to the same double, when their exact decimal text rounds to DIFFERENT stored DECIMAL(12,6) values (#505 review round 2: parsedA===parsedB bypassed the exact-scale comparison)', () => {
+    // These two decimal texts differ starting at the 16th significant digit —
+    // close enough that Number() rounds BOTH to the exact same double, so a
+    // parsedA===parsedB shortcut would wrongly call this "identical". But
+    // MySQL's half-up CAST(... AS DECIMAL(12,6)) rounds the 7th fraction
+    // digit ('4' vs '5') differently: 1.234566 vs 1.234567 — two different
+    // stored values, so this must be 'different', never 'identical' or
+    // 'precision-equivalent'.
+    const a = { dbh: '1.234566499999999999' } as unknown as FileRow;
+    const b = { dbh: '1.234566500000000001' } as unknown as FileRow;
+
+    expect(Number(a.dbh)).toBe(Number(b.dbh));
+    expect(compareSourceRows(a, b)).toBe('different');
+  });
+
+  it('applies the same exact-stored-scale comparison to exponent-notation text as to plain decimal text (regression for both forms)', () => {
+    // Same double-collision pair as above, written in exponent notation.
+    const a = { dbh: '1.234566499999999999e0' } as unknown as FileRow;
+    const b = { dbh: '1.234566500000000001e0' } as unknown as FileRow;
+
+    expect(compareSourceRows(a, b)).toBe('different');
+  });
+
+  it('refuses to collapse (returns "different") rather than crash or allocate unboundedly on an exponent magnitude no legitimate DECIMAL(12,6) value could ever need (#505 review round 2: expandExponentNotation unbounded String.repeat)', () => {
+    // A 24-digit negative exponent used to drive expandExponentNotation's
+    // padding to a magnitude that either threw RangeError (count exceeds
+    // String.repeat's max length) or allocated megabytes of zero-padding.
+    const a = { dbh: '1e-999999999999999999999999' } as unknown as FileRow;
+    const b = { dbh: '1' } as unknown as FileRow;
+
+    expect(() => compareSourceRows(a, b)).not.toThrow();
+    expect(compareSourceRows(a, b)).toBe('different');
+  });
+
+  it('also refuses to collapse a merely large (not RangeError-sized) exponent magnitude, so no megabyte-scale zero-padding is ever allocated', () => {
+    const a = { dbh: '1e300' } as unknown as FileRow;
+    const b = { dbh: '1' } as unknown as FileRow;
+
+    expect(() => compareSourceRows(a, b)).not.toThrow();
+    expect(compareSourceRows(a, b)).toBe('different');
   });
 });

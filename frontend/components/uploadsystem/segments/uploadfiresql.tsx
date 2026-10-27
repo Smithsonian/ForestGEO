@@ -121,6 +121,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   uploadForm,
   uploadMode,
   sourceFormat,
+  setUploadOutcome,
   setIsDataUnsaved,
   schema,
   setUploadError,
@@ -567,8 +568,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     async (
       fileData: FileCollectionRowSet | null,
       fileName: string,
-      batchID?: string,
-      rawPayload?: { rawRows: FileRow[]; csvHeaders: string[]; mapping: ColumnMapping | null; delimiter: string }
+      batchID: string | undefined,
+      firstRowOrdinal: number | null,
+      rawPayload?: { rawRows: FileRow[]; csvHeaders: string[]; mapping: ColumnMapping | null; delimiter: string },
+      /**
+       * This chunk's own 1-based position within the file (PapaParse's
+       * `actualChunkCount` at the moment this chunk was parsed, #507) — sent
+       * so the server's chunk identity (sqlpacketload/route.ts) is a true
+       * positional key rather than a content hash, which collapses two
+       * byte-identical chunks at different positions into one. Captured once
+       * by the caller before any retry, so every retry of this exact chunk
+       * resends the SAME value.
+       */
+      chunkSequence?: number
     ) => {
       if (!isMountedRef.current) {
         throw createAbortError(`Upload cancelled before starting ${fileName}`);
@@ -613,7 +625,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                       csvHeaders: rawPayload.csvHeaders,
                       mapping: rawPayload.mapping,
                       delimiter: rawPayload.delimiter,
-                      ...(batchID ? { batchID } : {})
+                      ...(batchID ? { batchID } : {}),
+                      ...(firstRowOrdinal !== null ? { firstRowOrdinal } : {}),
+                      ...(chunkSequence !== undefined ? { chunkSequence } : {})
                     }
                   : {
                       schema,
@@ -626,7 +640,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                       census: currentCensus,
                       user: session?.user?.name ?? null,
                       fileRowSet: fileData?.[fileName] ?? {},
-                      ...(batchID ? { batchID } : {})
+                      ...(batchID ? { batchID } : {}),
+                      ...(firstRowOrdinal !== null ? { firstRowOrdinal } : {}),
+                      ...(chunkSequence !== undefined ? { chunkSequence } : {})
                     }
               )
             },
@@ -980,7 +996,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         Papa.parse<FileRow>(file, {
           delimiter: delimiter,
           header: true,
-          skipEmptyLines: true,
+          // 'greedy' also drops rows that are blank only after trimming -- delimiter-only
+          // padding (",,,"), whitespace-only lines, or quoted-empty cells ('""',"") -- which
+          // Papa's boolean `true` mode does not. Measurement padding must be skipped here, before
+          // staging, so a blank chunk never trips the staging guard (issue #504). Other form types
+          // keep the original boolean behavior, unchanged.
+          skipEmptyLines: uploadForm === FormType.measurements ? 'greedy' : true,
           // Reference files commit together, including duplicate-code validation and quadrat
           // overlap acknowledgment. Session-scoped replacement preserves earlier files.
           // A chunk size past the file size makes Papa emit exactly one chunk.
@@ -989,6 +1010,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           transform,
           chunk(results: ParseResult<FileRow>, parser) {
             actualChunkCount += 1;
+            // Counts data rows as Papa delivers them (header excluded, empty lines skipped); chunks arrive in file order.
+            const chunkFirstRowOrdinal = uploadForm === FormType.measurements ? totalRows : null;
+            // Captured synchronously, at this chunk's own callback invocation,
+            // so the async work queued below (which runs later, interleaved
+            // with other chunks) still reports THIS chunk's own 1-based
+            // position rather than whatever actualChunkCount has climbed to
+            // by the time the queued task runs (#507).
+            const chunkSequence = actualChunkCount;
             totalRows += results.data.length;
             const rowLimitError = uploadsWholeFileInOneRequest(uploadForm) ? referenceUploadRowLimitError(totalRows) : null;
             if (rowLimitError) {
@@ -1119,12 +1148,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
                   try {
                     if (serverResolves) {
-                      const data = await uploadToSql(null, file.name, fileBatchID, {
-                        rawRows: rawChunkRows,
-                        csvHeaders: serverCsvHeaders,
-                        mapping: columnMappings?.[file.name] ?? null,
-                        delimiter
-                      });
+                      const data = await uploadToSql(
+                        null,
+                        file.name,
+                        fileBatchID,
+                        chunkFirstRowOrdinal,
+                        {
+                          rawRows: rawChunkRows,
+                          csvHeaders: serverCsvHeaders,
+                          mapping: columnMappings?.[file.name] ?? null,
+                          delimiter
+                        },
+                        chunkSequence
+                      );
                       if (data?.failingRows?.length) {
                         serverFailingRowsCount += data.failingRows.length;
                         await pushErrorRowsToFailedMeasurements(data.failingRows, file.name);
@@ -1135,7 +1171,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                         setMappingWarnings(prev => (prev.includes(warning) ? prev : [...prev, warning]));
                       }
                     } else {
-                      await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
+                      await uploadToSql(fileCollectionRowSet, file.name, fileBatchID, chunkFirstRowOrdinal, undefined, chunkSequence);
                     }
                   } catch (error: unknown) {
                     const errorObj = error instanceof Error ? error : new Error(String(error));
@@ -1314,6 +1350,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       processedChunks === 0;
 
     if (!hasFiles) {
+      setUploadOutcome(undefined);
       if (lastPreparedUploadAttemptRef.current || uploadStartedRef.current || batchProcessingStartedRef.current) {
         ailogger.info('Upload queue cleared; resetting upload lifecycle guards');
       }
@@ -1328,6 +1365,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     }
 
     if (isFreshAttempt) {
+      setUploadOutcome(undefined);
       lastPreparedUploadAttemptRef.current = uploadAttemptKey;
       uploadStartedRef.current = false;
       batchProcessingStartedRef.current = false;
@@ -1361,7 +1399,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       uploadStartedRef.current = false;
       batchProcessingStartedRef.current = false;
     }
-  }, [acceptedFiles.length, completedChunks, processed, processedChunks, totalChunks, uploadAttemptKey, uploaded]);
+  }, [acceptedFiles.length, completedChunks, processed, processedChunks, setUploadOutcome, totalChunks, uploadAttemptKey, uploaded]);
 
   useEffect(() => {
     // Use ref-based mount tracking to survive Fast Refresh during development
@@ -2176,6 +2214,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               );
             }
 
+            setUploadOutcome({ kind: 'ingestion', sourceRows: totalExpectedRows, insertedRows: totalSessionProcessed, failedRows: totalSessionFailed });
+
             setVerificationStatus(
               `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches ${totalExpectedRows} source rows)`
             );
@@ -2257,6 +2297,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     queue,
     setReviewState,
     setUploadError,
+    setUploadOutcome,
     fetchWithTimeout,
     buildClientResponseError,
     getRequiredUploadSessionId,

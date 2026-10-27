@@ -89,32 +89,52 @@ describe('Upload File Management', () => {
     cy.url().should('include', '#download-complete');
   });
 
-  it('deletes a file and re-renders the updated file list', () => {
+  it('confirms a file delete in an in-app dialog: Cancel sends nothing, Confirm deletes and re-renders', () => {
+    const TARGET_FILE = 'measurements-2024-06-15.csv';
+    const OTHER_FILE = 'species-update-2024-06-16.csv';
+    cy.on('window:confirm', text => {
+      throw new Error(`native window.confirm must not be used for file deletion; it fired with: ${text}`);
+    });
     mockUploadedFilesApi({
-      files: [buildUploadedFile({ name: 'measurements-2024-06-15.csv' }), buildUploadedFile({ name: 'species-update-2024-06-16.csv' })]
+      files: [buildUploadedFile({ name: TARGET_FILE }), buildUploadedFile({ name: OTHER_FILE })]
     });
 
     openUploadedFiles();
     cy.wait('@fetchUploadedFiles');
 
-    cy.contains('tr', 'measurements-2024-06-15.csv').within(() => {
-      cy.get('button').eq(1).click({ force: true });
+    cy.contains('tr', TARGET_FILE).within(() => {
+      cy.contains('button', 'Delete').click({ force: true });
+    });
+    cy.contains('[role="dialog"]', TARGET_FILE)
+      .should('be.visible')
+      .within(() => {
+        cy.contains('button', 'Cancel').click();
+      });
+    cy.get('[role="dialog"]').should('not.exist');
+    cy.get('@deleteUploadedFile.all').should('have.length', 0);
+
+    cy.contains('tr', TARGET_FILE).within(() => {
+      cy.contains('button', 'Delete').click({ force: true });
+    });
+    cy.contains('[role="dialog"]', TARGET_FILE).within(() => {
+      cy.contains('button', 'Confirm').click();
     });
 
     cy.wait('@deleteUploadedFile').then(interception => {
       const url = new URL(interception.request.url);
+      cy.task('log', `[uploaded files delete] DELETE ${url.pathname}?${url.searchParams.toString()}`);
       expect(url.searchParams.get('schema')).to.equal('luquillo');
       expect(url.searchParams.get('plotID')).to.equal('1');
       expect(url.searchParams.get('plotName')).to.equal(null);
       expect(url.searchParams.get('census')).to.equal('5');
-      expect(url.searchParams.get('filename')).to.equal('measurements-2024-06-15.csv');
+      expect(url.searchParams.get('filename')).to.equal(TARGET_FILE);
       expect(url.searchParams.get('container')).to.equal(null);
       expect(url.searchParams.get('legacyContainer')).to.equal(null);
     });
     cy.wait('@fetchUploadedFiles');
 
-    cy.contains('measurements-2024-06-15.csv').should('not.exist');
-    cy.contains('species-update-2024-06-16.csv').should('be.visible');
+    cy.contains(TARGET_FILE).should('not.exist');
+    cy.contains(OTHER_FILE).should('be.visible');
   });
 
   it('shows the empty-state row when no uploaded files are available', () => {

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vites
 import mysql from 'mysql2/promise';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { testDbServerOptions } from '../../setup/test-db-connection';
 
 // We need to observe the orchestrator's audit calls without polluting the
 // module registry for sibling test files in the same worker (singleFork +
@@ -44,10 +45,7 @@ describe('teardownProvisionedSite / abortRun (integration)', () => {
     abortRun = orchestrator.abortRun;
 
     pool = mysql.createPool({
-      host: process.env.TEST_DB_HOST || 'localhost',
-      port: Number(process.env.TEST_DB_PORT || 3306),
-      user: process.env.TEST_DB_USER || 'root',
-      password: process.env.TEST_DB_PASSWORD || 'testpassword',
+      ...testDbServerOptions(),
       multipleStatements: true,
       connectionLimit: 5
     });
@@ -148,6 +146,11 @@ describe('teardownProvisionedSite / abortRun (integration)', () => {
 
   it('abortRun cleans up usersiterelations and catalog row for a failed run', async () => {
     const runId = await seedRun('failed');
+    await pool.query(
+      `INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status)
+       VALUES (?, 0, 'validate_inputs', 'completed'), (?, 1, 'create_schema', 'completed'), (?, 6, 'insert_plot', 'failed')`,
+      [runId, runId, runId]
+    );
     const [site]: any = await pool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [TEST_SCHEMA]);
     await pool.query(`INSERT INTO catalog.usersiterelations (UserID, SiteID) VALUES (1, ?)`, [site[0].SiteID]);
 

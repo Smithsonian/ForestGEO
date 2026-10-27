@@ -7,6 +7,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { generateShortBatchID } from '@/config/utils';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
+import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -36,7 +37,7 @@ async function handler(_request: NextRequest, context: RouteContext) {
   }
 
   // Validate schema to prevent SQL injection
-  let shiftQuery: string, bulkProcessSQL: string;
+  let shiftQuery: string;
   let resolveIngestionSQL: string,
     transferErrorSQL: string,
     snapshotResultSQL: string,
@@ -81,7 +82,6 @@ async function handler(_request: NextRequest, context: RouteContext) {
              AND me.ErrorSource = ?
          )`
     );
-    bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
     resolveIngestionSQL = safeFormatQuery(
       schema,
       `UPDATE ??.measurement_error_log mel
@@ -209,7 +209,7 @@ async function handler(_request: NextRequest, context: RouteContext) {
       throw new Error('Single-row reingestion staging insert did not return a usable insertId');
     }
 
-    await connectionManager.executeQuery(bulkProcessSQL, [SINGLE_ROW_FILE_ID, batchID], transactionID);
+    await callBulkIngestionInCallerTransaction(transactionExecutorFor(connectionManager, transactionID), schema, SINGLE_ROW_FILE_ID, batchID);
 
     const snapshotRows: any[] = await connectionManager.executeQuery(snapshotResultSQL, [SINGLE_ROW_FILE_ID, batchID, temporaryRowID], transactionID);
     const snapshot = snapshotRows[0];

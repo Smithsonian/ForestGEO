@@ -23,6 +23,7 @@ import {
 import {
   GridActionsCellItem,
   GridColDef,
+  GridColumnVisibilityModel,
   GridEventListener,
   GridPaginationModel,
   GridRenderEditCellParams,
@@ -56,21 +57,30 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import CustomGridPagination from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
-import { useInfiniteGridRows, type UseInfiniteGridRowsResult } from '@/components/datagrids/hooks/useinfinitegridrows';
+import { useInfiniteGridRows, type RefreshOptions, type UseInfiniteGridRowsResult } from '@/components/datagrids/hooks/useinfinitegridrows';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
 import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import { isMuiRowEditCancelled } from '@/lib/muirowedit';
 import PreviewDialog from '@/components/editplan/previewdialog';
-import UndoToast from '@/components/editplan/undotoast';
-import { buildEditableFieldsDiffWithMetaForSurface } from '@/components/datagrids/measurementscommonsutils';
+import UndoToast, { UndoRevertOutcome } from '@/components/editplan/undotoast';
+import { buildEditableFieldsDiffWithMetaForSurface, revertEditAndRefresh } from '@/components/datagrids/measurementscommonsutils';
 import { isFieldEditableByRole } from '@/config/editplan/fieldpolicy';
+import ailogger from '@/ailogger';
 
-// Wide grids column-virtualize off-screen cells out of the DOM, so Cypress
-// assertions against unscrolled columns (e.g. the far-right Codes edit cell)
-// can never observe them. Same e2e-only escape hatch as
-// components/datagrids/isolateddatagridcommons.tsx; production is unchanged.
+// Wide grids column-virtualize off-screen cells out of the DOM, hiding them
+// from Cypress; e2e-only escape hatch, production is unchanged.
 const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
+
+// View Errors is a triage screen: it starts from these defaults on every visit
+// (no persistence), and users can turn the columns on from Manage columns.
+export const ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS: GridColumnVisibilityModel = {
+  stemPlotX: false,
+  stemPlotY: false,
+  priorDBH: false,
+  priorHOM: false,
+  homChanged: false
+};
 
 const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
   messages: [],
@@ -251,10 +261,8 @@ function renderCodesChips(codesValue: string, emptyLabel = '—') {
 }
 
 function CodesEditCell({ params, options }: { params: GridRenderEditCellParams<ErrorExplorerRow, string>; options: string[] }) {
-  // Show the uploaded codes as the correction target without writing them into
-  // MUI's row-edit state. Row mode initializes every editable field and saves
-  // all of them, so a column-level valueGetter/valueSetter would otherwise
-  // mutate Attributes when the user edits only DBH, Description, etc.
+  // Local state, not row-edit state: row mode saves every editable field, so
+  // a valueGetter/valueSetter here would mutate Attributes on unrelated edits.
   const [selectedCodes, setSelectedCodes] = useState(() => parseCodesString(getUploadedCodesValue(params.row)));
 
   return (
@@ -344,6 +352,7 @@ export default function ErrorsExplorer() {
   const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
+  const [columnVisibilityModel, setColumnVisibilityModel] = useState<GridColumnVisibilityModel>(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS);
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
   const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
   const infiniteRef = useRef<UseInfiniteGridRowsResult<GridRowModel> | null>(null);
@@ -382,7 +391,7 @@ export default function ErrorsExplorer() {
   }, [filters, storageKey]);
 
   const fetchRows = useCallback(
-    async (scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
+    async (scopeOverride?: ExplorerScope | null, signal?: AbortSignal, options?: RefreshOptions) => {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingRows(true);
@@ -416,6 +425,7 @@ export default function ErrorsExplorer() {
         if (error instanceof DOMException && error.name === 'AbortError') return;
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(errorObj.message);
+        if (options?.strict) throw errorObj;
       } finally {
         if (!signal?.aborted) setLoadingRows(false);
       }
@@ -424,7 +434,7 @@ export default function ErrorsExplorer() {
   );
 
   const fetchFacets = useCallback(
-    async (scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
+    async (scopeOverride?: ExplorerScope | null, signal?: AbortSignal, options?: RefreshOptions) => {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingFacets(true);
@@ -450,6 +460,7 @@ export default function ErrorsExplorer() {
         if (error instanceof DOMException && error.name === 'AbortError') return;
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(errorObj.message);
+        if (options?.strict) throw errorObj;
       } finally {
         if (!signal?.aborted) setLoadingFacets(false);
       }
@@ -502,7 +513,7 @@ export default function ErrorsExplorer() {
   }, [filters, resolveExplorerScope]);
 
   const fetchDetails = useCallback(
-    async (measurementID: number, scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
+    async (measurementID: number, scopeOverride?: ExplorerScope | null, signal?: AbortSignal, options?: RefreshOptions) => {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingDetails(true);
@@ -525,6 +536,7 @@ export default function ErrorsExplorer() {
         if (error instanceof DOMException && error.name === 'AbortError') return;
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(errorObj.message);
+        if (options?.strict) throw errorObj;
       } finally {
         if (!signal?.aborted) setLoadingDetails(false);
       }
@@ -578,6 +590,31 @@ export default function ErrorsExplorer() {
       }
     },
     [resolveExplorerScope]
+  );
+
+  // Shared by the edit and undo paths: re-reads rows, the infinite
+  // accumulator, facets, and selected details. Strict (undo only) waits
+  // for every read to settle before surfacing a failure.
+  const refreshAffectedReads = useCallback(
+    async (scope: ExplorerScope | null, options?: RefreshOptions) => {
+      const activeInfinite = infiniteRef.current;
+      const reads: Promise<void>[] = [
+        fetchRows(scope, undefined, options),
+        activeInfinite?.mode === 'infinite' ? activeInfinite.refresh(options) : Promise.resolve(),
+        fetchFacets(scope, undefined, options),
+        selectedMeasurementID ? fetchDetails(selectedMeasurementID, scope, undefined, options) : Promise.resolve()
+      ];
+
+      if (!options?.strict) {
+        await Promise.all(reads);
+        return;
+      }
+
+      const settled = await Promise.allSettled(reads);
+      const firstRejection = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (firstRejection) throw firstRejection.reason;
+    },
+    [fetchDetails, fetchFacets, fetchRows, selectedMeasurementID]
   );
 
   const syncEditedRowLocally = useCallback((updatedRow: ErrorExplorerRow) => {
@@ -688,25 +725,16 @@ export default function ErrorsExplorer() {
         return updatedRow;
       }
 
-      const activeInfinite = infiniteRef.current;
-      await Promise.all([
-        fetchRows(rowScope),
-        activeInfinite?.mode === 'infinite' ? activeInfinite.refresh() : Promise.resolve(),
-        fetchFacets(rowScope),
-        selectedMeasurementID ? fetchDetails(selectedMeasurementID, rowScope) : Promise.resolve()
-      ]);
+      await refreshAffectedReads(rowScope);
       return updatedRow;
     },
     [
       currentSite?.schemaName,
       editFlow,
-      fetchDetails,
-      fetchFacets,
-      fetchRows,
+      refreshAffectedReads,
       refreshMeasurementsSummaryScope,
       refreshViewFullTableScope,
       resolveExplorerScope,
-      selectedMeasurementID,
       syncEditedRowLocally
     ]
   );
@@ -846,10 +874,36 @@ export default function ErrorsExplorer() {
           ]
         : []),
       {
+        field: 'attributes',
+        headerName: 'Codes',
+        minWidth: 160,
+        flex: 0.9,
+        editable: true,
+        headerAlign: 'left',
+        align: 'left',
+        renderCell: params => {
+          const row = params.row as ErrorExplorerRow;
+          const displayedCodes = getUploadedCodesValue(row);
+          const mismatchMessage = getCodesMismatchMessage(row);
+
+          return (
+            <Stack spacing={0.25} sx={{ py: 0.5 }}>
+              {renderCodesChips(displayedCodes)}
+              {mismatchMessage ? (
+                <Typography level="body-xs" color="warning" sx={{ whiteSpace: 'normal', lineHeight: 1.2 }}>
+                  {mismatchMessage}
+                </Typography>
+              ) : null}
+            </Stack>
+          );
+        },
+        renderEditCell: params => <CodesEditCell params={params} options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))} />
+      },
+      {
         field: 'hasContradiction',
         headerName: 'Conflict',
-        minWidth: 150,
-        width: 150,
+        minWidth: 120,
+        width: 120,
         sortable: false,
         headerAlign: 'left',
         align: 'left',
@@ -942,7 +996,7 @@ export default function ErrorsExplorer() {
       {
         field: 'stemLocalX',
         headerName: 'X',
-        width: 90,
+        width: 80,
         type: 'number',
         editable: true,
         align: 'right',
@@ -952,7 +1006,7 @@ export default function ErrorsExplorer() {
       {
         field: 'stemLocalY',
         headerName: 'Y',
-        width: 90,
+        width: 80,
         type: 'number',
         editable: true,
         align: 'right',
@@ -982,7 +1036,7 @@ export default function ErrorsExplorer() {
       {
         field: 'measuredDBH',
         headerName: 'DBH',
-        width: 95,
+        width: 100,
         type: 'number',
         editable: true,
         align: 'right',
@@ -992,7 +1046,7 @@ export default function ErrorsExplorer() {
       {
         field: 'measuredHOM',
         headerName: 'HOM',
-        width: 95,
+        width: 100,
         type: 'number',
         editable: true,
         align: 'right',
@@ -1045,32 +1099,6 @@ export default function ErrorsExplorer() {
         headerAlign: 'left',
         align: 'left',
         renderCell: params => renderPreviewCell(params.value as string | undefined, 2)
-      },
-      {
-        field: 'attributes',
-        headerName: 'Codes',
-        minWidth: 180,
-        flex: 0.9,
-        editable: true,
-        headerAlign: 'left',
-        align: 'left',
-        renderCell: params => {
-          const row = params.row as ErrorExplorerRow;
-          const displayedCodes = getUploadedCodesValue(row);
-          const mismatchMessage = getCodesMismatchMessage(row);
-
-          return (
-            <Stack spacing={0.25} sx={{ py: 0.5 }}>
-              {renderCodesChips(displayedCodes)}
-              {mismatchMessage ? (
-                <Typography level="body-xs" color="warning" sx={{ whiteSpace: 'normal', lineHeight: 1.2 }}>
-                  {mismatchMessage}
-                </Typography>
-              ) : null}
-            </Stack>
-          );
-        },
-        renderEditCell: params => <CodesEditCell params={params} options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))} />
       }
     ],
     [canEditRows, canEditSpeciesCode, rowModesModel, selectableOpts]
@@ -1410,6 +1438,8 @@ export default function ErrorsExplorer() {
               onRowClick={params => setSelectedMeasurementID(Number(params.row.coreMeasurementID))}
               slots={explorerGridSlots}
               rowHeight={68}
+              columnVisibilityModel={columnVisibilityModel}
+              onColumnVisibilityModelChange={setColumnVisibilityModel}
               sx={{
                 minHeight: 640,
                 '& .MuiDataGrid-cell': {
@@ -1630,30 +1660,32 @@ export default function ErrorsExplorer() {
       {undoToastOperationID !== null && (
         <UndoToast
           editOperationID={undoToastOperationID}
-          onUndo={async () => {
+          onUndo={async (confirmedPlanHash?: string): Promise<UndoRevertOutcome> => {
             const scope = resolveExplorerScope();
             if (!scope) {
               setErrorMessage('Explorer scope is not available');
-              return;
+              return { status: 'failed' };
             }
-            try {
-              const response = await fetch(`/api/edits/revert`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  schema: scope.schema,
-                  plotID: scope.plotID,
-                  censusID: scope.censusID,
-                  editOperationID: undoToastOperationID
-                })
-              });
-              if (!response.ok) throw new Error(`revert failed (${response.status})`);
-              await Promise.all([refreshMeasurementsSummaryScope(scope), refreshViewFullTableScope(scope)]);
-              await Promise.all([fetchRows(scope), isInfiniteOn ? infinite.refresh() : Promise.resolve()]);
-            } catch (error: unknown) {
-              const message = error instanceof Error ? error.message : String(error);
-              setErrorMessage(`Undo failed: ${message}`);
-            }
+
+            return revertEditAndRefresh(
+              {
+                schema: scope.schema,
+                plotID: scope.plotID,
+                censusID: scope.censusID,
+                editOperationID: undoToastOperationID,
+                confirmedPlanHash
+              },
+              {
+                refreshAfterRevert: async () => {
+                  await Promise.all([refreshMeasurementsSummaryScope(scope), refreshViewFullTableScope(scope)]);
+                  await refreshAffectedReads(scope, { strict: true });
+                },
+                notify: ({ message, severity }) => {
+                  if (severity !== 'success') setErrorMessage(message);
+                },
+                logError: (message, error) => ailogger.error(`ErrorsExplorer: ${message}`, error)
+              }
+            );
           }}
           onDismiss={() => setUndoToastOperationID(null)}
         />

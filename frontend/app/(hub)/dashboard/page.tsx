@@ -1,6 +1,20 @@
 'use client';
 
-import { Accordion, AccordionDetails, AccordionGroup, AccordionSummary, Alert, Box, Card, CardContent, Chip, Divider, Stack, Typography } from '@mui/joy';
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionGroup,
+  AccordionSummary,
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  Divider,
+  Stack,
+  Typography
+} from '@mui/joy';
 import WarningIcon from '@mui/icons-material/Warning';
 import CheckIcon from '@mui/icons-material/Check';
 import PublicIcon from '@mui/icons-material/Public';
@@ -23,7 +37,6 @@ import {
 import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/lib/db/definitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useIsMounted } from '@/app/hooks/useismounted';
 import { UnifiedChangelogRDS } from '@/lib/db/definitions/core';
 import { SitesRDS as _SitesRDS, PlotRDS as _PlotRDS } from '@/lib/db/definitions/zones';
 import { OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/lib/db/definitions/timekeeping';
@@ -45,6 +58,7 @@ import DatasetIcon from '@mui/icons-material/Dataset';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/config/store/appstore';
+import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE, CENSUS_DELETE_STALE_LIST_STATUSES, readCensusDeleteRejectionMessage } from '@/config/censusdeletion';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import CensusCreationModal, { CensusCreationDetails } from '@/components/client/modals/censuscreationmodal';
@@ -65,6 +79,35 @@ interface StemTypesType {
   CountNewRecruits: number;
   isFirstCensus: boolean;
 }
+
+interface DashboardMetrics {
+  progressTacho: ProgressTachoType;
+  activeUsers: number;
+  countStems: number;
+  countTrees: number;
+  stemTypes: StemTypesType;
+}
+
+interface ScopedDashboardState {
+  key: string;
+  requestID: number;
+  status: 'success' | 'error';
+  metrics?: DashboardMetrics;
+  changelog: UnifiedChangelogRDS[];
+  errorMessage?: string;
+}
+
+// CountOldStems starts null so the tile shows the "no comparison" placeholder
+// instead of a confident 0 until real data arrives.
+const EMPTY_METRICS: DashboardMetrics = {
+  progressTacho: { TotalQuadrats: 0, PopulatedPercent: 0, PopulatedQuadrats: 0, UnpopulatedQuadrats: [] },
+  activeUsers: 0,
+  countStems: 0,
+  countTrees: 0,
+  stemTypes: { CountOldStems: null, CountMultiStems: 0, CountNewRecruits: 0, isFirstCensus: false }
+};
+
+const CHANGELOG_PAGE_SIZE = 5;
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -93,26 +136,33 @@ export default function DashboardPage() {
   const plotList = useAppStore(state => state.plotList);
   const censusList = useAppStore(state => state.censusList);
 
-  const [changelogHistory, setChangelogHistory] = useState<UnifiedChangelogRDS[]>(Array(5));
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [progressTacho, setProgressTacho] = useState<ProgressTachoType>({
-    TotalQuadrats: 0,
-    PopulatedPercent: 0,
-    PopulatedQuadrats: 0,
-    UnpopulatedQuadrats: []
-  });
-  const [activeUsers, setActiveUsers] = useState(0);
-  const [countStems, setCountStems] = useState(0);
-  const [countTrees, setCountTrees] = useState(0);
-  // CountOldStems starts null so the tile shows the "no comparison" placeholder
-  // instead of a confident 0 until real data arrives.
-  const [stemTypes, setStemTypes] = useState<StemTypesType>({
-    CountOldStems: null,
-    CountMultiStems: 0,
-    CountNewRecruits: 0,
-    isFirstCensus: false
-  });
+
+  // Dashboard data is stored WITH the scope (site schema / plot / census) it was fetched
+  // for. Only data whose key matches the current scope is ever rendered, so switching
+  // site/plot/census immediately shows a loading state instead of the previous scope's
+  // counts, and a late response for a superseded scope can never be displayed.
+  const [scopedData, setScopedData] = useState<ScopedDashboardState | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [activeRequest, setActiveRequest] = useState<{ key: string; id: number } | null>(null);
+  const requestSequenceRef = useRef(0);
+
+  const schemaName = currentSite?.schemaName;
+  const plotID = currentPlot?.plotID;
+  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
+  const plotCensusNumber = currentCensus?.plotCensusNumber;
+  const scopeKey = schemaName && plotID && censusID ? `${schemaName}|${plotID}|${censusID}|${plotCensusNumber ?? ''}` : '';
+  // Data is only current when it answers the LATEST request started for the current scope.
+  // Keying by request id (not just scope) means returning to scope A (A -> B -> A, or a retry)
+  // shows loading for the new A request instead of A's previous result.
+  const currentScopedData =
+    scopedData && scopedData.key === scopeKey && activeRequest && activeRequest.key === scopeKey && scopedData.requestID === activeRequest.id
+      ? scopedData
+      : null;
+  const dashboardStatus: 'idle' | 'loading' | 'success' | 'error' = !scopeKey ? 'idle' : (currentScopedData?.status ?? 'loading');
+  const isLoading = dashboardStatus === 'loading';
+  const { progressTacho, activeUsers, countStems, countTrees, stemTypes } = currentScopedData?.metrics ?? EMPTY_METRICS;
+  const changelogHistory = currentScopedData?.changelog ?? [];
 
   // Plot edit modal state
   const [plotToEdit, setPlotToEdit] = useState<Plot | null>(null);
@@ -130,149 +180,101 @@ export default function DashboardPage() {
   const [isCreatingCensus, setIsCreatingCensus] = useState(false);
   const nextCensusNumber = Math.max(0, ...(censusListContext ?? []).map(census => census?.plotCensusNumber ?? 0)) + 1;
 
-  // Track loading state and last loaded key to prevent duplicate requests
-  const loadingRef = useRef<boolean>(false);
-  const lastLoadedKeyRef = useRef<string>('');
-
   // Timer ref for census creation debounce - cleaned up on unmount
   const censusCreationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // AbortControllers for cancelling in-flight fetch requests on unmount
-  // Separate controllers for parallel requests to avoid race conditions
-  const metricsAbortControllerRef = useRef<AbortController | null>(null);
-  const changelogAbortControllerRef = useRef<AbortController | null>(null);
-
-  // Track mounted state for safe state updates
-  const { isMountedRef } = useIsMounted();
-
-  // Cleanup timer and abort controllers on unmount
+  // Cleanup the census-creation debounce timer on unmount
   useEffect(() => {
     return () => {
       if (censusCreationTimerRef.current) {
         clearTimeout(censusCreationTimerRef.current);
       }
-      if (metricsAbortControllerRef.current) {
-        metricsAbortControllerRef.current.abort();
-      }
-      if (changelogAbortControllerRef.current) {
-        changelogAbortControllerRef.current.abort();
-      }
     };
   }, []);
 
   /**
-   * Aggregated Dashboard Metrics Loader
+   * Loads the aggregated metrics and recent changelog for the CURRENT scope.
    *
-   * Replaces 5 separate API calls with 1 aggregated call for optimal performance.
-   * Performance improvement: 3-4x faster (from ~1200ms to ~300ms)
+   * Every scope change (site/plot/census) starts a new request unconditionally: an
+   * in-flight request for another scope is aborted, never allowed to block the new one.
+   * `cancelled` is set by the effect cleanup (scope change or unmount), so a response,
+   * error, or completion belonging to a superseded request is ignored even when the
+   * fetch implementation does not honour the abort signal.
    */
-  const loadAllDashboardMetrics = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) return;
+  useEffect(() => {
+    if (!scopeKey || !schemaName || !plotID || !censusID) return;
 
-    // Abort any in-flight metrics request before starting a new one
-    if (metricsAbortControllerRef.current) {
-      metricsAbortControllerRef.current.abort();
-    }
-    metricsAbortControllerRef.current = new AbortController();
+    const controller = new AbortController();
+    let cancelled = false;
+    const key = scopeKey;
+    const requestID = ++requestSequenceRef.current;
+    setActiveRequest({ key, id: requestID });
 
-    try {
-      const response = await fetch(`/api/dashboardmetrics/all/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0]?.censusID}`, {
-        signal: metricsAbortControllerRef.current.signal
-      });
-
-      if (!isMountedRef.current) return;
-
+    const loadMetrics = async (): Promise<DashboardMetrics> => {
+      const response = await fetch(`/api/dashboardmetrics/all/${schemaName}/${plotID}/${censusID}`, { signal: controller.signal });
       if (!response.ok) {
         throw new Error(`Failed to load dashboard data: ${response.status} ${response.statusText}`);
       }
-
       const data = await response.json();
-
-      if (!isMountedRef.current) return;
-
-      // Update all state from single aggregated response
-      setProgressTacho({
-        TotalQuadrats: data.progressTachometer.TotalQuadrats,
-        PopulatedQuadrats: data.progressTachometer.PopulatedQuadrats,
-        PopulatedPercent: data.progressTachometer.PopulatedPercent,
-        UnpopulatedQuadrats: data.progressTachometer.UnpopulatedQuadrats ? data.progressTachometer.UnpopulatedQuadrats.split(';') : []
-      });
-
-      setActiveUsers(data.activeUsers.CountActiveUsers);
-      setCountTrees(data.countTrees.CountTrees);
-      setCountStems(data.countStems.CountStems);
-      setStemTypes({
-        CountOldStems: data.stemTypes.CountOldStems,
-        CountMultiStems: data.stemTypes.CountMultiStems,
-        CountNewRecruits: data.stemTypes.CountNewRecruits,
-        isFirstCensus: data.stemTypes.isFirstCensus
-      });
-
-      ailogger.info('Dashboard metrics loaded successfully via aggregated API');
-    } catch (e: any) {
-      // Ignore abort errors - they're expected when component unmounts or context changes
-      if (e.name === 'AbortError') return;
-      if (!isMountedRef.current) return;
-      const errorMessage = e instanceof Error ? e.message : 'Failed to load dashboard data. Please try again.';
-      setError(errorMessage);
-      ailogger.error('Aggregated dashboard metrics error:', e);
-    }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID]);
-
-  const loadChangelogHistory = useCallback(async () => {
-    if (!currentSite || !currentPlot || !currentCensus) {
-      if (isMountedRef.current) {
-        setChangelogHistory(Array(5).fill({}));
-      }
-      return;
-    }
-
-    // Abort any in-flight changelog request before starting a new one
-    if (changelogAbortControllerRef.current) {
-      changelogAbortControllerRef.current.abort();
-    }
-    changelogAbortControllerRef.current = new AbortController();
-
-    try {
-      if (isMountedRef.current) {
-        setIsLoading(true);
-      }
-
-      const response = await fetch(
-        `/api/changelog/overview/unifiedchangelog/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`,
-        { method: 'GET', signal: changelogAbortControllerRef.current.signal }
-      );
-
-      if (!isMountedRef.current) return;
-
-      try {
-        const results: UnifiedChangelogRDS[] = await response.json();
-
-        if (!isMountedRef.current) return;
-
-        // Pad the array if it has less than 5 items
-        const paddedResults = [...results];
-        while (paddedResults.length < 5) {
-          paddedResults.push({}); // Push empty objects to pad the array
+      return {
+        progressTacho: {
+          TotalQuadrats: data.progressTachometer.TotalQuadrats,
+          PopulatedQuadrats: data.progressTachometer.PopulatedQuadrats,
+          PopulatedPercent: data.progressTachometer.PopulatedPercent,
+          UnpopulatedQuadrats: data.progressTachometer.UnpopulatedQuadrats ? data.progressTachometer.UnpopulatedQuadrats.split(';') : []
+        },
+        activeUsers: data.activeUsers.CountActiveUsers,
+        countTrees: data.countTrees.CountTrees,
+        countStems: data.countStems.CountStems,
+        stemTypes: {
+          CountOldStems: data.stemTypes.CountOldStems,
+          CountMultiStems: data.stemTypes.CountMultiStems,
+          CountNewRecruits: data.stemTypes.CountNewRecruits,
+          isFirstCensus: data.stemTypes.isFirstCensus
         }
+      };
+    };
 
-        setChangelogHistory(paddedResults);
-      } catch {
-        ailogger.warn('changeloghistory - no json response');
+    // Changelog is supplementary: a failure degrades to "no recent activity" and must
+    // not turn an otherwise successful metrics load into an error.
+    const loadChangelog = async (): Promise<UnifiedChangelogRDS[]> => {
+      try {
+        const response = await fetch(`/api/changelog/overview/unifiedchangelog/${plotID}/${plotCensusNumber}?schema=${schemaName}`, {
+          method: 'GET',
+          signal: controller.signal
+        });
+        const results = await response.json();
+        return Array.isArray(results) ? results : [];
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') ailogger.warn('changeloghistory - failed to load changelog');
+        return [];
       }
-    } catch (error: any) {
-      // Ignore abort errors - expected when component unmounts or context changes
-      if (error.name === 'AbortError') return;
-      if (!isMountedRef.current) return;
+    };
 
-      ailogger.error('Failed to load changelog history', error);
-      setChangelogHistory(Array(5).fill({})); // Fallback to an empty padded array in case of an error
-    } finally {
-      if (isMountedRef.current) {
-        setIsLoading(false);
+    Promise.allSettled([loadMetrics(), loadChangelog()]).then(([metricsResult, changelogResult]) => {
+      if (cancelled) return;
+      const padded = [...(changelogResult.status === 'fulfilled' ? changelogResult.value : [])];
+      while (padded.length < CHANGELOG_PAGE_SIZE) padded.push({});
+
+      if (metricsResult.status === 'fulfilled') {
+        setScopedData({ key, requestID, status: 'success', metrics: metricsResult.value, changelog: padded });
+        ailogger.info('Dashboard metrics loaded successfully via aggregated API');
+      } else {
+        const reason = metricsResult.reason;
+        if (reason?.name === 'AbortError') return;
+        // A failed request is NOT empty data: surface it as an error with retry.
+        const message = reason instanceof Error ? reason.message : 'Failed to load dashboard data. Please try again.';
+        setScopedData({ key, requestID, status: 'error', changelog: padded, errorMessage: message });
+        ailogger.error('Aggregated dashboard metrics error:', reason);
       }
-    }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
+    });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+    // plotCensusNumber is part of scopeKey; reloadNonce re-runs the same scope (retry).
+  }, [scopeKey, reloadNonce, schemaName, plotID, censusID, plotCensusNumber]);
 
   // Memoized event handlers to prevent unnecessary re-renders
   const handleFeedbackKeyDown = useCallback(
@@ -380,6 +382,19 @@ export default function DashboardPage() {
           body: JSON.stringify({ schema: currentSite.schemaName, censusID, type: deleteType })
         });
         if (!response.ok) {
+          const rejectionMessage = await readCensusDeleteRejectionMessage(response);
+          if (rejectionMessage) {
+            ailogger.warn(`Census delete refused by the server (HTTP ${response.status}): ${rejectionMessage}`);
+            setError(rejectionMessage);
+            if (CENSUS_DELETE_STALE_LIST_STATUSES.includes(response.status)) {
+              try {
+                await refreshCensusList();
+              } catch (refreshError) {
+                ailogger.warn(`Census list refresh after a refused delete failed: ${refreshError instanceof Error ? refreshError.message : refreshError}`);
+              }
+            }
+            return;
+          }
           throw new Error(`Failed to clear census: ${response.status}`);
         }
 
@@ -404,7 +419,7 @@ export default function DashboardPage() {
       } catch (error: any) {
         console.error('Failed to delete census:', error);
         ailogger.error('Failed to delete census', error);
-        setError('Failed to delete census. Please try again.');
+        setError(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE);
       } finally {
         setLoading(false);
         setIsDeletingCensus(false);
@@ -515,55 +530,7 @@ export default function DashboardPage() {
     }
   }, [manualReset]);
 
-  // Reset all dashboard data when contexts are cleared
-  useEffect(() => {
-    if (!currentSite || !currentPlot || !currentCensus) {
-      setIsLoading(false);
-      setProgressTacho({
-        TotalQuadrats: 0,
-        PopulatedPercent: 0,
-        PopulatedQuadrats: 0,
-        UnpopulatedQuadrats: []
-      });
-      setActiveUsers(0);
-      setCountStems(0);
-      setCountTrees(0);
-      setStemTypes({
-        CountOldStems: null,
-        CountMultiStems: 0,
-        CountNewRecruits: 0,
-        isFirstCensus: false
-      });
-      setChangelogHistory(Array(5));
-      lastLoadedKeyRef.current = ''; // Reset tracking key when contexts are cleared
-    }
-  }, [currentSite, currentPlot, currentCensus]);
-
-  useEffect(() => {
-    if (currentSite && currentPlot && currentCensus?.dateRanges?.[0]?.censusID) {
-      // Create unique key to prevent duplicate loads
-      const loadKey = `${currentSite.schemaName}-${currentPlot.plotID}-${currentCensus.dateRanges?.[0]?.censusID}`;
-
-      // Skip if already loading or if same key as last load
-      if (loadingRef.current || lastLoadedKeyRef.current === loadKey) {
-        return;
-      }
-
-      loadingRef.current = true;
-      setIsLoading(true);
-      lastLoadedKeyRef.current = loadKey;
-
-      // Load all dashboard metrics with single aggregated API call (3-4x faster)
-      Promise.all([loadAllDashboardMetrics(), loadChangelogHistory()])
-        .catch(ailogger.error)
-        .finally(() => {
-          loadingRef.current = false;
-          setIsLoading(false);
-        });
-    }
-  }, [currentSite, currentPlot, currentCensus, loadAllDashboardMetrics, loadChangelogHistory]);
-
-  const hasData = progressTacho.PopulatedQuadrats > 0 || countStems > 0;
+  const hasData = dashboardStatus === 'success' && (progressTacho.PopulatedQuadrats > 0 || countStems > 0);
 
   return (
     <Box
@@ -705,6 +672,7 @@ export default function DashboardPage() {
             plotName={currentPlot.plotName}
             siteName={currentSite.siteName}
             isLoading={false}
+            userRole={userRole}
             onCensusDelete={handleCensusDelete}
             onAddCensus={handleAddCensus}
             onSelectCensus={census => {
@@ -715,8 +683,25 @@ export default function DashboardPage() {
             }}
           />
         </Box>
-      ) : !hasData && !isLoading ? (
-        /* Empty State: Context selected but no data */
+      ) : dashboardStatus === 'error' ? (
+        /* Failed request: NOT empty data. Offer a retry for the same scope. */
+        <Alert
+          color="danger"
+          variant="soft"
+          role="alert"
+          endDecorator={
+            <Button size="sm" variant="solid" color="danger" onClick={() => setReloadNonce(n => n + 1)}>
+              Retry
+            </Button>
+          }
+        >
+          <Box>
+            <Typography level="title-sm">Could not load census data</Typography>
+            <Typography level="body-sm">{currentScopedData?.errorMessage ?? 'Failed to load dashboard data. Please try again.'}</Typography>
+          </Box>
+        </Alert>
+      ) : dashboardStatus === 'success' && !hasData ? (
+        /* Empty State: a successful, current-scope response with no data */
         <EmptyState
           icon={<DatasetIcon />}
           title="No Census Data Yet"
@@ -915,7 +900,11 @@ export default function DashboardPage() {
                   </Typography>
                 </Box>
 
-                {changelogHistory.filter(log => log.changeID).length > 0 ? (
+                {isLoading ? (
+                  <Typography level="body-sm" color="neutral" role="status">
+                    Loading recent activity...
+                  </Typography>
+                ) : changelogHistory.filter(log => log.changeID).length > 0 ? (
                   <Stack spacing={2}>
                     {changelogHistory
                       .filter(log => log.changeID)

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { HTTPResponses } from '@/config/macros';
+import { buildSubBatchID } from '@/lib/uploads/batch-family';
 
 const { loggerInfo, loggerWarn, loggerError, loggerDebug } = vi.hoisted(() => ({
   loggerInfo: vi.fn(),
@@ -88,33 +90,49 @@ describe('GET /api/setupbulkprocessor/[schema]/[plotID]/[censusID]', () => {
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
   });
 
-  it('returns only the latest batch per file from temporarymeasurements', async () => {
+  it('returns one original batch ID for a file staged as sub-batch members', async () => {
+    const PREPARTITIONED_FILE = 'SERC_census4_2025(1).csv';
+    const ORIGINAL_BATCH_ID = 'b';
     const cm = ConnectionManager.getInstance() as any;
     cm.executeQuery.mockResolvedValueOnce([
-      {
-        FileID: 'SERC_census4_2025(1).csv',
-        BatchID: 'latest-batch',
-        fileBatchCount: 2
-      },
-      {
-        FileID: 'SERC_census4_failures.csv',
-        BatchID: 'only-batch',
-        fileBatchCount: 1
-      }
+      { FileID: PREPARTITIONED_FILE, BatchID: buildSubBatchID(ORIGINAL_BATCH_ID, 1), maxRowID: '104' },
+      { FileID: PREPARTITIONED_FILE, BatchID: buildSubBatchID(ORIGINAL_BATCH_ID, 2), maxRowID: '108' },
+      { FileID: PREPARTITIONED_FILE, BatchID: buildSubBatchID(ORIGINAL_BATCH_ID, 3), maxRowID: '109' }
     ]);
 
     const res = await GET(makeRequest(), makeProps());
+    const body = await res.json();
+    const [sql, params] = cm.executeQuery.mock.calls[0];
+    console.log(`[setupbulkprocessor-family] status=${res.status} body=${JSON.stringify(body)} warnings=${loggerWarn.mock.calls.length}`);
 
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual([
-      { fileID: 'SERC_census4_2025(1).csv', batchID: 'latest-batch' },
-      { fileID: 'SERC_census4_failures.csv', batchID: 'only-batch' }
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(body).toEqual([{ fileID: PREPARTITIONED_FILE, batchID: ORIGINAL_BATCH_ID }]);
+    expect(String(sql)).toContain('GROUP BY FileID, BatchID');
+    expect(params).toEqual(['22', '6']);
+    expect(loggerWarn, 'members of one family are not competing batches').not.toHaveBeenCalled();
+  });
+
+  it('selects the family holding the newest staged row per file and warns when a file has several families', async () => {
+    const REUPLOADED_FILE = 'SERC_census4_2025(1).csv';
+    const LEGACY_FILE = 'SERC_census4_failures.csv';
+    const cm = ConnectionManager.getInstance() as any;
+    cm.executeQuery.mockResolvedValueOnce([
+      { FileID: REUPLOADED_FILE, BatchID: buildSubBatchID('older-batch', 1), maxRowID: '40' },
+      { FileID: REUPLOADED_FILE, BatchID: buildSubBatchID('newer-batch', 1), maxRowID: '90' },
+      { FileID: REUPLOADED_FILE, BatchID: buildSubBatchID('older-batch', 2), maxRowID: '50' },
+      { FileID: LEGACY_FILE, BatchID: 'only-batch', maxRowID: '12' }
     ]);
 
-    const [sql, params] = cm.executeQuery.mock.calls[0];
-    expect(String(sql)).toContain('ROW_NUMBER() OVER (PARTITION BY FileID');
-    expect(String(sql)).toContain('COUNT(*) OVER (PARTITION BY FileID)');
-    expect(params).toEqual(['22', '6']);
-    expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('Multiple temporarymeasurement batches detected for file SERC_census4_2025(1).csv'));
+    const res = await GET(makeRequest(), makeProps());
+    const body = await res.json();
+    console.log(`[setupbulkprocessor-newest] status=${res.status} body=${JSON.stringify(body)} warnings=${JSON.stringify(loggerWarn.mock.calls)}`);
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(body).toEqual([
+      { fileID: REUPLOADED_FILE, batchID: 'newer-batch' },
+      { fileID: LEGACY_FILE, batchID: 'only-batch' }
+    ]);
+    expect(loggerWarn).toHaveBeenCalledTimes(1);
+    expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining(`Multiple staged batch families for file ${REUPLOADED_FILE}`));
   });
 });

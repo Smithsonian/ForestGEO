@@ -21,8 +21,9 @@ interface ValidationActionsMenuProps {
   onRefreshView: () => Promise<void>;
   pendingCount?: number;
   /**
-   * Rows the override action will flip to valid (IsValidated FALSE OR NULL):
-   * genuinely failed rows PLUS never-validated ones. The copy must not call
+   * Rows the override action will flip to valid: linked (real StemGUID) rows with
+   * IsValidated FALSE OR NULL and no unresolved ingestion error (CountOverridable,
+   * shared predicate). Ingestion failures are never counted. The copy must not call
    * these all "failed" — that misreports pending rows as failures.
    */
   overridableCount?: number;
@@ -77,7 +78,7 @@ export default function ValidationActionsMenu({
     {
       id: 'override-validations',
       label: 'Override Validations',
-      description: overridableCount > 0 ? `Force ${overridableCount} failed or not-yet-validated row(s) to pass` : 'No rows to override',
+      description: overridableCount > 0 ? `Force ${overridableCount} eligible failed or not-yet-validated row(s) to pass` : 'No eligible rows to override',
       icon: <GppGoodOutlined />,
       onClick: onOverrideValidations,
       color: 'warning',

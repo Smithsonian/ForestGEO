@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
-import { BulkEditPlan, Effect, EditPlan, FieldChange, RowPlan } from './types';
+import {
+  BulkEditPlan,
+  Effect,
+  EditPlan,
+  FieldChange,
+  RowPlan,
+  SpeciesCorrectionGroup,
+  SpeciesCorrectionSummary,
+  SpeciesCorrectionUndoRestoration
+} from './types';
 import { PER_COLUMN_DECIMAL_PRECISION, isDateField } from './fieldpolicy';
 
 function normalizeDate(value: unknown): unknown {
@@ -13,12 +22,19 @@ function normalizeDecimal(value: unknown, precision: number): unknown {
   return Number(value.toFixed(precision));
 }
 
+/** Applies the hash's own date/decimal normalization so callers compare values exactly as the hash does. */
+export function normalizeFieldValueForComparison(field: string, value: unknown): unknown {
+  if (isDateField(field)) return normalizeDate(value);
+  const precision = PER_COLUMN_DECIMAL_PRECISION[field];
+  return precision !== undefined ? normalizeDecimal(value, precision) : value;
+}
+
 function normalizeFieldChange(fc: FieldChange): FieldChange {
-  const precision = PER_COLUMN_DECIMAL_PRECISION[fc.field];
-  const asDate = isDateField(fc.field);
-  const from = asDate ? normalizeDate(fc.from) : precision !== undefined ? normalizeDecimal(fc.from, precision) : fc.from;
-  const to = asDate ? normalizeDate(fc.to) : precision !== undefined ? normalizeDecimal(fc.to, precision) : fc.to;
-  return { field: fc.field, from, to };
+  return {
+    field: fc.field,
+    from: normalizeFieldValueForComparison(fc.field, fc.from),
+    to: normalizeFieldValueForComparison(fc.field, fc.to)
+  };
 }
 
 function sortKeys<T>(value: T): T {
@@ -53,12 +69,54 @@ function sortEffects(effects: Effect[]): Effect[] {
     .sort((a, b) => (a.id + a.category + a.affectedTable).localeCompare(b.id + b.category + b.affectedTable));
 }
 
+// Re-sort so query/enumeration order never affects the hash. Whole records are
+// hashed, not just IDs, so a measurement moving between stems changes the hash.
+function sortCorrectionMembership(correction: SpeciesCorrectionSummary): SpeciesCorrectionSummary {
+  return {
+    ...correction,
+    stems: [...correction.stems].sort((a, b) => a.stemGUID - b.stemGUID),
+    measurements: [...correction.measurements].sort((a, b) => a.coreMeasurementID - b.coreMeasurementID)
+  };
+}
+
+function normalizeSpeciesCorrection(correction: EditPlan['speciesCorrection']): SpeciesCorrectionSummary | undefined {
+  if (!correction) return undefined;
+  return sortCorrectionMembership(correction);
+}
+
+// `restoredAttributeCodes` keeps `null` distinct from `[]`.
+function normalizeSpeciesCorrectionUndo(restoration: EditPlan['speciesCorrectionUndo']): SpeciesCorrectionUndoRestoration | undefined {
+  if (!restoration) return undefined;
+  return {
+    ...restoration,
+    restoredMemberRawSpCodes: [...restoration.restoredMemberRawSpCodes].sort((a, b) => a.coreMeasurementID - b.coreMeasurementID),
+    restoredCoreMeasurementColumns: [...restoration.restoredCoreMeasurementColumns].sort((a, b) => a.column.localeCompare(b.column)),
+    restoredStemColumns: [...restoration.restoredStemColumns].sort((a, b) => a.column.localeCompare(b.column)),
+    restoredAttributeCodes: restoration.restoredAttributeCodes === null ? null : [...restoration.restoredAttributeCodes].sort()
+  };
+}
+
+function normalizeSpeciesCorrectionGroups(groups: BulkEditPlan['speciesCorrectionGroups']): SpeciesCorrectionGroup[] | undefined {
+  if (!groups) return undefined;
+  return [...groups]
+    .map(group => ({
+      ...group,
+      correction: sortCorrectionMembership(group.correction),
+      members: [...group.members].sort((a, b) => a.rowIndex - b.rowIndex),
+      affectedCoreMeasurementIDs: sortNumericArray(group.affectedCoreMeasurementIDs) ?? [],
+      affectedStemGUIDs: sortNumericArray(group.affectedStemGUIDs) ?? []
+    }))
+    .sort((a, b) => a.treeID - b.treeID || a.censusID - b.censusID);
+}
+
 function canonicalizeEditPlan(plan: EditPlan): unknown {
   const { planHash: _planHash, generatedAt: _generatedAt, ...rest } = plan;
   const canonical = {
     ...rest,
     effects: sortEffects(plan.effects).map(effect => sortKeys(effect)),
-    fieldChanges: plan.fieldChanges.map(normalizeFieldChange).sort((a, b) => a.field.localeCompare(b.field))
+    fieldChanges: plan.fieldChanges.map(normalizeFieldChange).sort((a, b) => a.field.localeCompare(b.field)),
+    speciesCorrection: normalizeSpeciesCorrection(plan.speciesCorrection),
+    speciesCorrectionUndo: normalizeSpeciesCorrectionUndo(plan.speciesCorrectionUndo)
   };
   return sortKeys(canonical);
 }
@@ -83,7 +141,9 @@ export function canonicalizePlan(plan: EditPlan | BulkEditPlan): unknown {
         .map(canonicalizeRowPlan)
         .sort((a, b) => Number((a as { rowIndex: number }).rowIndex) - Number((b as { rowIndex: number }).rowIndex)),
       aggregateEffects: sortEffects(plan.aggregateEffects).map(effect => sortKeys(effect)),
-      duplicateDeletions: sortedDuplicates
+      duplicateDeletions: sortedDuplicates,
+      // An `undefined` value is dropped by JSON.stringify, so a group-free bulk plan hashes exactly as one that predates this field.
+      speciesCorrectionGroups: normalizeSpeciesCorrectionGroups(plan.speciesCorrectionGroups)
     });
   }
 

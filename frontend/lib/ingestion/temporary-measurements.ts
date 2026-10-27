@@ -1,14 +1,25 @@
 import { format } from 'mysql2/promise';
 import moment from 'moment/moment';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { recordDeletedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
 import ailogger from '@/ailogger';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
 import { toFiniteNumber } from '@/config/measurementerrors';
 import { isMissingTableError } from '@/lib/errorhelpers';
 
 export const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
+
+export class StagingBatchIDCountMismatchError extends Error {
+  readonly code = 'STAGING_BATCH_ID_COUNT_MISMATCH';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'StagingBatchIDCountMismatchError';
+  }
+}
 
 const verifiedTemporaryMeasurementSourceFormatSchemas = new Set<string>();
 
@@ -180,31 +191,75 @@ export function toTemporaryMeasurementInsertValues(record: TemporaryMeasurementI
   return TEMPORARY_MEASUREMENT_INSERT_COLUMNS.map(column => record[column]);
 }
 
+/** Returns the rows the server inserted (INSERT IGNORE without ON DUPLICATE KEY counts only inserted rows). */
 export async function insertTemporaryMeasurementsInBatches(
   connectionManager: ConnectionManager,
   schema: string,
   rows: FileRow[],
   fileName: string,
-  batchID: string,
+  rowBatchIDs: readonly string[],
   sessionId: string | null,
   sourceFormat: SourceFormat,
   plotID: number,
   censusID: number,
   transactionID: string
-): Promise<void> {
+): Promise<number> {
+  if (rowBatchIDs.length !== rows.length) {
+    throw new StagingBatchIDCountMismatchError(`Staging ${fileName} received ${rows.length} row(s) but ${rowBatchIDs.length} BatchID(s)`);
+  }
   const columnList = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.join(', ');
   const placeholderTuple = `(${TEMPORARY_MEASUREMENT_INSERT_COLUMNS.map(() => '?').join(', ')})`;
   const insertSQLPrefix = format(`INSERT IGNORE INTO ??.temporarymeasurements (${columnList}) VALUES `, [schema]);
 
+  let insertedRows = 0;
   for (let start = 0; start < rows.length; start += TEMP_MEASUREMENT_INSERT_BATCH_SIZE) {
     const slice = rows.slice(start, start + TEMP_MEASUREMENT_INSERT_BATCH_SIZE);
     const placeholders = slice.map(() => placeholderTuple).join(', ');
-    const values = slice.flatMap(row =>
-      toTemporaryMeasurementInsertValues(buildTemporaryMeasurementInsertRecord(row, fileName, batchID, sessionId, sourceFormat, plotID, censusID))
+    const values = slice.flatMap((row, index) =>
+      toTemporaryMeasurementInsertValues(
+        buildTemporaryMeasurementInsertRecord(row, fileName, rowBatchIDs[start + index], sessionId, sourceFormat, plotID, censusID)
+      )
     );
-    await connectionManager.executeQuery(`${insertSQLPrefix}${placeholders}`, values, transactionID);
+    const insertSQL = `${insertSQLPrefix}${placeholders}`;
+    const result = await connectionManager.executeQuery(insertSQL, values, transactionID);
+    insertedRows += requireAffectedRows(result, insertSQL);
   }
+  return insertedRows;
 }
+
+/** True when any row of `batchID`'s family (the batch itself or a `__subNNN` member) is staged for the file. */
+export async function familyHasStagedRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  batchID: string,
+  transactionID: string
+): Promise<boolean> {
+  const existsSQL = safeFormatQuery(
+    schema,
+    `SELECT 1 AS staged FROM ??.temporarymeasurements
+     WHERE FileID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
+     LIMIT 1`
+  );
+  const rows = await connectionManager.executeQuery(existsSQL, [fileName, batchID, buildSubBatchPattern(batchID)], transactionID);
+  if (!Array.isArray(rows)) {
+    throw new Error(
+      `Family staging probe for ${fileName} (batch ${batchID}) expected a row list from the server but got ${JSON.stringify(rows)}; ` +
+        `refusing to report the family as not staged.`
+    );
+  }
+  return rows.length > 0;
+}
+
+/**
+ * The stale-batch DELETE pins this (PlotID, CensusID, FileID, BatchID) index: all
+ * three equality predicates are leading columns, so it examines only the
+ * file's rows in one plot/census. Measured on 200k staged rows: pinned, a const
+ * range; FileID-led ingest_temporarymeasurements_FBPC_index, ~99k rows examined;
+ * neither, a full scan. A hint, not FORCE INDEX, so a schema missing the index
+ * degrades to a warning.
+ */
+export const STALE_BATCH_SCAN_INDEX = 'idx_tmpm_plot_census_file_batch';
 
 export async function cleanupStaleMeasurementBatchesForFile(
   connectionManager: ConnectionManager,
@@ -216,15 +271,15 @@ export async function cleanupStaleMeasurementBatchesForFile(
   transactionID: string
 ): Promise<number> {
   const cleanupSQL = format(
-    `DELETE FROM ??.temporarymeasurements
+    `DELETE /*+ INDEX(temporarymeasurements ${STALE_BATCH_SCAN_INDEX}) */ FROM ??.temporarymeasurements
      WHERE FileID = ?
        AND PlotID = ?
        AND CensusID = ?
-       AND BatchID <> ?`,
+       AND ${buildNotIncomingFamilyPredicate('BatchID')}`,
     [schema]
   );
-  const cleanupResult = await connectionManager.executeQuery(cleanupSQL, [fileName, plotID, censusID, batchID], transactionID);
-  const deletedRows = Number((cleanupResult as { affectedRows?: number })?.affectedRows ?? 0);
+  const cleanupResult = await connectionManager.executeQuery(cleanupSQL, [fileName, plotID, censusID, batchID, buildSubBatchPattern(batchID)], transactionID);
+  const deletedRows = requireAffectedRows(cleanupResult, cleanupSQL);
 
   if (deletedRows > 0) {
     ailogger.warn(
@@ -275,13 +330,13 @@ function buildNotIncomingFamilyPredicate(column: string): string {
  * makes `deleted < CHUNK_SIZE` permanently false and the loop never ends.
  * Both are failures the caller must see.
  */
-function requireAffectedRows(result: unknown, deleteSQL: string): number {
+function requireAffectedRows(result: unknown, statementSQL: string): number {
   const affectedRows = (result as { affectedRows?: unknown })?.affectedRows;
   const parsed = Number(affectedRows);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error(
-      `Bounded delete could not read a row count from the server: affectedRows=${JSON.stringify(affectedRows)} ` +
-        `is not a non-negative integer. Statement: ${deleteSQL.replace(/\s+/g, ' ').trim().slice(0, 200)}`
+      `Statement could not read a row count from the server: affectedRows=${JSON.stringify(affectedRows)} ` +
+        `is not a non-negative integer. Statement: ${statementSQL.replace(/\s+/g, ' ').trim().slice(0, 200)}`
     );
   }
   return parsed;
@@ -303,11 +358,91 @@ async function deleteInBoundedChunks(connectionManager: ConnectionManager, delet
 }
 
 /**
+ * Same per-statement bound as deleteInBoundedChunks, but for coremeasurements
+ * only, with a `unifiedchangelog` DELETE-audit row per row removed (#507).
+ * Exported so lib/uploads/ingest-batch.ts's stale-failure cleanup can reuse
+ * this select-lock-audit-delete sequence instead of duplicating it.
+ *
+ * Each chunk: SELECT ... FOR UPDATE the chunk's ids (stable ORDER BY, so a
+ * reissued `LIMIT n` can't pick a different n rows; FOR UPDATE locks them for
+ * the audit read but does not stop a concurrent INSERT matching a LATER
+ * chunk), audit via recordDeletedCoreMeasurementsAudit, then DELETE by id —
+ * all in the same transaction, so a rollback discards both together.
+ *
+ * Deliberately does NOT audit the measurement_error_log/failedmeasurements/
+ * uploadmetrics deletes elsewhere in cleanupPreviousFileUploads — derivative
+ * bookkeeping, reconstructed by the replacement ingestion that follows.
+ *
+ * `fromSQL` defaults to the plain table (unchanged SQL for the common
+ * single-table caller); pass a `??.coremeasurements cm INNER JOIN ...`
+ * fragment when `whereSQL` needs other tables — the SELECT then adds
+ * `DISTINCT` so a join can't select (and audit) one id twice.
+ */
+export async function deleteCoreMeasurementsInBoundedChunksWithAudit(
+  connectionManager: ConnectionManager,
+  schema: string,
+  whereSQL: string,
+  whereParams: unknown[],
+  changedBy: string | null,
+  plotID: number,
+  censusID: number,
+  transactionID: string,
+  fromSQL: string = '??.coremeasurements'
+): Promise<number> {
+  const isJoinedSource = fromSQL !== '??.coremeasurements';
+  const idColumnSQL = isJoinedSource ? 'DISTINCT cm.CoreMeasurementID' : 'CoreMeasurementID';
+  const orderBySQL = isJoinedSource ? 'cm.CoreMeasurementID' : 'CoreMeasurementID';
+  const selectIdsSQL = safeFormatQuery(
+    schema,
+    `SELECT ${idColumnSQL} FROM ${fromSQL}
+     WHERE ${whereSQL}
+     ORDER BY ${orderBySQL}
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}
+     FOR UPDATE`
+  );
+  const tx = transactionExecutorFor(connectionManager, transactionID);
+  let totalDeleted = 0;
+
+  for (;;) {
+    const idRows = await connectionManager.executeQuery(selectIdsSQL, whereParams, transactionID);
+    const ids = (Array.isArray(idRows) ? idRows : []).map((row: { CoreMeasurementID: number }) => row.CoreMeasurementID);
+    if (ids.length === 0) return totalDeleted;
+
+    const auditedCount = await recordDeletedCoreMeasurementsAudit({ tx, schema, coreMeasurementIDs: ids, changedBy, plotID, censusID });
+    if (auditedCount !== ids.length) {
+      throw new Error(
+        `Audit mismatch: selected ${ids.length} coremeasurements row(s) for deletion but only ` +
+          `audited ${auditedCount}. Refusing to delete — the audit trail and the data would disagree.`
+      );
+    }
+
+    const deleteSQL = safeFormatQuery(schema, `DELETE FROM ??.coremeasurements WHERE CoreMeasurementID IN (${buildInPlaceholders(ids.length)})`);
+    const deleteResult = await connectionManager.executeQuery(deleteSQL, ids, transactionID);
+    const deletedThisChunk = requireAffectedRows(deleteResult, deleteSQL);
+    if (deletedThisChunk !== ids.length) {
+      throw new Error(
+        `Audited delete removed ${deletedThisChunk} coremeasurements row(s) but audited ${ids.length} — ` + `the audit trail and the data would disagree.`
+      );
+    }
+
+    totalDeleted += deletedThisChunk;
+    if (ids.length < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return totalDeleted;
+  }
+}
+
+/**
  * Clean up all data from previous uploads for the same plot/census scope.
  * Clean measurement uploads are census replacements: a new upload fully replaces
  * any earlier measurement batches for that census, even if the filename changed.
  *
  * Removes: validation error links, coremeasurements, failedmeasurements (if legacy table exists), uploadmetrics
+ *
+ * `changedBy` attributes the coremeasurements DELETE audit rows this writes
+ * to `unifiedchangelog` (#507). `null` records an unattributed cleanup rather
+ * than throwing — see recordDeletedCoreMeasurementsAudit. The derivative
+ * measurement_error_log/failedmeasurements/uploadmetrics deletes below are
+ * deliberately NOT audited; see deleteCoreMeasurementsInBoundedChunksWithAudit's
+ * doc comment for why.
  */
 export async function cleanupPreviousFileUploads(
   connectionManager: ConnectionManager,
@@ -316,6 +451,7 @@ export async function cleanupPreviousFileUploads(
   currentBatchID: string,
   plotID: number,
   censusID: number,
+  changedBy: string | null,
   transactionID: string
 ): Promise<number> {
   // SCOPE: the whole target census, minus the incoming batch family.
@@ -373,13 +509,20 @@ export async function cleanupPreviousFileUploads(
   }
 
   // Every prior measurement in the census — ingested and unresolved alike.
-  const deleteCmSQL = safeFormatQuery(
+  // Audited per row (#507): deleteCoreMeasurementsInBoundedChunksWithAudit
+  // writes a DELETE unifiedchangelog row for each one, in this same
+  // transaction, before removing it.
+  const deleteCmWhereSQL = `CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'UploadBatchID')}`;
+  const deletedCmRows = await deleteCoreMeasurementsInBoundedChunksWithAudit(
+    connectionManager,
     schema,
-    `DELETE FROM ??.coremeasurements
-     WHERE CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'UploadBatchID')}
-     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
+    deleteCmWhereSQL,
+    [censusID, ...familyParams],
+    changedBy,
+    plotID,
+    censusID,
+    transactionID
   );
-  const deletedCmRows = await deleteInBoundedChunks(connectionManager, deleteCmSQL, [censusID, ...familyParams], transactionID);
 
   const deleteFailedSQL = safeFormatQuery(
     schema,
@@ -421,17 +564,21 @@ export async function findDroppedMeasurementCandidates(
   connectionManager: ConnectionManager,
   schema: string,
   fileName: string,
-  batchID: string,
+  rowBatchIDs: readonly string[],
   plotID: number,
   censusID: number,
   chunkRows: FileRow[],
   transactionID: string
 ): Promise<DroppedMeasurementCandidate[]> {
+  if (rowBatchIDs.length !== chunkRows.length) {
+    throw new StagingBatchIDCountMismatchError(`Dropped-row audit for ${fileName} received ${chunkRows.length} row(s) but ${rowBatchIDs.length} BatchID(s)`);
+  }
   const tempTable = 'dropped_row_candidates';
   await connectionManager.executeQuery(`DROP TEMPORARY TABLE IF EXISTS ${tempTable}`, [], transactionID);
   await connectionManager.executeQuery(
     `CREATE TEMPORARY TABLE ${tempTable} (
       RowOrdinal INT NOT NULL PRIMARY KEY,
+      BatchID VARCHAR(36) NOT NULL,
       TreeTag VARCHAR(20) NULL,
       StemTag VARCHAR(10) NULL,
       SpeciesCode VARCHAR(25) NULL,
@@ -439,19 +586,20 @@ export async function findDroppedMeasurementCandidates(
       MeasurementDate DATE NULL,
       INDEX idx_dropped_row_candidates_match (TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate),
       INDEX idx_dropped_row_candidates_duplicate (TreeTag, StemTag, QuadratName)
-    ) ENGINE=MEMORY`,
+    )`,
     [],
     transactionID
   );
 
   try {
-    const insertWidth = 6;
+    const insertWidth = 7;
     const insertBatchSize = 500;
     for (let start = 0; start < chunkRows.length; start += insertBatchSize) {
       const slice = chunkRows.slice(start, start + insertBatchSize);
       const placeholders = slice.map(() => `(${Array(insertWidth).fill('?').join(',')})`).join(', ');
       const params = slice.flatMap((row, index) => [
         start + index + 1,
+        rowBatchIDs[start + index],
         row.tag ?? null,
         row.stemtag || null,
         row.spcode ?? null,
@@ -460,7 +608,7 @@ export async function findDroppedMeasurementCandidates(
       ]);
 
       await connectionManager.executeQuery(
-        `INSERT INTO ${tempTable} (RowOrdinal, TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate) VALUES ${placeholders}`,
+        `INSERT INTO ${tempTable} (RowOrdinal, BatchID, TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate) VALUES ${placeholders}`,
         params,
         transactionID
       );
@@ -479,7 +627,7 @@ export async function findDroppedMeasurementCandidates(
        FROM ${tempTable} drc
        LEFT JOIN ??.temporarymeasurements tm
          ON tm.FileID = ?
-        AND tm.BatchID = ?
+        AND tm.BatchID = drc.BatchID
         AND tm.TreeTag <=> drc.TreeTag
         AND tm.StemTag <=> drc.StemTag
         AND tm.SpeciesCode <=> drc.SpeciesCode
@@ -497,7 +645,7 @@ export async function findDroppedMeasurementCandidates(
        ORDER BY drc.RowOrdinal`
     );
 
-    const results = await connectionManager.executeQuery(droppedRowsSQL, [fileName, batchID, fileName, plotID, censusID], transactionID);
+    const results = await connectionManager.executeQuery(droppedRowsSQL, [fileName, fileName, plotID, censusID], transactionID);
 
     return Array.isArray(results) ? (results as DroppedMeasurementCandidate[]) : [];
   } finally {

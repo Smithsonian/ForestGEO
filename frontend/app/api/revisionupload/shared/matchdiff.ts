@@ -3,6 +3,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FileRow } from '@/config/macros/formdetails';
 import { canonicalizeRowForHash, RowMode } from '@/config/editplan/canonicalrow';
 import { parseFiniteBase10Number } from '@/config/editplan/fieldpolicy';
+import { STORED_DECIMAL_SCALE } from '@/config/editplan/storedfieldcomparison';
 
 export const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments', 'spcode', 'quadrat', 'lx', 'ly', 'px', 'py', 'tag', 'stemtag'] as const;
 
@@ -84,6 +85,112 @@ export interface ExistingMeasurementRow {
 export const LOOKUP_CHUNK_SIZE = 1000;
 export const TAG_STEMTAG_LOOKUP_CHUNK_SIZE = 250;
 
+const EXPONENT_PATTERN = /[eE]/;
+
+// Caps the zero-padding expandExponentNotation can ever allocate. DECIMAL(12,6)
+// never needs a shift this large; without the cap, an exponent like
+// '1e-999999999999999999999999' drives String.repeat to a RangeError or a
+// multi-megabyte allocation.
+const MAX_EXPONENT_SHIFT = 64;
+
+/**
+ * Expands exponent-notation decimal text (e.g. '1.2345665e0') to its exact
+ * decimal string via digit manipulation (no float conversion, so precision
+ * survives past a double's ~15-17 significant digits). Returns null when the
+ * shift exceeds MAX_EXPONENT_SHIFT, instead of expanding.
+ */
+function expandExponentNotation(text: string): string | null {
+  const [mantissa, exponentText] = text.split(/[eE]/);
+  const negative = mantissa.startsWith('-');
+  const unsignedMantissa = negative || mantissa.startsWith('+') ? mantissa.slice(1) : mantissa;
+  const [integerDigits, fractionDigits = ''] = unsignedMantissa.split('.');
+  const allDigits = `${integerDigits}${fractionDigits}` || '0';
+  const exponent = Number.parseInt(exponentText, 10);
+  if (!Number.isFinite(exponent) || Math.abs(exponent) > MAX_EXPONENT_SHIFT) return null;
+  const pointIndex = integerDigits.length + exponent;
+
+  let expanded: string;
+  if (pointIndex <= 0) {
+    expanded = `0.${'0'.repeat(-pointIndex)}${allDigits}`;
+  } else if (pointIndex >= allDigits.length) {
+    expanded = `${allDigits}${'0'.repeat(pointIndex - allDigits.length)}`;
+  } else {
+    expanded = `${allDigits.slice(0, pointIndex)}.${allDigits.slice(pointIndex)}`;
+  }
+
+  return negative ? `-${expanded}` : expanded;
+}
+
+/**
+ * Strips leading zeros (e.g. '0003' -> '3') so a zero-padded export
+ * ('003.1234561') and its unpadded equivalent ('3.1234564') round to the
+ * same text instead of comparing as 'different'.
+ */
+function normalizeLeadingZeros(digits: string): string {
+  const stripped = digits.replace(/^0+(?=\d)/, '');
+  return stripped === '' ? '0' : stripped;
+}
+
+/**
+ * Rounds exact decimal text to STORED_DECIMAL_SCALE digits via text-based
+ * round-half-up, matching MySQL's `CAST(... AS DECIMAL(12,6))` exactly.
+ * `toFixed` cannot substitute: a double has already lost precision beyond
+ * ~15-17 significant digits, so e.g. '1.2345665' and '1.2345664' both round
+ * through `toFixed(6)` to '1.234566' where MySQL gives '1.234567' for the
+ * first. Returns null when expandExponentNotation can't safely expand.
+ */
+function roundDecimalTextToStoredScale(text: string): string | null {
+  const exactText = EXPONENT_PATTERN.test(text) ? expandExponentNotation(text) : text;
+  if (exactText === null) return null;
+
+  const negative = exactText.startsWith('-');
+  const unsigned = negative || exactText.startsWith('+') ? exactText.slice(1) : exactText;
+  const [rawIntegerPart, rawFractionPart] = unsigned.split('.');
+  const integerPart = normalizeLeadingZeros(rawIntegerPart || '0');
+  const fractionPart = rawFractionPart ?? '';
+
+  const roundUp = fractionPart.length > STORED_DECIMAL_SCALE && fractionPart.charCodeAt(STORED_DECIMAL_SCALE) >= '5'.charCodeAt(0);
+  const keptFraction = fractionPart.slice(0, STORED_DECIMAL_SCALE).padEnd(STORED_DECIMAL_SCALE, '0');
+
+  let integerResult = integerPart;
+  let fractionResult = keptFraction;
+  if (roundUp) {
+    // BigInt carry so an arbitrarily long integer part still carries
+    // correctly into a new leading digit (e.g. '0.9999995' -> '1.000000').
+    const combinedDigits = `${integerPart}${keptFraction}`;
+    const incrementedDigits = (BigInt(combinedDigits) + BigInt(1)).toString().padStart(combinedDigits.length, '0');
+    const newIntegerLength = incrementedDigits.length - keptFraction.length;
+    integerResult = incrementedDigits.slice(0, newIntegerLength) || '0';
+    fractionResult = incrementedDigits.slice(newIntegerLength);
+  }
+
+  const magnitude = `${integerResult}.${fractionResult}`;
+  return negative && Number(magnitude) !== 0 ? `-${magnitude}` : magnitude;
+}
+
+/**
+ * Normalizes decimal text to its exact unrounded value (leading/trailing
+ * zeros stripped, exponent expanded) for TRUE equality — not equality after
+ * double-parse. Two decimal strings differing only past a double's ~15-17
+ * significant digits can parse to the same `Number` yet round to different
+ * DECIMAL(12,6) values, so float equality alone cannot mean "identical".
+ */
+function normalizeExactDecimalText(text: string): string | null {
+  const exactText = EXPONENT_PATTERN.test(text) ? expandExponentNotation(text) : text;
+  if (exactText === null) return null;
+
+  const negative = exactText.startsWith('-');
+  const unsigned = negative || exactText.startsWith('+') ? exactText.slice(1) : exactText;
+  const [rawIntegerPart, rawFractionPart] = unsigned.split('.');
+  const integerPart = normalizeLeadingZeros(rawIntegerPart || '0');
+  const fractionPart = (rawFractionPart ?? '').replace(/0+$/, '');
+
+  const magnitude = fractionPart ? `${integerPart}.${fractionPart}` : integerPart;
+  return negative && Number(magnitude) !== 0 ? `-${magnitude}` : magnitude;
+}
+
+export type SourceRowComparison = 'identical' | 'precision-equivalent' | 'different';
+
 const MEASUREMENT_SELECT = `cm.CoreMeasurementID, cm.StemGUID, cm.IsActive, cm.MeasuredDBH, cm.MeasuredHOM,
               cm.MeasurementDate, cm.RawCodes, cm.Description, cm.RawTreeTag, cm.RawStemTag,
               st.IsActive AS StemIsActive, t.IsActive AS TreeIsActive, q.IsActive AS QuadratIsActive,
@@ -158,6 +265,69 @@ export function fieldValuesAreEquivalent(compareKind: FieldCompareKind, csvValue
   }
 }
 
+/**
+ * Compares two CSV source rows (not a CSV row against the DB) field-by-field
+ * using the same tolerances as `fieldValuesAreEquivalent`, plus a numeric
+ * precision tolerance matched to coremeasurements' DECIMAL(12,6) storage.
+ *
+ * Used by revision-upload classification to decide what a same-match-key
+ * duplicate row actually is:
+ *  - `'identical'` / `'different'` rows are genuine duplicates — the later
+ *    row is rejected as invalid (and, at apply time, parked as a failed
+ *    measurement) while the first occurrence proceeds to matching.
+ *  - `'precision-equivalent'` rows differ only beyond the 7th decimal place
+ *    of a numeric field — noise introduced by export-tool float rounding,
+ *    not a real second entry. The later row collapses into the first
+ *    occurrence instead of being treated as either a duplicate or a change.
+ */
+export function compareSourceRows(a: FileRow, b: FileRow): SourceRowComparison {
+  let sawPrecisionOnlyDifference = false;
+
+  for (const field of UPDATABLE_FIELDS) {
+    const rawA = a[field];
+    const rawB = b[field];
+    const blankA = isBlankOrNullPlaceholder(rawA);
+    const blankB = isBlankOrNullPlaceholder(rawB);
+
+    if (blankA && blankB) continue;
+    if (blankA !== blankB) return 'different';
+
+    const trimmedA = String(rawA).trim();
+    const trimmedB = String(rawB).trim();
+    if (trimmedA === trimmedB) continue;
+
+    const descriptor = FIELD_DESCRIPTORS[field];
+
+    if (descriptor.compareKind === 'numeric') {
+      const parsedA = parseFiniteBase10Number(rawA);
+      const parsedB = parseFiniteBase10Number(rawB);
+      if (parsedA === null || parsedB === null) return 'different';
+
+      // Exact-text equality (not double-parse equality: two decimal texts
+      // differing only past a double's precision can parse equal yet round
+      // to DIFFERENT stored values — see normalizeExactDecimalText) means
+      // the same value, not a precision difference.
+      const exactA = normalizeExactDecimalText(trimmedA);
+      const exactB = normalizeExactDecimalText(trimmedB);
+      if (exactA !== null && exactB !== null && exactA === exactB) continue;
+
+      const roundedA = roundDecimalTextToStoredScale(trimmedA);
+      const roundedB = roundDecimalTextToStoredScale(trimmedB);
+      if (roundedA !== null && roundedB !== null && roundedA === roundedB) {
+        sawPrecisionOnlyDifference = true;
+        continue;
+      }
+      return 'different';
+    }
+
+    if (!fieldValuesAreEquivalent(descriptor.compareKind, trimmedA, trimmedB)) {
+      return 'different';
+    }
+  }
+
+  return sawPrecisionOnlyDifference ? 'precision-equivalent' : 'identical';
+}
+
 export function readDbValueForDisplay(field: UpdatableField, dbRow: ExistingMeasurementRow): unknown {
   const descriptor = FIELD_DESCRIPTORS[field];
   if (descriptor.compareKind === 'date') {
@@ -204,6 +374,24 @@ export function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Rec
   }
 
   return changes;
+}
+
+/**
+ * `computeDiff` drops a `spcode` cell whenever it is blank/NULL or equal
+ * (case-insensitively) to the stored species code — the cell carries "no
+ * change", so it never reaches `buildAnalyzerRowFromChanges`'s `newRow`. That
+ * makes an explicit-but-unchanged species request on one batch row invisible
+ * to anything comparing it against a sibling row's tree-wide species
+ * correction (#427 batch grouping). This reads the CSV cell directly,
+ * bypassing the diff, so that comparison has something to look at. The
+ * returned spelling is NOT canonicalized (not upper/lowercased): the caller
+ * compares case-insensitively, and the original spelling is what the user
+ * typed.
+ */
+export function readExplicitSpeciesCode(csvRow: FileRow): string | null {
+  const requested = csvRow.spcode;
+  if (isBlankOrNullPlaceholder(requested)) return null;
+  return String(requested).trim();
 }
 
 /**

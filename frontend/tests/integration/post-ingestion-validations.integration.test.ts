@@ -555,6 +555,120 @@ describe('Post-Ingestion Validation Tests', () => {
     });
   });
 
+  describe('#425: a NULL-Status attribute code does not grant a growth/shrinkage exemption', () => {
+    /**
+     * REGRESSION (#425): RunSharedDBHChangeValidations' growth/shrinkage
+     * exemption (ValidationID 1 and 2) keys ONLY off attributes.Status IN
+     * ('dead', 'stem dead', 'broken below', 'missing', 'omitted'). Status is
+     * NULL ("unspecified") for a neutral/mixed-use code until someone
+     * explicitly assigns it -- Code and Description must never be read as a
+     * stand-in for Status, even when the Description reads like a
+     * biological state. Rule 12/13 stay disabled; this does not touch them.
+     */
+    const MISLEADING_DESCRIPTION = 'Broken below 1.3m';
+    const EXPLICIT_EXEMPT_STATUS = 'broken below';
+
+    const GROWTH_CENSUS1_DBH = 100;
+    const GROWTH_CENSUS2_DBH = 200; // 100mm growth, exceeds the 65mm threshold
+    const SHRINK_CENSUS1_DBH = 200;
+    const SHRINK_CENSUS2_DBH = 100; // 50% shrinkage, exceeds the 5% threshold
+
+    interface NullStatusExemptionCase {
+      label: string;
+      validationID: number;
+      attributeCode: string;
+      treeTag: string;
+      // Growth checks the PRESENT (census2) measurement's attributes; shrinkage
+      // checks the PAST (census1) measurement's attributes -- see the dead
+      // controls above (GROWTHDEAD01 attaches to census2, SHRINKDEAD01 to census1).
+      exemptMeasurement: 'past' | 'present';
+      census1DBH: number;
+      census2DBH: number;
+    }
+
+    const cases: NullStatusExemptionCase[] = [
+      {
+        label: 'growth',
+        validationID: VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX,
+        attributeCode: 'BBG',
+        treeTag: 'NULLSTATUSGROWTH01',
+        exemptMeasurement: 'present',
+        census1DBH: GROWTH_CENSUS1_DBH,
+        census2DBH: GROWTH_CENSUS2_DBH
+      },
+      {
+        label: 'shrinkage',
+        validationID: VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX,
+        attributeCode: 'BBS',
+        treeTag: 'NULLSTATUSSHRINK01',
+        exemptMeasurement: 'past',
+        census1DBH: SHRINK_CENSUS1_DBH,
+        census2DBH: SHRINK_CENSUS2_DBH
+      }
+    ];
+
+    it.each(cases)(
+      '$label: a NULL-Status code with a misleading Description does not exempt; the SAME code with an explicit Status does',
+      async ({ validationID, attributeCode, treeTag, exemptMeasurement, census1DBH, census2DBH }) => {
+        const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+        const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+        if (!speciesCode || !quadratName) {
+          throw new Error('Test setup failed: missing species or quadrat data');
+        }
+
+        // A neutral/mixed-use code, active, Status unspecified (NULL). Reset
+        // explicitly in case a prior run of this file left Status set below.
+        await connection.query(
+          `INSERT INTO attributes (Code, Description, Status, IsActive)
+           VALUES (?, ?, NULL, 1)
+           ON DUPLICATE KEY UPDATE Description = VALUES(Description), Status = NULL`,
+          [attributeCode, MISLEADING_DESCRIPTION]
+        );
+
+        const inserted = await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
+          {
+            treeTag,
+            stemTag: 'S001',
+            speciesCode,
+            quadratName,
+            x: 20.0,
+            y: 20.0,
+            census1DBH,
+            census2DBH,
+            hom: 1.3,
+            census1Date: '2024-06-15',
+            census2Date: '2025-06-15',
+            codes: 'A'
+          }
+        ]);
+
+        const exemptMeasurementID = exemptMeasurement === 'present' ? inserted.census2MeasurementIDs[0] : inserted.census1MeasurementIDs[0];
+        await connection.query('INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)', [exemptMeasurementID, attributeCode]);
+
+        expect(
+          await runValidationForTest(connection, validationID, { censusID: census2.censusID, plotID }),
+          `runValidationForTest must execute cleanly (NULL-Status run) for ${treeTag}, not merely leave stale errors absent`
+        ).toBe(true);
+
+        const unexemptedErrors = await getValidationErrors(connection, { validationID, treeTag });
+        expect(unexemptedErrors.length, `a NULL-Status code ("${MISLEADING_DESCRIPTION}") must not exempt ${treeTag}`).toBeGreaterThan(0);
+        expect(unexemptedErrors[0].ValidationErrorID).toBe(validationID);
+
+        // Same Code, same Description -- only the explicit Status column moves.
+        await connection.query(`UPDATE attributes SET Status = ? WHERE Code = ? AND IsActive = 1`, [EXPLICIT_EXEMPT_STATUS, attributeCode]);
+
+        expect(
+          await runValidationForTest(connection, validationID, { censusID: census2.censusID, plotID }),
+          `runValidationForTest must execute cleanly (explicit-Status re-run) for ${treeTag}, not merely leave stale errors absent`
+        ).toBe(true);
+
+        const exemptedErrors = await getValidationErrors(connection, { validationID, treeTag });
+        expect(exemptedErrors.length, `an explicit Status of '${EXPLICIT_EXEMPT_STATUS}' must supply the existing exemption for ${treeTag}`).toBe(0);
+      }
+    );
+  });
+
   describe('ValidationID 6: Measurements Outside Census Date Bounds', () => {
     it('should flag measurements with dates outside census bounds', async () => {
       const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;

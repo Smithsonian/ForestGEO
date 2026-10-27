@@ -3,10 +3,12 @@ import { analyzeEdit, assertEditPlanCanApply, DisallowedFieldError, EditPlanUnap
 import { analyzeBulk, assertBulkPlanCanApply, BulkPlanUnapplicableError } from './bulkanalyzer';
 import { applyDuplicateRules } from './rules/duplicates';
 import { SpeciesNotFoundError } from './rules/context';
-import { DuplicateDeletion, Effect } from './types';
+import { DuplicateDeletion, Effect, SpeciesCorrectionSummary } from './types';
+import { hashPlan } from './planhash';
+import { InvalidFieldValueError } from './fieldpolicy';
 
 vi.mock('./rules/species', () => ({
-  applySpeciesRules: vi.fn(async () => [])
+  applySpeciesRules: vi.fn(async () => ({ effects: [], errors: [] }))
 }));
 vi.mock('./rules/treestem', () => ({
   applyTreeStemRules: vi.fn(async () => ({ effects: [], errors: [] }))
@@ -67,7 +69,7 @@ function makeConnectionManager(oldRow: Record<string, unknown> | null) {
 }
 
 beforeEach(() => {
-  vi.mocked(applySpeciesRules).mockResolvedValue([]);
+  vi.mocked(applySpeciesRules).mockResolvedValue({ effects: [], errors: [] });
   vi.mocked(applyTreeStemRules).mockResolvedValue({ effects: [], errors: [] });
   vi.mocked(applyCoordinateRules).mockResolvedValue([]);
   vi.mocked(applyAttributeRules).mockResolvedValue([]);
@@ -98,6 +100,60 @@ describe('analyzeEdit', () => {
     expect(plan.fieldChanges[0]).toMatchObject({ field: 'MeasuredDBH', from: 15, to: 16 });
   });
 
+  // #427: a linked species correction is a typed plan property, not just an
+  // effect — later writer/UI stages need the full correction contract, and
+  // the hash must change when its membership changes even if no other field
+  // on the edited row did.
+  it('populates plan.speciesCorrection from the species rule result and folds it into planHash', async () => {
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+    const correction: SpeciesCorrectionSummary = {
+      version: 1,
+      targetTreeID: 100,
+      treeTag: 'T-1',
+      plotID: PLOT_ID,
+      censusID: CENSUS_ID,
+      oldSpeciesID: 9,
+      oldSpeciesCode: 'AA',
+      newSpeciesID: 11,
+      newSpeciesCode: 'BB',
+      activeStemCount: 2,
+      inactiveStemCount: 0,
+      activeMeasurementCount: 3,
+      inactiveMeasurementCount: 0,
+      stems: [
+        { stemGUID: 200, censusID: CENSUS_ID, quadratID: 9, isActive: true },
+        { stemGUID: 201, censusID: CENSUS_ID, quadratID: 9, isActive: true }
+      ],
+      measurements: [
+        { coreMeasurementID: 42, stemGUID: 200, censusID: CENSUS_ID, isActive: true, priorRawSpCode: 'AA' },
+        { coreMeasurementID: 43, stemGUID: 200, censusID: CENSUS_ID, isActive: true, priorRawSpCode: 'AA' },
+        { coreMeasurementID: 44, stemGUID: 201, censusID: CENSUS_ID, isActive: true, priorRawSpCode: null }
+      ]
+    };
+    vi.mocked(applySpeciesRules).mockResolvedValueOnce({
+      effects: [makeEffect('R1a', 'warn', 1)],
+      errors: [],
+      speciesCorrection: correction
+    });
+
+    // SpeciesCode edits are role-gated to global/db admin in
+    // isFieldEditableByRole. Without an explicit authorized role,
+    // analyzeEdit short-circuits with a RoleForbidden error and never
+    // reaches applySpeciesRules — so plan.speciesCorrection would stay
+    // undefined and this test would pass for the wrong reason (F7).
+    const plan = await analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, { SpeciesCode: 'BB' }, undefined, { role: 'global' });
+
+    expect(plan.speciesCorrection).toEqual(correction);
+
+    // Changing only the correction's membership (same every other plan field)
+    // must change the hash: counts alone are not what's hashed.
+    const planWithDifferentMembership = {
+      ...plan,
+      speciesCorrection: { ...correction, stems: [correction.stems[0], { stemGUID: 202, censusID: CENSUS_ID, quadratID: 9, isActive: true }] }
+    };
+    expect(hashPlan(planWithDifferentMembership)).not.toBe(hashPlan(plan));
+  });
+
   it('builds changedFields only for fields that differ from oldRow', async () => {
     const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
     await analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, {
@@ -112,7 +168,7 @@ describe('analyzeEdit', () => {
 
   it('computes maxSeverity via SEVERITY_RANK (destructive > warn > info)', async () => {
     const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
-    vi.mocked(applySpeciesRules).mockResolvedValueOnce([makeEffect('R1a', 'warn')]);
+    vi.mocked(applySpeciesRules).mockResolvedValueOnce({ effects: [makeEffect('R1a', 'warn')], errors: [] });
     vi.mocked(applyAttributeRules).mockResolvedValueOnce([makeEffect('R5', 'destructive')]);
     vi.mocked(applyCoordinateRules).mockResolvedValueOnce([makeEffect('R4', 'info')]);
 
@@ -131,6 +187,20 @@ describe('analyzeEdit', () => {
       })
     ).rejects.toBeInstanceOf(DisallowedFieldError);
     expect(cm.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects a negative DBH (any alias shape) with InvalidFieldValueError before loading or writing anything', async () => {
+    for (const newRow of [{ MeasuredDBH: -5 }, { measuredDBH: '-5' }]) {
+      const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+      await expect(analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, newRow)).rejects.toBeInstanceOf(InvalidFieldValueError);
+      expect(cm.executeQuery).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps zero DBH and negative non-DBH values analyzable', async () => {
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+    const plan = await analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, { MeasuredDBH: 0, StemLocalX: -2 });
+    expect(plan.fieldChanges.map(c => c.field)).toEqual(['MeasuredDBH', 'StemLocalX']);
   });
 
   it('throws TargetNotFoundError when loadCurrentRow returns no row (unknown id or out of scope)', async () => {
@@ -176,7 +246,7 @@ describe('analyzeEdit', () => {
     // stem/tree row, no cmattributes. The ramification rules can't fire on
     // them; dispatching would be misleading. Assert the dispatch is gated.
     const cm = makeConnectionManager(FAILED_OLD_ROW);
-    vi.mocked(applySpeciesRules).mockResolvedValue([makeEffect('R1a', 'warn', 1)]);
+    vi.mocked(applySpeciesRules).mockResolvedValue({ effects: [makeEffect('R1a', 'warn', 1)], errors: [] });
     vi.mocked(applyTreeStemRules).mockResolvedValue({ effects: [makeEffect('R2', 'destructive', 1)], errors: [] });
     vi.mocked(applyCoordinateRules).mockResolvedValue([makeEffect('R4', 'warn', 1)]);
     vi.mocked(applyAttributeRules).mockResolvedValue([makeEffect('R5', 'destructive', 1)]);
@@ -213,7 +283,7 @@ describe('analyzeEdit', () => {
 
   it('marks SpeciesCode edits as blocking for field crew without running downstream rules', async () => {
     const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
-    vi.mocked(applySpeciesRules).mockResolvedValue([makeEffect('R1a', 'warn', 1)]);
+    vi.mocked(applySpeciesRules).mockResolvedValue({ effects: [makeEffect('R1a', 'warn', 1)], errors: [] });
 
     const plan = await analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, { SpeciesCode: 'BB' }, undefined, { role: 'field crew' });
 
@@ -281,7 +351,7 @@ describe('analyzeEdit', () => {
       blocking: true
     };
     vi.mocked(applyTreeStemRules).mockResolvedValueOnce({ effects: [], errors: [treeStemError] });
-    vi.mocked(applySpeciesRules).mockResolvedValueOnce([makeEffect('R1a', 'warn')]);
+    vi.mocked(applySpeciesRules).mockResolvedValueOnce({ effects: [makeEffect('R1a', 'warn')], errors: [] });
 
     const plan = await analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, {
       StemTag: 'S-99'
@@ -323,7 +393,7 @@ describe('analyzeBulk', () => {
 
   it('produces row plans for matched/new/invalid and aggregates surfaced effects', async () => {
     const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
-    vi.mocked(applySpeciesRules).mockResolvedValue([makeEffect('R1a', 'warn', 1)]);
+    vi.mocked(applySpeciesRules).mockResolvedValue({ effects: [makeEffect('R1a', 'warn', 1)], errors: [] });
 
     const bulkPlan = await analyzeBulk(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, {
       matched: [
@@ -455,7 +525,7 @@ describe('analyzeBulk', () => {
       if (ctx.newRow.SpeciesCode === 'UNKNOWN_SP') {
         throw new SpeciesNotFoundError('UNKNOWN_SP');
       }
-      return [];
+      return { effects: [], errors: [] };
     });
 
     const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);

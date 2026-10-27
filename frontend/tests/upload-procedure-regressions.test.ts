@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { REQUIRED_INDEXES_BY_TABLE } from '@/lib/db/schema-contract';
+import { FAMILY_SCAN_INDEX } from '@/lib/uploads/batch-family';
+import { buildFallbackSplitSelectSQL } from '@/lib/uploads/ingest-batch';
 
 function readSql(relativePath: string): string {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf-8').replace(/\s+/g, ' ');
@@ -100,6 +103,28 @@ describe('upload procedure regressions', () => {
     expect(tableStructuresSql).toContain('constraint ux_measure_unique unique (StemGUID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM)');
   });
 
+  it('names only schema-contract indexes in JOIN_INDEX hints', () => {
+    // MySQL ignores a JOIN_INDEX hint whose index is missing (a warning, not an
+    // error), so a hint naming an index outside the contract would leave that
+    // schema on the stale-statistics plan the hint exists to prevent.
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const hintedIndexes = [...canonicalSql.matchAll(/JOIN_INDEX\((\w+) (\w+)\)/g)].map(match => {
+      const [, alias, indexName] = match;
+      const statement = canonicalSql.slice(match.index, canonicalSql.indexOf(';', match.index));
+      const table = new RegExp(`JOIN (\\w+) ${alias}\\b`).exec(statement)?.[1];
+      return { alias, indexName, table };
+    });
+
+    expect(hintedIndexes.length, 'expected the stale-statistics JOIN_INDEX hints in bulkingestionprocess').toBeGreaterThanOrEqual(3);
+    for (const { alias, indexName, table } of hintedIndexes) {
+      expect(table, `JOIN_INDEX(${alias} ${indexName}): no "JOIN <table> ${alias}" in the hinted statement`).toBeDefined();
+      expect(
+        REQUIRED_INDEXES_BY_TABLE[table!] ?? [],
+        `JOIN_INDEX(${alias} ${indexName}) names an index on ${table} that REQUIRED_INDEXES_BY_TABLE does not guarantee`
+      ).toContain(indexName);
+    }
+  });
+
   it('cleans up stale failed sub-batches before retrying the same batch id', () => {
     const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
@@ -121,7 +146,7 @@ describe('upload procedure regressions', () => {
   it('degrades duplicate coremeasurement candidates to row-level failures', () => {
     const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
-    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE source_row_insert_conflicts AS');
+    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE source_row_insert_conflicts (INDEX idx_source_row_insert_conflicts_id (SourceRowIndex)) AS');
     expect(canonicalSql).toContain("'Measurement insert skipped: source row resolved to multiple candidate measurements'");
     expect(canonicalSql).toContain(
       'INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY, RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)'
@@ -219,5 +244,10 @@ describe('upload procedure regressions', () => {
     const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain("WHERE rcm.Codes IS NOT NULL AND TRIM(rcm.Codes) != '' AND TRIM(jt.code) != '';");
+  });
+
+  it('pins the setup family scans to an index the schema contract guarantees', () => {
+    expect(REQUIRED_INDEXES_BY_TABLE.temporarymeasurements).toContain(FAMILY_SCAN_INDEX);
+    expect(buildFallbackSplitSelectSQL('forestgeo_testing', 10)).toContain(`/*+ INDEX(tm ${FAMILY_SCAN_INDEX}) */`);
   });
 });

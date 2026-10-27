@@ -68,6 +68,7 @@ const issueTypes = [
 ];
 
 const DIALOG_ACCESSIBLE_NAME = 'GitHub Feedback Form';
+const BACKDROP_CLICK_CLOSE_REASON = 'backdropClick';
 
 type IssueType = (typeof issueTypes)[number]['value'];
 
@@ -163,11 +164,16 @@ ${pathname}
     onClose();
   }
 
+  function handleRequestClose(_event: unknown, reason?: string) {
+    if (isSubmitting || reason === BACKDROP_CLICK_CLOSE_REASON) return;
+    handleCancel();
+  }
+
   return (
-    <Modal open={open} sx={{ display: 'flex', flex: 1, flexDirection: 'row' }}>
+    <Modal open={open} onClose={handleRequestClose} sx={{ display: 'flex', flex: 1, flexDirection: 'row' }}>
       <ModalOverflow>
         <ModalDialog role="dialog" aria-labelledby="github-feedback-title" aria-describedby="github-feedback-description">
-          <ModalClose variant="outlined" onClick={handleCancel} />
+          <ModalClose variant="outlined" />
           <span id="github-feedback-title" className="sr-only">
             {DIALOG_ACCESSIBLE_NAME}
           </span>

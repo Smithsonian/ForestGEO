@@ -1,3 +1,4 @@
+import { splitSqlFile } from '@/lib/provisioning/sql-runner';
 /**
  * Local In-Memory Database Setup for E2E Testing
  *
@@ -20,7 +21,9 @@
  *   });
  */
 
-import mysql from 'mysql2/promise';
+import { createHash } from 'crypto';
+import mysql, { type ConnectionOptions } from 'mysql2/promise';
+import { TEST_DB_DRIVER_TIMEZONE, TEST_DB_NAME_PREFIX, testDbServerOptions } from './test-db-connection';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -52,6 +55,7 @@ export interface TestDatabaseConfig {
   port: number;
   database: string;
   multipleStatements: boolean;
+  timezone?: ConnectionOptions['timezone'];
 }
 
 // Type definitions for test data entities
@@ -102,14 +106,50 @@ export interface TestData {
   attributes: TestAttribute[];
 }
 
+export { TEST_DB_NAME_PREFIX } from './test-db-connection';
+const TEST_DB_NAME_SEGMENT_PATTERN = /^[a-z0-9_]{1,32}$/;
+const WORKTREE_NAMESPACE_HEX_LENGTH = 8;
+
+/**
+ * Picks the namespace segment of the test database name.
+ *
+ * An explicit TEST_DB_NAMESPACE wins so an operator can predict the name.
+ * Otherwise the worktree path is hashed: two checkouts running the suite at
+ * once get different schemas, while a rerun in the same checkout reuses (and
+ * therefore reclaims, via DROP DATABASE IF EXISTS) its own schema. A process
+ * ID would also separate concurrent runs, but it leaks one schema per
+ * aborted run and nothing can predict it from outside the process. The hash
+ * key is the directory the suite is started from, so always launch it from
+ * `frontend/`; two concurrent runs in the same checkout still share one
+ * schema.
+ */
+export function resolveTestDatabaseNamespace(explicitNamespace: string | undefined, worktreePath: string): string {
+  if (explicitNamespace) {
+    if (!TEST_DB_NAME_SEGMENT_PATTERN.test(explicitNamespace)) {
+      throw new Error(`TEST_DB_NAMESPACE ${JSON.stringify(explicitNamespace)} must match ${TEST_DB_NAME_SEGMENT_PATTERN}`);
+    }
+    return explicitNamespace;
+  }
+  return createHash('sha256').update(worktreePath).digest('hex').slice(0, WORKTREE_NAMESPACE_HEX_LENGTH);
+}
+
+export function testDatabaseName(namespace: string, poolId: string): string {
+  for (const [segmentName, segment] of [
+    ['namespace', namespace],
+    ['pool id', poolId]
+  ] as const) {
+    if (!TEST_DB_NAME_SEGMENT_PATTERN.test(segment)) {
+      throw new Error(`test database ${segmentName} ${JSON.stringify(segment)} must match ${TEST_DB_NAME_SEGMENT_PATTERN}`);
+    }
+  }
+  return `${TEST_DB_NAME_PREFIX}${namespace}_${poolId}`;
+}
+
 // Default configuration for local testing
 // These defaults match docker-compose.yml for seamless local development
 export const DEFAULT_TEST_CONFIG: TestDatabaseConfig = {
-  host: process.env.TEST_DB_HOST || 'localhost',
-  user: process.env.TEST_DB_USER || 'root',
-  password: process.env.TEST_DB_PASSWORD || 'testpassword',
-  port: parseInt(process.env.TEST_DB_PORT || '3306'),
-  database: `forestgeo_test_${process.env.VITEST_POOL_ID || 'default'}`,
+  ...testDbServerOptions(),
+  database: testDatabaseName(resolveTestDatabaseNamespace(process.env.TEST_DB_NAMESPACE, process.cwd()), process.env.VITEST_POOL_ID || 'default'),
   multipleStatements: true
 };
 
@@ -150,6 +190,7 @@ async function connectWithRetry(config: TestDatabaseConfig, retryConfig = CONNEC
         password: config.password,
         port: config.port,
         multipleStatements: true,
+        timezone: config.timezone ?? TEST_DB_DRIVER_TIMEZONE,
         charset: 'UTF8MB4_0900_AI_CI',
         ...(isRemoteHost && { ssl: { rejectUnauthorized: false } })
       });
@@ -222,6 +263,32 @@ export async function createTestDatabase(config: TestDatabaseConfig = DEFAULT_TE
   }
 }
 
+const CREATE_TABLE_NAME_PATTERN = /^[ \t]*create\s+table\s+(?:if\s+not\s+exists\s+)?`?([A-Za-z0-9_]+)`?/gim;
+const INFORMATION_SCHEMA_BASE_TABLES_QUERY = `SELECT TABLE_NAME
+   FROM information_schema.TABLES
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'`;
+
+/** Use the same quote-aware SQL splitter as production provisioning. */
+export function schemaStatementsFrom(schemaSql: string): string[] {
+  return splitSqlFile(schemaSql).map(statement => statement.sql);
+}
+
+/**
+ * Derives every declared base-table name from a line-start CREATE TABLE
+ * match on the RAW schema text, independent of schemaStatementsFrom, so it
+ * stays the source of truth the completeness guard checks against
+ * information_schema.
+ */
+export function tableNamesDeclaredIn(schemaSql: string): string[] {
+  const pattern = new RegExp(CREATE_TABLE_NAME_PATTERN.source, CREATE_TABLE_NAME_PATTERN.flags);
+  const declaredTableNames: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(schemaSql)) !== null) {
+    declaredTableNames.push(match[1]);
+  }
+  return declaredTableNames;
+}
+
 /**
  * Loads database schema from SQL file
  */
@@ -237,40 +304,52 @@ export async function loadSchema(connection: mysql.Connection): Promise<void> {
   // Disable foreign key checks during schema loading
   await connection.query('SET FOREIGN_KEY_CHECKS = 0');
 
-  // Execute schema in chunks to handle multiple statements
-  const statements = schema
-    .split(';')
-    .map(s => s.trim())
-    .filter(s => s.length > 0 && !s.startsWith('--'));
-
   let createdTables = 0;
-  const criticalErrors: string[] = [];
 
-  for (const statement of statements) {
-    try {
-      await connection.query(statement);
-      if (statement.toLowerCase().includes('create table')) {
-        createdTables++;
-      }
-    } catch (error: any) {
-      // Ignore expected errors: DROP on non-existent tables, CREATE on existing tables
-      const isExpectedError = error.message.includes("doesn't exist") || error.message.includes('already exists');
+  try {
+    const statements = schemaStatementsFrom(schema);
+    const criticalErrors: string[] = [];
 
-      if (!isExpectedError) {
-        // Collect critical errors - these indicate broken schema
-        criticalErrors.push(`${error.message.substring(0, 100)}`);
+    for (const statement of statements) {
+      try {
+        await connection.query(statement);
+        if (statement.toLowerCase().includes('create table')) {
+          createdTables++;
+        }
+      } catch (error: any) {
+        // Ignore expected errors: DROP on non-existent tables, CREATE on existing tables
+        const isExpectedError = error.message.includes("doesn't exist") || error.message.includes('already exists');
+
+        if (!isExpectedError) {
+          // Collect critical errors - these indicate broken schema
+          criticalErrors.push(`${error.message.substring(0, 100)}`);
+        }
       }
     }
-  }
 
-  // Re-enable foreign key checks
-  await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+    // FAIL FAST: Critical errors mean the schema is broken
+    if (criticalErrors.length > 0) {
+      const errorSummary = criticalErrors.slice(0, 3).join('\n  ');
+      const moreErrors = criticalErrors.length > 3 ? `\n  ... and ${criticalErrors.length - 3} more` : '';
+      throw new Error(`Schema loading failed with ${criticalErrors.length} critical errors:\n  ${errorSummary}${moreErrors}`);
+    }
 
-  // FAIL FAST: Critical errors mean the schema is broken
-  if (criticalErrors.length > 0) {
-    const errorSummary = criticalErrors.slice(0, 3).join('\n  ');
-    const moreErrors = criticalErrors.length > 3 ? `\n  ... and ${criticalErrors.length - 3} more` : '';
-    throw new Error(`Schema loading failed with ${criticalErrors.length} critical errors:\n  ${errorSummary}${moreErrors}`);
+    // Guard against a CREATE TABLE that silently no-ops: compare declared
+    // tables against what MySQL actually recorded for this schema.
+    const declaredTableNames = tableNamesDeclaredIn(schema);
+    const [tableRows] = await connection.query<mysql.RowDataPacket[]>(INFORMATION_SCHEMA_BASE_TABLES_QUERY);
+    const createdTableNames = new Set(tableRows.map(row => String(row.TABLE_NAME).toLowerCase()));
+    const missingTableNames = declaredTableNames.filter(name => !createdTableNames.has(name.toLowerCase()));
+
+    if (missingTableNames.length > 0) {
+      throw new Error(
+        `Schema file ${schemaPath} declares ${missingTableNames.length} table(s) that were not found in the ` +
+          `database after loading: ${missingTableNames.join(', ')}`
+      );
+    }
+  } finally {
+    // Always restore FK checks, even if the guard or a query above throws.
+    await connection.query('SET FOREIGN_KEY_CHECKS = 1');
   }
 
   log.debug(` Schema loaded: ${createdTables} tables created`);

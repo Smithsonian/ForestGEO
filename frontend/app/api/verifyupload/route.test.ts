@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 
 const { loggerInfo, loggerError } = vi.hoisted(() => ({
   loggerInfo: vi.fn(),
@@ -79,8 +80,12 @@ describe('GET /api/verifyupload', () => {
       verified: true
     });
 
-    expect(String(cm.executeQuery.mock.calls[0][0])).toContain('BatchID = ?');
-    expect(cm.executeQuery.mock.calls[0][1]).toEqual(['SERC_census4_2025(1).csv', 'batch-131', '22', '6']);
+    // Pre-partitioned staging writes rows only under `batch-131__subNNN`, so the
+    // count must cover the whole family or a fully staged upload reads as 0.
+    const [verificationSQL, verificationParams] = cm.executeQuery.mock.calls[0];
+    console.log(`[verifyupload-family] sql=${String(verificationSQL)} params=${JSON.stringify(verificationParams)}`);
+    expect(String(verificationSQL)).toContain(`(BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`);
+    expect(verificationParams).toEqual(['SERC_census4_2025(1).csv', 'batch-131', buildSubBatchPattern('batch-131'), '22', '6']);
     expect(cm.closeConnection).toHaveBeenCalledTimes(1);
   });
 
@@ -102,7 +107,7 @@ describe('GET /api/verifyupload', () => {
     const body = await res.json();
     expect(body.scope).toBe('file');
     expect(body.batchID).toBeNull();
-    expect(String(cm.executeQuery.mock.calls[0][0])).not.toContain('BatchID = ?');
+    expect(String(cm.executeQuery.mock.calls[0][0])).not.toContain('BatchID');
     expect(cm.executeQuery.mock.calls[0][1]).toEqual(['SERC_census1_2025.csv', '22', '3']);
     expect(cm.closeConnection).toHaveBeenCalledTimes(1);
   });

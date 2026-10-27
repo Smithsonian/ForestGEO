@@ -99,5 +99,13 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-09-09-01-add-upload-session-reference-replacement-marker',
     file: 'schema-contract-repair/2026-09-09-01-add-upload-session-reference-replacement-marker.sql'
+  },
+  {
+    id: '2026-10-14-01-repair-postvalidation-statistics-queries',
+    file: 'schema-contract-repair/2026-10-14-01-repair-postvalidation-statistics-queries.sql'
+  },
+  {
+    id: '2026-10-14-02-backfill-edit-operations-to-unifiedchangelog',
+    file: 'schema-contract-repair/2026-10-14-02-backfill-edit-operations-to-unifiedchangelog.sql'
   }
 ] as const;

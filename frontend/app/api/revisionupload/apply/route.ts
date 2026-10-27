@@ -1,3 +1,4 @@
+import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import ConnectionManager from '@/lib/db/connectionmanager';
@@ -12,8 +13,24 @@ import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from
 import { ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS, STALE_VALIDATION_RUN_THRESHOLD_MINUTES } from '@/config/measurementscopepolicy';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { applyEditInTransaction, ScopeLockHeldError, SessionExpiredError } from '@/config/editplan/apply';
-import { analyzeBulk, assertBulkPlanCanApply, BulkInput, BulkPlanUnapplicableError } from '@/config/editplan/bulkanalyzer';
+import { analyzeBulk, assertBulkPlanCanApply, BulkInput, BulkPlanUnapplicableError, isGroupBlockingPreviewError } from '@/config/editplan/bulkanalyzer';
+import {
+  applyPreparedBulkSpeciesCorrections,
+  BulkSpeciesCorrectionApplyScopeMismatchError,
+  BulkSpeciesCorrectionInputError,
+  BulkSpeciesCorrectionMemberInput,
+  BulkSpeciesCorrectionUnresolvedMeasurementError,
+  prepareBulkSpeciesCorrections
+} from '@/config/editplan/bulk-species-correction-writer';
+import {
+  SPECIES_CORRECTION_CONFLICT_CODE,
+  SPECIES_CORRECTION_CONFLICT_MESSAGE,
+  SpeciesCorrectionTransactionMismatchError,
+  SpeciesCorrectionWriteConflictError
+} from '@/config/editplan/tree-species-correction-writer';
+import type { AppliedSpeciesCorrectionBatchSummary } from '@/config/editplan/types';
 import { MeasurementResolutionError } from '@/config/editplan/writers/resolvers-mutating';
+import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writers/measurementssummary';
 import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { RoleForbiddenFieldError } from '@/config/editplan/analyzer';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
@@ -26,13 +43,34 @@ import {
   computeDiff,
   isBlankOrNullPlaceholder as isBlankOrNullCell,
   isResolvableMeasurement,
-  loadMeasurementsByCoreID
+  loadMeasurementsByCoreID,
+  readExplicitSpeciesCode
 } from '../shared/matchdiff';
 import { requireSession } from '@/lib/auth-helpers';
+import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { snapshotCoreMeasurementsScope, auditCoreMeasurementsScopeDiff, recordDeletedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
+import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
+import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
+import { IngestionFailureRowInput } from '@/config/measurementerrors';
+import {
+  buildIngestionFailureRowContent,
+  computeInvalidRowsIntegrityHash,
+  deriveRevisionFailureBatchID,
+  isValidInvalidRowCsvRow,
+  isValidUploadAttemptID,
+  REVISION_UPLOAD_FILE_ID
+} from '../shared/invalidrowintegrity';
 
 export const runtime = 'nodejs';
 
-const REVISION_UPLOAD_FILE_ID = 'revision-upload';
+// None of these messages may carry SQL fragments, locked-precondition data,
+// internal helper prose, or transaction IDs back to the client.
+const SPECIES_CORRECTION_MEMBER_UNRESOLVED_CODE = 'species-correction-member-unresolved';
+const SPECIES_CORRECTION_MEMBER_UNRESOLVED_MESSAGE =
+  'A measurement in this revision is no longer resolvable for a species correction. Refresh the upload and review the matches again before applying.';
+const SPECIES_CORRECTION_SERVER_FAILURE_CODE = 'species-correction-server-failure';
+const SPECIES_CORRECTION_SERVER_FAILURE_MESSAGE =
+  'The species correction could not be applied because of a server error. No changes were saved. Contact an administrator if this persists.';
 
 class RevisionApplyConflictError extends Error {
   constructor(message: string) {
@@ -41,8 +79,13 @@ class RevisionApplyConflictError extends Error {
   }
 }
 
+/** Carries the authoritative freshInvalidRows/freshInvalidRowsIntegrityHash pair for the 409 handler, so the UI never has to reconstruct an equivalent set from freshPlan.rowPlans. */
 class RevisionApplyPlanHashMismatchError extends Error {
-  constructor(public freshPlan: unknown) {
+  constructor(
+    public freshPlan: unknown,
+    public freshInvalidRows: ApplyInvalidRow[],
+    public freshInvalidRowsIntegrityHash: string
+  ) {
     super('plan hash mismatch');
     this.name = 'RevisionApplyPlanHashMismatchError';
   }
@@ -52,6 +95,22 @@ class RevisionStagingIntegrityError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RevisionStagingIntegrityError';
+  }
+}
+
+/** recordAuditedIngestionFailureRows persisted a different number of rows than this apply rejected — a server-side invariant failure, never user-correctable. */
+class RevisionFailureRowPersistenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RevisionFailureRowPersistenceError';
+  }
+}
+
+/** The fresh plan's speciesCorrectionGroups and the submitted rows disagree about a group member — always a server assembly bug, never a user-correctable state. */
+class RevisionSpeciesCorrectionAssemblyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RevisionSpeciesCorrectionAssemblyError';
   }
 }
 
@@ -88,6 +147,14 @@ interface ApplyRequest {
   plotID: number;
   censusID: number;
   bulkPlanHash: string;
+  // Per-attempt identity minted by match, echoed back unchanged. Derives the
+  // failed-row batchID (shared/invalidrowintegrity.ts) and scopes
+  // invalidRowsIntegrityHash to one specific attempt.
+  uploadAttemptID: string;
+  // Authenticated HMAC (computeInvalidRowsIntegrityHash) over the reviewed
+  // invalidRows. Recomputed server-side before any mutation; a mismatch
+  // (tampered content, not just a stale value) 409s instead of writing.
+  invalidRowsIntegrityHash: string;
 }
 
 interface ApplyError {
@@ -100,8 +167,10 @@ interface ApplyResponse {
   skippedCount: number;
   insertedCount: number;
   deletedDuplicateCount: number;
+  failedRowCount: number;
   applyErrors: ApplyError[];
   validationPending: boolean;
+  speciesCorrections?: AppliedSpeciesCorrectionBatchSummary;
 }
 
 function parsePositiveInteger(value: unknown): number | null {
@@ -269,9 +338,18 @@ function normalizeInvalidRows(rawRows: ApplyInvalidRow[] | undefined): { invalid
       return;
     }
 
+    const csvRow = row.csvRow ?? {};
+    if (!isValidInvalidRowCsvRow(csvRow)) {
+      applyErrors.push({
+        coreMeasurementID: 0,
+        error: `Invalid row ${index + 1} has a malformed csvRow — every cell must be a string, number, boolean, or null`
+      });
+      return;
+    }
+
     invalidRows.push({
       csvIndex,
-      csvRow: row.csvRow ?? {},
+      csvRow,
       reason: row.reason
     });
   });
@@ -304,6 +382,44 @@ function normalizeDuplicates(rawDuplicates: DuplicateToDelete[]): { duplicates: 
   return { duplicates, applyErrors };
 }
 
+/**
+ * csvIndex ties a row back to the integrity hash's sourceRowIndex and to
+ * insertIngestionFailureRows' UNIQUE (UploadBatchID, SourceRowIndex). A
+ * client that submits the same explicit csvIndex twice — whether both in
+ * invalidRows, or split across matched/new/invalid — would let one source
+ * row silently masquerade as another in that accounting. Rows that omit
+ * csvIndex (matchedRows defaults it positionally; see normalizeMatchedRows)
+ * are not checked here: they carry no explicit claim to collide over.
+ */
+function validateUniqueExplicitSourceIndexes(
+  matchedRows: ApplyMatchedRow[],
+  newRows: Array<ApplyNewRow | FileRow>,
+  invalidRows: ApplyInvalidRow[] | undefined
+): ApplyError[] {
+  const seen = new Map<number, string>();
+  const errors: ApplyError[] = [];
+
+  function note(rawCsvIndex: unknown, category: string, position: number): void {
+    const csvIndex = parseNonNegativeInteger(rawCsvIndex);
+    if (csvIndex === null) return;
+    const previousCategory = seen.get(csvIndex);
+    if (previousCategory !== undefined) {
+      errors.push({
+        coreMeasurementID: 0,
+        error: `csvIndex ${csvIndex} is claimed by both ${previousCategory} and ${category} (position ${position + 1}) — each source row may only be reported once`
+      });
+      return;
+    }
+    seen.set(csvIndex, category);
+  }
+
+  matchedRows.forEach((row, index) => note(row?.csvIndex, 'matchedRows', index));
+  newRows.forEach((row, index) => note((row as Partial<ApplyNewRow>)?.csvIndex, 'newRows', index));
+  (invalidRows ?? []).forEach((row, index) => note(row?.csvIndex, 'invalidRows', index));
+
+  return errors;
+}
+
 function buildDuplicateDeletionHints(matchedRows: ApplyMatchedRow[]): DuplicateToDelete[] {
   const duplicates: DuplicateToDelete[] = [];
   for (const row of matchedRows) {
@@ -317,6 +433,32 @@ function buildDuplicateDeletionHints(matchedRows: ApplyMatchedRow[]): DuplicateT
   return duplicates;
 }
 
+/**
+ * Maps the invalid rows this apply is about to reject into the shape
+ * `insertIngestionFailureRows` persists as StemGUID=NULL coremeasurements
+ * audit rows. This is the fix for source rows vanishing with no DB trace:
+ * every row the revision-upload flow decides not to apply (genuine
+ * duplicates, review-rejected rows with missing required fields, rows
+ * demoted by a fresh TOCTOU re-check) is parked here instead of only living
+ * in the HTTP response the client happened to receive.
+ *
+ * The per-row content mapping is shared with `computeInvalidRowsIntegrityHash`
+ * (shared/invalidrowintegrity.ts) so what gets hashed for review-tamper
+ * detection is byte-identical to what gets persisted here.
+ */
+function buildIngestionFailureRowsFromInvalid(
+  invalidRows: ApplyInvalidRow[],
+  plotID: number,
+  censusID: number,
+  fileID: string,
+  batchID: string
+): IngestionFailureRowInput[] {
+  return invalidRows.map(row => ({
+    ...buildIngestionFailureRowContent(row, plotID, censusID, fileID),
+    batchID
+  }));
+}
+
 function buildBulkInputForApply(
   matchedRowsWithDiff: MatchedRowWithDiff[],
   newRows: ApplyNewRow[],
@@ -327,7 +469,8 @@ function buildBulkInputForApply(
     matched: matchedRowsWithDiff.map(({ row, changes }, index) => ({
       rowIndex: index,
       targetID: row.coreMeasurementID,
-      newRow: buildAnalyzerRowFromChanges(changes, 'revision-update')
+      newRow: buildAnalyzerRowFromChanges(changes, 'revision-update'),
+      explicitSpeciesCode: readExplicitSpeciesCode(row.csvRow)
     })),
     newRows: newRows.map(row => ({
       rowIndex: row.csvIndex,
@@ -423,6 +566,11 @@ function validateDuplicateRequests(duplicates: DuplicateToDelete[], matchedRows:
  * Checks: active, same census, same plot, non-null StemGUID, same StemGUID as survivor.
  * Explicitly deletes cmattributes before the measurement row.
  *
+ * Audits the row's last state via recordDeletedCoreMeasurementsAudit BEFORE
+ * the DELETE below removes it, in the SAME transaction (#507) — a rollback of
+ * the outer transaction (e.g. a later duplicate in this loop fails) discards
+ * the DELETE and this audit row together; a commit keeps both together.
+ *
  * Returns the number of actual coremeasurements rows deleted (0 or 1).
  */
 async function verifyAndDeleteDuplicate(
@@ -431,9 +579,14 @@ async function verifyAndDeleteDuplicate(
   duplicate: DuplicateToDelete,
   censusID: number,
   plotID: number,
-  transactionID: string
+  transactionID: string,
+  changedBy: string
 ): Promise<{ deleted: number; applyError?: ApplyError }> {
   // Load both the duplicate and its survivor in one query to verify stem-group membership
+  // FOR UPDATE locks every row this query reads — cm, st, and q — for the
+  // rest of the transaction, closing the TOCTOU window between this read and
+  // the audit+DELETE below (a concurrent apply touching the same duplicate
+  // or survivor must wait, not race it).
   const verifyQuery = safeFormatQuery(
     schema,
     `SELECT cm.CoreMeasurementID, cm.StemGUID
@@ -444,7 +597,8 @@ async function verifyAndDeleteDuplicate(
        AND cm.CensusID = ?
        AND cm.IsActive = 1
        AND cm.StemGUID IS NOT NULL
-       AND q.PlotID = ?`
+       AND q.PlotID = ?
+     FOR UPDATE`
   );
   const verifiedRows = await connectionManager.executeQuery(
     verifyQuery,
@@ -485,6 +639,20 @@ async function verifyAndDeleteDuplicate(
     };
   }
 
+  // Audit the row's live state BEFORE the DELETE below removes it (#507) —
+  // reads OldRowState while the row still exists, exactly like
+  // cleanupPreviousFileUploads' use of this same function. Must run before
+  // either delete so a rollback discards the data and the audit together.
+  const tx = transactionExecutorFor(connectionManager, transactionID);
+  const auditedRowCount = await recordDeletedCoreMeasurementsAudit({
+    tx,
+    schema,
+    coreMeasurementIDs: [duplicate.coreMeasurementID],
+    changedBy: changedBy.slice(0, CHANGED_BY_MAX_LENGTH),
+    plotID,
+    censusID
+  });
+
   // Explicitly delete cmattributes — don't rely on CASCADE
   const deleteAttrsSQL = safeFormatQuery(schema, 'DELETE FROM ??.cmattributes WHERE CoreMeasurementID = ?');
   await connectionManager.executeQuery(deleteAttrsSQL, [duplicate.coreMeasurementID], transactionID);
@@ -495,6 +663,15 @@ async function verifyAndDeleteDuplicate(
 
   // Count actual rows deleted from the DB, not what the client requested
   const rowsDeleted = getAffectedRowCount(deleteResult);
+  const EXPECTED_DUPLICATE_DELETE_COUNT = 1;
+
+  if (auditedRowCount !== EXPECTED_DUPLICATE_DELETE_COUNT || rowsDeleted !== EXPECTED_DUPLICATE_DELETE_COUNT) {
+    throw new Error(
+      `Duplicate-deletion audit mismatch for CoreMeasurementID ${duplicate.coreMeasurementID}: expected to audit and delete exactly ` +
+        `${EXPECTED_DUPLICATE_DELETE_COUNT} row but audited ${auditedRowCount} and deleted ${rowsDeleted}. Refusing to commit — the audit trail and the data would disagree.`
+    );
+  }
+
   if (rowsDeleted > 0) {
     // These are denormalized materialized tables, not FK-backed views.
     const deleteMeasurementsSummarySQL = safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CoreMeasurementID = ?');
@@ -576,6 +753,11 @@ async function assertNoConflictingApplyActivity(
  * Stages confirmed new rows into temporarymeasurements, then calls
  * bulkingestionprocess to ingest them through the standard pipeline.
  *
+ * Audits the committed coremeasurements rows in the SAME transaction as the
+ * CALL (#507): a rollback of the caller's transaction (e.g. a later step in
+ * this request throws) discards the ingested rows and their audit trail
+ * together, and a commit keeps both together.
+ *
  * Returns the number of rows inserted into temporarymeasurements.
  * The bulkingestionprocess handles its own error logging internally.
  */
@@ -585,7 +767,8 @@ async function insertNewRowsThroughPipeline(
   plotID: number,
   censusID: number,
   newRows: FileRow[],
-  transactionID: string
+  transactionID: string,
+  changedBy: string
 ): Promise<number> {
   const batchID = generateShortBatchID();
 
@@ -648,8 +831,23 @@ async function insertNewRowsThroughPipeline(
     throw new RevisionStagingIntegrityError(`Revision staging inserted ${stagedCount} of ${newRows.length} expected row(s)`);
   }
 
-  const bulkIngestSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
-  await connectionManager.executeQuery(bulkIngestSQL, [REVISION_UPLOAD_FILE_ID, batchID], transactionID);
+  const tx = transactionExecutorFor(connectionManager, transactionID);
+  const before = await snapshotCoreMeasurementsScope(tx, schema, REVISION_UPLOAD_FILE_ID, batchID);
+  await callBulkIngestionInCallerTransaction(tx, schema, REVISION_UPLOAD_FILE_ID, batchID);
+
+  // Same transaction as the CALL above: rollback discards the ingested rows
+  // and this audit trail together (#507). ChangedBy is varchar(64) — a
+  // deliberate truncation, not a bug (see identity.ts CHANGED_BY_MAX_LENGTH).
+  await auditCoreMeasurementsScopeDiff({
+    before,
+    tx,
+    schema,
+    fileID: REVISION_UPLOAD_FILE_ID,
+    batchID,
+    changedBy: changedBy.slice(0, CHANGED_BY_MAX_LENGTH),
+    plotID,
+    censusID
+  });
 
   return stagedCount;
 }
@@ -682,7 +880,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { matchedRows, newRows, invalidRows, confirmNewRows, duplicateMeasurementIDsToDelete, schema, plotID, censusID, bulkPlanHash } = body;
+  const {
+    matchedRows,
+    newRows,
+    invalidRows,
+    confirmNewRows,
+    duplicateMeasurementIDsToDelete,
+    schema,
+    plotID,
+    censusID,
+    bulkPlanHash,
+    uploadAttemptID,
+    invalidRowsIntegrityHash
+  } = body;
 
   ailogger.info(
     `${logPrefix} parsed request body in ${Date.now() - requestStartedAt}ms (matchedRows=${Array.isArray(matchedRows) ? matchedRows.length : 'invalid'}, newRows=${Array.isArray(newRows) ? newRows.length : 'invalid'}, confirmNewRows=${confirmNewRows === true})`
@@ -702,6 +912,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  if (!isValidUploadAttemptID(uploadAttemptID)) {
+    return NextResponse.json(
+      { error: 'Missing or malformed required parameter: uploadAttemptID (UUID produced by the match endpoint)' },
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+
+  if (typeof invalidRowsIntegrityHash !== 'string' || invalidRowsIntegrityHash.trim() === '') {
+    return NextResponse.json(
+      { error: 'Missing required parameter: invalidRowsIntegrityHash (string produced by the match endpoint)' },
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+
+  // normalizeInvalidRows treats `undefined` as "no invalid rows" but will
+  // throw on any other non-array (e.g. a client sending an object) via its
+  // internal .forEach. Reject that shape explicitly, before it reaches there.
+  if (invalidRows !== undefined && !Array.isArray(invalidRows)) {
+    return NextResponse.json({ error: 'invalidRows must be an array when present' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   const normalizedPlotID = parsePositiveInteger(plotID);
   const normalizedCensusID = parsePositiveInteger(censusID);
   if (normalizedPlotID === null || normalizedCensusID === null) {
@@ -714,6 +945,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const normalizationErrors = [...normalizedMatchedRows.applyErrors, ...normalizedNewRows.applyErrors, ...normalizedInvalidRows.applyErrors];
   if (normalizationErrors.length > 0) {
     return NextResponse.json({ error: 'Revision rows failed validation', applyErrors: normalizationErrors }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  const sourceIndexErrors = validateUniqueExplicitSourceIndexes(matchedRows, newRows, invalidRows);
+  if (sourceIndexErrors.length > 0) {
+    return NextResponse.json({ error: 'Revision rows failed validation', applyErrors: sourceIndexErrors }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  // Recompute the review screen's attestation from the submitted invalidRows
+  // (not the client-submitted hash) and compare. This closes the gap where a
+  // client could edit a rejected row's raw fields after reviewing it without
+  // invalidating the reviewed plan — see shared/invalidrowintegrity.ts. Checked
+  // before any mutation: a mismatch returns 409 here, never inside the transaction.
+  const recomputedInvalidRowsIntegrityHash = computeInvalidRowsIntegrityHash(
+    schema,
+    normalizedPlotID,
+    normalizedCensusID,
+    uploadAttemptID,
+    REVISION_UPLOAD_FILE_ID,
+    normalizedInvalidRows.invalidRows
+  );
+  if (recomputedInvalidRowsIntegrityHash !== invalidRowsIntegrityHash) {
+    return NextResponse.json(
+      { error: 'invalidRows no longer match the reviewed plan — refresh the upload and review the rejected rows again before applying' },
+      { status: HTTPResponses.CONFLICT }
+    );
   }
 
   // Pre-flight validation of duplicate deletion requests (before opening a transaction)
@@ -851,7 +1107,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // Keep apply-time demotion in the same survivor-only shape as the match
       // route. That way the freshPlan returned on 409 is exactly the plan the
       // UI will submit after moving demoted matched rows into invalidRows.
-      const demotedRows = collectMatchedRowsDemotedByPlan(effectiveMatchedRowsWithDiff, baseFreshPlan);
+      // Skipped entirely when baseFreshPlan already carries a batch-level
+      // group blocker (#427): assertBulkPlanCanApply below will throw on it
+      // regardless, and demoting without also dropping the row from
+      // effectiveMatchedRowsWithDiff would double-count it in the response.
+      const hasBatchLevelGroupBlocker = (baseFreshPlan.errors ?? []).some(isGroupBlockingPreviewError);
+      const demotedRows = hasBatchLevelGroupBlocker ? [] : collectMatchedRowsDemotedByPlan(effectiveMatchedRowsWithDiff, baseFreshPlan);
       if (demotedRows.length > 0) {
         const demotedKeys = new Set(demotedRows.map(row => row.csvIndex));
         effectiveMatchedRowsWithDiff = effectiveMatchedRowsWithDiff.filter(({ row }) => !demotedKeys.has(row.csvIndex ?? -1));
@@ -877,17 +1138,153 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       assertBulkPlanCanApply(freshPlan);
       if (freshPlan.planHash !== bulkPlanHash) {
         ailogger.warn(`${logPrefix} bulk plan hash mismatch (expected=${bulkPlanHash}, fresh=${freshPlan.planHash}) — aborting apply so UI can re-review`);
-        throw new RevisionApplyPlanHashMismatchError(freshPlan);
+        // effectiveInvalidRows already reflects any apply-time demotion above —
+        // the exact set a re-submitted apply must match.
+        const freshInvalidRowsIntegrityHash = computeInvalidRowsIntegrityHash(
+          schema,
+          normalizedPlotID,
+          normalizedCensusID,
+          uploadAttemptID,
+          REVISION_UPLOAD_FILE_ID,
+          effectiveInvalidRows
+        );
+        throw new RevisionApplyPlanHashMismatchError(freshPlan, effectiveInvalidRows, freshInvalidRowsIntegrityHash);
       }
 
+      // `buildBulkInputForApply` assigns rowIndex: index over
+      // effectiveMatchedRowsWithDiff, so a group member's rowIndex indexes
+      // directly into that array. `freshPlan.rowPlans`, however, is NOT laid
+      // out in rowIndex order (analyzeBulk pushes TargetNotFoundError /
+      // SpeciesNotFoundError invalid-rowPlans in phase 1 and matched-status
+      // rowPlans separately in phase 3), so its entry is found by `.rowIndex`,
+      // never by array position. A mismatch between the fresh plan and the
+      // submitted rows means the batch must abort rather than silently skip
+      // the member.
+      const speciesCorrectionGroups = freshPlan.speciesCorrectionGroups ?? [];
+      // Group membership (bulkspeciesgroups.ts) attaches any non-requesting
+      // sibling whose row status is merely `!== 'invalid'`, so a submitted
+      // sibling with zero field changes lands here with status 'unchanged',
+      // not 'matched'. Such a member is a legitimate group member — it
+      // contributes no row-local write and is counted as skipped below — so
+      // both statuses that carry a plan must be included or a real,
+      // ordinary batch (a corrected tree plus an unchanged sibling row)
+      // would trip the assembly guard and fail the whole batch.
+      const groupMemberRowPlanByRowIndex = new Map(
+        freshPlan.rowPlans
+          .filter(rowPlan => rowPlan.status === 'matched' || rowPlan.status === 'unchanged')
+          .map(rowPlan => [rowPlan.rowIndex, rowPlan] as const)
+      );
+      const groupMemberRowIndexes = new Set<number>();
+      const speciesCorrectionMembers: BulkSpeciesCorrectionMemberInput[] = [];
+      for (const group of speciesCorrectionGroups) {
+        for (const groupMember of group.members) {
+          groupMemberRowIndexes.add(groupMember.rowIndex);
+          const matched = effectiveMatchedRowsWithDiff[groupMember.rowIndex];
+          const rowPlan = groupMemberRowPlanByRowIndex.get(groupMember.rowIndex);
+          if (
+            !matched ||
+            matched.row.coreMeasurementID !== groupMember.coreMeasurementID ||
+            !rowPlan ||
+            rowPlan.targetID !== groupMember.coreMeasurementID ||
+            !rowPlan.plan
+          ) {
+            throw new RevisionSpeciesCorrectionAssemblyError(
+              `Species-correction group member mismatch at rowIndex ${groupMember.rowIndex} (CoreMeasurementID ${groupMember.coreMeasurementID}): the fresh plan and the submitted rows disagree.`
+            );
+          }
+          speciesCorrectionMembers.push({
+            rowIndex: groupMember.rowIndex,
+            coreMeasurementID: groupMember.coreMeasurementID,
+            plan: rowPlan.plan,
+            newRow: buildAnalyzerRowFromChanges(matched.changes, 'revision-update')
+          });
+        }
+      }
+
+      // Preflight ALL groups before any mutation: a locked guard failure
+      // here means zero writes have happened yet.
+      const preparedCorrections =
+        speciesCorrectionGroups.length > 0
+          ? await prepareBulkSpeciesCorrections(
+              connectionManager,
+              {
+                schema,
+                plotID: normalizedPlotID,
+                censusID: normalizedCensusID,
+                groups: speciesCorrectionGroups,
+                members: speciesCorrectionMembers,
+                createdBy,
+                role: session!.user.userStatus
+              },
+              transactionID
+            )
+          : null;
+
+      // Fresh authorization is deliberately the LAST check before the first
+      // write: every read above (plan re-analysis, group partition, prepare)
+      // runs under lock but does not mutate, so re-checking access here is
+      // what actually guards against a mid-request role/access revocation.
       await assertAuthorizationFresh();
+
+      // Every row this apply is about to reject (genuine duplicates,
+      // review-rejected rows with missing required fields, rows demoted by
+      // the fresh TOCTOU re-check above) is parked as a StemGUID=NULL
+      // failed-measurement row here, before any surviving row is written.
+      // This is the fix for source rows vanishing with no DB trace: the
+      // client-visible invalidRows count must always be backed by a
+      // persisted row, not just an HTTP response field.
+      let failedRowCount = 0;
+      // True only when recordAuditedIngestionFailureRows actually inserted or
+      // updated a physical row this call — NOT when every rejected row was an
+      // unchanged same-attempt retry. Gates the ledger summary write below
+      // (#507): a pure retry that persists nothing new must produce neither a
+      // new audit row nor a new summary entry.
+      let failurePersistenceChanged = false;
+      if (effectiveInvalidRows.length > 0) {
+        // Derived from (schema, plotID, censusID, uploadAttemptID) — NOT the
+        // bulk plan hash, which carries no schema/plotID/censusID and would
+        // let two independent uploads (including different censuses) derive
+        // the same batchID and collide on insertIngestionFailureRows' UNIQUE
+        // (UploadBatchID, SourceRowIndex). See shared/invalidrowintegrity.ts.
+        const failureBatchID = deriveRevisionFailureBatchID(schema, normalizedPlotID, normalizedCensusID, uploadAttemptID);
+        const failureRows = buildIngestionFailureRowsFromInvalid(
+          effectiveInvalidRows,
+          normalizedPlotID,
+          normalizedCensusID,
+          REVISION_UPLOAD_FILE_ID,
+          failureBatchID
+        );
+        const failureAudit = await recordAuditedIngestionFailureRows({
+          connectionManager,
+          schema,
+          rows: failureRows,
+          transactionID,
+          changedBy: createdBy.slice(0, CHANGED_BY_MAX_LENGTH),
+          plotID: normalizedPlotID,
+          censusID: normalizedCensusID
+        });
+        if (failureAudit.measurementIDs.length !== effectiveInvalidRows.length) {
+          throw new RevisionFailureRowPersistenceError(
+            `Revision failure-row persistence recorded ${failureAudit.measurementIDs.length} of ${effectiveInvalidRows.length} expected rejected row(s)`
+          );
+        }
+        failedRowCount = failureAudit.measurementIDs.length;
+        failurePersistenceChanged = failureAudit.insertedCount + failureAudit.updatedCount > 0;
+      }
 
       let updatedCount = 0;
       let skippedCount = 0;
       const applyErrors: ApplyError[] = [];
       const updatedCoreMeasurementIDs: number[] = [];
 
-      for (const { row, changes } of effectiveMatchedRowsWithDiff) {
+      for (const [rowIndex, { row, changes }] of effectiveMatchedRowsWithDiff.entries()) {
+        if (groupMemberRowIndexes.has(rowIndex)) {
+          // Group members are written by applyPreparedBulkSpeciesCorrections
+          // below (row-local fields first, then the tree correction), and
+          // accounted for in updatedCount/skippedCount there — never here.
+          continue;
+        }
+
         if (Object.keys(changes).length === 0) {
           skippedCount++;
           continue;
@@ -920,11 +1317,38 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         updatedCoreMeasurementIDs.push(row.coreMeasurementID);
       }
 
+      // Correction writes run immediately after the ordinary-row loop (and
+      // before duplicate deletion) so they stay adjacent to the row writes
+      // they belong with. Nothing here catches/downgrades errors: a failure
+      // rolls the whole outer transaction back.
+      const speciesCorrections = preparedCorrections
+        ? await applyPreparedBulkSpeciesCorrections(
+            connectionManager,
+            preparedCorrections,
+            { schema, plotID: normalizedPlotID, censusID: normalizedCensusID },
+            transactionID
+          )
+        : null;
+
+      if (speciesCorrections) {
+        updatedCount += speciesCorrections.updatedMemberCoreMeasurementIDs.length;
+        updatedCoreMeasurementIDs.push(...speciesCorrections.updatedMemberCoreMeasurementIDs);
+
+        // A submitted member that neither requested the correction nor
+        // received a row-local write (e.g. an 'unchanged' sibling pulled in
+        // by tree membership) counts toward skippedCount, never updatedCount.
+        const updatedMemberIDs = new Set(speciesCorrections.updatedMemberCoreMeasurementIDs);
+        const submittedMemberIDs = new Set(speciesCorrectionMembers.map(member => member.coreMeasurementID));
+        for (const submittedID of submittedMemberIDs) {
+          if (!updatedMemberIDs.has(submittedID)) skippedCount++;
+        }
+      }
+
       // --- Delete verified duplicates ---
       let deletedDuplicateCount = 0;
       const deletedDuplicateIDs: number[] = [];
       for (const dup of effectiveDuplicates) {
-        const dupResult = await verifyAndDeleteDuplicate(connectionManager, schema, dup, normalizedCensusID, normalizedPlotID, transactionID);
+        const dupResult = await verifyAndDeleteDuplicate(connectionManager, schema, dup, normalizedCensusID, normalizedPlotID, transactionID, createdBy);
         deletedDuplicateCount += dupResult.deleted;
         if (dupResult.deleted > 0) {
           deletedDuplicateIDs.push(dup.coreMeasurementID);
@@ -942,11 +1366,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           normalizedPlotID,
           normalizedCensusID,
           normalizedNewRows.newRows.map(row => row.csvRow),
-          transactionID
+          transactionID,
+          createdBy
         );
       }
 
-      if (updatedCount > 0 || insertedCount > 0 || deletedDuplicateCount > 0) {
+      if (updatedCount > 0 || insertedCount > 0 || deletedDuplicateCount > 0 || speciesCorrections !== null) {
         const viewRefreshStartedAt = Date.now();
         ailogger.info(
           `${logPrefix} derived view refresh start (tx=${transactionID}, updated=${updatedCount}, inserted=${insertedCount}, deletedDuplicate=${deletedDuplicateCount})`
@@ -962,7 +1387,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // TargetID is null for bulk rows: the batch has no single "target"
       // measurement. The affected CoreMeasurementIDs are captured in
       // BeforeState JSON, which is where filters/audit should read them from.
-      if (updatedCount > 0 || deletedDuplicateCount > 0) {
+      //
+      // insertedCount and failurePersistenceChanged are included here (#507)
+      // so an insert-only or invalid-only batch — previously silent — also
+      // gets a summary. A same-attempt retry where every rejected row was
+      // already persisted unchanged (failurePersistenceChanged === false) and
+      // nothing else mutated must NOT reach this branch: it has nothing new
+      // to summarize.
+      if (updatedCount > 0 || insertedCount > 0 || deletedDuplicateCount > 0 || speciesCorrections !== null || failurePersistenceChanged) {
+        const dedupedUpdatedCoreMeasurementIDs = Array.from(new Set(updatedCoreMeasurementIDs)).sort((a, b) => a - b);
         await writeEditOperation(
           connectionManager,
           schema,
@@ -980,12 +1413,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
                 primaryKey: 'bulkPlanHash',
                 primaryKeyValue: bulkPlanHash,
                 row: {
-                  updatedCoreMeasurementIDs,
+                  updatedCoreMeasurementIDs: dedupedUpdatedCoreMeasurementIDs,
                   deletedDuplicateCoreMeasurementIDs: deletedDuplicateIDs,
                   updatedCount,
                   skippedCount,
                   insertedCount,
-                  deletedDuplicateCount
+                  deletedDuplicateCount,
+                  ...(speciesCorrections ? { speciesCorrections } : {}),
+                  // Only rendered by recentchangesexplorer.tsx when present —
+                  // never written as 0 for an apply that rejected nothing.
+                  failedRowCount
                 }
               }
             ],
@@ -996,7 +1433,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         );
       }
 
-      return { updatedCount, skippedCount, insertedCount, deletedDuplicateCount, applyErrors };
+      return { updatedCount, skippedCount, insertedCount, deletedDuplicateCount, failedRowCount, applyErrors, speciesCorrections };
     });
     ailogger.info(`${logPrefix} transaction complete in ${Date.now() - transactionStartedAt}ms`);
 
@@ -1005,12 +1442,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       skippedCount: result.skippedCount,
       insertedCount: result.insertedCount,
       deletedDuplicateCount: result.deletedDuplicateCount,
+      failedRowCount: result.failedRowCount,
       applyErrors: result.applyErrors,
-      validationPending: result.updatedCount > 0 || result.insertedCount > 0 || result.deletedDuplicateCount > 0
+      validationPending: result.updatedCount > 0 || result.insertedCount > 0 || result.deletedDuplicateCount > 0 || result.speciesCorrections !== null,
+      ...(result.speciesCorrections ? { speciesCorrections: result.speciesCorrections } : {})
     };
 
     ailogger.info(
-      `${logPrefix} response ready in ${Date.now() - requestStartedAt}ms (updated=${response.updatedCount}, inserted=${response.insertedCount}, deletedDuplicate=${response.deletedDuplicateCount}, skipped=${response.skippedCount}, validationPending=${response.validationPending})`
+      `${logPrefix} response ready in ${Date.now() - requestStartedAt}ms (updated=${response.updatedCount}, inserted=${response.insertedCount}, deletedDuplicate=${response.deletedDuplicateCount}, skipped=${response.skippedCount}, failed=${response.failedRowCount}, validationPending=${response.validationPending})`
     );
     return NextResponse.json(response, { status: HTTPResponses.OK });
   } catch (error: unknown) {
@@ -1033,7 +1472,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'role forbidden field', fields: errorObj.fields, role: errorObj.role }, { status: HTTPResponses.FORBIDDEN });
     }
     if (errorObj instanceof RevisionApplyPlanHashMismatchError) {
-      return NextResponse.json({ error: 'plan hash mismatch', freshPlan: errorObj.freshPlan }, { status: HTTPResponses.CONFLICT });
+      return NextResponse.json(
+        {
+          error: 'plan hash mismatch',
+          freshPlan: errorObj.freshPlan,
+          freshInvalidRows: errorObj.freshInvalidRows,
+          freshInvalidRowsIntegrityHash: errorObj.freshInvalidRowsIntegrityHash
+        },
+        { status: HTTPResponses.CONFLICT }
+      );
     }
     if (errorObj instanceof BulkPlanUnapplicableError) {
       return NextResponse.json({ error: 'plan not applicable', blockingErrors: errorObj.blockingErrors }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
@@ -1049,6 +1496,69 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (errorObj instanceof RevisionStagingIntegrityError) {
       return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (errorObj instanceof RevisionFailureRowPersistenceError) {
+      return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (errorObj instanceof BulkSpeciesCorrectionUnresolvedMeasurementError) {
+      ailogger.error(`${logPrefix} species-correction member unresolved`, errorObj, {
+        coreMeasurementID: errorObj.coreMeasurementID,
+        reason: errorObj.reason
+      });
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_MEMBER_UNRESOLVED_MESSAGE, code: SPECIES_CORRECTION_MEMBER_UNRESOLVED_CODE },
+        { status: HTTPResponses.UNPROCESSABLE_ENTITY }
+      );
+    }
+    if (errorObj instanceof SpeciesCorrectionWriteConflictError) {
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_CONFLICT_MESSAGE, code: SPECIES_CORRECTION_CONFLICT_CODE },
+        { status: HTTPResponses.UNPROCESSABLE_ENTITY }
+      );
+    }
+    // Server-assembly/transaction-internal failures below are always a
+    // server-side bug, never user-correctable state: the client gets fixed
+    // guidance, never raw message/reason/SQL/transaction-ID internals.
+    if (errorObj instanceof BulkSpeciesCorrectionInputError) {
+      ailogger.error(`${logPrefix} species-correction batch assembly failure`, errorObj, { reason: errorObj.reason });
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_SERVER_FAILURE_MESSAGE, code: SPECIES_CORRECTION_SERVER_FAILURE_CODE },
+        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      );
+    }
+    if (errorObj instanceof BulkSpeciesCorrectionApplyScopeMismatchError) {
+      ailogger.error(`${logPrefix} species-correction batch apply scope mismatch`, errorObj, { reason: errorObj.reason });
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_SERVER_FAILURE_MESSAGE, code: SPECIES_CORRECTION_SERVER_FAILURE_CODE },
+        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      );
+    }
+    if (errorObj instanceof RevisionSpeciesCorrectionAssemblyError) {
+      ailogger.error(`${logPrefix} species-correction batch assembly failure`, errorObj);
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_SERVER_FAILURE_MESSAGE, code: SPECIES_CORRECTION_SERVER_FAILURE_CODE },
+        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      );
+    }
+    if (errorObj instanceof SpeciesCorrectionGroupMemberContextError) {
+      ailogger.error(`${logPrefix} species-correction group-member write context rejected`, errorObj);
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_SERVER_FAILURE_MESSAGE, code: SPECIES_CORRECTION_SERVER_FAILURE_CODE },
+        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      );
+    }
+    if (errorObj instanceof SpeciesCorrectionTransactionMismatchError) {
+      ailogger.error(`${logPrefix} species-correction transaction mismatch`, errorObj, {
+        preparedTransactionID: errorObj.preparedTransactionID,
+        applyTransactionID: errorObj.applyTransactionID
+      });
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_SERVER_FAILURE_MESSAGE, code: SPECIES_CORRECTION_SERVER_FAILURE_CODE },
+        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      );
+    }
+    if (errorObj instanceof ChangelogWriteError) {
+      return NextResponse.json({ error: 'Unable to record revision history. Please retry.' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     }
     const status = errorObj instanceof RevisionApplyConflictError ? HTTPResponses.CONFLICT : HTTPResponses.INTERNAL_SERVER_ERROR;
     return NextResponse.json({ error: errorObj.message }, { status });

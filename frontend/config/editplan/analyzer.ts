@@ -1,39 +1,25 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import type { UserAuthRoles } from '@/config/macros';
-import { EditPlan, EditPlanDataType, Effect, FieldChange, PreviewError, RoleForbiddenFieldPreviewError, SEVERITY_RANK, Severity } from './types';
+import {
+  EditPlan,
+  EditPlanDataType,
+  Effect,
+  FieldChange,
+  PreviewError,
+  RoleForbiddenFieldPreviewError,
+  SEVERITY_RANK,
+  Severity,
+  SpeciesCorrectionSummary
+} from './types';
 import { applySpeciesRules } from './rules/species';
 import { applyTreeStemRules } from './rules/treestem';
 import { applyCoordinateRules } from './rules/coordinates';
 import { applyAttributeRules } from './rules/attributes';
-import { canonicalizeEditPayload, rejectDisallowedFields, EditSurface, isFieldEditableByRole, PER_COLUMN_DECIMAL_PRECISION, isDateField } from './fieldpolicy';
+import { assertNonNegativeFields, canonicalizeEditPayload, rejectDisallowedFields, EditSurface, isFieldEditableByRole } from './fieldpolicy';
 import { hashPlan } from './planhash';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
-
-// MySQL2 returns DECIMAL columns as strings (e.g. '3.500000') and DATE/DATETIME
-// columns as Date objects. The client sends numbers and 'YYYY-MM-DD' strings.
-// Comparing those raw with Object.is produces spurious fieldChanges that fire
-// cross-row rules (R4) on every revert and edit. Normalize both sides to the
-// same JS shape before diffing. isDateField is sourced from fieldpolicy so the
-// planhash uses the same classification.
-function normalizeForDiff(field: string, value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (isDateField(field)) {
-    if (value instanceof Date && !isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
-    return value;
-  }
-  const precision = PER_COLUMN_DECIMAL_PRECISION[field];
-  if (precision !== undefined) {
-    const num = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
-    if (Number.isFinite(num)) return Number(num.toFixed(precision));
-  }
-  return value;
-}
-
-function fieldChanged(field: string, from: unknown, to: unknown): boolean {
-  return !Object.is(normalizeForDiff(field, from), normalizeForDiff(field, to));
-}
+import { fieldChanged } from './storedfieldcomparison';
 
 export class DisallowedFieldError extends Error {
   constructor(public fields: string[]) {
@@ -135,6 +121,7 @@ export async function analyzeEdit(
 ): Promise<EditPlan> {
   const surface = SURFACE_BY_DATATYPE[dataType];
   const newRow = canonicalizeEditPayload(surface, rawNewRow);
+  assertNonNegativeFields(newRow);
   const disallowed = rejectDisallowedFields(surface, newRow);
   if (disallowed) throw new DisallowedFieldError(disallowed);
 
@@ -165,6 +152,7 @@ export async function analyzeEdit(
   let treeStemRulesMs = 0;
   let coordinateRulesMs = 0;
   let attributeRulesMs = 0;
+  let speciesCorrection: SpeciesCorrectionSummary | undefined;
 
   // Measurement rules (R1a, R2, R3, R4, R5) surface cross-row and identity
   // ramifications on fully-resolved coremeasurements rows. Failed measurements
@@ -177,8 +165,11 @@ export async function analyzeEdit(
   // rule to silently return [] for a data shape it was never designed to see.
   if (dataType === 'measurementssummary' && roleErrors.length === 0) {
     let s = performance.now();
-    effects.push(...(await applySpeciesRules(ctx)));
+    const speciesResult = await applySpeciesRules(ctx);
     speciesRulesMs = Math.round(performance.now() - s);
+    effects.push(...speciesResult.effects);
+    errors.push(...speciesResult.errors);
+    speciesCorrection = speciesResult.speciesCorrection;
 
     s = performance.now();
     const treeStem = await applyTreeStemRules(ctx);
@@ -219,7 +210,8 @@ export async function analyzeEdit(
     canApply: errors.length === 0,
     maxSeverity,
     planHash: '',
-    generatedAt: new Date().toISOString()
+    generatedAt: new Date().toISOString(),
+    ...(speciesCorrection ? { speciesCorrection } : {})
   };
   plan.planHash = hashPlan(plan);
   return plan;

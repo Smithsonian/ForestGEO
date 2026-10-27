@@ -207,26 +207,6 @@ describe('runCensusValidations — integration', () => {
     censusID = testData.census[0].censusID;
     sharedState.connection = connection;
 
-    // validation_runs is defined in tablestructures.sql but loadSchema's
-    // semicolon-split filter silently skips it (the statement chunk begins
-    // with a '--' comment block). Create it here with the production DDL so
-    // run-record assertions exercise the real column set.
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${schema}\`.validation_runs (
-        RunID          INT AUTO_INCREMENT PRIMARY KEY,
-        PlotID         INT NOT NULL,
-        CensusID       INT NOT NULL,
-        Status         ENUM ('running', 'completed', 'failed', 'cancelled') NOT NULL DEFAULT 'running',
-        TotalSteps     INT NOT NULL DEFAULT 0,
-        CompletedSteps INT NOT NULL DEFAULT 0,
-        FailedSteps    INT NOT NULL DEFAULT 0,
-        CurrentStep    VARCHAR(100) NULL,
-        ErrorMessages  JSON NULL,
-        StartedAt      DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        CompletedAt    DATETIME NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
-
     console.log(`[setup] schema=${schema} plotID=${plotID} censusID=${censusID}`);
   }, 120000);
 
@@ -265,6 +245,7 @@ describe('runCensusValidations — integration', () => {
       delimiter: CSV_DELIMITER,
       uploadSessionID: UPLOAD_SESSION_ID,
       transactionID,
+      firstRowOrdinal: null,
       changedBy: CHANGED_BY
     };
     const stageResult = await stageMeasurementChunk(connectionManager, params);
@@ -273,7 +254,7 @@ describe('runCensusValidations — integration', () => {
     expect(stageResult.insertedCount).toBe(expectedInserted);
     expect(stageResult.invalidRows).toHaveLength(0);
 
-    const ingestResult = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID });
+    const ingestResult = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID, expectedScope: { plotID, censusID } });
     console.log(`[ingest] processedSubBatches=${ingestResult.processedSubBatches} totalRows=${ingestResult.totalRows} noDataFound=${ingestResult.noDataFound}`);
     expect(ingestResult.noDataFound).toBe(false);
     expect(ingestResult.subBatchResults[0].batchFailedButHandled).toBe(false);

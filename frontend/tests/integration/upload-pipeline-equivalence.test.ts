@@ -57,10 +57,6 @@ if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
   );
 }
 
-const TEST_DB_PORT = Number(process.env.TEST_DB_PORT || 3306);
-const TEST_DB_USER = process.env.TEST_DB_USER || 'root';
-const TEST_DB_PASSWORD = process.env.TEST_DB_PASSWORD || 'testpassword';
-
 // ---------------------------------------------------------------------------
 // Shared state bridge — identical pattern to upload-worker.test.ts: route every
 // schema-side query through one real MySQL connection, and the catalog through
@@ -172,6 +168,7 @@ import { ingestBatch } from '@/lib/uploads/ingest-batch';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
 import type { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 // ---------------------------------------------------------------------------
 // Fixture — ONE CSV through both pipelines.
@@ -275,10 +272,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
     sharedState.connection = connection;
 
     catalogPool = mysql.createPool({
-      host: TEST_DB_HOST,
-      port: TEST_DB_PORT,
-      user: TEST_DB_USER,
-      password: TEST_DB_PASSWORD,
+      ...testDbServerOptions(),
       connectionLimit: 5
     });
     sharedState.catalogPool = catalogPool;
@@ -317,23 +311,8 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
     const [censusRows] = await connection.query<RowDataPacket[]>(`SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = 1`, [plotB]);
     censusB = Number(censusRows[0].CensusID);
 
-    // validation_runs and upload_sessions are skipped by loadSchema's
-    // semicolon-split filter — same workaround as upload-worker.test.ts.
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${schema}\`.validation_runs (
-        RunID          INT AUTO_INCREMENT PRIMARY KEY,
-        PlotID         INT NOT NULL,
-        CensusID       INT NOT NULL,
-        Status         ENUM ('running', 'completed', 'failed', 'cancelled') NOT NULL DEFAULT 'running',
-        TotalSteps     INT NOT NULL DEFAULT 0,
-        CompletedSteps INT NOT NULL DEFAULT 0,
-        FailedSteps    INT NOT NULL DEFAULT 0,
-        CurrentStep    VARCHAR(100) NULL,
-        ErrorMessages  JSON NULL,
-        StartedAt      DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        CompletedAt    DATETIME NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
+    // upload_sessions must exist before the worker run below; create it via
+    // the production bootstrap (same as upload-worker.test.ts).
     await ensureUploadSessionsTable(schema);
 
     // Catalog rows in FK-safe order: events → files → jobs.
@@ -464,6 +443,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
         storedMapping: undefined,
         uploadSessionID: null,
         transactionID: stagingTxn,
+        firstRowOrdinal: null,
         changedBy: TEST_USER,
         onInvalidRows: rows => {
           invalidRows = rows;
@@ -517,7 +497,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
     console.log(`[sync] rejects recorded before ingest: ${JSON.stringify(rejectsBeforeIngest)}`);
 
     // Then the interactive pipeline's processing phase: ingest + collapse.
-    const ingestResult = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID });
+    const ingestResult = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID, expectedScope: { plotID: plotA, censusID: censusA } });
     console.log(
       `[sync] ingest: subBatches=${ingestResult.processedSubBatches} totalRows=${ingestResult.totalRows} recovered=${ingestResult.recovered} ` +
         `failedSubBatches=${ingestResult.subBatchResults.filter(r => r.batchFailedButHandled).length}`

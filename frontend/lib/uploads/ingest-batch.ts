@@ -7,12 +7,21 @@
  * internals of its own. The sequence is:
  *
  *   Phase 1 (one transaction, application-locked):
- *     - derive plot/census + row count from temporarymeasurements
+ *     - discover the staged batch family once and check its scope and member sizes
  *     - recover dirty failed first-load census state if detected
  *     - remove stale unresolved ingestion rows that match the staged rows
- *     - split oversized batches into sub-batches
- *   Phase 2 (no outer transaction — the procedure manages its own):
- *     - run each sub-batch through bulkingestionprocess with retry/backoff
+ *     - split rows still staged under the original BatchID (legacy fallback)
+ *   Phase 2 (one caller-owned transaction PER sub-batch — #507/#527):
+ *     - run the sub-batch through bulkingestionprocess with the
+ *       @bulkingestion_caller_owns_transaction flag set, so the procedure
+ *       commits nothing itself
+ *     - audit every coremeasurements row the call just committed — including
+ *       unresolved StemGUID-NULL failure rows the procedure parks on a
+ *       handled SQLEXCEPTION — via auditCoreMeasurementsScopeDiff, in
+ *       the SAME transaction
+ *     - commit the transaction, so the CALL's data and its audit trail land
+ *       together or not at all; a thrown error rolls both back together and
+ *       the attempt retries from a fresh transaction
  *     - on exhausted retries or unrecoverable errors, move remaining rows to
  *       unresolved coremeasurements via moveTemporaryBatchToFailedMeasurements
  *
@@ -25,33 +34,34 @@
 
 import crypto from 'crypto';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import type { SystemFailureKind } from '@/config/measurementerrors';
-import { buildSubBatchID, buildSubBatchPattern, discoverBatchFamily, highestSubBatchOrdinal, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
+import {
+  BatchFamilyScopeError,
+  buildSubBatchID,
+  buildSubBatchPattern,
+  discoverBatchFamily,
+  FAMILY_SCAN_INDEX,
+  getIngestionBatchSize,
+  highestSubBatchOrdinal,
+  LIKE_ESCAPE_CLAUSE,
+  MAX_SUB_BATCH_ORDINAL,
+  SubBatchOrdinalOverflowError,
+  toCount,
+  type BatchFamilyMember,
+  type BatchFamilyScope
+} from '@/lib/uploads/batch-family';
+import { SETUP_FAILURE_CODES } from '@/lib/uploads/setup-failure';
 import { isKilledConnectionError, isKilledStatementError, QueryTimeoutError } from '@/lib/db/primitives';
-
-// Sub-batches of 10K rows keep transaction duration ~6.5s (benchmarked),
-// well under the 50s innodb_lock_wait_timeout on Azure MySQL.
-const INGESTION_BATCH_SIZE = 10_000;
-
-/**
- * Split threshold, overridable so tests can force a multi-sub-batch split
- * without staging 10K rows. The production default is unchanged; only an
- * explicit positive integer in INGESTION_SUB_BATCH_ROWS overrides it.
- */
-function getIngestionBatchSize(): number {
-  const raw = process.env.INGESTION_SUB_BATCH_ROWS;
-  if (raw === undefined || raw === '') return INGESTION_BATCH_SIZE;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    ailogger.warn(`INGESTION_SUB_BATCH_ROWS="${raw}" is not a positive integer; using default ${INGESTION_BATCH_SIZE}`);
-    return INGESTION_BATCH_SIZE;
-  }
-  return parsed;
-}
+import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { auditCoreMeasurementsScopeDiff, snapshotCoreMeasurementsScope } from '@/lib/changelog/ingestion-audit';
+import { ChangelogOperation, ChangelogWriteError } from '@/lib/changelog/record-mutation';
+import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
+import { deleteCoreMeasurementsInBoundedChunksWithAudit } from '@/lib/ingestion/temporary-measurements';
 
 const MAX_ATTEMPTS_PER_SUBBATCH = 5;
 const SETUP_PHASE_TIMEOUT_MS = 2 * 60 * 1000;
@@ -147,12 +157,121 @@ export interface IngestBatchParams {
   schema: string;
   fileID: string;
   batchID: string;
+  /** Caller-authorized scope; never derive this from ingestion discovery. */
+  expectedScope: { plotID: number; censusID: number };
   /**
    * Cancellation probe checked between sub-batches and between retry attempts.
    * The HTTP route passes a request-abort check; the worker passes its
    * job-cancellation probe. Defaults to "never aborted".
    */
   isAborted?: () => boolean;
+  /**
+   * Trusted actor recorded as `unifiedchangelog.ChangedBy` for every
+   * coremeasurements audit row this call writes (#507). MUST be a
+   * server-resolved identity — `job.createdBy` for the background worker,
+   * `authenticatedSessionIdentity(session.user)` for the synchronous route —
+   * never a client-supplied field. Truncated to CHANGED_BY_MAX_LENGTH;
+   * `undefined`/`null` records a NULL ChangedBy rather than throwing.
+   */
+  changedBy?: string | null;
+  /** Synchronous, best-effort setup telemetry. Exceptions are ignored. */
+  onSetupProgress?: (diagnostic: Readonly<SetupDiagnostic>) => void;
+}
+
+export interface SetupDiagnostic {
+  step: 'discovery' | 'lock_wait' | 'recovery' | 'cleanup' | 'splitting' | 'commit' | 'terminal';
+  outcome?: 'started' | 'completed' | 'failed' | 'committed';
+  schema: string;
+  plotID: number;
+  censusID: number;
+  fileID: string;
+  batchID: string;
+  elapsedMs: number;
+  rowCount?: number;
+  assignedRows?: number;
+  completedBatches?: number;
+  errorCode?: string;
+  terminal?: boolean;
+}
+
+export class SetupCallbackTimeoutError extends Error {
+  readonly code = SETUP_FAILURE_CODES.callbackTimeout;
+  readonly cause: unknown;
+  constructor(cause: unknown) {
+    super('Ingestion setup transaction callback timed out');
+    this.name = 'SetupCallbackTimeoutError';
+    this.cause = cause;
+  }
+}
+
+export class OversizedSubBatchError extends Error {
+  readonly code = SETUP_FAILURE_CODES.oversizedSubBatch;
+  constructor(fileID: string, member: BatchFamilyMember, batchSize: number) {
+    super(
+      `Sub-batch ${member.batchID} of ${fileID} holds ${member.rowCount} rows; the limit is ${batchSize}. It was staged with a different batch size or a tampered row offset.`
+    );
+    this.name = 'OversizedSubBatchError';
+  }
+}
+
+export class SetupMembershipChangedError extends Error {
+  readonly code = SETUP_FAILURE_CODES.membershipChanged;
+  constructor(message: string) {
+    super(message);
+    this.name = 'SetupMembershipChangedError';
+  }
+}
+
+export class SetupLockUnavailableError extends Error {
+  readonly code = SETUP_FAILURE_CODES.lockUnavailable;
+  constructor(fileID: string) {
+    super(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);
+    this.name = 'SetupLockUnavailableError';
+  }
+}
+
+/**
+ * Pinned to FBPC: on Azure (2026-10-16) the optimizer chose
+ * idx_cid_md_dbh_hom_qn_tt, scanned and sorted every remaining row, and spent
+ * 2.7 s per pass; the FBPC range scan returns the same rows in 20 ms.
+ */
+export function buildFallbackSplitSelectSQL(schema: string, batchSize: number): string {
+  return safeFormatQuery(
+    schema,
+    `SELECT /*+ INDEX(tm ${FAMILY_SCAN_INDEX}) */ CAST(tm.id AS CHAR) AS rowID
+     FROM ??.temporarymeasurements tm
+     WHERE tm.FileID = ? AND tm.BatchID = ? AND tm.PlotID = ? AND tm.CensusID = ?
+       AND tm.id > CAST(? AS UNSIGNED) AND tm.id <= CAST(? AS UNSIGNED)
+     ORDER BY tm.id
+     LIMIT ${batchSize}`
+  );
+}
+
+/**
+ * Staging derives membership from the client's firstRowOrdinal, so overlapping
+ * or tampered offsets can pile more than one batch of rows into a member. This
+ * is the only check that stops it before the procedure runs an oversized
+ * transaction.
+ */
+function assertMembersWithinBatchSize(family: BatchFamilyScope, fileID: string, originalBatchID: string, batchSize: number): void {
+  const oversized = family.members.find(member => member.batchID !== originalBatchID && member.rowCount > batchSize);
+  if (oversized) throw new OversizedSubBatchError(fileID, oversized, batchSize);
+}
+
+function errorCodeOf(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  const { code } = error as { code: unknown };
+  return typeof code === 'string' ? code : undefined;
+}
+
+function assertExpectedScope(family: BatchFamilyScope, plotID: number, censusID: number, fileID: string, batchID: string): void {
+  if (family.plotID !== plotID || family.censusID !== censusID) {
+    throw new BatchFamilyScopeError(
+      fileID,
+      batchID,
+      `discovered plot=${family.plotID}, census=${family.censusID}; expected plot=${plotID}, census=${censusID}`
+    );
+  }
 }
 
 export interface IngestBatchResult {
@@ -166,26 +285,40 @@ export interface IngestBatchResult {
   /** Per-sub-batch detail for callers that shape HTTP responses or job metrics. */
   subBatchResults: SubBatchResult[];
   /**
-   * Sub-batches adopted from an interrupted prior attempt rather than created by
-   * this run's split. Non-zero means this call recovered orphaned work.
+   * Count of the family's existing `__subNNN` members when setup began: normally
+   * every member for pre-partitioned uploads, rather than ones created by this run's split.
    */
   resumedSubBatchCount: number;
 }
 
-function toCount(value: unknown): number {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'string') return Number(value) || 0;
-  return 0;
+interface SetupResult {
+  totalRows: number;
+  subBatchIDs: string[];
+  recovered: boolean;
+  resumedSubBatchCount: number;
 }
+
+/**
+ * A single procedure-result row. mysql2 types column values as unknown at
+ * the driver boundary (string | number | bigint | Date | Buffer | null,
+ * depending on the column) — toCount/toOptionalMessage below narrow them.
+ */
+type ProcedureResultRow = Record<string, unknown>;
+
+/**
+ * mysql2's shape for a `CALL` with no OUT params: a tuple whose first element
+ * is the result-set row array (or, on some drivers, the row object directly —
+ * see the fallback branch in extractProcedureRow), with trailing driver
+ * metadata (e.g. the OkPacket) this code never reads.
+ */
+type ProcedureCallResult = [ProcedureResultRow[] | ProcedureResultRow, ...unknown[]];
 
 /**
  * Extracts the first data row from a mysql2 stored procedure result.
  * mysql2 returns CALL results as [[row1, row2, ...], OkPacket] — the first
  * element is the result set array.  We need the first row object.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractProcedureRow(procedureResult: any): Record<string, any> | null {
+function extractProcedureRow(procedureResult: ProcedureCallResult | null | undefined): ProcedureResultRow | null {
   if (!procedureResult) return null;
   const firstResultSet = procedureResult[0];
   if (Array.isArray(firstResultSet) && firstResultSet.length > 0) {
@@ -198,6 +331,11 @@ function extractProcedureRow(procedureResult: any): Record<string, any> | null {
   return null;
 }
 
+/** Narrows an unknown procedure-row field to a string for SubBatchResult.message. */
+function toOptionalMessage(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
 async function recoverFailedInitialCensusIfNeeded(
   connectionManager: ConnectionManager,
   schema: string,
@@ -205,6 +343,7 @@ async function recoverFailedInitialCensusIfNeeded(
   batchID: string,
   plotID: number,
   censusID: number,
+  changedBy: string | null,
   transactionID: string
 ): Promise<boolean> {
   const recoveryStateSQL = safeFormatQuery(
@@ -243,15 +382,32 @@ async function recoverFailedInitialCensusIfNeeded(
     recoveryState
   });
 
+  // measurementssummary is derived/reconstructable, not a primary audit trail
+  // (same discipline as cleanupPreviousFileUploads — see
+  // deleteCoreMeasurementsInBoundedChunksWithAudit's doc comment) — delete it
+  // unaudited, before the audited coremeasurements delete below.
+  await connectionManager.executeQuery(safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CensusID = ?'), [censusID], transactionID);
+
+  // Every coremeasurements row in this census is a real committed write and
+  // must be audited before removal (#507): reuse the same bounded,
+  // FOR-UPDATE-locked select-audit-delete sequence Clean Re-Upload's own
+  // census-wide cleanup uses (cleanupPreviousFileUploads), rather than a raw
+  // unaudited DELETE.
+  const recoveredCoreMeasurementsCount = await deleteCoreMeasurementsInBoundedChunksWithAudit(
+    connectionManager,
+    schema,
+    'CensusID = ?',
+    [censusID],
+    changedBy,
+    plotID,
+    censusID,
+    transactionID
+  );
+  if (recoveredCoreMeasurementsCount > 0) {
+    ailogger.warn(`Recovery removed ${recoveredCoreMeasurementsCount} coremeasurement(s) from dirty failed first-load census ${censusID}`);
+  }
+
   const cleanupSteps = [
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CensusID = ?'),
-      params: [censusID]
-    },
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.coremeasurements WHERE CensusID = ?'),
-      params: [censusID]
-    },
     {
       sql: safeFormatQuery(schema, 'DELETE FROM ??.stems WHERE CensusID = ?'),
       params: [censusID]
@@ -273,9 +429,9 @@ async function recoverFailedInitialCensusIfNeeded(
          WHERE tm.PlotID = ?
            AND tm.CensusID = ?
            AND um.status IN ('failed', 'processing')
-           AND NOT (tm.FileID = ? AND tm.BatchID = ?)`
+           AND NOT (tm.FileID = ? AND (tm.BatchID = ? OR tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`
       ),
-      params: [plotID, censusID, fileID, batchID]
+      params: [plotID, censusID, fileID, batchID, buildSubBatchPattern(batchID)]
     },
     {
       sql: safeFormatQuery(schema, 'DELETE FROM ??.uploadintegrityalerts WHERE PlotID = ? AND CensusID = ?'),
@@ -299,7 +455,9 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
   schema: string,
   fileID: string,
   batchID: string,
+  plotID: number,
   censusID: number,
+  changedBy: string | null,
   transactionID: string
 ): Promise<number> {
   // Spare the CURRENT batch FAMILY (bare ID + its __subNNN members), not just
@@ -310,21 +468,20 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
   // removed by the worker's sub-batch-aware cleanup before re-staging. A
   // same-file re-upload under a NEW batch ID still cleans the old family
   // (a different family never matches the new one's pattern).
-  const sameFileDeleteSQL = safeFormatQuery(
+  //
+  // Both deletes go through deleteCoreMeasurementsInBoundedChunksWithAudit
+  // (#507): every removed row is a real committed write and must be audited,
+  // same as Clean Re-Upload's own census-wide cleanup.
+  const sameFileDeletedRows = await deleteCoreMeasurementsInBoundedChunksWithAudit(
+    connectionManager,
     schema,
-    `DELETE FROM ??.coremeasurements
-     WHERE CensusID = ?
-       AND StemGUID IS NULL
-       AND UploadFileID = ?
-       AND NOT (UploadBatchID <=> ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`
-  );
-
-  const sameFileDeleteResult = await connectionManager.executeQuery(
-    sameFileDeleteSQL,
+    `CensusID = ? AND StemGUID IS NULL AND UploadFileID = ? AND NOT (UploadBatchID <=> ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`,
     [censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    changedBy,
+    plotID,
+    censusID,
     transactionID
   );
-  const sameFileDeletedRows = toCount(sameFileDeleteResult?.affectedRows);
 
   if (sameFileDeletedRows > 0) {
     ailogger.warn(`Removed ${sameFileDeletedRows} stale unresolved row(s) from prior same-file upload batches for ${fileID}-${batchID}`);
@@ -346,10 +503,10 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
     return sameFileDeletedRows;
   }
 
-  const deleteSQL = safeFormatQuery(
-    schema,
-    `DELETE cm
-     FROM ??.coremeasurements cm
+  // Cross-file match requires joining the incoming file's staged rows, so
+  // this goes through the JOIN-aware `fromSQL` form (aliased `cm`, DISTINCT
+  // id selection) rather than the plain-table default.
+  const crossFileFromSQL = `??.coremeasurements cm
      INNER JOIN ??.measurement_error_log mel
        ON mel.MeasurementID = cm.CoreMeasurementID
       AND mel.IsResolved = FALSE
@@ -359,7 +516,7 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
      INNER JOIN ??.temporarymeasurements tm
        ON tm.CensusID = cm.CensusID
       AND tm.FileID = ?
-      AND tm.BatchID = ?
+      AND (tm.BatchID = ? OR tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
       AND tm.TreeTag <=> cm.RawTreeTag
       AND tm.StemTag <=> cm.RawStemTag
       AND tm.SpeciesCode <=> cm.RawSpCode
@@ -370,18 +527,19 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
       AND tm.HOM <=> cm.MeasuredHOM
       AND tm.MeasurementDate <=> cm.MeasurementDate
       AND tm.Codes <=> cm.RawCodes
-      AND tm.Comments <=> cm.RawComments
-     WHERE cm.CensusID = ?
-       AND cm.StemGUID IS NULL
-       AND NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`
-  );
+      AND tm.Comments <=> cm.RawComments`;
 
-  const deleteResult = await connectionManager.executeQuery(
-    deleteSQL,
-    [fileID, batchID, censusID, fileID, batchID, buildSubBatchPattern(batchID)],
-    transactionID
+  const deletedRows = await deleteCoreMeasurementsInBoundedChunksWithAudit(
+    connectionManager,
+    schema,
+    `cm.CensusID = ? AND cm.StemGUID IS NULL AND NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`,
+    [fileID, batchID, buildSubBatchPattern(batchID), censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    changedBy,
+    plotID,
+    censusID,
+    transactionID,
+    crossFileFromSQL
   );
-  const deletedRows = toCount(deleteResult?.affectedRows);
 
   if (deletedRows > 0) {
     ailogger.warn(`Removed ${deletedRows} stale unresolved row(s) from prior cross-file uploads that matched ${fileID}-${batchID}`);
@@ -391,104 +549,199 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
 }
 
 /**
- * Splits a large batch into sub-batches of INGESTION_BATCH_SIZE by updating
- * the BatchID column on subsets of rows. Returns the list of sub-batch IDs
- * (or the original batchID if no split was needed).
+ * Fallback split for rows still staged under the original BatchID (legacy
+ * client, re-ingestion, or an orphaned remainder). Pre-partitioned staging never
+ * reaches it. It freezes its own upper bound, so rows staged after the bound
+ * read stay under the original BatchID for the next setup instead of joining
+ * a sub-batch this run already sized. Likewise a member first staged after the
+ * locked discovery stays staged and is ingested by the next setup of the
+ * family; staging completes before setup in both the worker and the browser.
  */
-async function splitIntoSubBatches(
+async function splitOriginalRowsIntoSubBatches(
   connectionManager: ConnectionManager,
   schema: string,
   fileID: string,
   originalBatchID: string,
-  totalRows: number,
+  expectedRows: number,
+  scope: { plotID: number; censusID: number },
   transactionID: string,
-  startOrdinal: number = 0
+  startOrdinal: number,
+  checkAbort: () => void,
+  onProgress: (assignedRows: number, completedBatches: number) => void
 ): Promise<string[]> {
   const batchSize = getIngestionBatchSize();
-  if (totalRows <= batchSize && startOrdinal === 0) {
-    return [originalBatchID];
-  }
-
-  const subBatchCount = Math.ceil(totalRows / batchSize);
-  const subBatchIDs: string[] = [];
-
-  ailogger.info(`Splitting ${totalRows} rows into ${subBatchCount} sub-batches of ~${batchSize} rows each for ${fileID}`);
-
-  for (let i = 0; i < subBatchCount; i++) {
-    // Continue past any sub-batch left by an interrupted prior attempt so a
-    // resumed split cannot reuse an ordinal that already holds rows.
-    const subBatchID = buildSubBatchID(originalBatchID, startOrdinal + i + 1);
-    // ORDER BY id pins sub-batch membership to staging order (= file order,
-    // since chunks insert sequentially). Without it the LIMIT takes rows in
-    // unspecified InnoDB scan order, and a crash-retry that re-stages and
-    // re-splits could partition rows differently than the dead attempt — the
-    // proc's idempotency skip would then silently delete never-ingested rows
-    // re-staged under an already-completed sub-batch ID.
-    // LIMIT cannot be parameterized in mysql2 prepared statements, so inline the constant
-    const updateSQL = safeFormatQuery(
-      schema,
-      `UPDATE ??.temporarymeasurements SET BatchID = ? WHERE FileID = ? AND BatchID = ? ORDER BY id LIMIT ${batchSize}`
+  const boundSQL = safeFormatQuery(
+    schema,
+    `SELECT /*+ INDEX(tm ${FAMILY_SCAN_INDEX}) */ COUNT(*) AS rowCount, CAST(MAX(tm.id) AS CHAR) AS upperID
+     FROM ??.temporarymeasurements tm
+     WHERE tm.FileID = ? AND tm.BatchID = ? AND tm.PlotID = ? AND tm.CensusID = ?`
+  );
+  const [bound] = (await connectionManager.executeQuery(boundSQL, [fileID, originalBatchID, scope.plotID, scope.censusID], transactionID)) as Array<{
+    rowCount: number | string;
+    upperID: string | null;
+  }>;
+  if (toCount(bound?.rowCount) !== expectedRows || !bound?.upperID) {
+    throw new SetupMembershipChangedError(
+      `Batch ${fileID}-${originalBatchID} changed during setup: discovered ${expectedRows} original row(s), found ${toCount(bound?.rowCount)}`
     );
-    const updateResult = await connectionManager.executeQuery(updateSQL, [subBatchID, fileID, originalBatchID], transactionID);
-    const affectedRows = toCount(updateResult?.affectedRows);
-
-    if (affectedRows === 0) break;
-
-    subBatchIDs.push(subBatchID);
-    ailogger.info(`Created sub-batch ${subBatchID} with ${affectedRows} rows (${i + 1}/${subBatchCount})`);
+  }
+  const subBatchCount = Math.ceil(expectedRows / batchSize);
+  if (startOrdinal + subBatchCount > MAX_SUB_BATCH_ORDINAL) {
+    const lastOriginalRowOrdinal = expectedRows - 1;
+    throw new SubBatchOrdinalOverflowError(originalBatchID, lastOriginalRowOrdinal, startOrdinal + subBatchCount);
   }
 
+  const selectSQL = buildFallbackSplitSelectSQL(schema, batchSize);
+  const updateSQL = safeFormatQuery(
+    schema,
+    `UPDATE ??.temporarymeasurements SET BatchID = ?
+     WHERE FileID = ? AND BatchID = ? AND PlotID = ? AND CensusID = ? AND id > CAST(? AS UNSIGNED) AND id <= CAST(? AS UNSIGNED)`
+  );
+  const subBatchIDs: string[] = [];
+  let cursor = '0';
+  let assigned = 0;
+  for (let index = 0; index < subBatchCount; index++) {
+    checkAbort();
+    const subBatchID = buildSubBatchID(originalBatchID, startOrdinal + index + 1);
+    const selected = (await connectionManager.executeQuery(
+      selectSQL,
+      [fileID, originalBatchID, scope.plotID, scope.censusID, cursor, bound.upperID],
+      transactionID
+    )) as Array<{ rowID: string }>;
+    if (selected.length === 0)
+      throw new SetupMembershipChangedError(`Fallback split selected no rows while ${expectedRows - assigned} remain for ${fileID}-${originalBatchID}`);
+    const lastID = String(selected[selected.length - 1].rowID);
+    const updateResult = await connectionManager.executeQuery(
+      updateSQL,
+      [subBatchID, fileID, originalBatchID, scope.plotID, scope.censusID, cursor, lastID],
+      transactionID
+    );
+    const affectedRows = toCount(updateResult?.affectedRows);
+    if (affectedRows !== selected.length)
+      throw new SetupMembershipChangedError(`Fallback split selected ${selected.length} rows but assigned ${affectedRows} for ${subBatchID}`);
+    subBatchIDs.push(subBatchID);
+    assigned += affectedRows;
+    cursor = lastID;
+    onProgress(assigned, index + 1);
+  }
+  if (assigned !== expectedRows)
+    throw new SetupMembershipChangedError(`Fallback split assigned ${assigned} of ${expectedRows} rows for ${fileID}-${originalBatchID}`);
   return subBatchIDs;
 }
 
 /**
  * Process a single sub-batch through bulkingestionprocess with retry logic.
  *
- * The procedure manages its own transaction (START TRANSACTION / COMMIT),
- * so we must NOT wrap it in withTransaction — that would create a nested
- * transaction which MySQL handles by implicitly committing the outer one,
- * corrupting the wrapper's state. Instead we call executeQuery directly
- * (no transactionID) and rely on the procedure's internal transaction.
+ * The CALL and its coremeasurements audit trail run inside ONE caller-owned
+ * transaction per attempt (#507/#527): beginTransaction, SET the
+ * @bulkingestion_caller_owns_transaction flag (via
+ * callBulkIngestionInCallerTransaction, which also clears it on every exit),
+ * run the procedure, audit the rows it just committed, then commit. A thrown
+ * error — including an audit-write failure — rolls the WHOLE attempt back
+ * (data and audit together) and falls through to this function's existing
+ * retry/backoff/kill classification, which is unchanged by this.
  */
+
+/**
+ * Moves one sub-batch's remaining temporarymeasurements rows to unresolved
+ * coremeasurements AND audits them in unifiedchangelog — bound to the SAME
+ * transaction (#507). Used by both fallback paths below: processSubBatch's
+ * give-up path (exhausted retries / a killed call) and ingestBatch's
+ * mid-batch-abort / unrecoverable-error cleanup. Both call this inside a
+ * transaction THEY own and commit/roll back themselves, exactly like the
+ * happy-path CALL+audit in processSubBatch above.
+ *
+ * Verifies the audit wrote exactly as many rows as the move reported moving:
+ * selecting "every row attached to this fileID/batchID" does not, on its
+ * own, prove it is exactly this attempt's rows unless the two counts agree
+ * (#507 — the same discipline deleteCoreMeasurementsInBoundedChunksWithAudit
+ * applies to Clean Re-Upload's deletes).
+ */
+async function moveSubBatchToFailedMeasurementsWithAudit(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileID: string,
+  subBatchID: string,
+  failureReason: string,
+  failureKind: SystemFailureKind,
+  transactionID: string,
+  changedBy: string | null,
+  plotID: number,
+  censusID: number
+): Promise<number> {
+  return moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, subBatchID, failureReason, failureKind, transactionID, {
+    changedBy,
+    plotID,
+    censusID
+  });
+}
+
 async function processSubBatch(
   connectionManager: ConnectionManager,
   schema: string,
-  procedureSQL: string,
   fileID: string,
   subBatchID: string,
+  plotID: number,
+  censusID: number,
+  changedBy: string | null,
   isAborted: () => boolean
 ): Promise<SubBatchResult> {
   let attempt = 0;
   let delay = INITIAL_RETRY_DELAY_MS;
   /** Set when the loop exits because the call was KILLed rather than because attempts ran out. */
   let killReason: string | null = null;
+  /** The most recent attempt's thrown error, so the loop can tell a persistent audit-infrastructure outage apart from a data/SQL failure once attempts run out. */
+  let lastError: unknown = null;
 
   while (attempt < MAX_ATTEMPTS_PER_SUBBATCH) {
     if (isAborted()) {
       throw new IngestBatchAbortedError(fileID, subBatchID, true);
     }
 
+    let transactionID: string | undefined;
     try {
       attempt++;
       const startTime = Date.now();
 
       ailogger.info(`Sub-batch ${subBatchID} attempt ${attempt}: calling bulkingestionprocess...`);
 
-      // Call procedure directly — it manages its own transaction internally.
-      // No outer transaction or application lock needed per sub-batch since
-      // sub-batches are processed sequentially and the procedure is self-contained.
-      const procedureResult = await connectionManager.executeQuery(procedureSQL, [fileID, subBatchID]);
+      transactionID = await connectionManager.beginTransaction();
+      const tx = transactionExecutorFor(connectionManager, transactionID);
+
+      // Snapshotted BEFORE the CALL: a self-heal that deletes stale residue
+      // and re-inserts can net to zero rows, but a count delta would miss
+      // every new row's INSERT audit and every removed row's DELETE audit —
+      // see auditCoreMeasurementsScopeDiff's doc comment.
+      const beforeCallSnapshot = await snapshotCoreMeasurementsScope(tx, schema, fileID, subBatchID);
+
+      const procedureResult = await callBulkIngestionInCallerTransaction<ProcedureCallResult>(tx, schema, fileID, subBatchID);
 
       ailogger.info(`Sub-batch ${subBatchID} attempt ${attempt}: procedure returned, parsing result...`, {
         resultType: typeof procedureResult,
         isArray: Array.isArray(procedureResult),
-        firstElementType: procedureResult?.[0] ? typeof procedureResult[0] : 'undefined',
-        firstElementIsArray: Array.isArray(procedureResult?.[0])
+        firstElementType: procedureResult[0] ? typeof procedureResult[0] : 'undefined',
+        firstElementIsArray: Array.isArray(procedureResult[0])
       });
 
       const row = extractProcedureRow(procedureResult);
 
       const batchFailedButHandled = row !== null && (toCount(row.records_failed) > 0 || toCount(row.batch_failed) === 1);
+
+      // Audits whatever changed since beforeCallSnapshot (new rows as
+      // INSERT, self-heal residue as DELETE, nothing on the no-op branch).
+      // Runs BEFORE commit so a failure here rolls this attempt's data back with it.
+      const auditDiff = await auditCoreMeasurementsScopeDiff({
+        tx,
+        schema,
+        fileID,
+        batchID: subBatchID,
+        before: beforeCallSnapshot,
+        changedBy,
+        plotID,
+        censusID
+      });
+
+      await connectionManager.commitTransaction(transactionID);
 
       const result: SubBatchResult = {
         subBatchID,
@@ -496,18 +749,31 @@ async function processSubBatch(
         durationMs: Date.now() - startTime,
         attemptsNeeded: attempt,
         batchFailedButHandled,
-        message: row?.message
+        message: toOptionalMessage(row?.message)
       };
 
       ailogger.info(`Sub-batch ${subBatchID} completed in ${result.durationMs}ms (attempt ${attempt})`, {
         batchFailedButHandled,
         message: row?.message,
         recordsFailed: row?.records_failed,
-        batchFailed: row?.batch_failed
+        batchFailed: row?.batch_failed,
+        auditedInsertCount: auditDiff.insertedCount,
+        auditedUpdateCount: auditDiff.updatedCount,
+        auditedDeleteCount: auditDiff.deletedCount
       });
       return result;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
+      lastError = e;
+      if (transactionID) {
+        try {
+          await connectionManager.rollbackTransaction(transactionID);
+        } catch (rollbackError: unknown) {
+          const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+          ailogger.error(`Rollback failed for sub-batch ${subBatchID} attempt ${attempt}: ${rollbackMessage}`);
+        }
+      }
+
       // Typed, not substring-matched. The DB layer's own timeout raises
       // QueryTimeoutError, whose message merely happens to contain "timed out";
       // matching on that text also swallowed unrelated errors and, worse, routed
@@ -515,9 +781,16 @@ async function processSubBatch(
       const isQueryTimeout = e instanceof QueryTimeoutError;
       const isInterrupted = isKilledStatementError(e);
       const isConnectionKilled = isKilledConnectionError(e) || e.code === PROTOCOL_CONNECTION_LOST_CODE;
-      const isConnectionError = e.code === 'ECONNRESET' || e.errno === MYSQL_ERRNO_TCP_LOST;
-      const isDeadlock = e.code === 'ER_LOCK_DEADLOCK' || e.errno === MYSQL_ERRNO_DEADLOCK;
+      // ChangelogWriteError wraps the audit statement's error as .cause, not
+      // .code/.errno — classify the cause so a transient infra condition
+      // underneath an audit failure still gets the SAME bounded backoff.
+      const classificationSource: any = e instanceof ChangelogWriteError ? e.cause : e;
+      const isConnectionError = classificationSource?.code === 'ECONNRESET' || classificationSource?.errno === MYSQL_ERRNO_TCP_LOST;
+      const isDeadlock = classificationSource?.code === 'ER_LOCK_DEADLOCK' || classificationSource?.errno === MYSQL_ERRNO_DEADLOCK;
       const isLockContention = e.message?.includes('Failed to acquire application lock') || e.message?.includes('Another upload is in progress');
+      // Any other audit/consistency failure is non-transient: the same CALL
+      // would fail identically on replay, so retrying wastes the budget (#507).
+      const isNonTransientAuditFailure = e instanceof ChangelogWriteError && !isConnectionError && !isDeadlock;
 
       // Every shape of "this procedure call was deliberately aborted": the DB
       // layer's timeout KILL (QueryTimeoutError), the ER_QUERY_INTERRUPTED that
@@ -537,6 +810,7 @@ async function processSubBatch(
         isConnectionError,
         isDeadlock,
         isLockContention,
+        isNonTransientAuditFailure,
         attempt,
         maxAttempts: MAX_ATTEMPTS_PER_SUBBATCH,
         fileID,
@@ -562,6 +836,10 @@ async function processSubBatch(
             : 'statement was KILLed';
         break;
       }
+      // Fail fast on a non-transient audit/consistency failure — see the
+      // post-loop handling below, which propagates the original error rather
+      // than moving staged rows to unresolved coremeasurements.
+      if (isNonTransientAuditFailure) break;
       if (isLockContention && attempt >= LOCK_GIVE_UP_AFTER_ATTEMPTS) break;
 
       if (isLockContention) {
@@ -578,6 +856,20 @@ async function processSubBatch(
     }
   }
 
+  // An audit/consistency failure is NOT a data error (#507): every attempt
+  // rolled the CALL's data back with its failed audit, so the staged rows
+  // are still good and recoverable. Propagate instead of moving them to
+  // unresolved coremeasurements, which would misreport a changelog outage as
+  // bad data.
+  if (!killReason && lastError instanceof ChangelogWriteError) {
+    ailogger.error(
+      `Sub-batch ${subBatchID} giving up after ${attempt} attempt(s): audit/consistency failure, not a data error — ` +
+        `propagating rather than moving staged rows to unresolved coremeasurements (#507)`,
+      lastError
+    );
+    throw lastError;
+  }
+
   // The loop ended for one of two very different reasons, and conflating them
   // has already cost a diagnosis once: a sub-batch abandoned after ONE killed
   // attempt was logged and recorded as "exhausted all 5 attempts".
@@ -586,14 +878,36 @@ async function processSubBatch(
     : `all ${MAX_ATTEMPTS_PER_SUBBATCH} attempts failed`;
 
   ailogger.error(`Sub-batch ${subBatchID} giving up: ${attemptSummary}`);
-  const movedRows = await moveTemporaryBatchToFailedMeasurements(
-    connectionManager,
-    schema,
-    fileID,
-    subBatchID,
-    `Sub-batch moved after ${attemptSummary}`,
-    'sql_exception'
-  );
+  const giveUpTransactionID = await connectionManager.beginTransaction();
+  let movedRows: number;
+  try {
+    movedRows = await moveSubBatchToFailedMeasurementsWithAudit(
+      connectionManager,
+      schema,
+      fileID,
+      subBatchID,
+      `Sub-batch moved after ${attemptSummary}`,
+      'sql_exception',
+      giveUpTransactionID,
+      changedBy,
+      plotID,
+      censusID
+    );
+    await connectionManager.commitTransaction(giveUpTransactionID);
+  } catch (giveUpError: unknown) {
+    try {
+      await connectionManager.rollbackTransaction(giveUpTransactionID);
+    } catch (rollbackError: unknown) {
+      const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+      ailogger.error(`Rollback failed while giving up on sub-batch ${subBatchID}: ${rollbackMessage}`);
+    }
+    // Never report batchFailedButHandled:true when the fallback write or its
+    // audit itself failed (#507): that would tell the caller this sub-batch
+    // resolved when nothing actually landed. Propagate so ingestBatch's own
+    // catch (below) retries the move/audit for this sub-batch rather than
+    // silently treating it as done.
+    throw giveUpError;
+  }
   ailogger.warn(`Moved ${movedRows} rows from sub-batch ${subBatchID} to unresolved coremeasurements (${attemptSummary})`);
 
   return {
@@ -609,91 +923,150 @@ async function processSubBatch(
 export async function ingestBatch(connectionManager: ConnectionManager, params: IngestBatchParams): Promise<IngestBatchResult> {
   const { schema, fileID, batchID } = params;
   const isAborted = params.isAborted ?? (() => false);
-  const procedureSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
-
-  // --- Phase 1: Setup (count rows, get plot/census, recovery, split) ---
-  const setupResult = await connectionManager.withTransaction(
-    async tx => {
-      const lockTimeoutMs = SETUP_PHASE_TIMEOUT_MS;
-
-      // Resolve the WHOLE family (original ID + any `__subNNN` left by an
-      // interrupted prior attempt). Looking up only the unsuffixed ID here is
-      // what let the Harvard incident report "No data found" over 106,227
-      // still-staged rows.
-      const family = await discoverBatchFamily((sql, sqlParams) => tx.query(sql, sqlParams), schema, fileID, batchID);
-
-      if (!family) {
-        return {
-          plotID: null as number | null,
-          censusID: null as number | null,
-          totalRows: 0,
-          subBatchIDs: [] as string[],
-          recovered: false,
-          resumedSubBatchCount: 0
-        };
+  const { plotID: expectedPlotID, censusID: expectedCensusID } = params.expectedScope ?? ({} as IngestBatchParams['expectedScope']);
+  if (!Number.isSafeInteger(expectedPlotID) || expectedPlotID <= 0 || !Number.isSafeInteger(expectedCensusID) || expectedCensusID <= 0) {
+    throw new TypeError('ingestBatch requires positive integer expectedScope plotID and censusID');
+  }
+  const setupStarted = process.hrtime.bigint();
+  let activeStep: SetupDiagnostic['step'] = 'discovery';
+  let lastDiagnostic: Partial<SetupDiagnostic> = {};
+  let terminalFrozen = false;
+  const emit = (
+    fields: Omit<SetupDiagnostic, 'step' | 'schema' | 'plotID' | 'censusID' | 'fileID' | 'batchID' | 'elapsedMs'> & { step?: SetupDiagnostic['step'] } = {}
+  ) => {
+    if (terminalFrozen || !params.onSetupProgress) return;
+    const diagnostic = Object.freeze({
+      ...lastDiagnostic,
+      schema,
+      plotID: expectedPlotID,
+      censusID: expectedCensusID,
+      fileID,
+      batchID,
+      elapsedMs: Number(process.hrtime.bigint() - setupStarted) / 1_000_000,
+      ...fields,
+      step: fields.step ?? activeStep
+    }) as Readonly<SetupDiagnostic>;
+    lastDiagnostic = diagnostic;
+    try {
+      const callbackResult: unknown = params.onSetupProgress(diagnostic);
+      if (
+        callbackResult &&
+        (typeof callbackResult === 'object' || typeof callbackResult === 'function') &&
+        typeof (callbackResult as { then?: unknown }).then === 'function'
+      ) {
+        void Promise.resolve(callbackResult).catch(() => {
+          /* optional telemetry cannot change ingestion */
+        });
       }
+    } catch {
+      /* optional telemetry cannot change ingestion */
+    }
+    if (fields.terminal) terminalFrozen = true;
+  };
+  // A deliberate loss, not a bug: ChangedBy is varchar(64) (see identity.ts).
+  const changedBy = params.changedBy ? params.changedBy.slice(0, CHANGED_BY_MAX_LENGTH) : null;
 
-      const currentPlotID = family.plotID;
-      const currentCensusID = family.censusID;
-      const totalRows = family.totalRows;
+  // --- Phase 1: Setup (lock, discover the family, recovery, cleanup, fallback split) ---
+  let setupResult: SetupResult | null;
+  try {
+    setupResult = await connectionManager.withTransaction<SetupResult | null>(
+      async tx => {
+        activeStep = 'lock_wait';
+        emit({ outcome: 'started' });
+        const lockKey = buildIngestionLockName(schema, fileID, expectedPlotID, expectedCensusID);
+        if (!(await connectionManager.acquireApplicationLock(lockKey, tx.id, SETUP_PHASE_TIMEOUT_MS))) {
+          throw new SetupLockUnavailableError(fileID);
+        }
 
-      // Acquire lock for setup phase
-      const lockKey = buildIngestionLockName(schema, fileID, currentPlotID, currentCensusID);
-      const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, tx.id, lockTimeoutMs);
-      if (!lockAcquired) {
-        throw new Error(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);
-      }
+        // One current-read discovery under the lock. Recovery and the unresolved-row
+        // cleanup below never delete this family's staged rows, so nothing re-reads it.
+        activeStep = 'discovery';
+        emit({ outcome: 'started' });
+        const family = await discoverBatchFamily((sql, sqlParams) => tx.query(sql, sqlParams), schema, fileID, batchID, { currentRead: true });
+        if (!family) return null;
+        assertExpectedScope(family, expectedPlotID, expectedCensusID, fileID, batchID);
+        const batchSize = getIngestionBatchSize();
+        assertMembersWithinBatchSize(family, fileID, batchID, batchSize);
+        emit({ outcome: 'completed', rowCount: family.totalRows });
 
-      // Recovery check (uses original batchID before any splitting)
-      const recovered = await recoverFailedInitialCensusIfNeeded(connectionManager, schema, fileID, batchID, currentPlotID, currentCensusID, tx.id);
-
-      // If the same census is re-uploaded under a new filename, remove any old
-      // unresolved ingestion rows that exactly match the currently staged rows.
-      await cleanupMatchedUnresolvedIngestionFailuresForBatch(connectionManager, schema, fileID, batchID, currentCensusID, tx.id);
-
-      // Resume orphans first, then split whatever is still under the original
-      // ID, numbering past the orphans so ordinals cannot collide.
-      const ids = [...family.orphanedSubBatchIDs];
-      if (family.orphanedSubBatchIDs.length > 0) {
-        ailogger.warn(
-          `Resuming ${family.orphanedSubBatchIDs.length} orphaned sub-batch(es) for ${fileID}-${batchID} ` +
-            `left by an interrupted prior attempt (${family.totalRows} row(s) total)`
+        activeStep = 'recovery';
+        emit({ outcome: 'started', rowCount: family.totalRows });
+        const recovered = await recoverFailedInitialCensusIfNeeded(
+          connectionManager,
+          schema,
+          fileID,
+          batchID,
+          expectedPlotID,
+          expectedCensusID,
+          changedBy,
+          tx.id
         );
-      }
-      if (family.originalRowCount > 0) {
-        ids.push(
-          ...(await splitIntoSubBatches(
+        emit({ outcome: 'completed', rowCount: family.totalRows });
+
+        activeStep = 'cleanup';
+        emit({ outcome: 'started', rowCount: family.totalRows });
+        await cleanupMatchedUnresolvedIngestionFailuresForBatch(connectionManager, schema, fileID, batchID, expectedPlotID, expectedCensusID, changedBy, tx.id);
+        emit({ outcome: 'completed', rowCount: family.totalRows });
+
+        // Completed members stay in the list: the procedure skips them and deletes
+        // their re-staged rows, which a TS-side skip would strand.
+        const subBatchIDs = [...family.orphanedSubBatchIDs];
+        const originalFitsAsIs = subBatchIDs.length === 0 && family.originalRowCount <= batchSize;
+        if (family.originalRowCount > 0 && originalFitsAsIs) {
+          subBatchIDs.push(batchID);
+        } else if (family.originalRowCount > 0) {
+          activeStep = 'splitting';
+          emit({ outcome: 'started', rowCount: family.originalRowCount, assignedRows: 0, completedBatches: 0 });
+          ailogger.warn(
+            `Setup fallback split for ${fileID}-${batchID}: ${family.originalRowCount} row(s) are staged under the original BatchID ` +
+              `(legacy client, re-ingestion, or an orphaned remainder); rewriting their BatchID costs about 0.2 ms per row on Azure`
+          );
+          const splitIDs = await splitOriginalRowsIntoSubBatches(
             connectionManager,
             schema,
             fileID,
             batchID,
             family.originalRowCount,
+            { plotID: expectedPlotID, censusID: expectedCensusID },
             tx.id,
-            highestSubBatchOrdinal(family.orphanedSubBatchIDs, batchID)
-          ))
+            highestSubBatchOrdinal(family.orphanedSubBatchIDs, batchID),
+            () => {
+              if (isAborted()) throw new IngestBatchAbortedError(fileID, batchID);
+            },
+            (assignedRows, completedBatches) => emit({ outcome: 'started', rowCount: family.originalRowCount, assignedRows, completedBatches })
+          );
+          subBatchIDs.push(...splitIDs);
+          emit({ outcome: 'completed', rowCount: family.originalRowCount, assignedRows: family.originalRowCount, completedBatches: splitIDs.length });
+        }
+        if (isAborted()) throw new IngestBatchAbortedError(fileID, batchID);
+
+        activeStep = 'commit';
+        emit({ outcome: 'started', rowCount: family.totalRows });
+        ailogger.info(
+          `Setup complete for ${fileID}: ${family.totalRows} rows → ${subBatchIDs.length} batch(es), plot=${expectedPlotID}, census=${expectedCensusID}`
         );
-      }
+        return {
+          totalRows: family.totalRows,
+          subBatchIDs,
+          recovered,
+          resumedSubBatchCount: family.orphanedSubBatchIDs.length
+        };
+      },
+      { timeoutMs: SETUP_PHASE_TIMEOUT_MS }
+    );
+    emit({ outcome: 'committed', rowCount: setupResult?.totalRows ?? 0, terminal: true });
+  } catch (error: unknown) {
+    const setupError = error instanceof TransactionCallbackTimeoutError ? new SetupCallbackTimeoutError(error) : error;
+    emit({ outcome: 'failed', errorCode: errorCodeOf(setupError), terminal: true });
+    throw setupError;
+  }
 
-      ailogger.info(`Setup complete for ${fileID}: ${totalRows} rows → ${ids.length} batch(es), plot=${currentPlotID}, census=${currentCensusID}`);
-
-      return {
-        plotID: currentPlotID,
-        censusID: currentCensusID,
-        totalRows,
-        subBatchIDs: ids,
-        recovered,
-        resumedSubBatchCount: family.orphanedSubBatchIDs.length
-      };
-    },
-    { timeoutMs: SETUP_PHASE_TIMEOUT_MS }
-  );
-
-  if (setupResult.plotID === null || setupResult.subBatchIDs.length === 0) {
+  if (setupResult === null) {
     ailogger.warn(`No temporary rows found for ${fileID}-${batchID}`);
     return {
       processedSubBatches: 0,
-      totalRows: setupResult.totalRows,
-      recovered: setupResult.recovered,
+      totalRows: 0,
+      recovered: false,
       noDataFound: true,
       totalDurationMs: 0,
       subBatchResults: [],
@@ -701,6 +1074,9 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
     };
   }
 
+  // Setup's discovery asserted the family matches the expected scope.
+  const plotID = expectedPlotID;
+  const censusID = expectedCensusID;
   const { totalRows, subBatchIDs, recovered, resumedSubBatchCount } = setupResult;
 
   // --- Phase 2: Process each sub-batch sequentially ---
@@ -718,10 +1094,24 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
     ailogger.info(`Processing sub-batch ${i + 1}/${subBatchIDs.length}: ${subBatchID}`);
 
     try {
-      const subResult = await processSubBatch(connectionManager, schema, procedureSQL, fileID, subBatchID, isAborted);
+      const subResult = await processSubBatch(connectionManager, schema, fileID, subBatchID, plotID, censusID, changedBy, isAborted);
       results.push(subResult);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (subError: any) {
+      // An audit/consistency failure propagated from processSubBatch (#507)
+      // already rolled its CALL's data back with the failed audit, so this
+      // and every later sub-batch's rows stay staged for recovery rather
+      // than being moved to unresolved coremeasurements. Earlier sub-batches
+      // that already committed (their own transactions) are unaffected.
+      if (subError instanceof ChangelogWriteError) {
+        ailogger.error(
+          `Audit-infrastructure failure on sub-batch ${subBatchID}; leaving it and every remaining sub-batch staged for recovery rather than ` +
+            `moving them to unresolved coremeasurements: ${subError.message}`,
+          subError
+        );
+        throw subError;
+      }
+
       // Mid-batch abort (isAborted fired inside the retry loop) or truly
       // unrecoverable error — move remaining sub-batches to failed.
       // A between-batches IngestBatchAbortedError (midBatch=false) never
@@ -739,19 +1129,26 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
 
       // Move all remaining sub-batches in a single transaction so cleanup
       // is atomic — either every remaining sub-batch is moved to failures
-      // or none are (no orphaned rows left in temporarymeasurements).
+      // (with its audit trail) or none are (no orphaned rows left in
+      // temporarymeasurements, and no partial audit for data that rolled
+      // back). Same bound move+audit helper processSubBatch's give-up path
+      // uses above (#507) — a mismatch between moved and audited rows must
+      // abort this transaction too, not commit a disagreeing audit trail.
       let cleanupTransactionID: string | undefined;
       try {
         cleanupTransactionID = await connectionManager.beginTransaction();
         for (let j = i; j < subBatchIDs.length; j++) {
-          const movedRows = await moveTemporaryBatchToFailedMeasurements(
+          const movedRows = await moveSubBatchToFailedMeasurementsWithAudit(
             connectionManager,
             schema,
             fileID,
             subBatchIDs[j],
             failureReason,
             failureKind,
-            cleanupTransactionID
+            cleanupTransactionID,
+            changedBy,
+            plotID,
+            censusID
           );
           results.push({
             subBatchID: subBatchIDs[j],
@@ -774,6 +1171,14 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
             ailogger.error(`Rollback of sub-batch cleanup also failed: ${rollbackError.message}`);
           }
         }
+        // Propagate: the rows this loop was supposed to move/audit are still
+        // stuck in temporarymeasurements (the rollback undid any partial
+        // move+audit), so silently swallowing this and returning a "handled"
+        // result would tell the caller the batch finished when the fallback
+        // write never actually landed (#507 — the same discipline
+        // processSubBatch's give-up path above applies to its own
+        // move+audit failure).
+        throw moveError;
       }
       break;
     }

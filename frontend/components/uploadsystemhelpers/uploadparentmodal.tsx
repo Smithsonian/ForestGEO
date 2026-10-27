@@ -18,20 +18,27 @@ interface UPMProps {
   onUploadComplete?: () => void;
 }
 
-function getRevisionMatchLabel(formType: FormType): string {
+const MEASUREMENTS_REVISION_DESCRIPTION =
+  'Updates measurements matched by the Stem ID column from a ForestGEO export (or, if the file has no Stem IDs, by Tree Tag + Stem Tag, case-insensitive) and adds any new rows from the file.';
+
+function describeKeyedRevision(matchLabel: string): string {
+  return `Updates existing records matched by ${matchLabel} (case-insensitive) and adds any new rows from the file.`;
+}
+
+function getRevisionModeDescription(formType: FormType): string {
   switch (formType) {
     case FormType.attributes:
-      return 'Code';
+      return describeKeyedRevision('Code');
     case FormType.species:
-      return 'SpeciesCode';
+      return describeKeyedRevision('SpeciesCode');
     case FormType.personnel:
-      return 'FirstName + LastName';
+      return describeKeyedRevision('FirstName + LastName');
     case FormType.quadrats:
-      return 'QuadratName';
+      return describeKeyedRevision('QuadratName');
     case FormType.measurements:
-      return 'StemGUID or TreeTag + StemTag';
+      return MEASUREMENTS_REVISION_DESCRIPTION;
     default:
-      return 'matching key';
+      return describeKeyedRevision('matching key');
   }
 }
 
@@ -40,7 +47,7 @@ export default function UploadParentModal(props: UPMProps) {
   const isArcgisMode = sourceFormat === SourceFormat.arcgis_xlsx;
   const overrideUploadForm = isArcgisMode ? FormType.measurements : formType;
   const requiresModeSelection = !skipToProcessing;
-  const revisionMatchLabel = getRevisionMatchLabel(formType);
+  const revisionModeDescription = getRevisionModeDescription(formType);
   const referenceGridType = getDataGridForForm(overrideUploadForm);
   const [uploadMode, setUploadMode] = useState<UploadMode | undefined>(requiresModeSelection ? undefined : UploadMode.CLEAN_REUPLOAD);
 
@@ -130,6 +137,29 @@ export default function UploadParentModal(props: UPMProps) {
               <Typography level="body-sm">
                 {isArcgisMode ? 'ArcGIS workbooks are imported as a clean re-upload.' : `Select how this ${formType} CSV should be applied.`}
               </Typography>
+              {/* Revisions is listed first (issue #504): it's the non-destructive,
+                  recommended path -- Clean Re-Upload is reinforced instead by the
+                  type-to-confirm dialog UploadParent shows before it runs. */}
+              {!isArcgisMode && (
+                <Card variant="outlined">
+                  <CardContent>
+                    <Stack spacing={1}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography level="title-md">{UploadModeLabels[UploadMode.REVISIONS]}</Typography>
+                        <Chip color="success" size="sm">
+                          Recommended
+                        </Chip>
+                      </Box>
+                      <Typography level="body-sm">{revisionModeDescription}</Typography>
+                    </Stack>
+                  </CardContent>
+                  <CardActions sx={{ justifyContent: 'flex-start' }}>
+                    <Button variant="outlined" onClick={() => setUploadMode(UploadMode.REVISIONS)}>
+                      Use Revisions Upload
+                    </Button>
+                  </CardActions>
+                </Card>
+              )}
               <Card variant="outlined">
                 <CardContent>
                   <Stack spacing={1}>
@@ -152,28 +182,6 @@ export default function UploadParentModal(props: UPMProps) {
                   </Button>
                 </CardActions>
               </Card>
-              {!isArcgisMode && (
-                <Card variant="outlined">
-                  <CardContent>
-                    <Stack spacing={1}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography level="title-md">{UploadModeLabels[UploadMode.REVISIONS]}</Typography>
-                        <Chip color="success" size="sm">
-                          Recommended
-                        </Chip>
-                      </Box>
-                      <Typography level="body-sm">
-                        Updates existing records matched by {revisionMatchLabel} (case-insensitive) and adds any new rows from the file.
-                      </Typography>
-                    </Stack>
-                  </CardContent>
-                  <CardActions sx={{ justifyContent: 'flex-start' }}>
-                    <Button variant="outlined" onClick={() => setUploadMode(UploadMode.REVISIONS)}>
-                      Use Revisions Upload
-                    </Button>
-                  </CardActions>
-                </Card>
-              )}
             </Stack>
           )}
         </ModalDialog>
