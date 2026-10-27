@@ -23,6 +23,8 @@ const humanizeProcedureName = (name: string) => name.split(/(?<=[a-z])(?=[A-Z])|
 // Avoid coupling the suite to Joy's generated/root class names.
 const VALIDATION_TOGGLE_INPUT = '[aria-label$="validation"] input[type="checkbox"]';
 
+const VALIDATIONS_TABLE_HEADERS = ['Enabled?', 'Validation', 'Description', 'Affecting Criteria', 'Query details', 'Actions'];
+
 describe('Validations Management Interface', () => {
   // Test data
   const testSite = {
@@ -97,13 +99,8 @@ WHERE cm.IsValidated IS NULL
       // Verify page loaded
       cy.url().should('include', '/validations');
 
-      // Verify table headers are present
-      cy.contains('Enabled?').should('be.visible');
-      cy.contains('Validation').should('be.visible');
-      cy.contains('Description').should('be.visible');
-      cy.contains('Affecting Criteria').should('be.visible');
-      cy.contains('Query').should('be.visible');
-      cy.contains('Actions').should('be.visible');
+      // Scoped to header cells: an unscoped 'Validation' matches the sidebar's Validations nav link first.
+      VALIDATIONS_TABLE_HEADERS.forEach(header => cy.contains('thead th', header).should('be.visible'));
 
       cy.log('✅ Validations page loaded successfully');
     });
