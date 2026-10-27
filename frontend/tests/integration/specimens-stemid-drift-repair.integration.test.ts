@@ -148,6 +148,10 @@ const LEGACY_ERROR_CATALOG_COLLATION = 'utf8mb3_general_ci';
 
 const MEASUREMENT_DATE = '2024-03-15';
 const QUADRAT = 'Q01';
+const STEM_TAG = '1';
+const MEASUREMENT_COORDINATE = 5;
+const MEASUREMENT_DBH = 10;
+const MEASUREMENT_HOM = 1.3;
 const SPECIES = { KNOWN: 'ACERRU', CORRECTED: 'QUERCO', UNKNOWN: 'NOSUCHSP' } as const;
 const TAG = { SENTINEL: 'SENTINEL', GOOD: 'DRIFT-GOOD', UNKNOWN_SPECIES: 'DRIFT-BADSP' } as const;
 const FILE = { SENTINEL: 'sentinel.csv', INCIDENT: 'incident.csv', REPAIRED: 'repaired.csv', REPLACEMENT: 'replacement.csv' } as const;
@@ -172,7 +176,17 @@ const MPALA_DRIFT_STATEMENTS = [
 type MeasurementRow = Parameters<typeof insertTestMeasurements>[2][number];
 
 function measurementRow(treeTag: string, speciesCode: string): MeasurementRow {
-  return { treeTag, stemTag: '1', speciesCode, quadratName: QUADRAT, x: 5, y: 5, dbh: 10, hom: 1.3, date: MEASUREMENT_DATE };
+  return {
+    treeTag,
+    stemTag: STEM_TAG,
+    speciesCode,
+    quadratName: QUADRAT,
+    x: MEASUREMENT_COORDINATE,
+    y: MEASUREMENT_COORDINATE,
+    dbh: MEASUREMENT_DBH,
+    hom: MEASUREMENT_HOM,
+    date: MEASUREMENT_DATE
+  };
 }
 
 const INCIDENT_ROWS: MeasurementRow[] = [measurementRow(TAG.GOOD, SPECIES.KNOWN), measurementRow(TAG.UNKNOWN_SPECIES, SPECIES.UNKNOWN)];
