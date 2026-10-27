@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   fetch: vi.fn(),
   stage: vi.fn(),
+  replace: vi.fn(),
   countStaged: vi.fn(),
   ingest: vi.fn(),
   collapse: vi.fn(),
@@ -72,7 +73,11 @@ vi.mock('@/config/uploadsessiontracker', () => ({
     FAILED: 'failed'
   }
 }));
-vi.mock('@/lib/uploads/stage-measurements', () => ({ stageMeasurementChunk: mocks.stage, countStagedRows: mocks.countStaged }));
+vi.mock('@/lib/uploads/stage-measurements', () => ({
+  stageMeasurementChunk: mocks.stage,
+  replaceCensusForCleanReupload: mocks.replace,
+  countStagedRows: mocks.countStaged
+}));
 vi.mock('@/lib/uploads/ingest-batch', () => ({
   ingestBatch: mocks.ingest,
   IngestBatchAbortedError: class extends Error {},
@@ -133,6 +138,7 @@ beforeEach(() => {
     return [];
   });
   mocks.assignBatch.mockResolvedValue('batch-8');
+  mocks.replace.mockResolvedValue({ outcome: 'not_applicable', deletedRows: 0, windowCount: 0 });
   mocks.stage.mockResolvedValue({ insertedCount: 1, expectedCount: 1, droppedCount: 0, invalidRows: [] });
   mocks.countStaged.mockResolvedValue(1);
   mocks.ingest.mockImplementation(async (_cm: unknown, params: { onSetupProgress: (d: typeof diagnostic) => void }) => {

@@ -50,7 +50,13 @@ import { setupFailureSummary } from '@/lib/uploads/setup-failure';
 import { deleteUnresolvedRowsForBatchFamily, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { isBlankMeasurementRow, isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
-import { countStagedRows, MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
+import {
+  countStagedRows,
+  MeasurementChunkResolutionError,
+  replaceCensusForCleanReupload,
+  stageMeasurementChunk,
+  type CensusReplacementParams
+} from '@/lib/uploads/stage-measurements';
 import { runCensusValidations } from '@/lib/uploads/validation-orchestrator';
 import { NonRetryableJobError, WorkerLeaseLostError } from './errors';
 import {
@@ -819,6 +825,14 @@ async function setProgress(ctx: WorkerRunContext, phase: UploadJobPhase, percent
 // Measurements CSV pipeline
 // ---------------------------------------------------------------------------
 
+/** A header-plan misalignment is deterministic: every retry would fail identically, so it must not burn the retry budget. */
+function failFastOnDeterministicChunkError(error: unknown, fileName: string): unknown {
+  if (error instanceof MeasurementChunkResolutionError) {
+    return new NonRetryableJobError(`Header resolution failed for ${fileName}: ${error.message}`, { cause: error });
+  }
+  return error;
+}
+
 async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
   const { job, connectionManager } = ctx;
   const schema = job.schemaName;
@@ -871,7 +885,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
     await updateBackgroundJobFileExpectedRows(ctx.catalogPool, job.jobID, ctx.workerID, file.jobFileID, rawRows.length);
 
     // Issue #504: a header-only/blank CSV must never reach the chunk/staging loop —
-    // for CLEAN_REUPLOAD, staging even one chunk triggers cleanupPreviousFileUploads'
+    // for CLEAN_REUPLOAD, the first chunk triggers replaceCensusForCleanReupload's
     // census-wide DELETE before any row count check, which previously let a blank file
     // silently wipe a census while the job still reported success.
     if (isEffectivelyEmptyMeasurementInput(rawRows)) {
@@ -908,36 +922,42 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
 
       const chunk = rawRows.slice(chunkIndex * chunkRows, (chunkIndex + 1) * chunkRows);
 
-      // The worker owns one transaction per chunk: begin/commit per chunk,
+      const chunkParams: CensusReplacementParams = {
+        schema,
+        fileName: file.fileName,
+        batchID,
+        plotID: job.plotID,
+        censusID: job.censusID,
+        uploadMode,
+        sourceFormat: SourceFormat.csv,
+        rawRows: chunk,
+        csvHeaders,
+        delimiter,
+        storedMapping: columnMappings[file.fileName],
+        uploadSessionID: ctx.sessionID,
+        firstRowOrdinal: chunkIndex * chunkRows,
+        changedBy: job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
+        // Census replacement may only run while staging the job's FIRST
+        // file — later files would wipe earlier files' completed batches.
+        suppressCensusReplacementCleanup: fileIndex > 0,
+        // Every chunk of this file shares `batchID` (#507) — chunkIndex is
+        // this chunk's own stable identity for the file_upload changelog
+        // running totals, so a worker retry of this exact chunk replaces
+        // its prior contribution instead of a second, different chunk
+        // overwriting it.
+        chunkIdentity: `${batchID}:chunk${chunkIndex}`
+      };
+      try {
+        await replaceCensusForCleanReupload(connectionManager, chunkParams);
+      } catch (error) {
+        throw failFastOnDeterministicChunkError(error, file.fileName);
+      }
+
+      // The worker owns one staging transaction per chunk: begin/commit per chunk,
       // rollback + rethrow on error (the whole attempt then retries the file).
       const transactionID = await connectionManager.beginTransaction();
       try {
-        const result = await stageMeasurementChunk(connectionManager, {
-          schema,
-          fileName: file.fileName,
-          batchID,
-          plotID: job.plotID,
-          censusID: job.censusID,
-          uploadMode,
-          sourceFormat: SourceFormat.csv,
-          rawRows: chunk,
-          csvHeaders,
-          delimiter,
-          storedMapping: columnMappings[file.fileName],
-          uploadSessionID: ctx.sessionID,
-          transactionID,
-          firstRowOrdinal: chunkIndex * chunkRows,
-          changedBy: job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
-          // Census replacement may only run while staging the job's FIRST
-          // file — later files would wipe earlier files' completed batches.
-          suppressCensusReplacementCleanup: fileIndex > 0,
-          // Every chunk of this file shares `batchID` (#507) — chunkIndex is
-          // this chunk's own stable identity for the file_upload changelog
-          // running totals, so a worker retry of this exact chunk replaces
-          // its prior contribution instead of a second, different chunk
-          // overwriting it.
-          chunkIdentity: `${batchID}:chunk${chunkIndex}`
-        });
+        const result = await stageMeasurementChunk(connectionManager, { ...chunkParams, transactionID });
         await connectionManager.commitTransaction(transactionID);
 
         fileInsertedRows += result.insertedCount;
@@ -954,13 +974,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
               `${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
           );
         }
-        if (error instanceof MeasurementChunkResolutionError) {
-          // A header-plan misalignment is deterministic — every retry would
-          // re-parse the same file and fail identically. Fail fast instead of
-          // burning the retry budget.
-          throw new NonRetryableJobError(`Header resolution failed for ${file.fileName}: ${error.message}`, { cause: error });
-        }
-        throw error;
+        throw failFastOnDeterministicChunkError(error, file.fileName);
       }
       // Percent/processedRows update every chunk; the EVENT row is sampled.
       const emitChunkEvent = (chunkIndex + 1) % CHUNK_EVENT_SAMPLE_RATE === 0;
