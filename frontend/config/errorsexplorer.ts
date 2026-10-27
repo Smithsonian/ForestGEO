@@ -107,6 +107,8 @@ export interface ErrorExplorerFacetsResponse {
     duplicateTagStem: number;
     sameBatchConflict: number;
   };
+  /** Distinct measurements in scope after the facet filters; sourceCounts can overlap. */
+  totalMeasurements: number;
 }
 
 export interface RelatedContradictionRow {
@@ -143,6 +145,34 @@ export const DEFAULT_ERROR_EXPLORER_FILTERS: ErrorExplorerFilters = {
   quickSearch: '',
   presetId: 'all_errors'
 };
+
+export const ERRORS_PAGE_PATH = '/measurementshub/errors';
+export const ERRORS_EXPLORER_MESSAGE_PARAM = 'message';
+export const ERRORS_EXPLORER_VIEW_PARAM = 'view';
+export const ERRORS_EXPLORER_VIEW_ALL = 'all';
+
+export function buildErrorsExplorerMessageHref(message: string): string {
+  return `${ERRORS_PAGE_PATH}?${new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: message }).toString()}`;
+}
+
+export const ERRORS_EXPLORER_VIEW_ALL_HREF = `${ERRORS_PAGE_PATH}?${new URLSearchParams({ [ERRORS_EXPLORER_VIEW_PARAM]: ERRORS_EXPLORER_VIEW_ALL }).toString()}`;
+
+/**
+ * Filters a View Errors deep link asks for, or null for a plain visit (which
+ * restores the saved filters). `message` wins over `view=all`. A message link
+ * clears presetId, as picking a message by hand does, so no preset chip claims
+ * to be active. `searchParams` is null outside the app router.
+ */
+export function resolveErrorsExplorerDeepLinkFilters(searchParams: Pick<URLSearchParams, 'get'> | null): ErrorExplorerFilters | null {
+  const message = searchParams?.get(ERRORS_EXPLORER_MESSAGE_PARAM);
+  if (message && message.trim().length > 0) {
+    return { ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages: [message], presetId: undefined };
+  }
+  if (searchParams?.get(ERRORS_EXPLORER_VIEW_PARAM) === ERRORS_EXPLORER_VIEW_ALL) {
+    return { ...DEFAULT_ERROR_EXPLORER_FILTERS };
+  }
+  return null;
+}
 
 export const ERROR_EXPLORER_PRESETS = [
   {

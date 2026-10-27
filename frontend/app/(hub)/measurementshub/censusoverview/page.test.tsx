@@ -46,9 +46,6 @@ vi.mock('@/app/contexts/loadingprovider', () => ({
   useLoading: () => ({ setLoading: vi.fn() })
 }));
 // Child widgets carry their own hooks/fetches; stub them so the page renders in isolation.
-vi.mock('@/components/dashboard/censusstatsview', () => ({
-  default: () => <div data-testid="census-stats-view" />
-}));
 vi.mock('@/components/dashboard/dataqualitycard', () => ({
   default: () => <div data-testid="data-quality-card" />
 }));

@@ -35,6 +35,22 @@ export const exportableMeasurementBaseWhere = `cm.CensusID = ?
         AND t.IsActive     = 1`;
 
 /**
+ * The inner-join graph every exportable measurement must satisfy. Five of these
+ * links (stems.TreeID, stems.QuadratID, trees.SpeciesID, species.GenusID,
+ * genus.FamilyID) are nullable, so a validated row can still fall out here.
+ * Every joined table is keyed on its join column, so the graph yields at most
+ * one row per measurement.
+ */
+const exportableMeasurementJoinGraph = `FROM ??.coremeasurements cm
+       JOIN ??.stems   s   ON s.StemGUID  = cm.StemGUID
+       JOIN ??.trees   t   ON t.TreeID    = s.TreeID
+       JOIN ??.quadrats q  ON q.QuadratID = s.QuadratID
+       JOIN ??.species  sp ON sp.SpeciesID = t.SpeciesID
+       JOIN ??.genus    gn ON gn.GenusID  = sp.GenusID
+       JOIN ??.family   fam ON fam.FamilyID = gn.FamilyID
+       JOIN ??.census   c  ON c.CensusID  = cm.CensusID`;
+
+/**
  * Build a complete SELECT against the full join graph for exportable
  * measurements. The caller supplies the columns it wants between
  * `SELECT cm.CoreMeasurementID,` and the trailing `FROM`.
@@ -44,13 +60,21 @@ export const exportableMeasurementBaseWhere = `cm.CensusID = ?
  */
 export function exportableMeasurementSelect(extraColumns: string): string {
   return `SELECT cm.CoreMeasurementID,${extraColumns}
-       FROM ??.coremeasurements cm
-       JOIN ??.stems   s   ON s.StemGUID  = cm.StemGUID
-       JOIN ??.trees   t   ON t.TreeID    = s.TreeID
-       JOIN ??.quadrats q  ON q.QuadratID = s.QuadratID
-       JOIN ??.species  sp ON sp.SpeciesID = t.SpeciesID
-       JOIN ??.genus    gn ON gn.GenusID  = sp.GenusID
-       JOIN ??.family   fam ON fam.FamilyID = gn.FamilyID
-       JOIN ??.census   c  ON c.CensusID  = cm.CensusID
+       ${exportableMeasurementJoinGraph}
+      WHERE ${exportableMeasurementBaseWhere}`;
+}
+
+/**
+ * `SELECT cm.CoreMeasurementID` for every exportable measurement, for the gate's
+ * check-8 count, the export-preview skip anti-join and the exported-with-unresolved-error
+ * count. selectMeasurements uses exportableMeasurementSelect instead; both are built
+ * from exportableMeasurementJoinGraph and exportableMeasurementBaseWhere, so a change
+ * to what counts as exportable belongs in those two shared constants. Same `??` and
+ * `[censusId, plotId]` contract as exportableMeasurementSelect.
+ * Used as a subquery, its aliases shadow the outer query's, so it never correlates.
+ */
+export function exportableMeasurementIdSelect(): string {
+  return `SELECT cm.CoreMeasurementID
+       ${exportableMeasurementJoinGraph}
       WHERE ${exportableMeasurementBaseWhere}`;
 }

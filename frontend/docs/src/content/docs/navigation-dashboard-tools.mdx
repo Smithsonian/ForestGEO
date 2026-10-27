@@ -91,7 +91,7 @@ This section contains interfaces for working with measurement data and census an
 
 | Page                         | Description                                                 |
 | ---------------------------- | ----------------------------------------------------------- |
-| **Census Overview**          | Summary of the selected census, where you delete it or start a new one |
+| **Census Overview**          | Summary of the selected census: tree and stem counts, quadrat coverage, errors and an export preview. Publish or delete the census from here |
 | **View Data**                              | View and edit measurements for the current census; failed rows appear inline with successful rows |
 | **View Errors**              | Every row with a validation error, with the consolidated reason and the original CSV codes |
 | **Post-Census Statistics**   | Run statistical analyses on your census data                |
@@ -99,6 +99,35 @@ This section contains interfaces for working with measurement data and census an
 | **Uploaded Files**           | History of files uploaded to the system with download links |
 | **View All Historical Data** | Browse measurements across all censuses                     |
 | **Validations**              | Configure and manage data validation rules                  |
+
+#### The Census Overview page
+
+The header shows the census number, plot, site and date range, along with the **Publish census**,
+**Rebuild ViewFullTable** and **Delete Census** buttons. Only the latest census can be deleted.
+Below the header, the page has these sections, from top to bottom:
+
+- **Trees & Stems** - how many trees and stems were measured, and the average number of stems per
+  tree. Three counts follow. Hover over a label to see its definition:
+  - **Previously measured stems** - stems whose tree tag and stem tag were both in the previous
+    census. The dashboard calls this count **Old Trees**.
+  - **New-recruit stems** - stems on trees the previous census didn't have.
+  - **Multi-stem trees** - trees with more than one stem.
+
+  These three are separate counts and don't add up to the stem total. On a first census there is
+  nothing to compare against, so **Previously measured stems** shows a dash and every stem counts
+  as a new recruit.
+- **Quadrat Coverage** - how many quadrats have measurements, and which ones still need them.
+- **Errors & Export Preview** - the facts you need before publishing:
+  - If anything would stop a publish, a red callout at the top names each problem, how many rows
+    it affects and how to fix it.
+  - How many active measurements have unresolved errors, and the five most common error types.
+    Click an error type to open **View Errors** filtered to it, or **View all errors** to see
+    every one.
+  - **Export preview** - how many rows a publish would send to the Smithsonian database and how
+    many it would skip, with the reasons for skipping. One row can be skipped for more than one
+    reason. If any exported rows still have an unresolved error, the preview says how many.
+- **Data Quality** - results of the post-census statistics queries, with a button to run them again.
+- **Census Tools** - shortcuts to the other Census Hub pages.
 
 ### Administration (global role)
 
@@ -149,9 +178,15 @@ Key statistics about your census data:
 
 | Metric           | Description                                          |
 | ---------------- | ---------------------------------------------------- |
-| **Old Trees**    | Trees carried over from a previous census and remeasured this one |
+| **Old Trees**    | Stems (not trees) whose tree tag and stem tag were both in the previous census |
 | **Multi-Stems**  | Trees with more than one stem                        |
-| **New Recruits** | Stems being measured for the first time              |
+| **New Recruits** | Stems on trees the previous census didn't have       |
+
+:::note
+Despite its name, **Old Trees** counts stems. On the Census Overview page the same number is
+labelled **Previously measured stems**. On a first census it shows a dash, because there is no
+previous census to compare against.
+:::
 
 ### Data Validity Status
 
