@@ -8,6 +8,14 @@ import { AdapterMoment } from '@mui/x-date-pickers/AdapterMoment';
 import IsolatedFailedMeasurementsDataGrid from './isolatedfailedmeasurementsdatagrid';
 import { NO_CHANGES_SAVED_MESSAGE } from '@/components/datagrids/isolateddatagridcommons';
 
+// Each test in the retry group runs the full preview/save cycle twice (a rejected or
+// cancelled attempt, then the retry). Under coverage on a CI runner that is ~11.5 s,
+// too close to the 15 s default for a slower-than-usual runner.
+const TWO_SAVE_CYCLE_TEST_TIMEOUT_MS = 30000;
+// enterSpeciesAndOpenSave waits for the species suggestion list, which renders after a
+// debounced fetch; Testing Library's 1 s default ran out on the slow 2026-10-14 nightly runner.
+const SPECIES_SUGGESTION_WAIT_MS = 5000;
+
 const mocks = vi.hoisted(() => {
   // The commons grid reads this flag at module evaluation time. Keeping all columns
   // mounted makes the real MUI editing assertions deterministic under jsdom.
@@ -257,7 +265,7 @@ async function enterSpeciesAndOpenSave({ selectSuggestion = true }: { selectSugg
   await user.clear(speciesInput);
   await user.type(speciesInput, 'DEMO26');
   if (selectSuggestion) {
-    await waitFor(() => expect(screen.getByRole('option', { name: 'DEMO26' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('option', { name: 'DEMO26' })).toBeInTheDocument(), { timeout: SPECIES_SUGGESTION_WAIT_MS });
     await user.click(screen.getByRole('option', { name: 'DEMO26' }));
   } else {
     // Exercise the freeSolo typed-input path: MUI commits the typed value when
@@ -427,68 +435,80 @@ describe('failed measurement correction with the real MUI grid', () => {
     expect(screen.getByText('Row successfully updated!')).toBeInTheDocument();
   });
 
-  it('keeps the edit retryable after preview rejection without applying or reporting success', async () => {
-    renderGrid({ preview: [response({ message: 'preview rejected' }, false, 422), response(makePreview())] });
-    await waitFor(() => expect(getDataRow()).toBeInTheDocument());
+  it(
+    'keeps the edit retryable after preview rejection without applying or reporting success',
+    async () => {
+      renderGrid({ preview: [response({ message: 'preview rejected' }, false, 422), response(makePreview())] });
+      await waitFor(() => expect(getDataRow()).toBeInTheDocument());
 
-    const initialUser = await enterSpeciesAndOpenSave();
-    await waitFor(() => expect(screen.getByText(/Error:.*preview rejected/i)).toBeInTheDocument());
-    expect(fetchCalls().some(([url]) => String(url).includes('/api/edits/apply'))).toBe(false);
-    expect(screen.queryByText('Row successfully updated!')).not.toBeInTheDocument();
-    await initialUser.click(within(getDataRow()).getByRole('menuitem', { name: /Cancel your changes/i }));
-    await waitFor(() => expect(within(getDataRow()).getByRole('menuitem', { name: /Edit this row/i })).toBeInTheDocument());
-    const retryUser = await enterSpeciesAndOpenSave();
-    await retryUser.click(screen.getByTestId('edit-preview-apply'));
-    await waitFor(() => expect(screen.getByText('Row successfully updated!')).toBeInTheDocument());
-    expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/preview'))).toHaveLength(2);
-    expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/apply'))).toHaveLength(1);
-  });
+      const initialUser = await enterSpeciesAndOpenSave();
+      await waitFor(() => expect(screen.getByText(/Error:.*preview rejected/i)).toBeInTheDocument());
+      expect(fetchCalls().some(([url]) => String(url).includes('/api/edits/apply'))).toBe(false);
+      expect(screen.queryByText('Row successfully updated!')).not.toBeInTheDocument();
+      await initialUser.click(within(getDataRow()).getByRole('menuitem', { name: /Cancel your changes/i }));
+      await waitFor(() => expect(within(getDataRow()).getByRole('menuitem', { name: /Edit this row/i })).toBeInTheDocument());
+      const retryUser = await enterSpeciesAndOpenSave();
+      await retryUser.click(screen.getByTestId('edit-preview-apply'));
+      await waitFor(() => expect(screen.getByText('Row successfully updated!')).toBeInTheDocument());
+      expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/preview'))).toHaveLength(2);
+      expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/apply'))).toHaveLength(1);
+    },
+    TWO_SAVE_CYCLE_TEST_TIMEOUT_MS
+  );
 
-  it('does not apply after cancellation and can retry the same correction once', async () => {
-    renderGrid();
-    await waitFor(() => expect(getDataRow()).toBeInTheDocument());
-    const user = await enterSpeciesAndOpenSave();
-    await user.click(screen.getByTestId('edit-preview-cancel'));
-    expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/apply'))).toHaveLength(0);
-    expect(screen.queryByText('Row successfully updated!')).not.toBeInTheDocument();
+  it(
+    'does not apply after cancellation and can retry the same correction once',
+    async () => {
+      renderGrid();
+      await waitFor(() => expect(getDataRow()).toBeInTheDocument());
+      const user = await enterSpeciesAndOpenSave();
+      await user.click(screen.getByTestId('edit-preview-cancel'));
+      expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/apply'))).toHaveLength(0);
+      expect(screen.queryByText('Row successfully updated!')).not.toBeInTheDocument();
 
-    // The rejected preview leaves the row in edit mode. Cancel that local MUI
-    // edit, then prove the same failed row can be edited and saved again.
-    await user.click(within(getDataRow()).getByRole('menuitem', { name: /Cancel your changes/i }));
-    await waitFor(() => expect(within(getDataRow()).getByRole('menuitem', { name: /Edit this row/i })).toBeInTheDocument());
-    const retryUser = await enterSpeciesAndOpenSave();
-    await retryUser.click(screen.getByTestId('edit-preview-apply'));
-    await waitFor(() => expect(screen.getByText('Row successfully updated!')).toBeInTheDocument());
-    expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/apply'))).toHaveLength(1);
-  });
+      // The rejected preview leaves the row in edit mode. Cancel that local MUI
+      // edit, then prove the same failed row can be edited and saved again.
+      await user.click(within(getDataRow()).getByRole('menuitem', { name: /Cancel your changes/i }));
+      await waitFor(() => expect(within(getDataRow()).getByRole('menuitem', { name: /Edit this row/i })).toBeInTheDocument());
+      const retryUser = await enterSpeciesAndOpenSave();
+      await retryUser.click(screen.getByTestId('edit-preview-apply'));
+      await waitFor(() => expect(screen.getByText('Row successfully updated!')).toBeInTheDocument());
+      expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/apply'))).toHaveLength(1);
+    },
+    TWO_SAVE_CYCLE_TEST_TIMEOUT_MS
+  );
 
-  it('does not report success when apply rejects and allows a subsequent retry', async () => {
-    const applyFailure = response({ message: 'apply rejected' }, false, 503);
-    renderGrid({
-      apply: [
-        applyFailure,
-        response({
-          updatedIDs: { failedmeasurements: originalRow.failedMeasurementID },
-          applyErrors: [],
-          editOperationID: 48002,
-          validationPending: false
-        })
-      ]
-    });
-    await waitFor(() => expect(getDataRow()).toBeInTheDocument());
-    const user = await enterSpeciesAndOpenSave();
+  it(
+    'does not report success when apply rejects and allows a subsequent retry',
+    async () => {
+      const applyFailure = response({ message: 'apply rejected' }, false, 503);
+      renderGrid({
+        apply: [
+          applyFailure,
+          response({
+            updatedIDs: { failedmeasurements: originalRow.failedMeasurementID },
+            applyErrors: [],
+            editOperationID: 48002,
+            validationPending: false
+          })
+        ]
+      });
+      await waitFor(() => expect(getDataRow()).toBeInTheDocument());
+      const user = await enterSpeciesAndOpenSave();
 
-    await user.click(screen.getByTestId('edit-preview-apply'));
-    await waitFor(() => expect(screen.getByText(/Error:.*apply rejected/i)).toBeInTheDocument());
-    expect(screen.queryByText('Row successfully updated!')).not.toBeInTheDocument();
-    expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/apply'))).toHaveLength(1);
-    await user.click(within(getDataRow()).getByRole('menuitem', { name: /Cancel your changes/i }));
-    await waitFor(() => expect(within(getDataRow()).getByRole('menuitem', { name: /Edit this row/i })).toBeInTheDocument());
-    const retryUser = await enterSpeciesAndOpenSave();
-    await retryUser.click(screen.getByTestId('edit-preview-apply'));
-    await waitFor(() => expect(screen.getByText('Row successfully updated!')).toBeInTheDocument());
-    expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/apply'))).toHaveLength(2);
-  });
+      await user.click(screen.getByTestId('edit-preview-apply'));
+      await waitFor(() => expect(screen.getByText(/Error:.*apply rejected/i)).toBeInTheDocument());
+      expect(screen.queryByText('Row successfully updated!')).not.toBeInTheDocument();
+      expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/apply'))).toHaveLength(1);
+      await user.click(within(getDataRow()).getByRole('menuitem', { name: /Cancel your changes/i }));
+      await waitFor(() => expect(within(getDataRow()).getByRole('menuitem', { name: /Edit this row/i })).toBeInTheDocument());
+      const retryUser = await enterSpeciesAndOpenSave();
+      await retryUser.click(screen.getByTestId('edit-preview-apply'));
+      await waitFor(() => expect(screen.getByText('Row successfully updated!')).toBeInTheDocument());
+      expect(fetchCalls().filter(([url]) => String(url).includes('/api/edits/apply'))).toHaveLength(2);
+    },
+    TWO_SAVE_CYCLE_TEST_TIMEOUT_MS
+  );
 
   it('removes a fully corrected failed row after successful reingestion', async () => {
     renderGrid({ removeOnReingest: true });
