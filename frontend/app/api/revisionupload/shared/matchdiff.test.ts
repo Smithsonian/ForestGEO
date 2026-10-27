@@ -31,6 +31,33 @@ function makeDbRow(overrides: Partial<ExistingMeasurementRow> = {}): ExistingMea
   };
 }
 
+// mysql2 runs with timezone 'Z', so a stored DATE arrives as a Date at UTC midnight.
+// Reading it with local getters shifts it to the previous day in every zone west of
+// UTC, which is how a local PDT run saw a phantom `date` change on an unchanged row.
+// Run this file under TZ=America/Los_Angeles to exercise that zone.
+const STORED_MEASUREMENT_DAY = '2026-04-01';
+const STORED_MEASUREMENT_DATE_FROM_DRIVER = new Date(`${STORED_MEASUREMENT_DAY}T00:00:00.000Z`);
+
+describe('computeDiff measurement date', () => {
+  it(`reports no change when the CSV repeats the stored date (process TZ=${process.env.TZ ?? 'unset'})`, () => {
+    const dbRow = makeDbRow({ MeasurementDate: STORED_MEASUREMENT_DATE_FROM_DRIVER });
+    const csvRow = { date: STORED_MEASUREMENT_DAY } as unknown as FileRow;
+
+    const changes = computeDiff(csvRow, dbRow);
+
+    expect(changes, `unexpected changes: ${JSON.stringify(changes)}`).toEqual({});
+  });
+
+  it('reports the stored calendar day as `from` when the CSV moves the date', () => {
+    const dbRow = makeDbRow({ MeasurementDate: STORED_MEASUREMENT_DATE_FROM_DRIVER });
+    const csvRow = { date: '2026-04-02' } as unknown as FileRow;
+
+    const changes = computeDiff(csvRow, dbRow);
+
+    expect(changes.date).toEqual({ from: STORED_MEASUREMENT_DAY, to: '2026-04-02' });
+  });
+});
+
 describe('computeDiff plot coordinates', () => {
   it('flags a px/py change against the stored plot coordinates', () => {
     const dbRow = makeDbRow({ StemPlotX: 100.123456, StemPlotY: 200.5 });
