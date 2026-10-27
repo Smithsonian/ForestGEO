@@ -59,7 +59,8 @@ const CENSUS_BEING_CREATED = {
   plotCensusNumber: 4,
   censusIDs: [0],
   dateRanges: [{ censusID: 0, startDate: new Date('2027-01-01'), endDate: undefined }],
-  description: 'Census 4'
+  description: 'Census 4',
+  isActive: true
 };
 const GROUPED_CENSUS = {
   plotID: 1,
