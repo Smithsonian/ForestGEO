@@ -1,7 +1,18 @@
 'use client';
 
 import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DataGridProps, GridActionsCellItem, gridClasses, GridColDef, GridRowId, GridRowsProp, GridValidRowModel, useGridApiRef } from '@mui/x-data-grid';
+import {
+  DataGridProps,
+  GridActionsCellItem,
+  GridCellModes,
+  GridCellModesModel,
+  gridClasses,
+  GridColDef,
+  GridRowId,
+  GridRowsProp,
+  GridValidRowModel,
+  useGridApiRef
+} from '@mui/x-data-grid';
 import { Alert, Box, Button, Stack, Typography } from '@mui/joy';
 import SaveIcon from '@mui/icons-material/Save';
 import RestoreIcon from '@mui/icons-material/Restore';
@@ -36,6 +47,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
   const [hasUnsavedRows, setHasUnsavedRows] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formMessage, setFormMessage] = useState('');
+  const [cellModesModel, setCellModesModel] = useState<GridCellModesModel>({});
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -108,7 +120,10 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     return newRow;
   }, []);
 
-  const discardChanges = useCallback(() => {
+  const discardChanges = useCallback(async () => {
+    // MUI applies the blur-triggered processRowUpdate result in a microtask.
+    // Let that commit finish before removing rows so it cannot reinsert them.
+    await Promise.resolve();
     setHasUnsavedRows(false);
     const newRowIds = new Set(
       Object.values(unsavedChangesRef.current.unsavedRows)
@@ -117,7 +132,9 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     );
     setRows(previousRows => previousRows.filter(row => !newRowIds.has(row.id)));
     Object.values(unsavedChangesRef.current.rowsBeforeChange).forEach(row => {
-      apiRef.current?.updateRows([row]);
+      // Blurring a new row records a snapshot too; restoring it would reinsert
+      // the row we just discarded.
+      if (!newRowIds.has(row.id)) apiRef.current?.updateRows([row]);
     });
     unsavedChangesRef.current = {
       unsavedRows: {},
@@ -136,7 +153,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       const savedRows = filteredRows.map(row => {
         const updatedRow = rowsToSave.find(editedRow => editedRow.id === row.id);
         const nextRow = updatedRow ? { ...row, ...updatedRow } : row;
-        return { ...nextRow, _error: !validateRow(nextRow, gridType) };
+        return { ...nextRow, isNew: false, _error: !validateRow(nextRow, gridType) };
       });
       setRows(savedRows);
 
@@ -189,11 +206,13 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
         apiRef.current?.scrollToIndexes({ rowIndex, colIndex: firstEditableField ? 1 : 0 });
         if (firstEditableField) {
           apiRef.current?.setCellFocus(newId, firstEditableField);
-          apiRef.current?.startCellEditMode({ id: newId, field: firstEditableField });
         }
       });
       return [...prevRows, newRow];
     });
+    if (firstEditableField) {
+      setCellModesModel(previousModel => ({ ...previousModel, [newId]: { [firstEditableField]: { mode: GridCellModes.Edit } } }));
+    }
     setFormMessage('New row added. Enter data in the highlighted first cell, then use Save before finalizing.');
   }, [apiRef, gridColumns, initialRow]);
 
@@ -324,6 +343,8 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
           apiRef={apiRef}
           disableRowSelectionOnClick
           processRowUpdate={processRowUpdate}
+          cellModesModel={cellModesModel}
+          onCellModesModelChange={setCellModesModel}
           ignoreValueFormatterDuringExport
           initialState={{
             columns: {
