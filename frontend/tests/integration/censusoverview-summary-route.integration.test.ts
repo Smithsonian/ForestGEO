@@ -15,6 +15,8 @@ import mysql, { type Connection } from 'mysql2/promise';
 import { createTestDatabase, DEFAULT_TEST_CONFIG, loadSchema, teardownTestDatabase } from '../setup/local-db-setup';
 import { loadAppDbSeed } from '../fixtures/ctfs-export/load-app-db-seed';
 import { HTTPResponses } from '@/config/macros';
+import { buildErrorExplorerFacets } from '@/app/api/errors/explorer/_shared';
+import { DEFAULT_ERROR_EXPLORER_FILTERS } from '@/config/errorsexplorer';
 import { CENSUS_OVERVIEW_ERROR_CENSUS_IDS_PARAM, TOP_ERROR_TYPE_LIMIT, type CensusOverviewSummary } from '@/config/censusoverview';
 import { CENSUS_OVERVIEW_SUMMARY_REQUEST_ERRORS } from '@/lib/censusoverview/summaryrequest';
 
@@ -59,6 +61,16 @@ const CENSUS_A_MESSAGE_TYPES = ERROR_TYPE_COUNT + 1;
 const CENSUS_B_ACTIVE_ROWS = 2;
 const CENSUS_B_AFFECTED_ROWS = 1;
 const CENSUS_B_ERROR_RANK = 1;
+
+const ONE_RAW_ERRORS_QUERY_PER_CENSUS = 1;
+const DUPLICATE_TREE_TAG = 'DUPLICATE-TAG';
+const DUPLICATE_STEM_TAG = '1';
+const SAME_BATCH_TREE_TAG = 'SAME-BATCH-TAG';
+const SAME_BATCH_FILE_ID = 'contradiction-file';
+const SAME_BATCH_ID = 'contradiction-batch';
+const DUPLICATE_TAG_ROW_IDS = [CENSUS_A_ERROR_ROW_FIRST_ID, CENSUS_A_ERROR_ROW_FIRST_ID + 1];
+const SAME_BATCH_ROW_IDS = [CENSUS_A_ERROR_ROW_FIRST_ID + 2, CENSUS_A_ERROR_ROW_FIRST_ID + 3];
+const SAME_BATCH_SPECIES_CODES = ['AAA', 'BBB'];
 
 const errorMessage = (rank: number) => `Overview test error ${rank}`;
 const censusAErrorRows = (rank: number) => ERROR_TYPE_COUNT - rank + 1;
@@ -346,6 +358,7 @@ describe('GET /api/censusoverview/summary (#547)', () => {
     expect(countQueryEvents.every(isSnapshotQueryEvent), 'only snapshot queries run inside the transaction').toBe(true);
     expect(events[rollbackIndex + 1], 'the connection is released right after the rollback').toBe(SNAPSHOT_RELEASE_EVENT);
     expect(events.indexOf(FACETS_QUERY_EVENT), 'facets run outside the snapshot').toBeGreaterThan(rollbackIndex);
+    expect(shared.executeQueryCalls, 'one raw-errors query for the one census, and no contradiction queries').toBe(ONE_RAW_ERRORS_QUERY_PER_CENSUS);
   });
 
   it('serves an in-scope field-crew member, who has no export permission, the same publish-scope summary', async () => {
@@ -363,6 +376,62 @@ describe('GET /api/censusoverview/summary (#547)', () => {
       expect(summary.blockers).toEqual(EXPECTED_BLOCKERS);
     } finally {
       vi.mocked(auth).mockResolvedValue(GLOBAL_SESSION as any);
+    }
+  });
+
+  it('reports the same error counts as the Errors page when duplicate-tag and same-batch contradictions exist', async () => {
+    await setupConnection.query('UPDATE measurementssummary SET TreeTag = ?, StemTag = ? WHERE CoreMeasurementID IN (?)', [
+      DUPLICATE_TREE_TAG,
+      DUPLICATE_STEM_TAG,
+      DUPLICATE_TAG_ROW_IDS
+    ]);
+    await setupConnection.query('UPDATE coremeasurements SET UploadFileID = ?, UploadBatchID = ? WHERE CoreMeasurementID IN (?)', [
+      SAME_BATCH_FILE_ID,
+      SAME_BATCH_ID,
+      SAME_BATCH_ROW_IDS
+    ]);
+    for (const [index, measurementID] of SAME_BATCH_ROW_IDS.entries()) {
+      await setupConnection.query('UPDATE measurementssummary SET TreeTag = ?, SpeciesCode = ? WHERE CoreMeasurementID = ?', [
+        SAME_BATCH_TREE_TAG,
+        SAME_BATCH_SPECIES_CODES[index],
+        measurementID
+      ]);
+    }
+    try {
+      shared.executeQueryCalls = 0;
+      const response = await callSummaryRoute(String(PLOT_ID), String(CENSUS_A), String(CENSUS_A));
+      const summary = (await response.json()) as CensusOverviewSummary;
+      const overviewQueryCount = shared.executeQueryCalls;
+
+      const { default: ConnectionManager } = await import('@/lib/db/connectionmanager');
+      const errorsPageFacets = await buildErrorExplorerFacets(ConnectionManager.getInstance(), {
+        schema: DB_NAME,
+        plotID: PLOT_ID,
+        censusID: CENSUS_A,
+        censusIDs: [CENSUS_A],
+        filters: DEFAULT_ERROR_EXPLORER_FILTERS
+      });
+      console.log('[#547 contradictions] overview', JSON.stringify(summary.errorOverview));
+      console.log(
+        '[#547 contradictions] errors page',
+        JSON.stringify({ total: errorsPageFacets.totalMeasurements, contradictions: errorsPageFacets.contradictionCounts })
+      );
+
+      expect(errorsPageFacets.contradictionCounts.duplicateTagStem, 'the Errors page must see the duplicate-tag contradiction').toBe(
+        DUPLICATE_TAG_ROW_IDS.length
+      );
+      expect(errorsPageFacets.contradictionCounts.sameBatchConflict, 'the Errors page must see the same-batch contradiction').toBe(SAME_BATCH_ROW_IDS.length);
+      expect(response.status).toBe(HTTPResponses.OK);
+      expect(summary.errorOverview.affectedMeasurements).toBe(errorsPageFacets.totalMeasurements);
+      expect(summary.errorOverview.topErrorTypes).toEqual(
+        errorsPageFacets.messages.slice(0, TOP_ERROR_TYPE_LIMIT).map(({ value, count }) => ({ message: value, count }))
+      );
+      expect(overviewQueryCount, 'the overview skips the contradiction queries the Errors page runs').toBe(ONE_RAW_ERRORS_QUERY_PER_CENSUS);
+    } finally {
+      await setupConnection.query('UPDATE measurementssummary SET TreeTag = NULL, StemTag = NULL, SpeciesCode = NULL WHERE CoreMeasurementID IN (?)', [
+        [...DUPLICATE_TAG_ROW_IDS, ...SAME_BATCH_ROW_IDS]
+      ]);
+      await setupConnection.query('UPDATE coremeasurements SET UploadFileID = NULL, UploadBatchID = NULL WHERE CoreMeasurementID IN (?)', [SAME_BATCH_ROW_IDS]);
     }
   });
 

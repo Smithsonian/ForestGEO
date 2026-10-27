@@ -5,7 +5,6 @@ import { getConn } from '@/lib/db/primitives';
 import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { HTTPResponses } from '@/config/macros';
-import { DEFAULT_ERROR_EXPLORER_FILTERS, type ErrorExplorerFacetsResponse } from '@/config/errorsexplorer';
 import { CENSUS_OVERVIEW_ERROR_CENSUS_IDS_PARAM, TOP_ERROR_TYPE_LIMIT, type CensusOverviewSummary, type ExportSkipReasonCount } from '@/config/censusoverview';
 import {
   countExportedRowsWithUnresolvedErrors,
@@ -15,7 +14,7 @@ import {
   type PublishBlockerCount
 } from '@/lib/ctfs-export';
 import { parseCensusOverviewSummaryRequest, type CensusOverviewSummaryRequest } from '@/lib/censusoverview/summaryrequest';
-import { buildErrorExplorerFacets } from '@/app/api/errors/explorer/_shared';
+import { buildErrorMessageCounts, type ErrorMessageCounts } from '@/app/api/errors/explorer/_shared';
 import ailogger from '@/ailogger';
 
 // mysql2 and the facets builder need the Node.js runtime.
@@ -100,13 +99,13 @@ async function readPublishScopeSnapshot({ schema, plotID, censusID, errorCensusI
   }
 }
 
-function toCensusOverviewSummary(snapshot: PublishScopeSnapshot, facets: ErrorExplorerFacetsResponse): CensusOverviewSummary {
+function toCensusOverviewSummary(snapshot: PublishScopeSnapshot, errorMessageCounts: ErrorMessageCounts): CensusOverviewSummary {
   return {
     errorOverview: {
-      affectedMeasurements: facets.totalMeasurements,
+      affectedMeasurements: errorMessageCounts.totalMeasurements,
       totalActiveMeasurements: snapshot.errorsScopeActiveMeasurements,
-      topErrorTypes: facets.messages.slice(0, TOP_ERROR_TYPE_LIMIT).map(option => ({ message: option.value, count: option.count })),
-      remainingErrorTypeCount: Math.max(facets.messages.length - TOP_ERROR_TYPE_LIMIT, 0)
+      topErrorTypes: errorMessageCounts.messages.slice(0, TOP_ERROR_TYPE_LIMIT).map(option => ({ message: option.value, count: option.count })),
+      remainingErrorTypeCount: Math.max(errorMessageCounts.messages.length - TOP_ERROR_TYPE_LIMIT, 0)
     },
     exportPreview: {
       totalActiveMeasurements: snapshot.totalActiveCount,
@@ -148,14 +147,12 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
   // through ConnectionManager, exactly as the Errors page does (spec Known risks).
   const connectionManager = ConnectionManager.getInstance();
   try {
-    const facets = await buildErrorExplorerFacets(connectionManager, {
+    const errorMessageCounts = await buildErrorMessageCounts(connectionManager, {
       schema: summaryRequest.schema,
       plotID: summaryRequest.plotID,
-      censusID: summaryRequest.censusID,
-      censusIDs: summaryRequest.errorCensusIDs,
-      filters: DEFAULT_ERROR_EXPLORER_FILTERS
+      censusIDs: summaryRequest.errorCensusIDs
     });
-    return NextResponse.json(toCensusOverviewSummary(snapshot, facets), { status: HTTPResponses.OK });
+    return NextResponse.json(toCensusOverviewSummary(snapshot, errorMessageCounts), { status: HTTPResponses.OK });
   } catch (error: unknown) {
     ailogger.error('Census overview error overview failed', toError(error), logContext);
     return NextResponse.json({ error: SUMMARY_FAILED_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
