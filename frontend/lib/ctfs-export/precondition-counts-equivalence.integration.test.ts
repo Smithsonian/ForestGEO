@@ -28,15 +28,15 @@ import { loadAppDbSeed } from '../../tests/fixtures/ctfs-export/load-app-db-seed
 import type { ExportSkipReasonCount, ExportSkipReasonKind } from '@/config/censusoverview';
 import {
   checkFinishedCensus,
-  countPublishBlockers,
   isBlockingPreconditionKind,
+  PRECONDITION_ROW_CHECKS,
   type BlockingKindClassifier,
   type BlockingPreconditionKind,
   type PreconditionFailureKind,
   type PreconditionInput,
   type PublishBlockerCount
 } from './precondition';
-import { countExportedRowsWithUnresolvedErrors, countExportSkipReasons } from './export-preview';
+import { countExportedRowsWithUnresolvedErrors, countPublishPreconditions } from './export-preview';
 
 // ---------------------------------------------------------------------------
 // Function under test
@@ -54,11 +54,7 @@ type CountPublishPreconditionsUnderTest = (
   isBlocking: BlockingKindClassifier
 ) => Promise<PublishPreconditionCountsUnderTest>;
 
-// Baseline adapter: today's two functions merged into the single-pass shape.
-const countPublishPreconditionsUnderTest: CountPublishPreconditionsUnderTest = async (conn, input, isBlocking) => ({
-  ...(await countPublishBlockers(conn, input, isBlocking)),
-  skipReasons: await countExportSkipReasons(conn, input)
-});
+const countPublishPreconditionsUnderTest: CountPublishPreconditionsUnderTest = countPublishPreconditions;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1272,6 +1268,14 @@ describe('publish-precondition counts equal the model, the gate and each other (
     if (!LOCAL_HOSTS.includes(DEFAULT_TEST_CONFIG.host)) {
       throw new Error(`REFUSING TO RUN: TEST_DB_HOST is '${DEFAULT_TEST_CONFIG.host}', not local. Aborting to avoid writing to a real database.`);
     }
+  });
+
+  it('models every row check PRECONDITION_ROW_CHECKS declares, in declaration order', () => {
+    const declaredKinds = PRECONDITION_ROW_CHECKS.map(check => check.kind);
+    console.log(`${LOG_PREFIX} declared kinds`, JSON.stringify(declaredKinds), 'modelled kinds', JSON.stringify(MODELLED_ROW_KINDS));
+    expect(declaredKinds, 'a declared check without a model (or a model without a check) makes this test vacuous for that kind').toEqual([
+      ...MODELLED_ROW_KINDS
+    ]);
   });
 
   it('gives each witness row the verdict the spec documents', () => {

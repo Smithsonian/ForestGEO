@@ -6,13 +6,7 @@ import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { HTTPResponses } from '@/config/macros';
 import { CENSUS_OVERVIEW_ERROR_CENSUS_IDS_PARAM, TOP_ERROR_TYPE_LIMIT, type CensusOverviewSummary, type ExportSkipReasonCount } from '@/config/censusoverview';
-import {
-  countExportedRowsWithUnresolvedErrors,
-  countExportSkipReasons,
-  countPublishBlockers,
-  isBlockingPreconditionKind,
-  type PublishBlockerCount
-} from '@/lib/ctfs-export';
+import { countExportedRowsWithUnresolvedErrors, countPublishPreconditions, isBlockingPreconditionKind, type PublishBlockerCount } from '@/lib/ctfs-export';
 import { parseCensusOverviewSummaryRequest, type CensusOverviewSummaryRequest } from '@/lib/censusoverview/summaryrequest';
 import { buildErrorMessageCounts, type ErrorMessageCounts } from '@/app/api/errors/explorer/_shared';
 import ailogger from '@/ailogger';
@@ -64,8 +58,7 @@ async function readPublishScopeSnapshot({ schema, plotID, censusID, errorCensusI
     if (errorCensusIDs.some(id => !activeCensusIDs.has(id))) return null;
 
     const publishInput = { schema, plotId: plotID, censusId: censusID };
-    const { blockers, count, totalActiveCount } = await countPublishBlockers(conn, publishInput, isBlockingPreconditionKind);
-    const skipReasons = await countExportSkipReasons(conn, publishInput);
+    const { blockers, count, totalActiveCount, skipReasons } = await countPublishPreconditions(conn, publishInput, isBlockingPreconditionKind);
     const exportedWithUnresolvedErrorCount = await countExportedRowsWithUnresolvedErrors(conn, publishInput);
     const [activeRows] = await conn.query<RowDataPacket[]>(
       safeFormatQuery(

@@ -7,7 +7,6 @@
 
 export {
   checkFinishedCensus,
-  countPublishBlockers,
   exportableShortfallKind,
   partitionPreconditionFailures,
   isBlockingPreconditionKind,
@@ -18,11 +17,10 @@ export {
   type PreconditionResult,
   type PreconditionFailure,
   type PreconditionFailureKind,
-  type PublishBlockerCount,
-  type PublishBlockerCounts
+  type PublishBlockerCount
 } from './precondition';
 export { selectMeasurements, type SelectResult, type SelectInput } from './select-measurements';
-export { countExportSkipReasons, countExportedRowsWithUnresolvedErrors } from './export-preview';
+export { countPublishPreconditions, countExportedRowsWithUnresolvedErrors, type PublishPreconditionCounts } from './export-preview';
 export { renderArtifact, renderRebuildViewFullTableArtifact, type RenderArtifactInput, type RenderArtifactResult } from './render-procedure';
 export { buildProcedureName, buildLockName, deterministicSuffix } from './identifier-safety';
 export { exportableMeasurementBaseWhere, exportableMeasurementSelect } from './exportable-measurement';
