@@ -318,7 +318,7 @@ ON DUPLICATE KEY UPDATE CoreMeasurementID = VALUES(CoreMeasurementID),
                         Code              = VALUES(Code);
 
 -- Insert into specimens with ON DUPLICATE KEY UPDATE
-INSERT INTO specimens (SpecimenID, StemGUID, PersonnelID, SpecimenNumber, SpeciesID, Herbarium, Voucher, CollectionDate,
+INSERT INTO specimens (SpecimenID, StemID, PersonnelID, SpecimenNumber, SpeciesID, Herbarium, Voucher, CollectionDate,
                        DeterminedBy, Description)
 SELECT sp.SpecimenID,
        st.StemGUID,
@@ -333,7 +333,7 @@ SELECT sp.SpecimenID,
 FROM stable_bci.specimen sp
          LEFT JOIN stable_bci.stem st ON st.TreeID = sp.TreeID
          LEFT JOIN stable_bci.personnel pr ON sp.Collector = CONCAT(pr.FirstName, ' ', pr.LastName)
-ON DUPLICATE KEY UPDATE StemGUID         = VALUES(StemGUID),
+ON DUPLICATE KEY UPDATE StemID           = VALUES(StemID),
                         PersonnelID    = VALUES(PersonnelID),
                         SpecimenNumber = VALUES(SpecimenNumber),
                         SpeciesID      = VALUES(SpeciesID),

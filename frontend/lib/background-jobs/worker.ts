@@ -270,7 +270,7 @@ function parseRejectIndexOffset(rejectCount: number): number {
   return -(rejectCount + 1);
 }
 
-function getChunkRows(): number {
+export function getChunkRows(): number {
   const raw = process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
   if (raw === undefined || raw === '') return DEFAULT_CHUNK_ROWS;
   const parsed = Number(raw);
