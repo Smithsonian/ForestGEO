@@ -138,7 +138,8 @@ class ConnectionManager {
       pendingLockAcquisitions: Map<string, Promise<boolean>>;
     }
   >();
-  private readonly DEFAULT_TX_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+  private static readonly DEFAULT_TX_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+  public static readonly DEFAULT_STALE_TRANSACTION_THRESHOLD_MS = ConnectionManager.DEFAULT_TX_TIMEOUT_MS * 2;
   private readonly MAX_CONCURRENT_TRANSACTIONS = 12; // Reduced to prevent overwhelming connection pool
   // Removed in-memory applicationLocks Map - now using MySQL GET_LOCK/RELEASE_LOCK for distributed locking
   private readonly LOCK_TIMEOUT_MS = 2 * 60 * 1000; // Reduced from 5 to 2 minutes for application locks
@@ -505,7 +506,7 @@ class ConnectionManager {
    * surface as an unhandled rejection.
    */
   public async withTransaction<T>(fn: (tx: TxExecutor) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
-    const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
+    const timeoutMs = opts?.timeoutMs ?? ConnectionManager.DEFAULT_TX_TIMEOUT_MS;
 
     // Slot reservation is owned entirely by beginTransaction now: each attempt
     // reserves its own slot and, on failure, releases it before throwing. So
@@ -675,7 +676,7 @@ class ConnectionManager {
   }
 
   public async cleanupStaleTransactions(maxAgeMs?: number): Promise<void> {
-    const threshold = maxAgeMs ?? this.DEFAULT_TX_TIMEOUT_MS * 2; // e.g., twice default
+    const threshold = maxAgeMs ?? ConnectionManager.DEFAULT_STALE_TRANSACTION_THRESHOLD_MS;
     const now = Date.now();
     const staleTransactions: string[] = [];
 

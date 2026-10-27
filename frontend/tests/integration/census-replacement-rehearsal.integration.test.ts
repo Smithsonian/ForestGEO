@@ -37,6 +37,7 @@ import {
   type TestData,
   type TestDatabaseConfig
 } from '../setup/local-db-setup';
+import { getChunkRows } from '@/lib/background-jobs/worker';
 import { stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { CENSUS_REPLACEMENT_MARKER_COLUMN, resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
@@ -88,14 +89,12 @@ const rehearsalProfile = resolveRehearsalProfile(process.env[REHEARSAL_ENV_FLAG]
 // Budget, fixture vocabulary, timeouts
 // ---------------------------------------------------------------------------
 
-/** ConnectionManager.cleanupStaleTransactions default: 2 x DEFAULT_TX_TIMEOUT_MS (lib/db/connectionmanager.ts ~678). */
-const STALE_TRANSACTION_REAPER_THRESHOLD_MS = 240_000;
+const STALE_TRANSACTION_REAPER_THRESHOLD_MS = ConnectionManager.DEFAULT_STALE_TRANSACTION_THRESHOLD_MS;
 /** Judgement margin for Azure (slower I/O, ~340 network round trips); not a measured ratio. */
 const AZURE_SAFETY_FACTOR = 4;
 const LOCAL_FIRST_CHUNK_BUDGET_MS = STALE_TRANSACTION_REAPER_THRESHOLD_MS / AZURE_SAFETY_FACTOR;
 
-/** lib/background-jobs/worker.ts DEFAULT_CHUNK_ROWS. */
-const WORKER_FIRST_CHUNK_ROWS = 5_000;
+const WORKER_FIRST_CHUNK_ROWS = getChunkRows();
 const FIRST_CHUNK_INDEX = 0;
 const FIRST_CHUNK_ROW_ORDINAL = 0;
 
