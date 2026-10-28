@@ -1207,6 +1207,40 @@ describe('ConnectionManager transaction lifecycle record (#563 §1, §4)', () =>
     expect(outcome).toBeInstanceOf(RangeError);
     expect(beginSpy, 'a programming error is not a transient connection problem').toHaveBeenCalledTimes(1);
   });
+
+  it('a BEGIN that deadlocks, then cannot get a connection, releases the first connection exactly once', async () => {
+    const { manager, internals } = await loadLifecycleManager();
+    const deadlockedConnection = makeLifecycleConnection();
+    const poolExhaustedMessage = 'pool exhausted (non-deadlock)';
+    const deadlock = Object.assign(new Error('Deadlock found when trying to get lock; try restarting transaction'), { code: 'ER_LOCK_DEADLOCK', errno: 1213 });
+    const isIsolationStatement = (sql: unknown) => String(sql).startsWith('SET SESSION TRANSACTION ISOLATION');
+    deadlockedConnection.query.mockImplementation(async (sql: string) => {
+      if (isIsolationStatement(sql)) throw deadlock;
+      return [[]];
+    });
+    getConnMock.mockResolvedValueOnce(deadlockedConnection).mockRejectedValueOnce(new Error(poolExhaustedMessage));
+    runQueryMock.mockImplementation(async (connection: unknown, sql: string) => {
+      if (connection === deadlockedConnection && isIsolationStatement(sql)) throw deadlock;
+      return [];
+    });
+
+    const outcome = outcomeOf(manager.beginTransaction());
+    await vi.runAllTimersAsync();
+    const settled = await outcome;
+    console.log(
+      '[begin retry] outcome:',
+      settled,
+      'release calls:',
+      deadlockedConnection.release.mock.calls.length,
+      'startingTransactions:',
+      internals.startingTransactions
+    );
+
+    expect(deadlockedConnection.release, 'releasing one pooled connection twice hands it to two borrowers (E7)').toHaveBeenCalledTimes(1);
+    expect(settled).toBeInstanceOf(Error);
+    expect((settled as Error).message, 'the outcome must be the failed acquisition, not the deadlock').toContain(poolExhaustedMessage);
+    expect(internals.startingTransactions, 'the start slot must be returned').toBe(0);
+  });
 });
 
 describe('ConnectionManager confirmed lock cleanup and quarantine on failure (#563 §3.6, §3.8)', () => {

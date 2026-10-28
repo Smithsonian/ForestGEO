@@ -370,7 +370,9 @@ class ConnectionManager {
           ailogger.info(chalk.green(`Transaction started: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
           return transactionId;
         } catch (error: unknown) {
+          const failedThreadId = (connection as PoolConnectionWithThreadId | null)?.threadId;
           connection?.release();
+          connection = null;
           if (!this.isDeadlockError(error) && !this.isLockTimeoutError(error)) {
             const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
             ailogger.error(chalk.red(`Error starting transaction: ${getErrorMessage(error)}`), errorObj);
@@ -383,9 +385,7 @@ class ConnectionManager {
           const totalDelay = retryDelay + jitter;
 
           ailogger.warn(
-            chalk.yellow(
-              `${getErrorMessage(error)} encountered, retrying after ${totalDelay.toFixed(0)}ms... (thread: ${(connection as PoolConnectionWithThreadId)?.threadId || 'unknown'})`
-            )
+            chalk.yellow(`${getErrorMessage(error)} encountered, retrying after ${totalDelay.toFixed(0)}ms... (thread: ${failedThreadId || 'unknown'})`)
           );
           await new Promise(resolve => setTimeout(resolve, totalDelay));
         }
