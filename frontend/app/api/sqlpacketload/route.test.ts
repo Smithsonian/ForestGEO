@@ -35,6 +35,7 @@ import {
   validateQuadratCollectionDetailed
 } from '@/lib/provisioning/quadrat-collection-validation';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
+import { CENSUS_REPLACEMENT_STATEMENT, CENSUS_REPLACEMENT_WRITE_PATTERNS } from '@/tests/setup/census-replacement-statement-patterns';
 
 /**
  * Matches the chunk LIMIT only when it terminates the whole statement — i.e. it
@@ -74,7 +75,13 @@ vi.mock('@/lib/db/connectionmanager', () => {
   const commitTransaction = vi.fn().mockResolvedValue(undefined);
   const rollbackTransaction = vi.fn().mockResolvedValue(undefined);
   const acquireApplicationLock = vi.fn().mockResolvedValue(true);
-  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction, acquireApplicationLock };
+  let replacementTransactionCount = 0;
+  const withTransaction = vi.fn(async (work: (tx: { id: string; query: (sql: string, params?: unknown[]) => Promise<unknown> }) => Promise<unknown>) => {
+    replacementTransactionCount += 1;
+    const id = `tx-replacement-${replacementTransactionCount}`;
+    return work({ id, query: (sql, params) => executeQuery(sql, params, id) });
+  });
+  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction, acquireApplicationLock, withTransaction };
   return {
     default: {
       getInstance: () => instance
@@ -104,8 +111,13 @@ vi.mock('@/config/uploadsessiontracker', () => ({
   UploadSessionOwnershipError: MockUploadSessionOwnershipError,
   UploadSessionState: {
     INITIALIZED: 'initialized',
-    UPLOADING: 'uploading'
-  }
+    UPLOADING: 'uploading',
+    UPLOADED: 'uploaded',
+    PROCESSING: 'processing',
+    COLLAPSING: 'collapsing',
+    ABANDONED: 'abandoned'
+  },
+  ACTIVE_UPLOAD_SESSION_STATES: ['initialized', 'uploading', 'uploaded', 'processing', 'collapsing']
 }));
 
 vi.mock('@/config/measurementerrors', async importOriginal => {
@@ -145,6 +157,31 @@ const TEST_BATCH_ID = 'batch-1';
 const TEST_FILE_NAME = 'SERC_census1_2025.csv';
 /** The per-chunk scope check: one sampled row of the batch family, never an aggregate over it. */
 const FAMILY_SCOPE_SAMPLE_SQL = /SELECT PlotID AS plotID, CensusID AS censusID\s+FROM\s+\S*temporarymeasurements[\s\S]*LIMIT 1/;
+
+interface FakeUploadSession {
+  state: string;
+  markerSetAt: string | null;
+}
+const CENSUS_REPLACEMENT_MARKER_TIMESTAMP = '2026-10-27 12:00:00';
+const ABANDONED_SESSION_STATE = 'abandoned';
+const STAGING_TRANSACTION_ID = 'tx-test';
+
+function freshUploadSession(): FakeUploadSession {
+  return { state: 'uploading', markerSetAt: null };
+}
+
+/** Answers the census replacement's session statements; returns undefined for anything else. */
+function answerUploadSessionStatement(session: FakeUploadSession, sql: string): unknown {
+  if (CENSUS_REPLACEMENT_STATEMENT.MARKER_COLUMN_STATE.test(sql)) return [{ tableCount: 1, columnCount: 1 }];
+  if (CENSUS_REPLACEMENT_STATEMENT.SESSION_LOCK.test(sql))
+    return [{ state: session.state, plot_id: TEST_PLOT_ID, census_id: TEST_CENSUS_ID, census_replacement_completed_at: session.markerSetAt }];
+  if (CENSUS_REPLACEMENT_STATEMENT.MARKER_PROBE.test(sql)) return [{ census_replacement_completed_at: session.markerSetAt }];
+  if (CENSUS_REPLACEMENT_STATEMENT.MARKER_UPDATE.test(sql)) {
+    session.markerSetAt = CENSUS_REPLACEMENT_MARKER_TIMESTAMP;
+    return { affectedRows: 1 };
+  }
+  return undefined;
+}
 
 function makeMeasurementRequest(overrides: Partial<Record<string, unknown>> = {}) {
   const body = {
@@ -259,11 +296,22 @@ function makeGenericFormTypeRequest(fileRowSet: Record<string, unknown>, overrid
  * `undefined` to a downstream call and surfacing as an unrelated 500. Keying on
  * the SQL keeps these tests about the behaviour they name.
  */
-function primeMeasurementQueries(manager: any): void {
+function primeMeasurementQueries(manager: any, session: FakeUploadSession = freshUploadSession(), priorCoreMeasurementIDs: number[] = []): void {
+  let priorIDsStillToServe = [...priorCoreMeasurementIDs];
   // insertedCount is the INSERT IGNORE affectedRows sum, so a staging INSERT
   // reports one affected row per VALUES tuple, as MySQL does when nothing is ignored.
   manager.executeQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     const text = String(sql);
+    const sessionAnswer = answerUploadSessionStatement(session, text);
+    if (sessionAnswer !== undefined) return sessionAnswer;
+    if (CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_ID_SELECT.test(text)) {
+      const servedIDs = priorIDsStillToServe;
+      priorIDsStillToServe = [];
+      return servedIDs.map(id => ({ CoreMeasurementID: id }));
+    }
+    if (CENSUS_REPLACEMENT_STATEMENT.DELETE_AUDIT.test(text) || CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE.test(text)) {
+      return { affectedRows: priorCoreMeasurementIDs.length };
+    }
     // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
     if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
     if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
@@ -616,7 +664,14 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(executedSQL.some((sql: string) => sql.includes('temporarymeasurements') && sql.trimStart().toUpperCase().startsWith('INSERT'))).toBe(false);
     expect(executedSQL.some((sql: string) => sql.trimStart().toUpperCase().startsWith('DELETE'))).toBe(false);
     expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
-    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalled();
+    console.log(
+      '[504] beginTransaction calls:',
+      mockConnectionManager.beginTransaction.mock.calls.length,
+      'withTransaction calls:',
+      mockConnectionManager.withTransaction.mock.calls.length
+    );
+    expect(mockConnectionManager.beginTransaction, 'no staging transaction may open for a blank chunk').not.toHaveBeenCalled();
+    expect(mockConnectionManager.withTransaction, 'no replacement transaction may open for a blank chunk').not.toHaveBeenCalled();
   });
 
   it('rejects an empty rawRows chunk (server-resolution path) with 422 before any staging write or cleanup', async () => {
@@ -638,7 +693,88 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(executedSQL.some((sql: string) => sql.includes('temporarymeasurements') && sql.trimStart().toUpperCase().startsWith('INSERT'))).toBe(false);
     expect(executedSQL.some((sql: string) => sql.trimStart().toUpperCase().startsWith('DELETE'))).toBe(false);
     expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
-    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalled();
+    console.log(
+      '[504] beginTransaction calls:',
+      mockConnectionManager.beginTransaction.mock.calls.length,
+      'withTransaction calls:',
+      mockConnectionManager.withTransaction.mock.calls.length
+    );
+    expect(mockConnectionManager.beginTransaction, 'no staging transaction may open for a blank chunk').not.toHaveBeenCalled();
+    expect(mockConnectionManager.withTransaction, 'no replacement transaction may open for a blank chunk').not.toHaveBeenCalled();
+  });
+
+  describe('census replacement ahead of the staging transaction (#555)', () => {
+    const PRIOR_CORE_MEASUREMENT_IDS = [501, 502];
+    const REPLACEMENT_STATEMENT_KINDS = [
+      ['error-link delete', CENSUS_REPLACEMENT_STATEMENT.ERROR_LINK_DELETE],
+      ['delete audit', CENSUS_REPLACEMENT_STATEMENT.DELETE_AUDIT],
+      ['measurement delete', CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE],
+      ['legacy failedmeasurements delete', CENSUS_REPLACEMENT_STATEMENT.LEGACY_DELETE],
+      ['uploadmetrics delete', CENSUS_REPLACEMENT_STATEMENT.METRICS_DELETE],
+      ['session marker update', CENSUS_REPLACEMENT_STATEMENT.MARKER_UPDATE]
+    ] as const;
+
+    function callsMatching(pattern: RegExp): any[][] {
+      return mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) => pattern.test(String(call[0])));
+    }
+
+    it('R1: a first measurement chunk replaces the census outside the staging transaction (catches: route not calling the replacement, or calling it inside the staging transaction)', async () => {
+      primeMeasurementQueries(mockConnectionManager, freshUploadSession(), PRIOR_CORE_MEASUREMENT_IDS);
+
+      const res = (await POST(makeMeasurementRequest()))!;
+
+      const statementLog = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => [call[2], String(call[0]).replace(/\s+/g, ' ').slice(0, 100)]);
+      console.log('[R1] status:', res.status, 'transaction id and statement per call:', statementLog);
+      expect(res.status).toBe(HTTPResponses.OK);
+      expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith(STAGING_TRANSACTION_ID);
+
+      for (const [kind, pattern] of REPLACEMENT_STATEMENT_KINDS) {
+        const kindCalls = callsMatching(pattern);
+        console.log(
+          `[R1] ${kind}: transaction ids`,
+          kindCalls.map(call => call[2])
+        );
+        expect(kindCalls.length, `the route must drive a ${kind}`).toBeGreaterThan(0);
+        for (const call of kindCalls) {
+          expect(call[2], `${kind} must run in a replacement transaction`).toBeDefined();
+          expect(call[2], `${kind} must not run in the staging transaction`).not.toBe(STAGING_TRANSACTION_ID);
+        }
+      }
+      const everyReplacementWrite = CENSUS_REPLACEMENT_WRITE_PATTERNS.flatMap(pattern => callsMatching(pattern));
+      expect(everyReplacementWrite.length).toBeGreaterThanOrEqual(REPLACEMENT_STATEMENT_KINDS.length);
+
+      const stagingInserts = callsMatching(/INSERT IGNORE INTO\s+\S+\.temporarymeasurements/);
+      expect(stagingInserts.length).toBeGreaterThan(0);
+      for (const call of stagingInserts) expect(call[2]).toBe(STAGING_TRANSACTION_ID);
+    });
+
+    it('R2a: a session that is no longer active returns 409 and is not retried (catches: wrong error mapping, or a retry of a deterministic refusal)', async () => {
+      primeMeasurementQueries(mockConnectionManager, { state: ABANDONED_SESSION_STATE, markerSetAt: null }, PRIOR_CORE_MEASUREMENT_IDS);
+
+      const res = (await POST(makeMeasurementRequest()))!;
+
+      const body = await res.json();
+      const deleteCalls = callsMatching(/^\s*DELETE\b/);
+      console.log(
+        '[R2a] status:',
+        res.status,
+        'body:',
+        body,
+        'withTransaction calls:',
+        mockConnectionManager.withTransaction.mock.calls.length,
+        'DELETEs:',
+        deleteCalls.length
+      );
+      expect(res.status).toBe(HTTPResponses.CONFLICT);
+      expect(body).toMatchObject({ responseMessage: 'Upload session conflict', fileName: TEST_FILE_NAME, batchID: TEST_BATCH_ID });
+      expect(body.error).toMatch(/abandoned/);
+      expect(mockConnectionManager.beginTransaction, 'no staging transaction may open after the refusal').not.toHaveBeenCalled();
+      expect(mockConnectionManager.withTransaction, 'the first unit throws and the route must not retry it').toHaveBeenCalledTimes(1);
+      expect(
+        deleteCalls.filter(call => /coremeasurements/.test(String(call[0]))),
+        'no census row may be deleted'
+      ).toHaveLength(0);
+    });
   });
 
   it('rejects measurement filenames longer than 50 characters before querying or staging', async () => {
@@ -730,10 +866,13 @@ describe('sqlpacketload measurement scope validation', () => {
     // itself removes that exact id list -- never a broad `WHERE CensusID = ?`
     // DELETE, which would have no fixed row set to audit against.
     const priorCoreMeasurementIDs = [501, 502];
+    const session = freshUploadSession();
     let windowSelectsAnswered = 0;
     let insertSeen = false;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      const sessionAnswer = answerUploadSessionStatement(session, text);
+      if (sessionAnswer !== undefined) return sessionAnswer;
       // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
       if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
@@ -872,10 +1011,13 @@ describe('sqlpacketload measurement scope validation', () => {
     // Statement-driven: the unified error-log delete fails as missing, and the
     // route must fall back to the legacy cmverrors delete rather than 500.
     const priorCoreMeasurementID = 701;
+    const session = freshUploadSession();
     let windowSelectsAnswered = 0;
     let stagedRowCount = 0;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      const sessionAnswer = answerUploadSessionStatement(session, text);
+      if (sessionAnswer !== undefined) return sessionAnswer;
       if (CORE_MEASUREMENT_WINDOW_SELECT_PATTERN.test(text) && text.includes('.coremeasurements')) {
         windowSelectsAnswered += 1;
         return windowSelectsAnswered === 1 ? [{ CoreMeasurementID: priorCoreMeasurementID }] : [];
@@ -942,9 +1084,12 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockRejectedValueOnce(new Error('second persistence failure'));
 
     // Statement-driven, plus the dropped-row candidate the scenario needs.
+    const session = freshUploadSession();
     let insertSeen = false;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      const sessionAnswer = answerUploadSessionStatement(session, text);
+      if (sessionAnswer !== undefined) return sessionAnswer;
       // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
       if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];

@@ -26,7 +26,9 @@ import {
   InvalidFirstRowOrdinalError,
   MeasurementChunkResolutionError,
   parseFirstRowOrdinal,
-  stageMeasurementChunk
+  replaceCensusForCleanReupload,
+  stageMeasurementChunk,
+  type CensusReplacementParams
 } from '@/lib/uploads/stage-measurements';
 import {
   BatchIDContainsSubBatchSeparatorError,
@@ -519,33 +521,35 @@ export async function POST(request: NextRequest) {
           ? crypto.createHash('sha256').update(JSON.stringify(rawRows)).digest('hex')
           : hashChunkContent(fileRowSet);
 
+    const chunkParams: CensusReplacementParams = {
+      schema,
+      fileName,
+      batchID,
+      plotID: resolvedPlotID,
+      censusID: resolvedCensusID,
+      uploadMode,
+      sourceFormat,
+      rawRows: rawRows ?? [],
+      csvHeaders,
+      delimiter: csvDelimiter,
+      storedMapping: isColumnMappingShape(clientMapping) ? clientMapping : undefined,
+      uploadSessionID: sessionId,
+      firstRowOrdinal,
+      preKeyedRows: useServerResolution ? undefined : Object.values(fileRowSet ?? {}),
+      changedBy,
+      chunkIdentity,
+      onInvalidRows: invalidRows => {
+        resolutionInvalidRows = invalidRows;
+      }
+    };
+
     // Retry logic for database operations
     while (retryCount <= maxRetries) {
       try {
+        await replaceCensusForCleanReupload(connectionManager, chunkParams);
         transactionID = await connectionManager.beginTransaction();
 
-        const stageResult = await stageMeasurementChunk(connectionManager, {
-          schema,
-          fileName,
-          batchID,
-          plotID: resolvedPlotID,
-          censusID: resolvedCensusID,
-          uploadMode,
-          sourceFormat,
-          rawRows: rawRows ?? [],
-          csvHeaders,
-          delimiter: csvDelimiter,
-          storedMapping: isColumnMappingShape(clientMapping) ? clientMapping : undefined,
-          uploadSessionID: sessionId,
-          transactionID,
-          firstRowOrdinal,
-          preKeyedRows: useServerResolution ? undefined : Object.values(fileRowSet ?? {}),
-          changedBy,
-          chunkIdentity,
-          onInvalidRows: invalidRows => {
-            resolutionInvalidRows = invalidRows;
-          }
-        });
+        const stageResult = await stageMeasurementChunk(connectionManager, { ...chunkParams, transactionID });
         mappingDiagnostics = stageResult.diagnostics;
 
         await connectionManager.commitTransaction(transactionID);
@@ -591,6 +595,10 @@ export async function POST(request: NextRequest) {
           });
         }
 
+        if (e instanceof UploadSessionOwnershipError) {
+          ailogger.warn(`Rejected measurement upload for ${fileName}-${batchID} during the census replacement: ${e.message}`);
+          return new NextResponse(JSON.stringify({ responseMessage: 'Upload session conflict', error: e.message, fileName, batchID }), { status: e.status });
+        }
         if (e instanceof MeasurementChunkResolutionError) {
           return new NextResponse(JSON.stringify({ responseMessage: 'Header plan misalignment for the uploaded file', fileName, batchID }), {
             status: HTTPResponses.UNPROCESSABLE_ENTITY
