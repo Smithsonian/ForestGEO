@@ -59,6 +59,7 @@ const ACTIVE_ATTRIBUTE_CODE = 'LI';
 const UNVALIDATED_EVERY = 20;
 const FAILED_EVERY = 100; // a multiple of UNVALIDATED_EVERY: every failed row is also unvalidated
 const UNRESOLVED_ERROR_EVERY = 25;
+const UNVALIDATED_AND_UNRESOLVED_ERROR_EVERY = 100; // lcm(UNVALIDATED_EVERY, UNRESOLVED_ERROR_EVERY)
 const ERROR_TYPE_COUNT = 20;
 // The numbers table holds rowsPerCensus rows and also seeds the quadrats, species and error types, so it must reach
 // the largest of them; otherwise stems would point at quadrats that were never created.
@@ -161,8 +162,10 @@ function benchRowsPerCensus(): number {
   const raw = process.env[ROWS_ENV];
   if (raw === undefined) return DEFAULT_ROWS_PER_CENSUS;
   const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || parsed < MIN_ROWS_PER_CENSUS || parsed % FAILED_EVERY !== 0) {
-    throw new Error(`${ROWS_ENV} must be a multiple of ${FAILED_EVERY} and at least ${MIN_ROWS_PER_CENSUS}; received '${raw}'`);
+  if (!Number.isSafeInteger(parsed) || parsed < MIN_ROWS_PER_CENSUS || parsed % FAILED_EVERY !== 0 || parsed % UNVALIDATED_AND_UNRESOLVED_ERROR_EVERY !== 0) {
+    throw new Error(
+      `${ROWS_ENV} must be a multiple of ${FAILED_EVERY} and ${UNVALIDATED_AND_UNRESOLVED_ERROR_EVERY} and at least ${MIN_ROWS_PER_CENSUS}; received '${raw}'`
+    );
   }
   return parsed;
 }
@@ -207,7 +210,7 @@ async function openRawConnection(): Promise<Connection> {
 }
 
 function isNoSuchThreadError(error: unknown): boolean {
-  return (error as { code?: string }).code === MYSQL_NO_SUCH_THREAD;
+  return error instanceof Error && 'code' in error && error.code === MYSQL_NO_SUCH_THREAD;
 }
 
 // Every step runs even if an earlier one throws; the errors are collected and rethrown together, never swallowed.
@@ -473,8 +476,7 @@ function expectedExportPreview(rowsPerCensus: number): CensusOverviewSummary['ex
   const unvalidatedRows = rowsPerCensus / UNVALIDATED_EVERY;
   const failedRows = rowsPerCensus / FAILED_EVERY;
   const unresolvedErrorRows = rowsPerCensus / UNRESOLVED_ERROR_EVERY;
-  // Rows that are both unvalidated and carry an error: multiples of lcm(20, 25) = 100.
-  const unvalidatedErrorRows = rowsPerCensus / FAILED_EVERY;
+  const unvalidatedErrorRows = rowsPerCensus / UNVALIDATED_AND_UNRESOLVED_ERROR_EVERY;
   return {
     totalActiveMeasurements: rowsPerCensus,
     exportableCount: rowsPerCensus - unvalidatedRows,
