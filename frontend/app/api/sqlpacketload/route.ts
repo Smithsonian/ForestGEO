@@ -22,6 +22,7 @@ import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { assertSchemaAccess } from '@/lib/authz';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import {
+  CensusReplacementIncompleteError,
   EmptyMeasurementUploadError,
   InvalidFirstRowOrdinalError,
   MeasurementChunkResolutionError,
@@ -52,6 +53,8 @@ import { referenceUploadRowLimitError } from '@/lib/uploads/reference-upload-lim
 
 const REFERENCE_REPLACEMENT_IN_PROGRESS_CODE = 'REFERENCE_REPLACEMENT_IN_PROGRESS';
 const UPLOAD_SCOPE_REQUIRED_CODE = 'UPLOAD_SCOPE_REQUIRED';
+const UPLOAD_SESSION_CONFLICT_MESSAGE = 'Upload session conflict';
+const CENSUS_REPLACEMENT_INCOMPLETE_MESSAGE = 'The previous data for this census has not finished being replaced. Please retry the upload.';
 
 /**
  * Generate idempotency key for a batch of data
@@ -597,7 +600,16 @@ export async function POST(request: NextRequest) {
 
         if (e instanceof UploadSessionOwnershipError) {
           ailogger.warn(`Rejected measurement upload for ${fileName}-${batchID} during the census replacement: ${e.message}`);
-          return new NextResponse(JSON.stringify({ responseMessage: 'Upload session conflict', error: e.message, fileName, batchID }), { status: e.status });
+          return new NextResponse(JSON.stringify({ responseMessage: UPLOAD_SESSION_CONFLICT_MESSAGE, error: e.message, fileName, batchID }), {
+            status: e.status
+          });
+        }
+        if (e instanceof CensusReplacementIncompleteError) {
+          ailogger.error(`Refused to stage ${fileName}-${batchID} before its census replacement completed: ${e.message}`);
+          return new NextResponse(
+            JSON.stringify({ responseMessage: UPLOAD_SESSION_CONFLICT_MESSAGE, error: CENSUS_REPLACEMENT_INCOMPLETE_MESSAGE, fileName, batchID }),
+            { status: HTTPResponses.CONFLICT }
+          );
         }
         if (e instanceof MeasurementChunkResolutionError) {
           return new NextResponse(JSON.stringify({ responseMessage: 'Header plan misalignment for the uploaded file', fileName, batchID }), {

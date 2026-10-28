@@ -796,6 +796,30 @@ describe('sqlpacketload measurement scope validation', () => {
     });
   });
 
+  it('maps a staging refusal for an unfinished census replacement to 409 with a user-facing message, without retrying or leaking internals', async () => {
+    const sessionWhoseMarkerNeverSticks: FakeUploadSession = freshUploadSession();
+    Object.defineProperty(sessionWhoseMarkerNeverSticks, 'markerSetAt', { get: () => null, set: () => undefined });
+    primeMeasurementQueries(mockConnectionManager, sessionWhoseMarkerNeverSticks, PRIOR_CORE_MEASUREMENT_IDS_FOR_OVERFLOW_TEST);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+
+    const body = await res.json();
+    const stagingInserts = mockConnectionManager.executeQuery.mock.calls.filter(
+      (call: any[]) => String(call[0]).includes('temporarymeasurements') && String(call[0]).trimStart().startsWith('INSERT')
+    );
+    console.log(
+      `[replacement-incomplete] status=${res.status} body=${JSON.stringify(body)} beginTransaction=${mockConnectionManager.beginTransaction.mock.calls.length} ` +
+        `rollbackTransaction=${mockConnectionManager.rollbackTransaction.mock.calls.length} stagingInserts=${stagingInserts.length}`
+    );
+    expect(res.status).toBe(HTTPResponses.CONFLICT);
+    expect(body).toMatchObject({ responseMessage: 'Upload session conflict', fileName: TEST_FILE_NAME, batchID: TEST_BATCH_ID });
+    expect(body.error).toBe('The previous data for this census has not finished being replaced. Please retry the upload.');
+    expect(JSON.stringify(body), 'internal function names must not reach the client').not.toMatch(/replaceCensusForCleanReupload|staging transaction/);
+    expect(mockConnectionManager.beginTransaction, 'a deterministic refusal must not be retried').toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith(STAGING_TRANSACTION_ID);
+    expect(stagingInserts).toHaveLength(0);
+  });
+
   it('rejects measurement filenames longer than 50 characters before querying or staging', async () => {
     const res = (await POST(makeMeasurementRequest({ fileName: `${'a'.repeat(47)}.csv` })))!;
 
