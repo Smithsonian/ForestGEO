@@ -36,6 +36,10 @@ const CENSUSOVERVIEW_BENCH_TEST_TIMEOUT_MS = 45 * 60 * 1000;
 const CENSUSOVERVIEW_BENCH_TEARDOWN_HOOK_TIMEOUT_MS = 5 * 60 * 1000;
 // Fixed, not per-process: a run killed before afterAll leaves the schema behind, and the next run's createTestDatabase drops it.
 const SCHEMA = 'forestgeo_bench_censusoverview';
+// MySQL advisory lock names are server-wide and at most 64 characters. Holding it is what entitles a run to drop SCHEMA.
+const SCHEMA_OWNER_LOCK_NAME = 'forestgeo_bench_censusoverview_schema_owner';
+const SCHEMA_OWNER_LOCK_NO_WAIT_SECONDS = 0;
+const LOCK_ACQUIRED = 1;
 const CONNECTION_CHARSET = 'UTF8MB4_0900_AI_CI';
 const BENCH_USER_EMAIL = 'benchmark-runner@forestgeo.test';
 const SUMMARY_ROUTE_PATH = '/api/censusoverview/summary';
@@ -157,6 +161,8 @@ vi.mock('@/ailogger', () => ({ default: { info: () => undefined, warn: () => und
 // The setup connection only guards, kills and drops. Seeding and settling run on workConnection, so afterAll can
 // KILL a statement left running by a timed-out test and still reach DROP DATABASE on a connection that is free.
 let setupConnection: Connection | null = null;
+// Holds SCHEMA_OWNER_LOCK_NAME for the whole run; the lock lives and dies with this session.
+let schemaOwnerConnection: Connection | null = null;
 const rawConnections: Connection[] = [];
 let workConnection: Connection;
 let snapshotConnection: Connection;
@@ -180,23 +186,28 @@ function assertLocalHostsOrRefuse(): void {
   if (!LOCAL_HOSTS.includes(DEFAULT_TEST_CONFIG.host)) throw new Error(`REFUSING TO RUN: TEST_DB_HOST is '${DEFAULT_TEST_CONFIG.host}', not local.`);
 }
 
-async function assertBenchSchemaNotInUse(): Promise<void> {
-  const guardConnection = await mysql.createConnection({
+async function acquireBenchSchemaOwnership(): Promise<void> {
+  const ownerConnection = await mysql.createConnection({
     host: DEFAULT_TEST_CONFIG.host,
     port: DEFAULT_TEST_CONFIG.port,
     user: DEFAULT_TEST_CONFIG.user,
     password: DEFAULT_TEST_CONFIG.password
   });
   try {
-    const [sessions] = await guardConnection.query<RowDataPacket[]>('SELECT ID, USER, COMMAND, TIME FROM information_schema.PROCESSLIST WHERE DB = ?', [
-      SCHEMA
+    const [[lockRow]] = await ownerConnection.query<RowDataPacket[]>('SELECT GET_LOCK(?, ?) AS acquired', [
+      SCHEMA_OWNER_LOCK_NAME,
+      SCHEMA_OWNER_LOCK_NO_WAIT_SECONDS
     ]);
-    if (sessions.length > 0) {
-      throw new Error(`REFUSING TO RUN: ${SCHEMA} is in use, so another benchmark is running; dropping it would destroy that run: ${JSON.stringify(sessions)}`);
+    if (lockRow.acquired !== LOCK_ACQUIRED) {
+      throw new Error(
+        `REFUSING TO RUN: another benchmark holds the '${SCHEMA_OWNER_LOCK_NAME}' lock, so it owns ${SCHEMA}; dropping it would destroy that run (GET_LOCK returned ${String(lockRow.acquired)})`
+      );
     }
-  } finally {
-    guardConnection.destroy();
+  } catch (error: unknown) {
+    ownerConnection.destroy();
+    throw error;
   }
+  schemaOwnerConnection = ownerConnection;
 }
 
 async function openRawConnection(): Promise<Connection> {
@@ -218,10 +229,11 @@ function isNoSuchThreadError(error: unknown): boolean {
 }
 
 // Every step runs even if an earlier one throws; the errors are collected and rethrown together, never swallowed.
+// Only the lock owner may touch SCHEMA, and the lock is released last so no other run can start while this one drops it.
 async function killDropAndClose(): Promise<void> {
   const cleanupErrors: unknown[] = [];
   try {
-    if (setupConnection) {
+    if (setupConnection && schemaOwnerConnection) {
       for (const connection of rawConnections) {
         try {
           await setupConnection.query('KILL ?', [connection.threadId]);
@@ -239,13 +251,25 @@ async function killDropAndClose(): Promise<void> {
     setupConnection?.destroy();
     for (const connection of rawConnections) connection.destroy();
   }
+  if (schemaOwnerConnection) {
+    try {
+      await schemaOwnerConnection.query('SELECT RELEASE_LOCK(?)', [SCHEMA_OWNER_LOCK_NAME]);
+    } catch (error: unknown) {
+      cleanupErrors.push(error);
+    } finally {
+      schemaOwnerConnection.destroy();
+      schemaOwnerConnection = null;
+    }
+  }
   if (cleanupErrors.length > 0) {
     throw new AggregateError(cleanupErrors, `Benchmark cleanup failed; check for a leftover ${SCHEMA} schema on the local MySQL`);
   }
 }
 
 function harnessThreadIds(): number[] {
-  return [setupConnection, ...rawConnections].filter((connection): connection is Connection => connection !== null).map(connection => connection.threadId);
+  return [setupConnection, schemaOwnerConnection, ...rawConnections]
+    .filter((connection): connection is Connection => connection !== null)
+    .map(connection => connection.threadId);
 }
 
 async function assertNoOtherActiveSession(conn: Connection): Promise<void> {
@@ -499,7 +523,7 @@ function expectedExportPreview(rowsPerCensus: number): CensusOverviewSummary['ex
 describe('census overview summary benchmark (opt-in, real local MySQL)', () => {
   beforeAll(async () => {
     assertLocalHostsOrRefuse();
-    await assertBenchSchemaNotInUse();
+    await acquireBenchSchemaOwnership();
     setupConnection = await createTestDatabase({ ...DEFAULT_TEST_CONFIG, database: SCHEMA });
     workConnection = await openRawConnection();
     snapshotConnection = await openRawConnection();
