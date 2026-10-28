@@ -97,6 +97,12 @@ const SINGLE_PASS_SQL = `SELECT ${[
        ${joinMeasurementLinks(ALL_MEASUREMENT_LINK_ALIASES, 'LEFT JOIN')}
       WHERE ${MEASUREMENT_SCOPE_WHERE}`;
 
+function readCount(row: RowDataPacket, column: string): number {
+  const count = Number(row[column]);
+  if (!Number.isFinite(count)) throw new Error(`Single-pass publish count column '${column}' is missing or not a number: ${JSON.stringify(row[column])}`);
+  return count;
+}
+
 async function countRelatedRowsCheck(conn: Connection, input: PreconditionInput, check: RelatedRowsRowCheck): Promise<number> {
   const [rows] = await conn.query<RowDataPacket[]>(
     safeFormatQuery(input.schema, `SELECT COUNT(DISTINCT cm.CoreMeasurementID) AS n ${rowCheckFromWhere(check)}`),
@@ -123,16 +129,16 @@ export async function countPublishPreconditions(
   for (const check of PRECONDITION_ROW_CHECKS) {
     const { kind } = check;
     if (!isBlocking(kind)) continue;
-    const flaggedMeasurements = check.joinShape === 'measurement-graph' ? Number(pass[kind]) : await countRelatedRowsCheck(conn, input, check);
+    const flaggedMeasurements = check.joinShape === 'measurement-graph' ? readCount(pass, kind) : await countRelatedRowsCheck(conn, input, check);
     if (flaggedMeasurements > 0) blockers.push({ kind, count: flaggedMeasurements });
   }
 
-  const count = Number(pass[EXPORTABLE_COLUMN]);
-  const totalActiveCount = Number(pass[TOTAL_ACTIVE_COLUMN]);
+  const count = readCount(pass, EXPORTABLE_COLUMN);
+  const totalActiveCount = readCount(pass, TOTAL_ACTIVE_COLUMN);
   const shortfallKind = exportableShortfallKind(count, totalActiveCount);
   if (shortfallKind !== null && isBlocking(shortfallKind)) blockers.push({ kind: shortfallKind, count: null });
 
-  const skipReasons = EXPORT_SKIP_REASON_KINDS.map(kind => ({ kind, count: Number(pass[skipReasonColumn(kind)]) }));
+  const skipReasons = EXPORT_SKIP_REASON_KINDS.map(kind => ({ kind, count: readCount(pass, skipReasonColumn(kind)) }));
   return { blockers, count, totalActiveCount, skipReasons };
 }
 

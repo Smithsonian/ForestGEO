@@ -11,13 +11,23 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Connection } from 'mysql2/promise';
 import { createTestDatabase, teardownTestDatabase, loadSchema, DEFAULT_TEST_CONFIG } from '../../tests/setup/local-db-setup';
 import { loadAppDbSeed } from '../../tests/fixtures/ctfs-export/load-app-db-seed';
-import { checkFinishedCensus, isBlockingPreconditionKind, MAX_DISPLAY_FAILURES } from './precondition';
+import {
+  checkFinishedCensus,
+  isBlockingPreconditionKind,
+  MAX_DISPLAY_FAILURES,
+  type BlockingPreconditionKind,
+  type PreconditionFailureKind
+} from './precondition';
 import { selectMeasurements } from './select-measurements';
 import { countExportedRowsWithUnresolvedErrors, countPublishPreconditions } from './export-preview';
 
 const PLOT_ID = 1;
 const CENSUS_ID = 1;
 const DB_NAME = `forestgeo_exportpreview_${process.pid}_${Date.now()}`;
+// The single pass's count aliases in export-preview.ts.
+const TOTAL_ACTIVE_COLUMN_ALIAS = 'totalActiveCount';
+const EXPORTABLE_COLUMN_ALIAS = 'exportableCount';
+const blocksNothing = (kind: PreconditionFailureKind): kind is BlockingPreconditionKind => false;
 const FIXTURE_MEASUREMENT_DATE = '2024-06-02';
 const FIXTURE_HOM = 1.3;
 const FIXTURE_DELETED_AT = '2024-07-01 00:00:00';
@@ -278,5 +288,12 @@ describe('export preview on a known-totals census', () => {
     ).rejects.toThrow('Invalid or unauthorized schema');
     await expect(countExportedRowsWithUnresolvedErrors(conn, { ...publishInput, schema: 'bad`name' })).rejects.toThrow('Invalid or unauthorized schema');
     expect(querySpy, 'no SQL may run for an invalid schema').not.toHaveBeenCalled();
+  });
+
+  it('throws naming the column when the single pass omits a count, instead of reporting NaN', async () => {
+    const passRowMissingExportableCount = { [TOTAL_ACTIVE_COLUMN_ALIAS]: SEED_EXPORTABLE_ROWS };
+    vi.spyOn(conn, 'query').mockResolvedValueOnce([[passRowMissingExportableCount], []] as never);
+
+    await expect(countPublishPreconditions(conn, publishInput, blocksNothing)).rejects.toThrow(`'${EXPORTABLE_COLUMN_ALIAS}' is missing or not a number`);
   });
 });
