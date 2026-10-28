@@ -62,36 +62,6 @@ export interface UploadParseFilesProps {
   handleReplaceFile: (fileIndex: number, newFile: FileWithPath) => void;
 }
 
-export interface UploadReviewFilesProps {
-  // state vars
-  uploadForm: FormType | undefined;
-  acceptedFiles: FileWithStream[];
-  expectedHeaders: string[];
-  parsedData: FileCollectionRowSet;
-  errors: FileCollectionRowSet;
-  errorRows: FileCollectionRowSet;
-  confirmationDialogOpen: boolean;
-  dataViewActive: number;
-  currentFileHeaders: string[];
-  // state setters
-  setDataViewActive: Dispatch<SetStateAction<number>>;
-  setAcceptedFiles: Dispatch<SetStateAction<FileWithStream[]>>;
-  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-  setParsedData: Dispatch<SetStateAction<FileCollectionRowSet>>;
-  setErrors: Dispatch<SetStateAction<FileCollectionRowSet>>;
-  setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
-  setUploadError: Dispatch<SetStateAction<any>>;
-  setErrorComponent: Dispatch<SetStateAction<string>>;
-  // centralized functions
-  areHeadersValid: (actualHeaders: string[]) => { isValid: boolean; missingHeaders: string[] };
-  handleChange: (_event: React.ChangeEvent<unknown>, value: number) => void;
-  handleApproval: () => Promise<void>;
-  handleCancel: () => Promise<void>;
-  handleConfirm: () => Promise<void>;
-  handleRemoveFile: (fileIndex: number) => void;
-  handleReplaceFile: (fileIndex: number, newFile: FileWithPath) => Promise<void>;
-}
-
 export type { RevisionApplyOutcomeCounts, IngestionUploadOutcome, RevisionsUploadOutcome, UploadOutcome } from './uploadoutcome';
 
 export interface UploadFireProps {
