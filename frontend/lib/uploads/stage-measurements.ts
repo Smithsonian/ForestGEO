@@ -49,8 +49,10 @@ import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
 import {
   buildSubBatchPattern,
+  getIngestionBatchSize,
   LIKE_ESCAPE_CLAUSE,
   MAX_ORIGINAL_BATCH_ID_LENGTH,
+  MAX_SUB_BATCH_ORDINAL,
   OriginalBatchIDTooLongError,
   subBatchIDForRowOrdinal
 } from '@/lib/uploads/batch-family';
@@ -109,15 +111,22 @@ export class MeasurementChunkResolutionError extends Error {
 export class InvalidFirstRowOrdinalError extends Error {
   readonly code = 'INVALID_FIRST_ROW_ORDINAL';
   constructor(value: unknown) {
-    super(`firstRowOrdinal must be a non-negative integer; received ${typeof value === 'string' ? JSON.stringify(value) : String(value)}`);
+    super(
+      `firstRowOrdinal must be a non-negative integer whose sub-batch can still be named; received ${typeof value === 'string' ? JSON.stringify(value) : String(value)}`
+    );
     this.name = 'InvalidFirstRowOrdinalError';
   }
 }
 
-/** Absent → null (legacy client). Present → a non-negative safe integer or InvalidFirstRowOrdinalError. */
+/**
+ * Absent → null (legacy client). Present → a non-negative safe integer whose own sub-batch can still be named,
+ * or InvalidFirstRowOrdinalError. Bounding the start keeps every later `firstRowOrdinal + offset` a safe integer.
+ */
 export function parseFirstRowOrdinal(value: unknown): number | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new InvalidFirstRowOrdinalError(value);
+  const subBatchOrdinal = Math.floor(value / getIngestionBatchSize()) + 1;
+  if (subBatchOrdinal > MAX_SUB_BATCH_ORDINAL) throw new InvalidFirstRowOrdinalError(value);
   return value;
 }
 

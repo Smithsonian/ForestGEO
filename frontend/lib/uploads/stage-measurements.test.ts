@@ -74,6 +74,32 @@ describe('parseFirstRowOrdinal', () => {
     expect((thrown as InvalidFirstRowOrdinalError).code).toBe(INVALID_FIRST_ROW_ORDINAL_CODE);
     expect((thrown as Error).message).toContain(typeof value === 'string' ? JSON.stringify(value) : String(value));
   });
+
+  describe('the sub-batch ordinal bound', () => {
+    const FIRST_ORDINAL_PAST_LAST_NAMEABLE_SUB_BATCH = getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL;
+    const LAST_ORDINAL_IN_LAST_NAMEABLE_SUB_BATCH = FIRST_ORDINAL_PAST_LAST_NAMEABLE_SUB_BATCH - 1;
+
+    it('accepts the last ordinal whose sub-batch can still be named', () => {
+      const parsed = parseFirstRowOrdinal(LAST_ORDINAL_IN_LAST_NAMEABLE_SUB_BATCH);
+      console.log(`[parseFirstRowOrdinal] last in-range ordinal ${LAST_ORDINAL_IN_LAST_NAMEABLE_SUB_BATCH} -> ${String(parsed)}`);
+      expect(parsed).toBe(LAST_ORDINAL_IN_LAST_NAMEABLE_SUB_BATCH);
+    });
+
+    it.each([
+      ['the first ordinal past the last nameable sub-batch', FIRST_ORDINAL_PAST_LAST_NAMEABLE_SUB_BATCH],
+      ['the largest safe integer', Number.MAX_SAFE_INTEGER]
+    ])('rejects %s with InvalidFirstRowOrdinalError, not a later RangeError (catches: a retried 500 for a request that can never succeed)', (_label, value) => {
+      let thrown: unknown;
+      try {
+        parseFirstRowOrdinal(value);
+      } catch (error) {
+        thrown = error;
+      }
+      console.log(`[parseFirstRowOrdinal] out-of-range ordinal ${value} threw:`, thrown instanceof Error ? `${thrown.name}: ${thrown.message}` : thrown);
+      expect(thrown).toBeInstanceOf(InvalidFirstRowOrdinalError);
+      expect((thrown as InvalidFirstRowOrdinalError).code).toBe(INVALID_FIRST_ROW_ORDINAL_CODE);
+    });
+  });
 });
 
 const SCHEMA = 'forestgeo_testing';
@@ -100,6 +126,7 @@ const VALID_ROW = {
   date: '2026-06-01',
   codes: 'A'
 };
+const INVALID_NON_BLANK_ROW = { ...VALID_ROW, dbh: 'not-a-number' };
 const BLANK_ROW = Object.fromEntries(CSV_HEADERS.map(header => [header, '']));
 const ACTIVE_STATE = UploadSessionState.UPLOADING;
 
@@ -521,11 +548,16 @@ describe('replaceCensusForCleanReupload', () => {
       [
         'a first row ordinal past the last nameable sub-batch',
         { firstRowOrdinal: getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL },
-        SubBatchOrdinalOverflowError
+        InvalidFirstRowOrdinalError
       ],
       [
-        'a first row ordinal at the largest safe integer, whose second row would not be a safe integer',
-        { firstRowOrdinal: Number.MAX_SAFE_INTEGER, rawRows: [VALID_ROW, VALID_ROW] },
+        'a first row ordinal at the largest safe integer ahead of a leading invalid row, whose first valid row would not be a safe integer',
+        { firstRowOrdinal: Number.MAX_SAFE_INTEGER, rawRows: [INVALID_NON_BLANK_ROW, VALID_ROW] },
+        InvalidFirstRowOrdinalError
+      ],
+      [
+        'a first row ordinal in the last nameable sub-batch whose second row spills into the next',
+        { firstRowOrdinal: getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL - 1, rawRows: [VALID_ROW, VALID_ROW] },
         SubBatchOrdinalOverflowError
       ]
     ])('%s throws before any replacement transaction opens', async (label, overrides, expectedError) => {

@@ -155,6 +155,19 @@ const TEST_PLOT_ID = 22;
 const TEST_CENSUS_ID = 32;
 const TEST_BATCH_ID = 'batch-1';
 const TEST_FILE_NAME = 'SERC_census1_2025.csv';
+const SERVER_RESOLUTION_CSV_HEADERS = ['tag', 'stemtag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes'];
+const VALID_RAW_ROW = {
+  tag: '100001',
+  stemtag: '1',
+  spcode: 'FAGR',
+  quadrat: '1011',
+  lx: '202',
+  ly: '104.5',
+  dbh: '3.5',
+  hom: '1.30',
+  date: '2010-03-17',
+  codes: 'LI'
+};
 /** The per-chunk scope check: one sampled row of the batch family, never an aggregate over it. */
 const FAMILY_SCOPE_SAMPLE_SQL = /SELECT PlotID AS plotID, CensusID AS censusID\s+FROM\s+\S*temporarymeasurements[\s\S]*LIMIT 1/;
 
@@ -448,7 +461,8 @@ describe('sqlpacketload measurement scope validation', () => {
     ['a negative ordinal', -1],
     ['a fractional ordinal', 1.5],
     ['a numeric string', '3'],
-    ['an ordinal beyond the safe-integer range', 1e300]
+    ['an ordinal beyond the safe-integer range', 1e300],
+    ['an ordinal whose own sub-batch cannot be named', getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL]
   ])('rejects %s as firstRowOrdinal with INVALID_REQUEST before touching the database', async (_label, firstRowOrdinal) => {
     const expectedCode = new InvalidFirstRowOrdinalError(firstRowOrdinal).code;
 
@@ -545,12 +559,15 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(insertCall[1][STAGED_BATCH_ID_PARAM_INDEX]).toBe(buildSubBatchID('m9x7k2a-8fh3k9d2x5p', 1));
   });
 
-  it('rejects a firstRowOrdinal past the last nameable sub-batch with INVALID_REQUEST and stages nothing', async () => {
-    const firstRowOrdinal = getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL;
-    const expectedCode = new SubBatchOrdinalOverflowError(TEST_BATCH_ID, firstRowOrdinal, MAX_SUB_BATCH_ORDINAL + 1).code;
+  it('rejects a chunk whose later rows spill past the last nameable sub-batch with INVALID_REQUEST and stages nothing', async () => {
+    const firstRowOrdinal = getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL - 1;
+    const SPILLING_ROW_OFFSET = 1;
+    const expectedCode = new SubBatchOrdinalOverflowError(TEST_BATCH_ID, firstRowOrdinal + SPILLING_ROW_OFFSET, MAX_SUB_BATCH_ORDINAL + 1).code;
     primeMeasurementQueries(mockConnectionManager, freshUploadSession(), PRIOR_CORE_MEASUREMENT_IDS_FOR_OVERFLOW_TEST);
 
-    const res = (await POST(makeMeasurementRequest({ firstRowOrdinal })))!;
+    const res = (await POST(
+      makeMeasurementRequest({ firstRowOrdinal, rawRows: [VALID_RAW_ROW, VALID_RAW_ROW], csvHeaders: SERVER_RESOLUTION_CSV_HEADERS, fileRowSet: {} })
+    ))!;
     const body = await res.json();
     const stagingInserts = mockConnectionManager.executeQuery.mock.calls.filter(
       (call: any[]) => String(call[0]).includes('temporarymeasurements') && String(call[0]).trimStart().startsWith('INSERT')
@@ -566,6 +583,45 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(stagingInserts).toHaveLength(0);
     expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
     expect(mockConnectionManager.withTransaction, 'the census must not be replaced for an ordinal that can never be staged').not.toHaveBeenCalled();
+    expect(deletes, 'no DELETE may run for an ordinal that can never be staged').toHaveLength(0);
+  });
+
+  it('rejects a largest-safe-integer firstRowOrdinal ahead of a leading invalid row with INVALID_REQUEST, not a retried 500, and deletes nothing', async () => {
+    const SERVER_RESOLUTION_CSV_HEADERS = ['tag', 'stemtag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes'];
+    const validRow = {
+      tag: '100001',
+      stemtag: '1',
+      spcode: 'FAGR',
+      quadrat: '1011',
+      lx: '202',
+      ly: '104.5',
+      dbh: '3.5',
+      hom: '1.30',
+      date: '2010-03-17',
+      codes: 'LI'
+    };
+    const invalidNonBlankRow = { ...validRow, dbh: 'not-a-number' };
+    const expectedCode = new InvalidFirstRowOrdinalError(Number.MAX_SAFE_INTEGER).code;
+    primeMeasurementQueries(mockConnectionManager, freshUploadSession(), PRIOR_CORE_MEASUREMENT_IDS_FOR_OVERFLOW_TEST);
+
+    const res = (await POST(
+      makeMeasurementRequest({
+        firstRowOrdinal: Number.MAX_SAFE_INTEGER,
+        rawRows: [invalidNonBlankRow, VALID_RAW_ROW],
+        csvHeaders: SERVER_RESOLUTION_CSV_HEADERS,
+        fileRowSet: {}
+      })
+    ))!;
+    const body = await res.json();
+    const deletes = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) => /^\s*DELETE\b/.test(String(call[0])));
+    console.log(
+      `[unsafe-first-row-ordinal] status=${res.status} body=${JSON.stringify(body)} withTransaction=${mockConnectionManager.withTransaction.mock.calls.length} deletes=${deletes.length}`
+    );
+
+    expect(res.status, 'a request that can never succeed must be a 400 the browser does not retry').toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe(expectedCode);
+    expect(mockConnectionManager.withTransaction, 'the census must not be replaced for an ordinal that can never be staged').not.toHaveBeenCalled();
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
     expect(deletes, 'no DELETE may run for an ordinal that can never be staged').toHaveLength(0);
   });
 
