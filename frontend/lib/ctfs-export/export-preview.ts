@@ -90,7 +90,7 @@ const SINGLE_PASS_SQL = `SELECT ${[
   countWhenColumn(`(${EXPORTABLE_IN_MEASUREMENT_GRAPH})`, EXPORTABLE_COLUMN),
   ...MEASUREMENT_GRAPH_ROW_CHECKS.map(check => countWhenColumn(`(${measurementLinksMatched(check.links)}) AND (${check.condition})`, check.kind)),
   ...EXPORT_SKIP_REASON_KINDS.map(kind =>
-    countWhenColumn(`(${EXPORTABLE_IN_MEASUREMENT_GRAPH}) IS NOT TRUE AND (${skipReasonCondition(kind)})`, skipReasonColumn(kind))
+    countWhenColumn(`(${skipReasonCondition(kind)}) AND (${EXPORTABLE_IN_MEASUREMENT_GRAPH}) IS NOT TRUE`, skipReasonColumn(kind))
   )
 ].join(',\n            ')}
        ${MEASUREMENT_SCOPE_FROM}
