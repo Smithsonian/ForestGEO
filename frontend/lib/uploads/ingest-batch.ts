@@ -34,7 +34,7 @@
 
 import crypto from 'crypto';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
+import { TransactionCallbackTimeoutError, TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
@@ -774,6 +774,14 @@ async function processSubBatch(
         }
       }
 
+      // The COMMIT reached the driver and no reply came back, so this sub-batch may have committed. The procedure's
+      // completed-skip check is non-locking, so a replay 100 ms later could ingest it twice, and the give-up path
+      // would move rows the original is deleting. Leave them staged; the outer retry re-checks uploadmetrics (#563).
+      if (e instanceof TransactionCommitOutcomeUnknownError) {
+        ailogger.error(`Sub-batch ${subBatchID} attempt ${attempt}: COMMIT outcome unknown; not retrying and leaving its rows staged`, e);
+        throw e;
+      }
+
       // Typed, not substring-matched. The DB layer's own timeout raises
       // QueryTimeoutError, whose message merely happens to contain "timed out";
       // matching on that text also swallowed unrelated errors and, worse, routed
@@ -1103,9 +1111,11 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       // and every later sub-batch's rows stay staged for recovery rather
       // than being moved to unresolved coremeasurements. Earlier sub-batches
       // that already committed (their own transactions) are unaffected.
-      if (subError instanceof ChangelogWriteError) {
+      // An unknown COMMIT outcome (#563) is handled the same way: the rows may or may not have been ingested.
+      if (subError instanceof ChangelogWriteError || subError instanceof TransactionCommitOutcomeUnknownError) {
+        const failureKind = subError instanceof ChangelogWriteError ? 'Audit-infrastructure failure' : 'Unknown COMMIT outcome';
         ailogger.error(
-          `Audit-infrastructure failure on sub-batch ${subBatchID}; leaving it and every remaining sub-batch staged for recovery rather than ` +
+          `${failureKind} on sub-batch ${subBatchID}; leaving it and every remaining sub-batch staged for recovery rather than ` +
             `moving them to unresolved coremeasurements: ${subError.message}`,
           subError
         );
