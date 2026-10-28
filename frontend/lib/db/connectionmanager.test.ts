@@ -1631,3 +1631,166 @@ describe('ConnectionManager ROLLBACK deadline and callback-timeout abandonment (
     expect(connection.release).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ConnectionManager reaper: own deadline, idle, active (#563 §2)', () => {
+  const REAPER_DEADLINE_MS = 1_000;
+  const PAST_REAPER_DEADLINE_MS = 1_500;
+  const LONG_CALLBACK_TIMEOUT_MS = 300_000;
+  const PAST_DEFAULT_THRESHOLD_MS = 241_000;
+  const EVICTION_REAPER_DEADLINE_MS = 1;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    getConnMock.mockReset();
+    runQueryMock.mockReset();
+    runQueryMock.mockImplementation(async () => []);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('U1: a withTransaction with timeoutMs 300 000 is not reaped at 241 s and still times out at 300 s', async () => {
+    const { TransactionCallbackTimeoutError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+    const { manager, internals } = await loadLifecycleManager();
+    const connection = makeLifecycleConnection();
+    getConnMock.mockResolvedValueOnce(connection);
+
+    const outcome = outcomeOf(manager.withTransaction(() => neverSettles<string>(), { timeoutMs: LONG_CALLBACK_TIMEOUT_MS }));
+    await vi.advanceTimersByTimeAsync(0);
+    const [transactionId] = Array.from(internals.transactionMeta.keys());
+    await vi.advanceTimersByTimeAsync(PAST_DEFAULT_THRESHOLD_MS);
+
+    const reaped = await manager.cleanupStaleTransactions();
+    console.log('[U1] reaped at 241 s:', reaped, 'phase:', internals.transactionMeta.get(transactionId)?.phase);
+    expect(reaped, 'the issue’s scenario: an age-only reaper rolls back a healthy 300 s transaction here').toBe(0);
+    expect(internals.transactionMeta.get(transactionId)?.phase).toBe('active');
+    expect(connection.destroy).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(LONG_CALLBACK_TIMEOUT_MS - PAST_DEFAULT_THRESHOLD_MS);
+    expect(await settledValue(outcome)).toBeInstanceOf(TransactionCallbackTimeoutError);
+  });
+
+  it('U2: an idle direct transaction is reaped at exactly its 240 s deadline by quarantine, not ROLLBACK', async () => {
+    const { ConnectionManagerClass, manager, internals } = await loadLifecycleManager();
+    const { TRANSACTION_REAPED_EVENT } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const connection = makeLifecycleConnection();
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await manager.beginTransaction();
+    const occupancyBefore = slotOccupancy(internals) - 1;
+
+    await vi.advanceTimersByTimeAsync(ConnectionManagerClass.DEFAULT_STALE_TRANSACTION_THRESHOLD_MS - 1);
+    const beforeDeadline = await manager.cleanupStaleTransactions();
+    await vi.advanceTimersByTimeAsync(1);
+    const atDeadline = await manager.cleanupStaleTransactions();
+    console.log('[U2] reaped before/at deadline:', beforeDeadline, atDeadline);
+
+    expect(beforeDeadline).toBe(0);
+    expect(atDeadline).toBe(1);
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(connection.release, 'a reaped connection must never return to the pool').not.toHaveBeenCalled();
+    expect(connection.rollback, 'a ROLLBACK over the shared connection is the double-release race').not.toHaveBeenCalled();
+    expect(slotOccupancy(internals)).toBe(occupancyBefore);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      TRANSACTION_REAPED_EVENT,
+      expect.objectContaining({ transactionId, threadId: LIFECYCLE_THREAD_ID, overdueMs: 0 })
+    );
+  });
+
+  it('U3: a transaction whose COMMIT is pending past its deadline is not reaped and commits once', async () => {
+    const { manager } = await loadLifecycleManager();
+    const pendingCommit = deferred<void>();
+    const connection = makeLifecycleConnection();
+    connection.commit.mockImplementation(() => pendingCommit.promise);
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await manager.beginTransaction({ reaperDeadlineMs: REAPER_DEADLINE_MS });
+
+    const commit = outcomeOf(manager.commitTransaction(transactionId));
+    await vi.advanceTimersByTimeAsync(PAST_REAPER_DEADLINE_MS);
+    const reaped = await manager.cleanupStaleTransactions();
+    pendingCommit.resolve();
+    const committed = await commit;
+    console.log('[U3] reaped:', reaped, 'commit:', committed);
+
+    expect(reaped).toBe(0);
+    expect(committed).toEqual({ resolved: undefined });
+    expect(connection.release).toHaveBeenCalledTimes(1);
+    expect(connection.destroy).not.toHaveBeenCalled();
+  });
+
+  it('U4: a transaction with a statement in flight past its deadline is not reaped and its owner commits', async () => {
+    const { manager } = await loadLifecycleManager();
+    const connection = makeLifecycleConnection();
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await manager.beginTransaction({ reaperDeadlineMs: REAPER_DEADLINE_MS });
+    const longStatement = deferred<unknown[]>();
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => (String(sql).startsWith('CALL') ? longStatement.promise : []));
+
+    const statement = manager.executeQuery('CALL RefreshViewFullTable()', [], transactionId);
+    await vi.advanceTimersByTimeAsync(PAST_REAPER_DEADLINE_MS);
+    const reaped = await manager.cleanupStaleTransactions();
+    longStatement.resolve([]);
+    await statement;
+    const committed = await outcomeOf(manager.commitTransaction(transactionId));
+    console.log('[U4] reaped:', reaped, 'commit:', committed);
+
+    expect(reaped, 'a deadline-only reaper kills the full-site refresh mid-statement (§2.3)').toBe(0);
+    expect(committed).toEqual({ resolved: undefined });
+  });
+
+  it('U5: after a reap, query and commit fail closed with typed errors and rollback is a no-op', async () => {
+    const { TransactionNotActiveError, TransactionReapedError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+    const { manager } = await loadLifecycleManager();
+    const connection = makeLifecycleConnection();
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await manager.beginTransaction({ reaperDeadlineMs: REAPER_DEADLINE_MS });
+    await vi.advanceTimersByTimeAsync(REAPER_DEADLINE_MS);
+    expect(await manager.cleanupStaleTransactions()).toBe(1);
+
+    const firstQuery = await outcomeOf(manager.executeQuery('SELECT 1', [], transactionId));
+    const secondQuery = await outcomeOf(manager.executeQuery('SELECT 1', [], transactionId));
+    const firstCommit = await outcomeOf(manager.commitTransaction(transactionId));
+    const secondCommit = await outcomeOf(manager.commitTransaction(transactionId));
+    const rollback = await outcomeOf(manager.rollbackTransaction(transactionId));
+    console.log('[U5]', { firstQuery, secondQuery, firstCommit, secondCommit, rollback });
+
+    expect(firstQuery).toBeInstanceOf(TransactionReapedError);
+    expect(secondQuery, 'executeQuery must not consume the tombstone').toBeInstanceOf(TransactionReapedError);
+    expect(firstCommit).toBeInstanceOf(TransactionReapedError);
+    expect(secondCommit, 'commit consumed the tombstone; it still fails closed').toBeInstanceOf(TransactionNotActiveError);
+    expect(rollback).toEqual({ resolved: undefined });
+    expect(connection.rollback).not.toHaveBeenCalled();
+    expect(connection.commit).not.toHaveBeenCalled();
+  });
+
+  it('U6: tombstones are capped; the evicted oldest owner still fails closed while the newest gets TransactionReapedError', async () => {
+    const { TransactionNotActiveError, TransactionReapedError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+    const { MAX_REAPED_TRANSACTION_RECORDS } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const { manager, internals } = await loadLifecycleManager();
+    getConnMock.mockImplementation(async () => makeLifecycleConnection());
+    const totalToReap = MAX_REAPED_TRANSACTION_RECORDS + 1;
+    const reapedIds: string[] = [];
+
+    while (reapedIds.length < totalToReap) {
+      const waveSize = Math.min(internals.MAX_CONCURRENT_TRANSACTIONS, totalToReap - reapedIds.length);
+      const wave: string[] = [];
+      for (let index = 0; index < waveSize; index++) {
+        wave.push(await manager.beginTransaction({ reaperDeadlineMs: EVICTION_REAPER_DEADLINE_MS }));
+      }
+      await vi.advanceTimersByTimeAsync(EVICTION_REAPER_DEADLINE_MS);
+      expect(await manager.cleanupStaleTransactions()).toBe(waveSize);
+      reapedIds.push(...wave);
+    }
+
+    const tombstonesBeforeCommits = internals.reapedTransactions?.size;
+    const oldestCommit = await outcomeOf(manager.commitTransaction(reapedIds[0]));
+    const newestCommit = await outcomeOf(manager.commitTransaction(reapedIds[reapedIds.length - 1]));
+    console.log('[U6] tombstones kept:', tombstonesBeforeCommits, 'oldest:', oldestCommit, 'newest:', newestCommit);
+
+    expect(tombstonesBeforeCommits, 'one more reap than the cap must evict exactly the oldest').toBe(MAX_REAPED_TRANSACTION_RECORDS);
+    expect(oldestCommit, 'eviction must never restore silent success (R3)').toBeInstanceOf(TransactionNotActiveError);
+    expect(newestCommit).toBeInstanceOf(TransactionReapedError);
+  });
+});

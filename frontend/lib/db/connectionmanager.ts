@@ -56,9 +56,18 @@ export const COMMIT_DEADLINE_EXCEEDED_EVENT = 'db.transaction.commit_deadline_ex
 export const ROLLBACK_DEADLINE_EXCEEDED_EVENT = 'db.transaction.rollback_deadline_exceeded';
 export const COMMIT_ACKNOWLEDGED_AFTER_DEADLINE_EVENT = 'db.transaction.commit_acknowledged_after_deadline';
 
+/** Reap tombstones kept so a resuming owner learns why; the oldest is evicted first. */
+export const MAX_REAPED_TRANSACTION_RECORDS = 1_000;
+export const TRANSACTION_REAPED_EVENT = 'db.transaction.reaped';
+
 interface ReapedTransactionRecord {
   deadlineAt: number;
   reapedAt: number;
+}
+
+/** Abandoned = past its own deadline, idle (no counted statement in flight), and not already committing or rolling back. */
+function isAbandoned(meta: TransactionMeta, now: number): boolean {
+  return meta.phase === 'active' && meta.inFlightStatements === 0 && now >= meta.deadlineAt;
 }
 
 /**
@@ -186,6 +195,10 @@ class ConnectionManager {
   private transactionConnections = new ObservableMap<string, PoolConnection>(); // Store transaction-specific connections
   private transactionMeta = new Map<string, TransactionMeta>();
   private static readonly DEFAULT_TX_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+  /**
+   * Reaper deadline for a transaction begun directly (beginTransaction without reaperDeadlineMs). The reaper acts on
+   * each transaction's own deadline and only when it is idle and active; withTransaction uses timeoutMs + grace.
+   */
   public static readonly DEFAULT_STALE_TRANSACTION_THRESHOLD_MS = ConnectionManager.DEFAULT_TX_TIMEOUT_MS * 2;
   /** Added to a withTransaction's timeoutMs to form its reaper deadline, so the reaper can never act before the callback timer. */
   public static readonly TRANSACTION_REAPER_GRACE_MS = 60_000;
@@ -221,6 +234,7 @@ class ConnectionManager {
   public async executeQuery(query: string, params?: unknown[], transactionId?: string): Promise<any> {
     const startedAt = Date.now();
     const acquireStartedAt = Date.now();
+    if (transactionId) this.throwIfReaped(transactionId);
     const connection = transactionId ? this.transactionConnections.get(transactionId) : await this.acquireConnectionInternal();
     const acquireMs = transactionId ? 0 : Date.now() - acquireStartedAt;
 
@@ -775,39 +789,46 @@ class ConnectionManager {
     return this.transactionConnections.size > 0;
   }
 
-  public async cleanupStaleTransactions(maxAgeMs?: number): Promise<void> {
-    const threshold = maxAgeMs ?? ConnectionManager.DEFAULT_STALE_TRANSACTION_THRESHOLD_MS;
+  /**
+   * Reaps every abandoned transaction and returns how many. Each reap is one synchronous block — tombstone,
+   * quarantine + finalize, log — so neither the owner nor another finalizer can interleave with it. No ROLLBACK is
+   * sent: the session is idle, so the server rolls back when it reads EOF (E3), and the reaper never waits on a
+   * statement. Async only so existing callers and mocks keep their types.
+   */
+  public async cleanupStaleTransactions(): Promise<number> {
     const now = Date.now();
-    const staleTransactions: string[] = [];
-
-    for (const [txId, meta] of this.transactionMeta.entries()) {
-      if (now - meta.startedAt > threshold) {
-        staleTransactions.push(txId);
-      }
+    let reapedCount = 0;
+    for (const [transactionId, meta] of Array.from(this.transactionMeta.entries())) {
+      if (!isAbandoned(meta, now)) continue;
+      const connection = this.transactionConnections.get(transactionId) as PoolConnectionWithThreadId | undefined;
+      if (!connection) continue;
+      this.recordReapedTransaction(transactionId, { deadlineAt: meta.deadlineAt, reapedAt: now });
+      this.discardTransaction(transactionId, 'reaped: idle past its own deadline');
+      ailogger.warn(TRANSACTION_REAPED_EVENT, {
+        transactionId,
+        threadId: connection.threadId,
+        ageMs: now - meta.startedAt,
+        deadlineAt: meta.deadlineAt,
+        overdueMs: now - meta.deadlineAt
+      });
+      reapedCount += 1;
     }
+    return reapedCount;
+  }
 
-    if (staleTransactions.length === 0) {
-      return; // No stale transactions, exit silently
+  private recordReapedTransaction(transactionId: string, record: ReapedTransactionRecord): void {
+    if (this.reapedTransactions.size >= MAX_REAPED_TRANSACTION_RECORDS) {
+      const oldestTransactionId = this.reapedTransactions.keys().next().value;
+      if (oldestTransactionId !== undefined) this.reapedTransactions.delete(oldestTransactionId);
     }
+    this.reapedTransactions.set(transactionId, record);
+  }
 
-    // Log once for all stale transactions found
-    ailogger.warn(`Detected ${staleTransactions.length} stale transaction(s), cleaning up...`);
-
-    for (const txId of staleTransactions) {
-      try {
-        const meta = this.transactionMeta.get(txId);
-        if (meta) {
-          const ageSeconds = (now - meta.startedAt) / 1000;
-          ailogger.info(`Cleaning up stale transaction ${txId} (age: ${ageSeconds.toFixed(1)}s)`);
-          await this.rollbackTransaction(txId);
-        }
-      } catch (e: unknown) {
-        const errorObj = e instanceof Error ? e : new Error(getErrorMessage(e));
-        ailogger.error(`Error rolling back stale transaction ${txId}: ${getErrorMessage(e)}`, errorObj);
-        // Ensure metadata is deleted even if rollback fails
-        this.transactionMeta.delete(txId);
-      }
-    }
+  /** executeQuery on a reaped id names the reap; the tombstone is kept for the owner's commit to consume. */
+  private throwIfReaped(transactionId: string): void {
+    if (this.transactionConnections.has(transactionId)) return;
+    const tombstone = this.reapedTransactions.get(transactionId);
+    if (tombstone) throw new TransactionReapedError(transactionId, tombstone.deadlineAt, tombstone.reapedAt);
   }
 
   // Application-level lock management using MySQL distributed locks
