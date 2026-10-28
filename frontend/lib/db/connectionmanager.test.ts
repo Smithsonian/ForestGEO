@@ -158,7 +158,7 @@ describe('ConnectionManager.executeQuery timing', () => {
     };
 
     getConnMock.mockResolvedValueOnce(connection);
-    runQueryMock.mockResolvedValueOnce([{ TreeID: 1 }]);
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => (String(sql).startsWith('USE ') ? [] : [{ TreeID: 1 }]));
     vi.spyOn(Date, 'now')
       .mockReturnValueOnce(0)
       .mockReturnValueOnce(5)
@@ -173,7 +173,7 @@ describe('ConnectionManager.executeQuery timing', () => {
     const result = await ConnectionManager.getInstance().executeQuery(query, [1]);
 
     expect(result).toEqual([{ TreeID: 1 }]);
-    expect(connection.query).toHaveBeenCalledWith('USE `forestgeo_testing`');
+    expect(runQueryMock).toHaveBeenCalledWith(connection, 'USE `forestgeo_testing`');
     expect(runQueryMock).toHaveBeenCalledWith(connection, query, [1]);
     expect(connection.ping).not.toHaveBeenCalled();
     expect(connection.release).toHaveBeenCalledTimes(1);
@@ -300,6 +300,7 @@ describe('ConnectionManager transaction-slot accounting — beginTransaction is 
   const MICROTASK_FLUSH_MS = 0; // advance-by-0 to let queued microtasks settle
   const WORKING_THREAD_ID = 777;
   const SET_ISOLATION_SQL = 'SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED';
+  const START_TRANSACTION_SQL = 'START TRANSACTION';
 
   type SlotInternals = {
     transactionSlotQueue: Array<() => void>;
@@ -431,7 +432,8 @@ describe('ConnectionManager transaction-slot accounting — beginTransaction is 
    * immediately, and never touch transactionSlotQueue.
    */
   it('enforces the concurrency cap on the direct beginTransaction path: a saturated cap forces the caller to wait on the slot queue', async () => {
-    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const { default: ConnectionManager, TRANSACTION_BEGIN_STATEMENT_TIMEOUT_MS } =
+      await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
     const cm = ConnectionManager.getInstance();
     const internals = cm as unknown as SlotInternals;
 
@@ -475,8 +477,8 @@ describe('ConnectionManager transaction-slot accounting — beginTransaction is 
       expect(didResolve).toBe(true);
       expect(resolvedId).toBeTruthy();
       expect(getConnMock).toHaveBeenCalledTimes(1);
-      expect(workingConnection.query).toHaveBeenCalledWith(SET_ISOLATION_SQL);
-      expect(workingConnection.beginTransaction).toHaveBeenCalledTimes(1);
+      expect(runQueryMock).toHaveBeenCalledWith(workingConnection, SET_ISOLATION_SQL, undefined, TRANSACTION_BEGIN_STATEMENT_TIMEOUT_MS);
+      expect(runQueryMock).toHaveBeenCalledWith(workingConnection, START_TRANSACTION_SQL, undefined, TRANSACTION_BEGIN_STATEMENT_TIMEOUT_MS);
 
       // Occupancy is unchanged: we removed one sentinel and added one real tx,
       // and the starting-counter handed its reservation to the map entry.
@@ -547,7 +549,7 @@ describe('ConnectionManager transaction-slot accounting — beginTransaction is 
         expect(secondOutcome.id).toBeTruthy();
       }
       expect(getConnMock).toHaveBeenCalledTimes(2);
-      expect(workingConnection.beginTransaction).toHaveBeenCalledTimes(1);
+      expect(runQueryMock.mock.calls.filter(([connection, sql]) => connection === workingConnection && sql === START_TRANSACTION_SQL)).toHaveLength(1);
       expect(internals.startingTransactions).toBe(0);
     } finally {
       resetSlotState(internals, sentinelIds, grantedTxIds);
@@ -663,7 +665,10 @@ describe('ConnectionManager transaction finalization after a statement timeout',
 
     // The statement times out; primitives has already destroyed the connection.
     const timeoutError = new primitives.QueryTimeoutError(STATEMENT_TIMEOUT_MS, TIMED_OUT_THREAD_ID);
-    runQueryMock.mockRejectedValueOnce(timeoutError);
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => {
+      if (String(sql).startsWith('USE ')) return [];
+      throw timeoutError;
+    });
 
     const thrown = await cm.executeQuery('CALL forestgeo_test.bulkingestionprocess(?, ?)', ['f', 'b'], transactionId).then(
       () => {
@@ -674,6 +679,10 @@ describe('ConnectionManager transaction finalization after a statement timeout',
 
     // The original error survives, unwrapped.
     expect(thrown).toBe(timeoutError);
+    expect(
+      runQueryMock.mock.calls.some(([, sql]) => String(sql).startsWith('CALL')),
+      'the CALL itself must time out'
+    ).toBe(true);
 
     // The transaction is already finalized, so the caller's rollback finds
     // nothing to roll back and never touches the closed connection.
@@ -696,11 +705,19 @@ describe('ConnectionManager transaction finalization after a statement timeout',
     const connection = makeDestroyedConnection();
     getConnMock.mockResolvedValueOnce(connection);
     const transactionId = await cm.beginTransaction();
-    runQueryMock.mockRejectedValueOnce(new primitives.QueryTimeoutError(STATEMENT_TIMEOUT_MS, TIMED_OUT_THREAD_ID));
+    const timeoutError = new primitives.QueryTimeoutError(STATEMENT_TIMEOUT_MS, TIMED_OUT_THREAD_ID);
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => {
+      if (String(sql).startsWith('USE ')) return [];
+      throw timeoutError;
+    });
 
     await expect(cm.executeQuery('UPDATE forestgeo_test.coremeasurements SET IsActive = 0', [], transactionId)).rejects.toBeInstanceOf(
       primitives.QueryTimeoutError
     );
+    expect(
+      runQueryMock.mock.calls.some(([, sql]) => String(sql).startsWith('UPDATE')),
+      'the UPDATE itself must time out'
+    ).toBe(true);
 
     // The writes were rolled back by the server; flushing them would record
     // changelog entries for changes that never happened.
@@ -719,9 +736,16 @@ describe('ConnectionManager transaction finalization after a statement timeout',
     const transactionId = await cm.beginTransaction();
 
     const sqlError = new Error("Table 'x.nonexistent' doesn't exist");
-    runQueryMock.mockRejectedValueOnce(sqlError);
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => {
+      if (String(sql).startsWith('USE ')) return [];
+      throw sqlError;
+    });
 
     await expect(cm.executeQuery('SELECT * FROM forestgeo_test.nonexistent', [], transactionId)).rejects.toBe(sqlError);
+    expect(
+      runQueryMock.mock.calls.some(([, sql]) => String(sql).startsWith('SELECT')),
+      'the SELECT itself must reach runQuery'
+    ).toBe(true);
 
     // Still owned by the caller: the connection is alive and the real ROLLBACK
     // must still be issued.
@@ -841,10 +865,18 @@ describe('ConnectionManager.discardTransaction', () => {
     const connection = makeLiveConnection();
     getConnMock.mockResolvedValueOnce(connection);
     const transactionId = await cm.beginTransaction();
-    runQueryMock.mockRejectedValueOnce(new primitives.QueryTimeoutError(1000, DISCARDED_THREAD_ID));
+    const timeoutError = new primitives.QueryTimeoutError(1000, DISCARDED_THREAD_ID);
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => {
+      if (String(sql).startsWith('USE ')) return [];
+      throw timeoutError;
+    });
     await expect(cm.executeQuery('CALL forestgeo_test.bulkingestionprocess(?, ?)', ['f', 'b'], transactionId)).rejects.toBeInstanceOf(
       primitives.QueryTimeoutError
     );
+    expect(
+      runQueryMock.mock.calls.some(([, sql]) => String(sql).startsWith('CALL')),
+      'the CALL itself must time out'
+    ).toBe(true);
 
     cm.discardTransaction(transactionId, DISCARD_REASON);
 

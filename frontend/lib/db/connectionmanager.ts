@@ -56,6 +56,11 @@ export const COMMIT_DEADLINE_EXCEEDED_EVENT = 'db.transaction.commit_deadline_ex
 export const ROLLBACK_DEADLINE_EXCEEDED_EVENT = 'db.transaction.rollback_deadline_exceeded';
 export const COMMIT_ACKNOWLEDGED_AFTER_DEADLINE_EVENT = 'db.transaction.commit_acknowledged_after_deadline';
 
+/** Bound on SET ISOLATION / START TRANSACTION. The connection is freshly acquired, so nothing is queued ahead (A21). */
+export const TRANSACTION_BEGIN_STATEMENT_TIMEOUT_MS = 30_000;
+export const SET_READ_COMMITTED_ISOLATION_SQL = 'SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED';
+export const START_TRANSACTION_SQL = 'START TRANSACTION';
+
 /** Reap tombstones kept so a resuming owner learns why; the oldest is evicted first. */
 export const MAX_REAPED_TRANSACTION_RECORDS = 1_000;
 export const TRANSACTION_REAPED_EVENT = 'db.transaction.reaped';
@@ -263,11 +268,15 @@ class ConnectionManager {
       if (schema && connectionSchemaCache.get(connection) !== schema) {
         try {
           const schemaUseStartedAt = Date.now();
-          // Use simple query protocol (not prepared statements) to switch database
-          await connection.query(`USE \`${schema}\``);
+          // Text protocol (USE is not preparable) with runQuery's default bound: a shorter one would KILL a
+          // legitimate statement queued ahead of it, because runQuery measures from enqueue (A21).
+          await runQuery(connection, `USE \`${schema}\``);
           schemaUseMs = Date.now() - schemaUseStartedAt;
           connectionSchemaCache.set(connection, schema);
         } catch (useError: unknown) {
+          if (useError instanceof QueryTimeoutError || useError instanceof ConnectionQuarantinedError) {
+            throw useError;
+          }
           // Log but don't fail - the query may still work with fully-qualified names
           ailogger.warn(chalk.yellow(`Could not set database context to ${schema}: ${getErrorMessage(useError)}`));
           connectionSchemaCache.delete(connection);
@@ -346,9 +355,9 @@ class ConnectionManager {
           connection = await this.acquireConnectionInternal();
 
           // Set transaction isolation level to reduce deadlock probability
-          await connection.query('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
+          await runQuery(connection, SET_READ_COMMITTED_ISOLATION_SQL, undefined, TRANSACTION_BEGIN_STATEMENT_TIMEOUT_MS);
 
-          await connection.beginTransaction();
+          await runQuery(connection, START_TRANSACTION_SQL, undefined, TRANSACTION_BEGIN_STATEMENT_TIMEOUT_MS);
           this.transactionConnections.set(transactionId, connection);
           // Hand the reserved slot off from the starting-counter to the map
           // entry: net occupancy stays +1, now held by transactionConnections.
@@ -371,7 +380,7 @@ class ConnectionManager {
           return transactionId;
         } catch (error: unknown) {
           const failedThreadId = (connection as PoolConnectionWithThreadId | null)?.threadId;
-          connection?.release();
+          if (connection && !isConnectionQuarantined(connection)) connection.release();
           connection = null;
           if (!this.isDeadlockError(error) && !this.isLockTimeoutError(error)) {
             const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));

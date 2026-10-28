@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionQuarantinedError } from './connectionquarantine';
+import { QueryTimeoutError } from './primitives';
 import { TransactionCallbackTimeoutError } from './transactionerrors';
 
 const { getConnectionMock, tryAcquireConnectionMock, killConnection } = vi.hoisted(() => ({
@@ -35,14 +36,26 @@ vi.mock('chalk', () => ({
 }));
 
 // The shared test setup replaces '@/lib/db/connectionmanager' with a stub, so the real module is loaded explicitly.
-const { default: ConnectionManager, APPLICATION_LOCK_CLEANUP_DEADLINE_MS } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+const {
+  default: ConnectionManager,
+  APPLICATION_LOCK_CLEANUP_DEADLINE_MS,
+  TRANSACTION_BEGIN_STATEMENT_TIMEOUT_MS
+} = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
 
 const CANCELLATION_THREAD_ID = 5_631;
 const LOCK_NAME = 'upload:file:563-cancellation';
 const LOCK_WAIT_MS = 1_000;
 const ROWS_OK: [unknown[], unknown[]] = [[], []];
+const STILL_PENDING = Symbol('still pending');
+/** primitives.ts DEFAULT_QUERY_TIMEOUT_MS: the bound a USE inherits (A21). */
+const RUNQUERY_DEFAULT_TIMEOUT_MS = 660_000;
 
 type StatementResponder = (sql: string, params?: unknown[]) => Promise<unknown>;
+
+/** The settled value, or STILL_PENDING; call after advancing timers so settled promises have run their reactions. */
+async function settledValue<T>(promise: Promise<T>): Promise<T | typeof STILL_PENDING> {
+  return Promise.race([promise, Promise.resolve(STILL_PENDING)]);
+}
 
 function neverSettles<T>(): Promise<T> {
   return new Promise<T>(() => undefined);
@@ -166,5 +179,107 @@ describe('callback-timeout abandonment with the real runQuery (U25, R5)', () => 
     expect(killConnection.query).toHaveBeenCalledWith(`KILL QUERY ${CANCELLATION_THREAD_ID}`);
     expect(vi.getTimerCount()).toBe(timersBefore);
     expect(slotOccupancy(internals)).toBe(occupancyBefore);
+  });
+});
+
+describe('the manager’s own statements are bounded (U21, U22, U23, U23b — R4)', () => {
+  const REAPER_DEADLINE_MS = 1_000;
+  const PAST_REAPER_DEADLINE_MS = 1_500;
+  const SETUP_TIMEOUT_MS = 5_000;
+  const STALLED_SCHEMA_QUERY = 'SELECT * FROM forestgeo_stalled_use.trees';
+  const START_TRANSACTION_PATTERN = /^\s*START\s+TRANSACTION\b/i;
+
+  it('U21: a stalled USE is counted in flight, so it is never reaped, and is bounded at 660 s', async () => {
+    const { manager, internals } = managerAtBaseline();
+    const connection = makeScriptedConnection(async sql => (sql.startsWith('USE ') ? neverSettles() : ROWS_OK));
+    getConnectionMock.mockResolvedValueOnce(connection);
+    const timersBefore = vi.getTimerCount();
+    const occupancyBefore = slotOccupancy(internals);
+    const transactionId = await manager.beginTransaction({ reaperDeadlineMs: REAPER_DEADLINE_MS });
+
+    const statement = manager.executeQuery(STALLED_SCHEMA_QUERY, [], transactionId).then(
+      () => 'resolved',
+      (error: unknown) => error
+    );
+    await vi.advanceTimersByTimeAsync(PAST_REAPER_DEADLINE_MS);
+    const reapedWhileInFlight = await manager.cleanupStaleTransactions();
+    await vi.advanceTimersByTimeAsync(RUNQUERY_DEFAULT_TIMEOUT_MS - PAST_REAPER_DEADLINE_MS);
+    const outcome = await settledValue(statement);
+    console.log('[U21] reaped while USE in flight:', reapedWhileInFlight, 'outcome at 660 s:', outcome, 'timers:', timersBefore, vi.getTimerCount());
+
+    expect(reapedWhileInFlight).toBe(0);
+    expect(outcome, 'an unbounded raw USE hangs forever and pins the slot').toBeInstanceOf(QueryTimeoutError);
+    expect(internals.transactionConnections.has(transactionId)).toBe(false);
+    expect(slotOccupancy(internals)).toBe(occupancyBefore);
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(killConnection.query).toHaveBeenCalledWith(`KILL QUERY ${CANCELLATION_THREAD_ID}`);
+    expect(vi.getTimerCount()).toBe(timersBefore);
+  });
+
+  it('U22: a stalled setup SET SESSION ends at timeoutMs, the callback never runs, and nothing leaks', async () => {
+    const { manager, internals } = managerAtBaseline();
+    const connection = makeScriptedConnection(async sql => (sql.startsWith('SET SESSION wait_timeout') ? neverSettles() : ROWS_OK));
+    getConnectionMock.mockResolvedValueOnce(connection);
+    const timersBefore = vi.getTimerCount();
+    const occupancyBefore = slotOccupancy(internals);
+    const fn = vi.fn(async () => 'callback ran');
+
+    const outcome = manager.withTransaction(fn, { timeoutMs: SETUP_TIMEOUT_MS }).then(
+      () => 'resolved',
+      (error: unknown) => error
+    );
+    await vi.advanceTimersByTimeAsync(SETUP_TIMEOUT_MS);
+    const settled = await settledValue(outcome);
+    await vi.advanceTimersByTimeAsync(0);
+    console.log('[U22] outcome:', settled, 'fn calls:', fn.mock.calls.length, 'timers:', timersBefore, vi.getTimerCount());
+
+    expect(settled).toBeInstanceOf(TransactionCallbackTimeoutError);
+    expect(fn, 'the cancelled setup must stop the callback (amendment 2)').not.toHaveBeenCalled();
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(slotOccupancy(internals)).toBe(occupancyBefore);
+    expect(vi.getTimerCount()).toBe(timersBefore);
+  });
+
+  it('U23: a stalled START TRANSACTION is bounded, quarantined, and returns its start slot', async () => {
+    const { manager, internals } = managerAtBaseline();
+    const connection = makeScriptedConnection(async sql => (START_TRANSACTION_PATTERN.test(sql) ? neverSettles() : ROWS_OK));
+    getConnectionMock.mockResolvedValueOnce(connection);
+    const occupancyBefore = slotOccupancy(internals);
+
+    const outcome = manager.beginTransaction().then(
+      () => 'resolved',
+      (error: unknown) => error
+    );
+    await vi.advanceTimersByTimeAsync(TRANSACTION_BEGIN_STATEMENT_TIMEOUT_MS);
+    const settled = await settledValue(outcome);
+    console.log('[U23] outcome:', settled, 'startingTransactions:', internals.startingTransactions);
+
+    expect(settled).toBeInstanceOf(QueryTimeoutError);
+    expect(internals.startingTransactions).toBe(0);
+    expect(slotOccupancy(internals)).toBe(occupancyBefore);
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(connection.release, 'a quarantined connection must not be released').not.toHaveBeenCalled();
+    expect(killConnection.query).toHaveBeenCalledWith(`KILL QUERY ${CANCELLATION_THREAD_ID}`);
+  });
+
+  it('U23b: a stalled isolation SET is bounded the same way (AC 13)', async () => {
+    const { manager, internals } = managerAtBaseline();
+    const connection = makeScriptedConnection(async sql => (sql.startsWith('SET SESSION TRANSACTION ISOLATION') ? neverSettles() : ROWS_OK));
+    getConnectionMock.mockResolvedValueOnce(connection);
+    const occupancyBefore = slotOccupancy(internals);
+
+    const outcome = manager.beginTransaction().then(
+      () => 'resolved',
+      (error: unknown) => error
+    );
+    await vi.advanceTimersByTimeAsync(TRANSACTION_BEGIN_STATEMENT_TIMEOUT_MS);
+    const settled = await settledValue(outcome);
+    console.log('[U23b] outcome:', settled, 'startingTransactions:', internals.startingTransactions);
+
+    expect(settled, 'today the isolation SET goes raw over connection.query with no bound').toBeInstanceOf(QueryTimeoutError);
+    expect(internals.startingTransactions).toBe(0);
+    expect(slotOccupancy(internals)).toBe(occupancyBefore);
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(connection.release).not.toHaveBeenCalled();
   });
 });
