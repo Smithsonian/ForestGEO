@@ -5,9 +5,9 @@
  * precondition checks 1-8). Must pass before a CTFS SQL artifact is generated.
  *
  * Each check runs as a parameterized query against the app schema (schema-qualified
- * identifiers via `quoteSchema`; CensusID bound via `?` placeholder). Schema names
- * are validated against a strict regex before being backtick-quoted, preventing
- * SQL injection through schema name interpolation.
+ * identifiers via `??` placeholders resolved by `safeFormatQuery`; PlotID and CensusID
+ * bound via `?`). checkFinishedCensus also rejects a schema name that is not a plain
+ * identifier before running any SQL.
  *
  * Task 10C (ratified interim 2026-07-20 — IMPLEMENTED): publish preconditions are split
  * into WARNING vs BLOCKING kinds (see WARNING_PRECONDITION_KINDS below). Data-quality
@@ -23,7 +23,7 @@
  */
 
 import type { Connection, RowDataPacket } from 'mysql2/promise';
-import { exportableMeasurementIdSelect } from './exportable-measurement';
+import { exportableMeasurementIdSelect, joinMeasurementLinks, type MeasurementLinkAlias } from './exportable-measurement';
 import { TREE_TAG_MAX_WIDTH } from '../csv-to-sql-v2';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
@@ -87,6 +87,12 @@ export type ExportableShortfallKind = Extract<PreconditionFailureKind, 'zero-exp
 /** Check 2's predicate: a `measurement_error_log` row (alias `mel`) that is still open. */
 export const UNRESOLVED_ERROR_LOG_CONDITION = 'COALESCE(mel.IsResolved, FALSE) = FALSE';
 
+/** Check 1's predicate, never NULL; the export preview's not-validated skip reason reuses it. */
+export const NOT_VALIDATED_CONDITION = 'cm.IsValidated IS NULL OR cm.IsValidated = FALSE';
+
+/** Check 3's predicate, never NULL; the export preview's no-stem-guid and missing-link skip reasons reuse it. */
+export const NO_STEM_GUID_CONDITION = 'cm.StemGUID IS NULL';
+
 export interface PreconditionFailure {
   kind: PreconditionFailureKind;
   message: string;
@@ -111,9 +117,9 @@ export type PreconditionResult =
   | { ok: false; reasons: PreconditionFailure[]; count: number; totalActiveCount: number };
 
 /**
- * Classifier injected into countPublishBlockers. It also narrows the kind, so a
- * caller can swap the policy (e.g. #545's, where the 50% rule only warns)
- * without casts. Production passes isBlockingPreconditionKind.
+ * Classifier injected into countPublishPreconditions (export-preview.ts). It also
+ * narrows the kind, so a caller can swap the policy (e.g. #545's, where the 50%
+ * rule only warns) without casts. Production passes isBlockingPreconditionKind.
  */
 export type BlockingKindClassifier = (kind: PreconditionFailureKind) => kind is BlockingPreconditionKind;
 
@@ -121,14 +127,6 @@ export interface PublishBlockerCount {
   kind: BlockingPreconditionKind;
   /** Distinct flagged measurements; null for the census-level shortfall kind. */
   count: number | null;
-}
-
-export interface PublishBlockerCounts {
-  blockers: PublishBlockerCount[];
-  /** Exportable measurements, exactly as check 8 counts them. */
-  count: number;
-  /** Active measurements in the census, exactly as check 8 counts them. */
-  totalActiveCount: number;
 }
 
 /**
@@ -179,14 +177,13 @@ export function partitionPreconditionFailures(reasons: PreconditionFailure[]): {
 // ---------------------------------------------------------------------------
 
 /**
- * Validate and backtick-quote a MySQL schema name for use as a SQL identifier.
- * Throws on names that contain non-identifier characters to prevent injection.
+ * Reject a schema name that is not a plain identifier, before any SQL runs.
+ * safeFormatQuery validates every query again against the app's schema whitelist.
  */
-function quoteSchema(schema: string): string {
+function assertPlainSchemaName(schema: string): void {
   if (!SCHEMA_NAME_RE.test(schema)) {
     throw new Error(`Invalid schema name: ${schema}`);
   }
-  return `\`${schema}\``;
 }
 
 /**
@@ -198,127 +195,114 @@ async function gatherIds(conn: Connection, sql: string, params: unknown[]): Prom
   return (rows as Array<{ CoreMeasurementID: number }>).slice(0, MAX_DISPLAY_FAILURES).map(r => Number(r.CoreMeasurementID));
 }
 
-/**
- * One row-level precondition check (checks 1-7). `fromWhereSql` is the
- * `FROM … WHERE …` part, with two `?` placeholders bound as [plotId, censusId].
- * checkFinishedCensus wraps it in `SELECT … LIMIT ?`; countPublishBlockers wraps
- * it in `SELECT COUNT(DISTINCT cm.CoreMeasurementID)`. Sharing the fragment is
- * what keeps the two from drifting.
- */
-interface PreconditionRowCheck {
+interface RowCheckDeclaration {
   kind: PreconditionFailureKind;
   message: string;
-  /** True when a join can repeat a measurement, so the ID query needs DISTINCT. */
-  selectsDistinctRows: boolean;
-  fromWhereSql: string;
+  /** Every column alias-qualified: the overview's single pass joins every link, where a bare name can be ambiguous. */
+  condition: string;
 }
 
-function buildPreconditionRowChecks(s: string): readonly PreconditionRowCheck[] {
-  return [
-    // Check 1: IsValidated IS NOT TRUE
-    // Must use `IS NULL OR = FALSE` rather than `<> TRUE` — SQL three-valued logic
-    // would silently pass NULL through a <> comparison.
-    {
-      kind: 'not-validated',
-      message: 'Measurements not validated (IsValidated is FALSE or NULL)',
-      selectsDistinctRows: false,
-      fromWhereSql: `FROM ${s}.coremeasurements cm
-       JOIN ${s}.census c ON c.CensusID = cm.CensusID
-      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
-        AND (IsValidated IS NULL OR IsValidated = FALSE)`
-    },
-    // Check 2: Unresolved measurement_error_log row.
-    {
-      kind: 'unresolved-error',
-      message: 'Unresolved measurement_error_log rows exist',
-      selectsDistinctRows: true,
-      fromWhereSql: `FROM ${s}.coremeasurements cm
-       JOIN ${s}.census c ON c.CensusID = cm.CensusID
-       JOIN ${s}.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
-      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
-        AND ${UNRESOLVED_ERROR_LOG_CONDITION}`
-    },
-    // Check 3: StemGUID IS NULL (app-side failure marker).
-    {
-      kind: 'no-stem-guid',
-      message: 'Measurements lack StemGUID (app-side failure marker)',
-      selectsDistinctRows: false,
-      fromWhereSql: `FROM ${s}.coremeasurements cm
-       JOIN ${s}.census c ON c.CensusID = cm.CensusID
-      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
-        AND StemGUID IS NULL`
-    },
-    // Check 4: Joined stems or trees is inactive or soft-deleted.
-    {
-      kind: 'inactive-join',
-      message: 'Joined stems or trees are inactive or soft-deleted',
-      selectsDistinctRows: false,
-      fromWhereSql: `FROM ${s}.coremeasurements cm
-       JOIN ${s}.census c ON c.CensusID = cm.CensusID
-       JOIN ${s}.stems st ON st.StemGUID = cm.StemGUID
-       JOIN ${s}.trees t  ON t.TreeID    = st.TreeID
-      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
-        AND (
-          st.IsActive = 0 OR st.DeletedAt IS NOT NULL
-          OR t.IsActive = 0 OR t.DeletedAt IS NOT NULL
-        )`
-    },
-    // Check 5: cmattributes.Code does not resolve to an active app attributes row.
-    // The app has no FK from cmattributes.Code to attributes.Code (by design, to allow
-    // display of invalid codes for correction), so this must be checked explicitly.
-    // attributes PK is (Code, IsActive), so require IsActive = 1 on the join.
-    {
-      kind: 'unknown-attribute-code',
-      message: 'cmattributes.Code does not resolve to an active app attributes row',
-      selectsDistinctRows: true,
-      fromWhereSql: `FROM ${s}.coremeasurements cm
-       JOIN ${s}.census c ON c.CensusID = cm.CensusID
-       JOIN ${s}.cmattributes cma ON cma.CoreMeasurementID = cm.CoreMeasurementID
-       LEFT JOIN ${s}.attributes a ON a.Code = cma.Code AND a.IsActive = 1
-      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
-        AND a.Code IS NULL`
-    },
-    // Check 6: Missing mnemonic needed for destination taxonomy lookup.
-    // SpeciesName, Genus, and Family are descriptive context only: the Smithsonian
-    // contract confirmed by Suzanne resolves current Species/SubSpecies on Mnemonic.
-    {
-      kind: 'missing-taxonomy-fields',
-      message: 'Species row is missing SpeciesCode required for destination mnemonic lookup',
-      selectsDistinctRows: false,
-      fromWhereSql: `FROM ${s}.coremeasurements cm
-       JOIN ${s}.census c ON c.CensusID = cm.CensusID
-       JOIN ${s}.stems   st  ON st.StemGUID  = cm.StemGUID
-       JOIN ${s}.trees   t   ON t.TreeID     = st.TreeID
-       JOIN ${s}.species sp  ON sp.SpeciesID = t.SpeciesID
-       JOIN ${s}.genus   gn  ON gn.GenusID   = sp.GenusID
-       JOIN ${s}.family  fam ON fam.FamilyID = gn.FamilyID
-      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
-        AND (sp.SpeciesCode IS NULL OR sp.SpeciesCode = '')`
-    },
-    // Check 7: Destination-bound value exceeds CTFS legacy column width.
-    // Source column widths in the app schema may be larger than CTFS column widths.
-    // Specific limits (from spec):
-    //   Tree.Tag 20, Stem.StemTag 32, Quadrat.QuadratName 8, TSMAttributes.TSMCode 10,
-    //   DBH.Comments 128, Species.Mnemonic / SubSpecies.Mnemonic 10,
-    //   taxonomy names 64, taxonomy authorities 128.
-    // App coremeasurements.Description maps to CTFS DBH.Comments (128 char limit).
-    // App species.SpeciesCode maps to CTFS Mnemonic (10 char limit).
-    {
-      kind: 'string-too-long',
-      message: 'Destination-bound value exceeds CTFS legacy column width',
-      selectsDistinctRows: false,
-      fromWhereSql: `FROM ${s}.coremeasurements cm
-       JOIN ${s}.census c ON c.CensusID = cm.CensusID
-       JOIN ${s}.stems   st  ON st.StemGUID  = cm.StemGUID
-       JOIN ${s}.trees   t   ON t.TreeID     = st.TreeID
-       JOIN ${s}.quadrats q  ON q.QuadratID  = st.QuadratID
-       JOIN ${s}.species sp  ON sp.SpeciesID = t.SpeciesID
-       JOIN ${s}.genus   gn  ON gn.GenusID   = sp.GenusID
-       JOIN ${s}.family  fam ON fam.FamilyID = gn.FamilyID
-      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
-        AND (
-          CHAR_LENGTH(t.TreeTag)                        > ${CTFS_LIMITS.treeTag}
-          OR CHAR_LENGTH(st.StemTag)                    > ${CTFS_LIMITS.stemTag}
+/** A check over the measurement's one-row-per-measurement links (exportable-measurement.ts). */
+export interface MeasurementGraphRowCheck extends RowCheckDeclaration {
+  joinShape: 'measurement-graph';
+  /** Inner-joined by the gate; guarded with measurementLinksMatched in the overview's single pass. */
+  links: readonly MeasurementLinkAlias[];
+}
+
+/** A check that joins a table holding many rows per measurement, so it is counted with DISTINCT in its own statement. */
+export interface RelatedRowsRowCheck extends RowCheckDeclaration {
+  joinShape: 'related-rows';
+  relatedRowsJoin: string;
+}
+
+export type PreconditionRowCheck = MeasurementGraphRowCheck | RelatedRowsRowCheck;
+
+/** The census's measurements every row check starts from; the WHERE is bound [plotId, censusId]. */
+export const MEASUREMENT_SCOPE_FROM = `FROM ??.coremeasurements cm
+       JOIN ??.census c ON c.CensusID = cm.CensusID`;
+export const MEASUREMENT_SCOPE_WHERE = 'c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1';
+
+/**
+ * Row-level precondition checks 1-7, one declaration each. checkFinishedCensus
+ * renders each through rowCheckFromWhere as a capped ID query. The overview
+ * (countPublishPreconditions, export-preview.ts) counts the measurement-graph
+ * checks in one LEFT JOIN pass and each related-rows check through
+ * rowCheckFromWhere. Both embed the same `condition`, which is what keeps the
+ * two from drifting.
+ */
+export const PRECONDITION_ROW_CHECKS: readonly PreconditionRowCheck[] = [
+  // Check 1: IsValidated IS NOT TRUE
+  // Must use `IS NULL OR = FALSE` rather than `<> TRUE` — SQL three-valued logic
+  // would silently pass NULL through a <> comparison.
+  {
+    kind: 'not-validated',
+    message: 'Measurements not validated (IsValidated is FALSE or NULL)',
+    joinShape: 'measurement-graph',
+    links: [],
+    condition: NOT_VALIDATED_CONDITION
+  },
+  // Check 2: Unresolved measurement_error_log row.
+  {
+    kind: 'unresolved-error',
+    message: 'Unresolved measurement_error_log rows exist',
+    joinShape: 'related-rows',
+    relatedRowsJoin: 'JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID',
+    condition: UNRESOLVED_ERROR_LOG_CONDITION
+  },
+  // Check 3: StemGUID IS NULL (app-side failure marker).
+  {
+    kind: 'no-stem-guid',
+    message: 'Measurements lack StemGUID (app-side failure marker)',
+    joinShape: 'measurement-graph',
+    links: [],
+    condition: NO_STEM_GUID_CONDITION
+  },
+  // Check 4: Joined stems or trees is inactive or soft-deleted.
+  {
+    kind: 'inactive-join',
+    message: 'Joined stems or trees are inactive or soft-deleted',
+    joinShape: 'measurement-graph',
+    links: ['s', 't'],
+    condition: `s.IsActive = 0 OR s.DeletedAt IS NOT NULL
+          OR t.IsActive = 0 OR t.DeletedAt IS NOT NULL`
+  },
+  // Check 5: cmattributes.Code does not resolve to an active app attributes row.
+  // The app has no FK from cmattributes.Code to attributes.Code (by design, to allow
+  // display of invalid codes for correction), so this must be checked explicitly.
+  // attributes PK is (Code, IsActive), so require IsActive = 1 on the join.
+  {
+    kind: 'unknown-attribute-code',
+    message: 'cmattributes.Code does not resolve to an active app attributes row',
+    joinShape: 'related-rows',
+    relatedRowsJoin: `JOIN ??.cmattributes cma ON cma.CoreMeasurementID = cm.CoreMeasurementID
+       LEFT JOIN ??.attributes a ON a.Code = cma.Code AND a.IsActive = 1`,
+    condition: 'a.Code IS NULL'
+  },
+  // Check 6: Missing mnemonic needed for destination taxonomy lookup.
+  // SpeciesName, Genus, and Family are descriptive context only: the Smithsonian
+  // contract confirmed by Suzanne resolves current Species/SubSpecies on Mnemonic.
+  {
+    kind: 'missing-taxonomy-fields',
+    message: 'Species row is missing SpeciesCode required for destination mnemonic lookup',
+    joinShape: 'measurement-graph',
+    links: ['s', 't', 'sp', 'gn', 'fam'],
+    condition: "sp.SpeciesCode IS NULL OR sp.SpeciesCode = ''"
+  },
+  // Check 7: Destination-bound value exceeds CTFS legacy column width.
+  // Source column widths in the app schema may be larger than CTFS column widths.
+  // Specific limits (from spec):
+  //   Tree.Tag 20, Stem.StemTag 32, Quadrat.QuadratName 8, TSMAttributes.TSMCode 10,
+  //   DBH.Comments 128, Species.Mnemonic / SubSpecies.Mnemonic 10,
+  //   taxonomy names 64, taxonomy authorities 128.
+  // App coremeasurements.Description maps to CTFS DBH.Comments (128 char limit).
+  // App species.SpeciesCode maps to CTFS Mnemonic (10 char limit).
+  {
+    kind: 'string-too-long',
+    message: 'Destination-bound value exceeds CTFS legacy column width',
+    joinShape: 'measurement-graph',
+    links: ['s', 't', 'q', 'sp', 'gn', 'fam'],
+    condition: `CHAR_LENGTH(t.TreeTag)                        > ${CTFS_LIMITS.treeTag}
+          OR CHAR_LENGTH(s.StemTag)                     > ${CTFS_LIMITS.stemTag}
           OR CHAR_LENGTH(q.QuadratName)                 > ${CTFS_LIMITS.quadratName}
           OR CHAR_LENGTH(COALESCE(cm.Description, ''))  > ${CTFS_LIMITS.dbhComments}
           OR CHAR_LENGTH(COALESCE(sp.SpeciesCode, ''))  > ${CTFS_LIMITS.speciesMnemonic}
@@ -331,13 +315,23 @@ function buildPreconditionRowChecks(s: string): readonly PreconditionRowCheck[] 
           OR CHAR_LENGTH(COALESCE(gn.GenusAuthority, ''))      > ${CTFS_LIMITS.taxonomyAuthority}
           OR EXISTS (
             SELECT 1
-              FROM ${s}.cmattributes cma
+              FROM ??.cmattributes cma
              WHERE cma.CoreMeasurementID = cm.CoreMeasurementID
                AND CHAR_LENGTH(COALESCE(cma.Code, '')) > ${CTFS_LIMITS.tsmCode}
-          )
-        )`
-    }
-  ];
+          )`
+  }
+];
+
+/**
+ * The gate's `FROM … WHERE …` for one check: the census scope, the check's inner
+ * joins, then its condition. Bound [plotId, censusId]; `??` resolved by safeFormatQuery.
+ */
+export function rowCheckFromWhere(check: PreconditionRowCheck): string {
+  const joins = check.joinShape === 'measurement-graph' ? joinMeasurementLinks(check.links, 'JOIN') : check.relatedRowsJoin;
+  return `${MEASUREMENT_SCOPE_FROM}
+       ${joins}
+      WHERE ${MEASUREMENT_SCOPE_WHERE}
+        AND (${check.condition})`;
 }
 
 /**
@@ -354,9 +348,8 @@ async function countExportableAndActiveMeasurements(conn: Connection, input: Pre
     safeFormatQuery(
       input.schema,
       `SELECT COUNT(*) AS n
-       FROM ??.coremeasurements cm
-       JOIN ??.census c ON c.CensusID = cm.CensusID
-      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1`
+       ${MEASUREMENT_SCOPE_FROM}
+      WHERE ${MEASUREMENT_SCOPE_WHERE}`
     ),
     [input.plotId, input.censusId]
   );
@@ -374,32 +367,6 @@ export function exportableShortfallKind(count: number, totalActiveCount: number)
   return null;
 }
 
-/**
- * Uncapped counterpart of checkFinishedCensus for the census overview: the
- * number of distinct measurements each blocking row check flags, then the
- * census-level shortfall kind when `isBlocking` classifies it as blocking.
- * Shares checkFinishedCensus's fragments and check-8 counts, so the two cannot
- * drift. COUNT(DISTINCT) matters: one measurement can carry several unknown codes.
- */
-export async function countPublishBlockers(conn: Connection, input: PreconditionInput, isBlocking: BlockingKindClassifier): Promise<PublishBlockerCounts> {
-  const s = quoteSchema(input.schema);
-  const blockers: PublishBlockerCount[] = [];
-
-  for (const check of buildPreconditionRowChecks(s)) {
-    const { kind } = check;
-    if (!isBlocking(kind)) continue;
-    const [rows] = await conn.query<RowDataPacket[]>(`SELECT COUNT(DISTINCT cm.CoreMeasurementID) AS n ${check.fromWhereSql}`, [input.plotId, input.censusId]);
-    const flaggedMeasurements = Number(rows[0].n);
-    if (flaggedMeasurements > 0) blockers.push({ kind, count: flaggedMeasurements });
-  }
-
-  const { count, totalActiveCount } = await countExportableAndActiveMeasurements(conn, input);
-  const shortfallKind = exportableShortfallKind(count, totalActiveCount);
-  if (shortfallKind !== null && isBlocking(shortfallKind)) blockers.push({ kind: shortfallKind, count: null });
-
-  return { blockers, count, totalActiveCount };
-}
-
 // ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
@@ -412,22 +379,27 @@ export async function countPublishBlockers(conn: Connection, input: Precondition
  * number of active measurements in the census. Returns `{ ok: false, reasons }` with
  * one `PreconditionFailure` per triggered check (plus both counts when check 8 ran).
  *
- * All queries use parameterized `?` for the censusId and backtick-quoted schema
- * names (validated by regex). No raw string concatenation of user-supplied values.
+ * All queries bind PlotID and CensusID with `?` and resolve the schema through
+ * `safeFormatQuery`. No raw string concatenation of user-supplied values.
  */
 export async function checkFinishedCensus(conn: Connection, input: PreconditionInput): Promise<PreconditionResult> {
-  const s = quoteSchema(input.schema);
+  assertPlainSchemaName(input.schema);
   const reasons: PreconditionFailure[] = [];
   // Fetch one extra row beyond the display cap so we can detect overflow without
   // fetching an unbounded result set.
   const fetchLimit = MAX_DISPLAY_FAILURES + 1;
 
-  for (const check of buildPreconditionRowChecks(s)) {
+  for (const check of PRECONDITION_ROW_CHECKS) {
+    // A related-rows join can repeat a measurement, so its ID query needs DISTINCT.
+    const distinct = check.joinShape === 'related-rows' ? 'DISTINCT ' : '';
     const ids = await gatherIds(
       conn,
-      `SELECT ${check.selectsDistinctRows ? 'DISTINCT ' : ''}cm.CoreMeasurementID
-       ${check.fromWhereSql}
-      LIMIT ?`,
+      safeFormatQuery(
+        input.schema,
+        `SELECT ${distinct}cm.CoreMeasurementID
+       ${rowCheckFromWhere(check)}
+      LIMIT ?`
+      ),
       [input.plotId, input.censusId, fetchLimit]
     );
     if (ids.length > 0) {

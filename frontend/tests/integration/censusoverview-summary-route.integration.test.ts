@@ -34,6 +34,17 @@ const SNAPSHOT_BEGIN_EVENT = 'snapshot-begin';
 const SNAPSHOT_ROLLBACK_EVENT = 'snapshot-rollback';
 const SNAPSHOT_RELEASE_EVENT = 'snapshot-release';
 const FACETS_QUERY_EVENT = 'facets-query';
+// #557: after the isolation level, the snapshot reads exactly these, in this order. The single pass replaced checks
+// 6 and 7, check 8's two counts and the skip reasons' NOT IN anti-join.
+const SNAPSHOT_READS_AFTER_ISOLATION_LEVEL: readonly { label: string; statement: RegExp }[] = [
+  { label: 'census check', statement: CENSUS_CHECK_STATEMENT },
+  { label: 'single pass over the measurement graph', statement: /^SELECT COUNT\(\*\) AS `totalActiveCount`[\s\S]*LEFT JOIN `[a-z0-9_]+`\.stems s ON/ },
+  { label: 'unknown-attribute-code count', statement: /^SELECT COUNT\(DISTINCT cm\.CoreMeasurementID\)[\s\S]*JOIN `[a-z0-9_]+`\.cmattributes cma ON/ },
+  { label: 'exported-with-unresolved count', statement: /^SELECT COUNT\(DISTINCT mel\.MeasurementID\)/ },
+  { label: 'errors-scope active count', statement: /cm\.CensusID IN \(/ }
+];
+const ANTI_JOIN_STATEMENT = /\bNOT IN\b/;
+const SQL_LOG_PREVIEW_LENGTH = 120;
 
 const PLOT_ID = 1;
 const OTHER_PLOT_ID = 2;
@@ -359,6 +370,21 @@ describe('GET /api/censusoverview/summary (#547)', () => {
     expect(events[rollbackIndex + 1], 'the connection is released right after the rollback').toBe(SNAPSHOT_RELEASE_EVENT);
     expect(events.indexOf(FACETS_QUERY_EVENT), 'facets run outside the snapshot').toBeGreaterThan(rollbackIndex);
     expect(shared.executeQueryCalls, 'one raw-errors query for the one census, and no contradiction queries').toBe(ONE_RAW_ERRORS_QUERY_PER_CENSUS);
+  });
+
+  it('reads the publish counts in five statements after the isolation level: one single pass, no NOT IN anti-join (#557)', async () => {
+    const response = await callSummaryRoute(String(PLOT_ID), String(CENSUS_A), String(CENSUS_A));
+    expect(response.status).toBe(HTTPResponses.OK);
+
+    const [isolationLevel, ...reads] = shared.events.filter(isSnapshotQueryEvent).map(event => event.slice(SNAPSHOT_QUERY_EVENT_PREFIX.length));
+    console.log('[#557 snapshot reads]', JSON.stringify(reads.map(sql => sql.replace(/\s+/g, ' ').slice(0, SQL_LOG_PREVIEW_LENGTH))));
+
+    expect(isolationLevel, 'the isolation level is the first snapshot statement').toMatch(REPEATABLE_READ_STATEMENT);
+    expect(reads.length, 'reads inside the snapshot after the isolation level').toBe(SNAPSHOT_READS_AFTER_ISOLATION_LEVEL.length);
+    SNAPSHOT_READS_AFTER_ISOLATION_LEVEL.forEach(({ label, statement }, index) => {
+      expect(reads[index], `read ${index + 1} is the ${label}`).toMatch(statement);
+    });
+    for (const sql of reads) expect(sql, 'no snapshot read uses a NOT IN anti-join').not.toMatch(ANTI_JOIN_STATEMENT);
   });
 
   it('serves an in-scope field-crew member, who has no export permission, the same publish-scope summary', async () => {

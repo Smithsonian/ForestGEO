@@ -9,7 +9,7 @@
  * Run: npm run test:integration -- lib/ctfs-export/precondition
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Connection } from 'mysql2/promise';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -17,7 +17,6 @@ import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, loadSchema, DEFAULT_TEST_CONFIG } from '../../tests/setup/local-db-setup';
 import {
   checkFinishedCensus,
-  countPublishBlockers,
   exportableShortfallKind,
   MAX_DISPLAY_FAILURES,
   MIN_EXPORTABLE_FRACTION,
@@ -27,6 +26,8 @@ import {
   type BlockingPreconditionKind,
   type PreconditionFailure
 } from './precondition';
+import { countPublishPreconditions } from './export-preview';
+import { EXPORT_SKIP_REASON_KINDS } from '@/config/censusoverview';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -664,7 +665,7 @@ describe('checkFinishedCensus', () => {
 
 // ---------------------------------------------------------------------------
 // exportableShortfallKind (#547): the zero / 50% detection, shared by the gate
-// and countPublishBlockers. Pure — no database.
+// and countPublishPreconditions. Pure — no database.
 // ---------------------------------------------------------------------------
 
 describe('exportableShortfallKind', () => {
@@ -685,7 +686,7 @@ describe('exportableShortfallKind', () => {
 });
 
 // ---------------------------------------------------------------------------
-// countPublishBlockers (#547): uncapped blocker counts that cannot drift from the gate
+// countPublishPreconditions (#547, #557): uncapped blocker counts that cannot drift from the gate
 // ---------------------------------------------------------------------------
 
 // CTFS_LIMITS.dbhComments in precondition.ts; a description one longer trips check 7.
@@ -751,7 +752,7 @@ async function insertBelowCapFixture(conn: Connection): Promise<void> {
 const treatsInsufficientRowsAsWarning: BlockingKindClassifier = (kind): kind is BlockingPreconditionKind =>
   kind !== 'insufficient-exportable-rows' && isBlockingPreconditionKind(kind);
 
-describe('countPublishBlockers', () => {
+describe('countPublishPreconditions', () => {
   let conn: Connection;
   const config = { ...DEFAULT_TEST_CONFIG, database: DB_NAME };
   const publishInput = () => ({ schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
@@ -770,7 +771,7 @@ describe('countPublishBlockers', () => {
     await insertBelowCapFixture(conn);
 
     const gate = await checkFinishedCensus(conn, publishInput());
-    const counted = await countPublishBlockers(conn, publishInput(), isBlockingPreconditionKind);
+    const counted = await countPublishPreconditions(conn, publishInput(), isBlockingPreconditionKind);
     const gateReasons = gate.ok ? [] : gate.reasons;
     const gateIdsByKind = new Map(gateReasons.map(reason => [reason.kind, reason.coreMeasurementIds]));
     console.log(
@@ -799,7 +800,7 @@ describe('countPublishBlockers', () => {
     await insertBelowCapFixture(conn);
 
     const gate = await checkFinishedCensus(conn, publishInput());
-    const counted = await countPublishBlockers(conn, publishInput(), isBlockingPreconditionKind);
+    const counted = await countPublishPreconditions(conn, publishInput(), isBlockingPreconditionKind);
     console.log(`[#547 check 8] gate ${gate.count}/${gate.totalActiveCount}, counter ${counted.count}/${counted.totalActiveCount}`);
 
     expect(counted.count, 'exportable count').toBe(gate.count);
@@ -818,8 +819,8 @@ describe('countPublishBlockers', () => {
               (202, 1, 1, FALSE, '2024-07-01', 10.2, 1.3, 1)`
     );
 
-    const production = await countPublishBlockers(conn, publishInput(), isBlockingPreconditionKind);
-    const warnOnly = await countPublishBlockers(conn, publishInput(), treatsInsufficientRowsAsWarning);
+    const production = await countPublishPreconditions(conn, publishInput(), isBlockingPreconditionKind);
+    const warnOnly = await countPublishPreconditions(conn, publishInput(), treatsInsufficientRowsAsWarning);
     console.log('[#547 classification] production:', JSON.stringify(production.blockers), 'warn-only:', JSON.stringify(warnOnly.blockers));
 
     expect(production.blockers).toEqual([
@@ -834,15 +835,21 @@ describe('countPublishBlockers', () => {
   it('reports zero-exportable-rows with count null when the census has no active measurements', async () => {
     await conn.query('UPDATE coremeasurements SET IsActive = 0');
 
-    const counted = await countPublishBlockers(conn, publishInput(), isBlockingPreconditionKind);
+    const counted = await countPublishPreconditions(conn, publishInput(), isBlockingPreconditionKind);
     console.log('[#547 empty census]', JSON.stringify(counted));
 
-    expect(counted).toEqual({ blockers: [{ kind: 'zero-exportable-rows', count: null }], count: 0, totalActiveCount: 0 });
+    const { skipReasons, ...blockerCounts } = counted;
+    expect(blockerCounts).toEqual({ blockers: [{ kind: 'zero-exportable-rows', count: null }], count: 0, totalActiveCount: 0 });
+    expect(skipReasons, 'an empty census skips nothing, and every skip kind is still reported').toEqual(
+      EXPORT_SKIP_REASON_KINDS.map(kind => ({ kind, count: 0 }))
+    );
   });
 
   it('rejects an invalid schema name before running any SQL', async () => {
+    const querySpy = vi.spyOn(conn, 'query');
     await expect(
-      countPublishBlockers(conn, { schema: 'bad; DROP TABLE coremeasurements; --', plotId: PLOT_ID, censusId: CENSUS_ID }, isBlockingPreconditionKind)
-    ).rejects.toThrow('Invalid schema name');
+      countPublishPreconditions(conn, { schema: 'bad; DROP TABLE coremeasurements; --', plotId: PLOT_ID, censusId: CENSUS_ID }, isBlockingPreconditionKind)
+    ).rejects.toThrow('Invalid or unauthorized schema');
+    expect(querySpy, 'no SQL may run for an invalid schema').not.toHaveBeenCalled();
   });
 });

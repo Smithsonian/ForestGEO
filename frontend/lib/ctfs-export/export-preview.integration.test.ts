@@ -7,17 +7,27 @@
  * Prerequisites: docker compose up -d mysql
  * Run: npm run test:integration -- lib/ctfs-export/export-preview.integration.test.ts
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Connection } from 'mysql2/promise';
 import { createTestDatabase, teardownTestDatabase, loadSchema, DEFAULT_TEST_CONFIG } from '../../tests/setup/local-db-setup';
 import { loadAppDbSeed } from '../../tests/fixtures/ctfs-export/load-app-db-seed';
-import { checkFinishedCensus, countPublishBlockers, isBlockingPreconditionKind, MAX_DISPLAY_FAILURES } from './precondition';
+import {
+  checkFinishedCensus,
+  isBlockingPreconditionKind,
+  MAX_DISPLAY_FAILURES,
+  type BlockingPreconditionKind,
+  type PreconditionFailureKind
+} from './precondition';
 import { selectMeasurements } from './select-measurements';
-import { countExportedRowsWithUnresolvedErrors, countExportSkipReasons } from './export-preview';
+import { countExportedRowsWithUnresolvedErrors, countPublishPreconditions } from './export-preview';
 
 const PLOT_ID = 1;
 const CENSUS_ID = 1;
 const DB_NAME = `forestgeo_exportpreview_${process.pid}_${Date.now()}`;
+// The single pass's count aliases in export-preview.ts.
+const TOTAL_ACTIVE_COLUMN_ALIAS = 'totalActiveCount';
+const EXPORTABLE_COLUMN_ALIAS = 'exportableCount';
+const blocksNothing = (kind: PreconditionFailureKind): kind is BlockingPreconditionKind => false;
 const FIXTURE_MEASUREMENT_DATE = '2024-06-02';
 const FIXTURE_HOM = 1.3;
 const FIXTURE_DELETED_AT = '2024-07-01 00:00:00';
@@ -195,7 +205,7 @@ describe('export preview on a known-totals census', () => {
   });
 
   it('counts every blocking kind exactly, including one above the display cap', async () => {
-    const counted = await countPublishBlockers(conn, publishInput, isBlockingPreconditionKind);
+    const counted = await countPublishPreconditions(conn, publishInput, isBlockingPreconditionKind);
     console.log('[#547 known totals] blockers:', JSON.stringify(counted.blockers));
 
     expect(UNKNOWN_CODE_ROWS, 'the fixture must exceed the display cap').toBeGreaterThan(MAX_DISPLAY_FAILURES);
@@ -216,7 +226,7 @@ describe('export preview on a known-totals census', () => {
 
   it('agrees with checkFinishedCensus on count and totalActiveCount, and both match the fixture', async () => {
     const gate = await checkFinishedCensus(conn, publishInput);
-    const counted = await countPublishBlockers(conn, publishInput, isBlockingPreconditionKind);
+    const counted = await countPublishPreconditions(conn, publishInput, isBlockingPreconditionKind);
     console.log(`[#547 known totals] gate ${gate.count}/${gate.totalActiveCount}, counter ${counted.count}/${counted.totalActiveCount}`);
 
     expect(counted.count).toBe(gate.count);
@@ -226,7 +236,7 @@ describe('export preview on a known-totals census', () => {
   });
 
   it('previews exactly the rows selectMeasurements would export', async () => {
-    const counted = await countPublishBlockers(conn, publishInput, isBlockingPreconditionKind);
+    const counted = await countPublishPreconditions(conn, publishInput, isBlockingPreconditionKind);
     const { measurementRows } = await selectMeasurements(conn, publishInput);
     const exportedIds = new Set(measurementRows.map(row => row.CoreMeasurementID));
     console.log(`[#547 known totals] selectMeasurements rows: ${measurementRows.length}, preview exportable: ${counted.count}`);
@@ -249,7 +259,7 @@ describe('export preview on a known-totals census', () => {
   });
 
   it('counts each skip reason over skipped rows only, with other at zero', async () => {
-    const reasons = await countExportSkipReasons(conn, publishInput);
+    const { skipReasons: reasons } = await countPublishPreconditions(conn, publishInput, isBlockingPreconditionKind);
     console.log('[#547 known totals] skip reasons:', JSON.stringify(reasons));
 
     expect(reasons).toEqual([
@@ -272,9 +282,18 @@ describe('export preview on a known-totals census', () => {
   });
 
   it('rejects an invalid schema before running SQL', async () => {
-    await expect(countExportSkipReasons(conn, { ...publishInput, schema: 'bad; DROP TABLE coremeasurements; --' })).rejects.toThrow(
-      'Invalid or unauthorized schema'
-    );
+    const querySpy = vi.spyOn(conn, 'query');
+    await expect(
+      countPublishPreconditions(conn, { ...publishInput, schema: 'bad; DROP TABLE coremeasurements; --' }, isBlockingPreconditionKind)
+    ).rejects.toThrow('Invalid or unauthorized schema');
     await expect(countExportedRowsWithUnresolvedErrors(conn, { ...publishInput, schema: 'bad`name' })).rejects.toThrow('Invalid or unauthorized schema');
+    expect(querySpy, 'no SQL may run for an invalid schema').not.toHaveBeenCalled();
+  });
+
+  it('throws naming the column when the single pass omits a count, instead of reporting NaN', async () => {
+    const passRowMissingExportableCount = { [TOTAL_ACTIVE_COLUMN_ALIAS]: SEED_EXPORTABLE_ROWS };
+    vi.spyOn(conn, 'query').mockResolvedValueOnce([[passRowMissingExportableCount], []] as never);
+
+    await expect(countPublishPreconditions(conn, publishInput, blocksNothing)).rejects.toThrow(`'${EXPORTABLE_COLUMN_ALIAS}' is missing or not a number`);
   });
 });
