@@ -178,7 +178,7 @@ const SECOND_FILE_FAILURE = { fileID: 'second-file.csv', batchID: 'second-file-b
 const SECOND_WINDOW = 2;
 const BULK_PRIOR_BATCH = 'bulk-prior-batch';
 const FIRST_WINDOW = 1;
-const REPLACEMENT_OUTCOME = { REPLACED: 'replaced', COMPLETED_BY_PEER: 'completed_by_peer' } as const;
+const REPLACEMENT_OUTCOME = { REPLACED: 'replaced', COMPLETED_BY_PEER: 'completed_by_peer', ALREADY_COMPLETED: 'already_completed' } as const;
 
 class InjectedWindowFailure extends Error {
   constructor(statementPattern: RegExp, occurrence: number) {
@@ -193,7 +193,7 @@ const LOCK_WAIT_POLL_INTERVAL_MS = 150;
 const SESSION_LOCK_PATTERN = CENSUS_REPLACEMENT_STATEMENT.SESSION_LOCK;
 const LOCK_CONTENTION_ERROR = /Deadlock|Lock wait timeout/;
 const BARRIER_TEST_TIMEOUT_MS = 120_000;
-const PEER_FINISHED_OUTCOMES: readonly string[] = ['replaced', 'completed_by_peer', 'already_completed'];
+const NON_REPLACING_OUTCOMES: readonly string[] = [REPLACEMENT_OUTCOME.COMPLETED_BY_PEER, REPLACEMENT_OUTCOME.ALREADY_COMPLETED];
 
 interface Barrier {
   reached: Promise<void>;
@@ -1337,7 +1337,7 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     );
 
     it(
-      'I5b: two unbarriered runners of one session stay consistent (end-to-end regression only: windows serialize on the session lock, so this cannot isolate the window FOR UPDATE; U1/U2 pin that)',
+      'I5b: two unbarriered runners of one session end with one replacer, one that yields, exact audits and the marker set (end-to-end regression only: it does not force the overlap, which I5 does, and cannot isolate the window FOR UPDATE, which U1/U2 pin)',
       async () => {
         const seededRowCount = 2 * WINDOW_SIZE + I5B_EXTRA_PRIOR_ROWS;
         await seedBulkPriorRows(seededRowCount, 'I5BT');
@@ -1352,8 +1352,12 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
             `remaining=${await countRows(targetCensusID, 'all')} marker=${await sessionMarker(SESSION_ID.I5B)}`
         );
         expect(settled.map(result => result.status)).toEqual(['fulfilled', 'fulfilled']);
-        expect(outcomes.every(outcome => PEER_FINISHED_OUTCOMES.includes(outcome))).toBe(true);
-        expect(outcomes).toContain(REPLACEMENT_OUTCOME.REPLACED);
+        expect(
+          outcomes.filter(outcome => outcome === REPLACEMENT_OUTCOME.REPLACED),
+          'exactly one runner sets the marker'
+        ).toHaveLength(1);
+        const otherOutcome = outcomes.find(outcome => outcome !== REPLACEMENT_OUTCOME.REPLACED);
+        expect(NON_REPLACING_OUTCOMES, `the other runner must yield, not replace again or reject (got ${otherOutcome})`).toContain(otherOutcome);
         expect(auditRecordIDs).toHaveLength(seededRowCount);
         expect(new Set(auditRecordIDs).size).toBe(seededRowCount);
         expect(await countRows(targetCensusID, 'all')).toBe(0);
