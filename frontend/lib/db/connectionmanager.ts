@@ -3,7 +3,7 @@ import '@/lib/connectionlogger';
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
-import { ConnectionQuarantinedError } from '@/lib/db/connectionquarantine';
+import { ConnectionQuarantinedError, isConnectionQuarantined, quarantineConnection, settleWithinDeadline } from '@/lib/db/connectionquarantine';
 import { getConn, killQueryOnThread, QueryTimeoutError, runQuery } from '@/lib/db/primitives';
 import { v4 as uuidv4 } from 'uuid';
 import { patchConnectionManager, flushTransactionChangelog, discardTransactionChangelog } from '@/lib/connectionlogger';
@@ -33,6 +33,13 @@ interface TransactionMeta {
   /** In-flight acquireApplicationLock calls for this transaction, keyed by lock name — see acquireApplicationLock's doc comment. */
   pendingLockAcquisitions: Map<string, Promise<boolean>>;
 }
+
+type LockCleanupOutcome = 'confirmed' | 'unconfirmed';
+type ConnectionDisposition = 'release' | 'quarantine' | 'already_quarantined';
+
+/** Bound on releasing a transaction's application locks after COMMIT/ROLLBACK (names the old literal 10 s). */
+export const APPLICATION_LOCK_CLEANUP_DEADLINE_MS = 10_000;
+export const LOCK_CLEANUP_UNCONFIRMED_EVENT = 'db.transaction.lock_cleanup_unconfirmed';
 
 const MILLISECONDS_PER_SECOND = 1000;
 /** Extra session idle time beyond the transaction timeout, so the server never drops a live transaction's session. */
@@ -250,7 +257,7 @@ class ConnectionManager {
         failed,
         queryPreview: this.queryPreview(query)
       });
-      if (!transactionId) {
+      if (!transactionId && !isConnectionQuarantined(connection)) {
         connection.release(); // Release if not part of a transaction
       }
     }
@@ -353,150 +360,116 @@ class ConnectionManager {
   // Commit a transaction
   public async commitTransaction(transactionId: string): Promise<void> {
     const connection = this.transactionConnections.get(transactionId);
-
-    if (!connection) {
+    const meta = this.transactionMeta.get(transactionId);
+    if (!connection || !meta) {
       ailogger.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
-      // Clean up metadata even if connection is gone
-      const meta = this.transactionMeta.get(transactionId);
-      if (meta) {
-        if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-        this.transactionMeta.delete(transactionId);
-      }
       return; // Avoid throwing an error for an already finalized transaction
     }
 
+    this.leaveActivePhase(meta, 'committing');
     try {
       await connection.commit();
-      ailogger.info(chalk.green(`Transaction committed: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
-
-      // Flush buffered changelog entries now that the transaction is committed
-      flushTransactionChangelog(transactionId);
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
       ailogger.error(chalk.red(`Error committing transaction: ${getErrorMessage(error)}`), errorObj);
-
-      // Discard changelog entries if commit itself failed
-      discardTransactionChangelog(transactionId);
+      this.discardTransaction(transactionId, 'COMMIT failed');
       throw error;
-    } finally {
-      // Clean up application locks before releasing connection
-      await this.cleanupApplicationLocks(transactionId);
-      connection.release();
-      this.transactionConnections.delete(transactionId);
-
-      // CRITICAL FIX: Clean up metadata to prevent leaks
-      const meta = this.transactionMeta.get(transactionId);
-      if (meta) {
-        if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-        this.transactionMeta.delete(transactionId);
-      }
-
-      // Release a waiting transaction slot (race condition fix)
-      this.releaseTransactionSlot();
     }
+    ailogger.info(chalk.green(`Transaction committed: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
+
+    // Flush buffered changelog entries now that the transaction is committed
+    flushTransactionChangelog(transactionId);
+    await this.releaseLocksAndFinalize(transactionId, 'COMMIT');
   }
 
   // Rollback a transaction
   public async rollbackTransaction(transactionId: string): Promise<void> {
     const connection = this.transactionConnections.get(transactionId);
-
-    if (!connection) {
+    const meta = this.transactionMeta.get(transactionId);
+    if (!connection || !meta) {
       ailogger.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
-      // Clean up metadata even if connection is gone
-      const meta = this.transactionMeta.get(transactionId);
-      if (meta) {
-        if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-        this.transactionMeta.delete(transactionId);
-      }
       return; // Avoid throwing an error for an already finalized transaction
     }
 
+    this.leaveActivePhase(meta, 'rolling_back');
     try {
       await connection.rollback();
-      ailogger.warn(chalk.yellow(`Transaction rolled back: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
       ailogger.error(chalk.red(`Error rolling back transaction: ${getErrorMessage(error)}`), errorObj);
+      this.discardTransaction(transactionId, 'ROLLBACK failed');
       throw error;
-    } finally {
-      // Discard any buffered changelog entries — the transaction was rolled back
-      discardTransactionChangelog(transactionId);
+    }
+    ailogger.warn(chalk.yellow(`Transaction rolled back: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
 
-      // Clean up application locks before releasing connection
-      await this.cleanupApplicationLocks(transactionId);
-      connection.release();
-      this.transactionConnections.delete(transactionId);
+    // Discard any buffered changelog entries — the transaction was rolled back
+    discardTransactionChangelog(transactionId);
+    await this.releaseLocksAndFinalize(transactionId, 'ROLLBACK');
+  }
 
-      // CRITICAL FIX: Clean up metadata to prevent leaks
-      const meta = this.transactionMeta.get(transactionId);
-      if (meta) {
-        if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-        this.transactionMeta.delete(transactionId);
-      }
-
-      // Release a waiting transaction slot (race condition fix)
-      this.releaseTransactionSlot();
+  /** Moves a transaction out of 'active' and stops its keep-alive in the same synchronous step. */
+  private leaveActivePhase(meta: TransactionMeta, phase: Exclude<TransactionPhase, 'active'>): void {
+    meta.phase = phase;
+    if (meta.keepAliveHandle) {
+      clearInterval(meta.keepAliveHandle);
+      meta.keepAliveHandle = null;
     }
   }
 
   /**
-   * Finalize a managed transaction whose connection is already gone (destroyed
-   * by the DB layer after a statement timeout). There is nothing left to
-   * ROLLBACK over the wire — the server rolled the transaction back when the
-   * socket closed — so this only settles the bookkeeping:
-   *
-   *   - drop the map entry and metadata (clearing its timers),
-   *   - discard buffered changelog entries, which describe writes that were
-   *     rolled back and must never be flushed,
-   *   - release the transaction slot so a queued waiter is woken.
-   *
-   * Runs exactly once per transaction: the map entry is the guard, and every
-   * other exit path (commit/rollback) deletes it too. Callers that later invoke
-   * rollbackTransaction land on its "already finalized" no-op branch.
-   *
-   * Application locks are NOT released here: they are session-scoped MySQL
-   * GET_LOCKs, and the session is gone, so the server has already dropped them.
+   * The one exit for every transaction: drops the map entry and meta (clearing the keep-alive), then releases the
+   * connection or quarantines it, then frees the slot. The map entry is the guard, so it runs at most once.
    */
-  private finalizeTransactionAfterConnectionLoss(transactionId: string, reason: string): void {
-    if (!this.transactionConnections.has(transactionId)) return;
-
-    ailogger.warn(
-      chalk.yellow(
-        `Transaction ${transactionId} finalized without ROLLBACK — its connection was destroyed (${reason}). The server rolled it back on socket close.`
-      )
-    );
-
+  private finalizeTransaction(transactionId: string, disposition: ConnectionDisposition, reason: string): void {
+    const connection = this.transactionConnections.get(transactionId);
+    if (!connection) return;
     this.transactionConnections.delete(transactionId);
-    discardTransactionChangelog(transactionId);
-
     const meta = this.transactionMeta.get(transactionId);
-    if (meta) {
-      if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-      this.transactionMeta.delete(transactionId);
+    if (meta?.keepAliveHandle) clearInterval(meta.keepAliveHandle);
+    this.transactionMeta.delete(transactionId);
+    if (disposition === 'release') {
+      connection.release();
+    } else if (disposition === 'quarantine') {
+      quarantineConnection(connection, `transaction ${transactionId}: ${reason}`);
     }
-
     this.releaseTransactionSlot();
   }
 
+  /** After an acknowledged COMMIT or ROLLBACK: release the connection only if every lock release was confirmed. */
+  private async releaseLocksAndFinalize(transactionId: string, acknowledgedStatement: 'COMMIT' | 'ROLLBACK'): Promise<void> {
+    const lockCleanup = await this.cleanupApplicationLocks(transactionId);
+    if (lockCleanup === 'confirmed') {
+      this.finalizeTransaction(transactionId, 'release', `${acknowledgedStatement} acknowledged`);
+      return;
+    }
+    this.finalizeTransaction(transactionId, 'quarantine', `${acknowledgedStatement} acknowledged but application-lock release was not confirmed`);
+  }
+
   /**
-   * Destroy a transaction's connection whose session state can no longer be
-   * trusted, so it never returns to the pool. The server rolls the transaction
-   * back on socket close; bookkeeping settles through
-   * {@link finalizeTransactionAfterConnectionLoss}, so a later commit/rollback
-   * is a no-op. Never throws, so it cannot mask the caller's own error.
+   * Finalize after runQuery already quarantined this transaction's connection (statement timeout). There is nothing
+   * left to ROLLBACK over the wire — the server rolled the transaction back when the socket closed — so this only
+   * settles the bookkeeping and discards buffered changelog entries, which describe rolled-back writes.
+   *
+   * Application locks are NOT released here: they are session-scoped MySQL GET_LOCKs, and the session is gone, so the
+   * server has already dropped them.
+   */
+  private finalizeTransactionAfterConnectionLoss(transactionId: string, reason: string): void {
+    if (!this.transactionConnections.has(transactionId)) return;
+    ailogger.warn(chalk.yellow(`Transaction ${transactionId} finalized without ROLLBACK: its connection was quarantined (${reason}).`));
+    discardTransactionChangelog(transactionId);
+    this.finalizeTransaction(transactionId, 'already_quarantined', reason);
+  }
+
+  /**
+   * Quarantine a transaction's connection whose session can no longer be trusted, so it never returns to the pool,
+   * and finalize the transaction. A later commit or rollback is a no-op. Never throws, so it cannot mask the caller's
+   * own error.
    */
   public discardTransaction(transactionId: string, reason: string): void {
-    const connection = this.transactionConnections.get(transactionId);
-    if (!connection) return;
-
-    try {
-      connection.destroy();
-    } catch (destroyError: unknown) {
-      const errorObj = destroyError instanceof Error ? destroyError : new Error(getErrorMessage(destroyError));
-      ailogger.error(chalk.red(`Error destroying connection for transaction ${transactionId}: ${getErrorMessage(destroyError)}`), errorObj);
-    } finally {
-      this.finalizeTransactionAfterConnectionLoss(transactionId, reason);
-    }
+    if (!this.transactionConnections.has(transactionId)) return;
+    ailogger.warn(chalk.yellow(`Transaction ${transactionId} discarded: its connection was quarantined (${reason}).`));
+    discardTransactionChangelog(transactionId);
+    this.finalizeTransaction(transactionId, 'quarantine', reason);
   }
 
   // Close connection method (no-op for compatibility)
@@ -570,18 +543,23 @@ class ConnectionManager {
     }
     const startedAt = meta.startedAt;
 
-    // Enhanced keep-alive mechanism: ping every 90 seconds for long transactions
+    // Enhanced keep-alive mechanism: ping every 90 seconds for long transactions.
+    // It runs only while the transaction is active: commit/rollback clear it
+    // (leaveActivePhase), finalizeTransaction clears it on every other exit, and
+    // a tick re-checks after its ping because the transaction may have finished
+    // (and its connection gone back to the pool) while the ping was queued.
     if (timeoutMs > 90 * 1000) {
       const pingInterval = Math.min(90 * 1000, timeoutMs / 4); // Ping every 90s or 1/4 of timeout
       meta.keepAliveHandle = setInterval(async () => {
+        const isActive = () => this.transactionMeta.get(transactionId!)?.phase === 'active';
         try {
           const conn = this.transactionConnections.get(transactionId!);
-          if (conn) {
-            await conn.ping();
-            // Also refresh connection settings to prevent timeout
-            await conn.query('SET SESSION wait_timeout = ?', [Math.ceil(timeoutMs / 1000) + 300]);
-            ailogger.info(`Keep-alive ping and timeout refresh for transaction ${transactionId!} (thread: ${(conn as PoolConnectionWithThreadId).threadId})`);
-          }
+          if (!conn || !isActive()) return;
+          await conn.ping();
+          if (!isActive()) return;
+          // Also refresh connection settings to prevent timeout
+          await conn.query('SET SESSION wait_timeout = ?', [Math.ceil(timeoutMs / MILLISECONDS_PER_SECOND) + SESSION_TIMEOUT_BUFFER_SECONDS]);
+          ailogger.info(`Keep-alive ping and timeout refresh for transaction ${transactionId!} (thread: ${(conn as PoolConnectionWithThreadId).threadId})`);
         } catch (pingError: unknown) {
           ailogger.error(`Keep-alive ping failed for transaction ${transactionId!}: ${getErrorMessage(pingError)}`);
           // If ping fails, the connection might be dead - this will cause the transaction to fail
@@ -817,50 +795,51 @@ class ConnectionManager {
   }
 
   public async releaseApplicationLock(lockName: string, transactionId: string): Promise<void> {
+    await this.releaseApplicationLockWithOutcome(lockName, transactionId);
+  }
+
+  /**
+   * RELEASE_LOCK returns 1 (released), 0 (not held by this session) or NULL (no such lock): each proves the session
+   * no longer holds it. A thrown error or a missing row cannot prove that. Never throws.
+   */
+  private async releaseApplicationLockWithOutcome(lockName: string, transactionId: string): Promise<LockCleanupOutcome> {
     try {
-      // Use MySQL RELEASE_LOCK for distributed lock release
-      // RELEASE_LOCK returns:
-      // - 1 if lock was released successfully
-      // - 0 if lock was not held by this connection
-      // - NULL if the lock doesn't exist
-      const query = 'SELECT RELEASE_LOCK(?) as released';
-      const result = await this.executeQuery(query, [lockName], transactionId);
-
-      // Remove from resource locks tracking
-      const meta = this.transactionMeta.get(transactionId);
-      if (meta) {
-        meta.resourceLocks.delete(lockName);
-      }
-
-      if (result && result[0]?.released === 1) {
+      const result = await this.executeQuery('SELECT RELEASE_LOCK(?) as released', [lockName], transactionId);
+      this.transactionMeta.get(transactionId)?.resourceLocks.delete(lockName);
+      const released = Array.isArray(result) && result.length > 0 ? result[0]?.released : undefined;
+      if (released === 1) {
         ailogger.info(chalk.blue(`MySQL lock released: ${lockName} by transaction ${transactionId}`));
-      } else if (result && result[0]?.released === 0) {
-        ailogger.warn(chalk.yellow(`Lock ${lockName} was not held by transaction ${transactionId}`));
+        return 'confirmed';
       }
+      if (released === 0) {
+        ailogger.warn(chalk.yellow(`Lock ${lockName} was not held by transaction ${transactionId}`));
+        return 'confirmed';
+      }
+      if (released === null) {
+        ailogger.info(`Lock ${lockName} no longer existed when transaction ${transactionId} released it`);
+        return 'confirmed';
+      }
+      ailogger.warn(chalk.yellow(`RELEASE_LOCK for ${lockName} returned no usable result for transaction ${transactionId}`));
+      return 'unconfirmed';
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
       ailogger.error(chalk.red(`Error releasing MySQL lock ${lockName}: ${getErrorMessage(error)}`), errorObj);
-      // Don't throw - we want cleanup to continue even if release fails
+      return 'unconfirmed';
     }
   }
 
-  private async cleanupApplicationLocks(transactionId: string): Promise<void> {
+  private async cleanupApplicationLocks(transactionId: string): Promise<LockCleanupOutcome> {
     const meta = this.transactionMeta.get(transactionId);
-    if (meta && meta.resourceLocks.size > 0) {
-      ailogger.info(`Cleaning up ${meta.resourceLocks.size} locks for transaction ${transactionId}`);
-
-      // Release all locks for this transaction
-      const releasePromises = Array.from(meta.resourceLocks).map(lockName => this.releaseApplicationLock(lockName, transactionId));
-
-      // Wait for all releases to complete (with timeout)
-      await Promise.race([Promise.all(releasePromises), new Promise((_, reject) => setTimeout(() => reject(new Error('Lock cleanup timeout')), 10000))]).catch(
-        (error: unknown) => {
-          const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
-          ailogger.error(`Error during lock cleanup for transaction ${transactionId}: ${getErrorMessage(error)}`, errorObj);
-          // Continue anyway - locks will be auto-released when connection closes
-        }
-      );
-    }
+    if (!meta || meta.resourceLocks.size === 0) return 'confirmed';
+    const lockCount = meta.resourceLocks.size;
+    ailogger.info(`Cleaning up ${lockCount} locks for transaction ${transactionId}`);
+    const releases = Promise.all(Array.from(meta.resourceLocks).map(lockName => this.releaseApplicationLockWithOutcome(lockName, transactionId)));
+    const settlement = await settleWithinDeadline(releases, APPLICATION_LOCK_CLEANUP_DEADLINE_MS, late => {
+      ailogger.info(`Lock cleanup for transaction ${transactionId} settled (${late.status}) after its ${APPLICATION_LOCK_CLEANUP_DEADLINE_MS}ms deadline`);
+    });
+    if (settlement.status === 'settled' && settlement.value.every(outcome => outcome === 'confirmed')) return 'confirmed';
+    ailogger.warn(LOCK_CLEANUP_UNCONFIRMED_EVENT, { transactionId, lockCount, settlement: settlement.status });
+    return 'unconfirmed';
   }
 
   private transactionSlotOccupancy(): number {
