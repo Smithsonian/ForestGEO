@@ -68,7 +68,7 @@ export const EXPORTABLE_ROW_CONDITION = 'cm.IsValidated = TRUE AND cm.StemGUID I
 export const exportableMeasurementBaseWhere = `cm.CensusID = ?
         AND c.PlotID = ?
         AND cm.IsActive = 1
-        AND ${EXPORTABLE_ROW_CONDITION}`;
+        AND (${EXPORTABLE_ROW_CONDITION})`;
 
 /**
  * The inner-join graph every exportable measurement must satisfy. Five of these
