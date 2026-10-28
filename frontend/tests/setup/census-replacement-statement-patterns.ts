@@ -3,7 +3,7 @@ import { CENSUS_REPLACEMENT_SCAN_INDEX } from '@/lib/ingestion/temporary-measure
 /** Test-side recognisers for the statements a census replacement issues. One copy, so fakes, barriers and log checks cannot drift apart. */
 export const CENSUS_REPLACEMENT_STATEMENT = {
   MARKER_COLUMN_STATE: /information_schema\.TABLES[\s\S]*upload_sessions/,
-  SESSION_LOCK: /FROM\s+\S+\.upload_sessions\s+WHERE session_id = \?\s+FOR UPDATE/,
+  SESSION_LOCK: /SELECT state, plot_id, census_id, \w+ FROM\s+\S+\.upload_sessions\s+WHERE session_id = \?/,
   MARKER_PROBE: /^\s*SELECT census_replacement_completed_at FROM\s+\S+\.upload_sessions/,
   MARKER_UPDATE: /^\s*UPDATE\s+\S+\.upload_sessions\s+SET census_replacement_completed_at/,
   FAMILY_PROBE: /SELECT 1 AS staged FROM/,
@@ -14,6 +14,9 @@ export const CENSUS_REPLACEMENT_STATEMENT = {
   LEGACY_DELETE: /^\s*DELETE FROM\s+\S+\.failedmeasurements\b/,
   METRICS_DELETE: /^\s*DELETE FROM\s+\S+\.uploadmetrics\b/
 } as const;
+
+/** Recognised without the lock clause, so a lock weakened to a plain read is still found and judged by `SESSION_LOCK_CLAUSE`. */
+export const SESSION_LOCK_CLAUSE = /\sFOR UPDATE\s*$/;
 
 /** Acceptance criterion 1's list: none of these may run in a transaction that stages rows. */
 export const CENSUS_REPLACEMENT_WRITE_PATTERNS: readonly RegExp[] = [

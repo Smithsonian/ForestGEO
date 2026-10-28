@@ -28,7 +28,7 @@ import {
   type CensusReplacementParams
 } from './stage-measurements';
 import { CensusReplacementMarkerColumnMissingError, resetUploadSessionReplacementMarkerCacheForTests } from './upload-session-replacement-marker';
-import { CENSUS_REPLACEMENT_STATEMENT } from '@/tests/setup/census-replacement-statement-patterns';
+import { CENSUS_REPLACEMENT_STATEMENT, SESSION_LOCK_CLAUSE } from '@/tests/setup/census-replacement-statement-patterns';
 
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 vi.mock('@/lib/column-mapping/measurement-rows', async importOriginal => {
@@ -349,7 +349,7 @@ function allStatements(transactions: RecordedTransaction[]): RecordedStatement[]
 const loggedEvents = (event: string) => vi.mocked(ailogger.info).mock.calls.filter(([message]) => message === event);
 
 describe('replaceCensusForCleanReupload', () => {
-  it('U3: commits each unit in its own transaction, marker last (catches: one transaction for everything; marker in an earlier transaction; no confirming window; metrics inside a measurement window)', async () => {
+  it('U3: commits each unit in its own transaction, marker last (catches: one transaction for everything; marker in an earlier transaction; no confirming window; metrics inside a measurement window; session lock taken with a plain read)', async () => {
     const { result, error, transactions } = await runReplacement({
       measurementPages: [
         { cursor: 'zero', rows: W },
@@ -367,6 +367,7 @@ describe('replaceCensusForCleanReupload', () => {
     expect(transactions.map(transaction => transaction.outcome)).toEqual(Array(7).fill('committed'));
     for (const transaction of transactions) {
       expect(transaction.statements[0]?.kind, `${transaction.id} must start with the session lock`).toBe(STATEMENT.SESSION_LOCK);
+      expect(transaction.statements[0]?.sql, `${transaction.id} must lock the session row with FOR UPDATE, not read it`).toMatch(SESSION_LOCK_CLAUSE);
       const unitKinds = new Set(transaction.statements.map(statement => REPLACEMENT_UNIT_OF_STATEMENT[statement.kind]).filter(Boolean));
       expect(unitKinds.size, `${transaction.id} mixes units: ${[...unitKinds].join(',')}`).toBeLessThanOrEqual(1);
       expect(transaction.timeoutMs).toBe(CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS);

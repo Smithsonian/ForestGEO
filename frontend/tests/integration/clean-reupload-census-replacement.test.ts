@@ -1217,11 +1217,18 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
       return settled;
     }
 
-    async function waitForPeerInSessionRowLockWait(harness: SessionLockHarness): Promise<void> {
+    async function waitForPeerInSessionRowLockWait(harness: SessionLockHarness, uploadSessionID: string): Promise<void> {
       const deadlineAt = Date.now() + BARRIER_DEADLINE_MS;
       while (Date.now() < deadlineAt) {
         const [waiting] = await connection.query<RowDataPacket[]>(
-          `SELECT trx_state, trx_query FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT' AND trx_query LIKE '%upload_sessions%FOR UPDATE%'`
+          `SELECT trx.trx_state, trx.trx_query
+           FROM information_schema.INNODB_TRX trx
+           JOIN performance_schema.data_locks requested ON requested.ENGINE_LOCK_ID = trx.trx_requested_lock_id
+           WHERE trx.trx_state = 'LOCK WAIT'
+             AND requested.OBJECT_SCHEMA = ?
+             AND requested.OBJECT_NAME = 'upload_sessions'
+             AND requested.LOCK_DATA LIKE ?`,
+          [schema, `%${uploadSessionID}%`]
         );
         if (waiting.length > 0) return;
         await sleep(LOCK_WAIT_POLL_INTERVAL_MS);
@@ -1285,7 +1292,7 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
           harness.markPeerAboutToStart();
           let peerSettled = false;
           const peer = harness.track(completeCensusReplacement(realManager, scope).finally(() => (peerSettled = true)));
-          await waitForPeerInSessionRowLockWait(harness);
+          await waitForPeerInSessionRowLockWait(harness, SESSION_ID.I5);
           expect(await sessionMarker(SESSION_ID.I5), 'the peer is blocked, so the marker is still unset').toBeNull();
           expect(peerSettled, 'the peer is blocked behind the runner').toBe(false);
 
