@@ -797,7 +797,8 @@ describe('ConnectionManager.discardTransaction', () => {
     cm.discardTransaction(transactionId, DISCARD_REASON);
     cm.discardTransaction(transactionId, DISCARD_REASON);
     await expect(cm.rollbackTransaction(transactionId)).resolves.toBeUndefined();
-    await expect(cm.commitTransaction(transactionId)).resolves.toBeUndefined();
+    const { TransactionNotActiveError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+    await expect(cm.commitTransaction(transactionId)).rejects.toBeInstanceOf(TransactionNotActiveError);
 
     expect(connection.destroy, 'the untrusted session must be destroyed exactly once').toHaveBeenCalledTimes(1);
     expect(connection.release, 'a discarded session must never return to the pool').not.toHaveBeenCalled();
@@ -1412,5 +1413,162 @@ describe('ConnectionManager confirmed lock cleanup and quarantine on failure (#5
     expect(vi.mocked(discardTransactionChangelog)).toHaveBeenCalledWith(transactionId);
     expect(vi.mocked(flushTransactionChangelog)).not.toHaveBeenCalled();
     expect(slotOccupancy(internals)).toBe(occupancyBefore);
+  });
+});
+
+describe('ConnectionManager COMMIT fails closed and is bounded (#563 §2.4, §3.3)', () => {
+  const NEVER_BEGUN_TRANSACTION_ID = 'never-begun-563';
+  const CALLBACK_TIMEOUT_MS = 5_000;
+  const DISCARD_REASON = 'callback discarded its own transaction';
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    getConnMock.mockReset();
+    runQueryMock.mockReset();
+    runQueryMock.mockImplementation(async () => []);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function beginDirect(connection: LifecycleConnection) {
+    const loaded = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await loaded.manager.beginTransaction();
+    return { ...loaded, transactionId };
+  }
+
+  it('U7: commit of a never-begun id and a second commit after success reject TransactionNotActiveError and touch no connection', async () => {
+    const { TransactionNotActiveError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+    const connection = makeLifecycleConnection();
+    const { manager, transactionId } = await beginDirect(connection);
+
+    const neverBegun = await outcomeOf(manager.commitTransaction(NEVER_BEGUN_TRANSACTION_ID));
+    await manager.commitTransaction(transactionId);
+    const secondCommit = await outcomeOf(manager.commitTransaction(transactionId));
+    console.log('[U7] never-begun:', neverBegun, 'second commit:', secondCommit);
+
+    expect(neverBegun, 'today this resolves: a silent success for work that never committed').toBeInstanceOf(TransactionNotActiveError);
+    expect(secondCommit).toBeInstanceOf(TransactionNotActiveError);
+    expect(connection.commit, 'only the one real commit may reach the connection').toHaveBeenCalledTimes(1);
+  });
+
+  it('U9: a COMMIT with no reply by the deadline is quarantined and KILLed, never rolled back, and rejects with an unknown outcome', async () => {
+    const { killQueryOnThread } = await import('@/lib/db/primitives');
+    const { discardTransactionChangelog, flushTransactionChangelog } = await import('@/lib/connectionlogger');
+    const { TransactionCommitOutcomeUnknownError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+    const connection = makeLifecycleConnection();
+    connection.commit.mockImplementation(() => neverSettles());
+    const timersBefore = vi.getTimerCount();
+    const { ConnectionManagerClass, manager, internals, transactionId } = await beginDirect(connection);
+    const occupancyBefore = slotOccupancy(internals) - 1;
+
+    const commit = outcomeOf(manager.commitTransaction(transactionId));
+    await vi.advanceTimersByTimeAsync(ConnectionManagerClass.DEFAULT_COMMIT_DEADLINE_MS);
+    const outcome = await settledValue(commit);
+    console.log('[U9] outcome:', outcome, 'destroy:', connection.destroy.mock.calls.length, 'timers:', vi.getTimerCount());
+
+    expect(outcome).toBeInstanceOf(TransactionCommitOutcomeUnknownError);
+    expect((outcome as InstanceType<typeof TransactionCommitOutcomeUnknownError>).trigger).toBe('deadline_exceeded');
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(connection.release).not.toHaveBeenCalled();
+    expect(connection.rollback, 'a ROLLBACK after a sent COMMIT could report rolled-back work that committed').not.toHaveBeenCalled();
+    expect(vi.mocked(killQueryOnThread)).toHaveBeenCalledWith(LIFECYCLE_THREAD_ID, expect.any(String));
+    expect(vi.mocked(discardTransactionChangelog)).toHaveBeenCalledWith(transactionId);
+    expect(vi.mocked(flushTransactionChangelog)).not.toHaveBeenCalled();
+    expect(slotOccupancy(internals)).toBe(occupancyBefore);
+    expect(vi.getTimerCount()).toBe(timersBefore);
+  });
+
+  it('U9 variant: a COMMIT acknowledged after the deadline is logged as committed-after-deadline', async () => {
+    const { COMMIT_ACKNOWLEDGED_AFTER_DEADLINE_EVENT } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const lateCommit = deferred<void>();
+    const connection = makeLifecycleConnection();
+    connection.commit.mockImplementation(() => lateCommit.promise);
+    const { ConnectionManagerClass, manager, transactionId } = await beginDirect(connection);
+
+    const commit = outcomeOf(manager.commitTransaction(transactionId));
+    await vi.advanceTimersByTimeAsync(ConnectionManagerClass.DEFAULT_COMMIT_DEADLINE_MS);
+    await commit;
+    lateCommit.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    console.log(
+      '[U9 late] warn calls:',
+      loggerMock.warn.mock.calls.map(call => call[0])
+    );
+
+    expect(loggerMock.warn).toHaveBeenCalledWith(COMMIT_ACKNOWLEDGED_AFTER_DEADLINE_EVENT, expect.objectContaining({ transactionId }));
+  });
+
+  it('U10: a COMMIT transport loss (sqlMessage: undefined, as mysql2’s promise adapter builds it) is an unknown outcome carrying the original as cause', async () => {
+    const { killQueryOnThread } = await import('@/lib/db/primitives');
+    const { TransactionCommitOutcomeUnknownError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+    const { findRetryClassifierSubstrings } = await import('@/tests/setup/retry-classifier-substrings');
+    const transportLoss = Object.assign(new Error('Connection lost: The server closed the connection.'), {
+      code: 'PROTOCOL_CONNECTION_LOST',
+      fatal: true,
+      sqlMessage: undefined
+    });
+    expect(Object.prototype.hasOwnProperty.call(transportLoss, 'sqlMessage'), 'fixture must carry an OWN undefined sqlMessage, like make_done_cb.js:11').toBe(
+      true
+    );
+    const connection = makeLifecycleConnection();
+    connection.commit.mockRejectedValue(transportLoss);
+    const { manager, transactionId } = await beginDirect(connection);
+
+    const outcome = await outcomeOf(manager.commitTransaction(transactionId));
+    const unknown = outcome as InstanceType<typeof TransactionCommitOutcomeUnknownError>;
+    console.log('[U10] outcome:', {
+      name: unknown?.name,
+      trigger: unknown?.trigger,
+      message: unknown?.message,
+      causeCode: (unknown?.cause as { code?: string })?.code
+    });
+
+    expect(outcome, 'presence of a sqlMessage KEY must not count as a server reply').toBeInstanceOf(TransactionCommitOutcomeUnknownError);
+    expect(unknown.trigger).toBe('connection_lost');
+    expect(unknown.cause).toBe(transportLoss);
+    expect(findRetryClassifierSubstrings(unknown.message)).toEqual([]);
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(connection.release).not.toHaveBeenCalled();
+    expect(vi.mocked(killQueryOnThread)).toHaveBeenCalledWith(LIFECYCLE_THREAD_ID, expect.any(String));
+  });
+
+  it('U12: withTransaction whose COMMIT stalls rejects with the unknown outcome and never rolls back', async () => {
+    const { TransactionCommitOutcomeUnknownError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+    const { ConnectionManagerClass, manager } = await loadLifecycleManager();
+    const connection = makeLifecycleConnection();
+    connection.commit.mockImplementation(() => neverSettles());
+    getConnMock.mockResolvedValueOnce(connection);
+    const rollbackSpy = vi.spyOn(manager, 'rollbackTransaction');
+
+    const outcome = outcomeOf(manager.withTransaction(async () => 'work done', { timeoutMs: CALLBACK_TIMEOUT_MS }));
+    await vi.advanceTimersByTimeAsync(ConnectionManagerClass.DEFAULT_COMMIT_DEADLINE_MS);
+    const settled = await settledValue(outcome);
+    console.log('[U12] outcome:', settled, 'rollback calls:', rollbackSpy.mock.calls.length);
+
+    expect(settled).toBeInstanceOf(TransactionCommitOutcomeUnknownError);
+    expect(rollbackSpy, 'no ROLLBACK may follow a COMMIT that was sent').not.toHaveBeenCalled();
+    expect(connection.rollback).not.toHaveBeenCalled();
+  });
+
+  it('U13: a callback that discards its transaction and returns normally makes withTransaction reject TransactionNotActiveError', async () => {
+    const { TransactionNotActiveError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+    const { manager } = await loadLifecycleManager();
+    const connection = makeLifecycleConnection();
+    getConnMock.mockResolvedValueOnce(connection);
+
+    const outcome = await outcomeOf(
+      manager.withTransaction(async tx => {
+        manager.discardTransaction(tx.id, DISCARD_REASON);
+        return 'looks fine';
+      })
+    );
+    console.log('[U13] outcome:', outcome);
+    expect(outcome, 'today this resolves "looks fine" for work the server rolled back').toBeInstanceOf(TransactionNotActiveError);
+    expect(connection.commit).not.toHaveBeenCalled();
   });
 });

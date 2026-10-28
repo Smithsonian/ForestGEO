@@ -2,8 +2,20 @@
 import '@/lib/connectionlogger';
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
-import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
-import { ConnectionQuarantinedError, isConnectionQuarantined, quarantineConnection, settleWithinDeadline } from '@/lib/db/connectionquarantine';
+import {
+  TransactionCallbackTimeoutError,
+  TransactionCommitOutcomeUnknownError,
+  TransactionNotActiveError,
+  TransactionReapedError,
+  type CommitOutcomeUnknownTrigger
+} from '@/lib/db/transactionerrors';
+import {
+  ConnectionQuarantinedError,
+  isConnectionQuarantined,
+  quarantineConnection,
+  settleWithinDeadline,
+  type LateSettlement
+} from '@/lib/db/connectionquarantine';
 import { getConn, killQueryOnThread, QueryTimeoutError, runQuery } from '@/lib/db/primitives';
 import { v4 as uuidv4 } from 'uuid';
 import { patchConnectionManager, flushTransactionChangelog, discardTransactionChangelog } from '@/lib/connectionlogger';
@@ -40,6 +52,21 @@ type ConnectionDisposition = 'release' | 'quarantine' | 'already_quarantined';
 /** Bound on releasing a transaction's application locks after COMMIT/ROLLBACK (names the old literal 10 s). */
 export const APPLICATION_LOCK_CLEANUP_DEADLINE_MS = 10_000;
 export const LOCK_CLEANUP_UNCONFIRMED_EVENT = 'db.transaction.lock_cleanup_unconfirmed';
+export const COMMIT_DEADLINE_EXCEEDED_EVENT = 'db.transaction.commit_deadline_exceeded';
+export const COMMIT_ACKNOWLEDGED_AFTER_DEADLINE_EVENT = 'db.transaction.commit_acknowledged_after_deadline';
+
+interface ReapedTransactionRecord {
+  deadlineAt: number;
+  reapedAt: number;
+}
+
+/**
+ * A server error reply always carries a string sqlMessage. mysql2's promise adapter copies sqlMessage onto every
+ * rejection (make_done_cb.js:11), as undefined for transport errors, so test the value, never the key.
+ */
+function isServerErrorReply(error: unknown): boolean {
+  return typeof (error as { sqlMessage?: unknown } | null)?.sqlMessage === 'string';
+}
 
 const MILLISECONDS_PER_SECOND = 1000;
 /** Extra session idle time beyond the transaction timeout, so the server never drops a live transaction's session. */
@@ -161,6 +188,13 @@ class ConnectionManager {
   public static readonly DEFAULT_STALE_TRANSACTION_THRESHOLD_MS = ConnectionManager.DEFAULT_TX_TIMEOUT_MS * 2;
   /** Added to a withTransaction's timeoutMs to form its reaper deadline, so the reaper can never act before the callback timer. */
   public static readonly TRANSACTION_REAPER_GRACE_MS = 60_000;
+  public static readonly DEFAULT_COMMIT_DEADLINE_MS = 30_000;
+  public static readonly DEFAULT_ROLLBACK_DEADLINE_MS = 30_000;
+  /** Instance copies of the deadlines; tests shorten them through the internals cast. */
+  private commitDeadlineMs = ConnectionManager.DEFAULT_COMMIT_DEADLINE_MS;
+  private rollbackDeadlineMs = ConnectionManager.DEFAULT_ROLLBACK_DEADLINE_MS;
+  /** Ids the reaper ended, so a resuming owner gets TransactionReapedError; only chooses the error type, never safety. */
+  private reapedTransactions = new Map<string, ReapedTransactionRecord>();
   private readonly MAX_CONCURRENT_TRANSACTIONS = 12; // Reduced to prevent overwhelming connection pool
   // Removed in-memory applicationLocks Map - now using MySQL GET_LOCK/RELEASE_LOCK for distributed locking
   private readonly LOCK_TIMEOUT_MS = 2 * 60 * 1000; // Reduced from 5 to 2 minutes for application locks
@@ -357,29 +391,75 @@ class ConnectionManager {
     }
   }
 
+  /** The error for a commit on a non-active id. Consumes a reap tombstone if one exists. */
+  private inactiveTransactionError(transactionId: string): TransactionReapedError | TransactionNotActiveError {
+    const tombstone = this.reapedTransactions.get(transactionId);
+    if (tombstone) {
+      this.reapedTransactions.delete(transactionId);
+      return new TransactionReapedError(transactionId, tombstone.deadlineAt, tombstone.reapedAt);
+    }
+    return new TransactionNotActiveError(transactionId);
+  }
+
+  /**
+   * Gives up on a transaction whose step outcome is unknown or overdue: quarantine and finalize synchronously
+   * (changelog discarded), then KILL QUERY from another connection so the server session ends now rather than
+   * when a running or queued statement finishes (E1 vs E1b, E2a vs E2b). Never throws.
+   */
+  private async abandonTransactionConnection(transactionId: string, reason: string): Promise<void> {
+    const threadId = (this.transactionConnections.get(transactionId) as PoolConnectionWithThreadId | undefined)?.threadId;
+    this.discardTransaction(transactionId, reason);
+    if (typeof threadId === 'number') {
+      await killQueryOnThread(threadId, reason);
+    }
+  }
+
+  private logLateCommitSettlement(transactionId: string, late: LateSettlement): void {
+    if (late.status === 'settled') {
+      ailogger.warn(COMMIT_ACKNOWLEDGED_AFTER_DEADLINE_EVENT, {
+        transactionId,
+        detail: 'this transaction DID commit after its caller was told the outcome is unknown; its changelog entries were discarded'
+      });
+      return;
+    }
+    ailogger.info(`COMMIT for transaction ${transactionId} failed after its deadline: ${getErrorMessage(late.error)}`);
+  }
+
   // Commit a transaction
   public async commitTransaction(transactionId: string): Promise<void> {
     const connection = this.transactionConnections.get(transactionId);
     const meta = this.transactionMeta.get(transactionId);
-    if (!connection || !meta) {
-      ailogger.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
-      return; // Avoid throwing an error for an already finalized transaction
+    if (!connection || !meta || meta.phase !== 'active') {
+      throw this.inactiveTransactionError(transactionId);
     }
-
     this.leaveActivePhase(meta, 'committing');
-    try {
-      await connection.commit();
-    } catch (error: unknown) {
-      const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
-      ailogger.error(chalk.red(`Error committing transaction: ${getErrorMessage(error)}`), errorObj);
-      this.discardTransaction(transactionId, 'COMMIT failed');
-      throw error;
-    }
-    ailogger.info(chalk.green(`Transaction committed: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
+    const threadId = (connection as PoolConnectionWithThreadId).threadId;
+    const settlement = await settleWithinDeadline(connection.commit(), this.commitDeadlineMs, late => this.logLateCommitSettlement(transactionId, late));
 
-    // Flush buffered changelog entries now that the transaction is committed
-    flushTransactionChangelog(transactionId);
-    await this.releaseLocksAndFinalize(transactionId, 'COMMIT');
+    if (settlement.status === 'settled') {
+      ailogger.info(chalk.green(`Transaction committed: ${transactionId} (thread: ${threadId})`));
+      flushTransactionChangelog(transactionId);
+      await this.releaseLocksAndFinalize(transactionId, 'COMMIT');
+      return;
+    }
+
+    if (settlement.status === 'failed' && isServerErrorReply(settlement.error)) {
+      const errorObj = settlement.error instanceof Error ? settlement.error : new Error(getErrorMessage(settlement.error));
+      ailogger.error(chalk.red(`COMMIT rejected by the server for transaction ${transactionId}: ${getErrorMessage(settlement.error)}`), errorObj);
+      this.discardTransaction(transactionId, 'COMMIT rejected by the server');
+      throw settlement.error;
+    }
+
+    const trigger: CommitOutcomeUnknownTrigger = settlement.status === 'deadline_exceeded' ? 'deadline_exceeded' : 'connection_lost';
+    const cause = settlement.status === 'failed' ? settlement.error : undefined;
+    if (trigger === 'deadline_exceeded') {
+      ailogger.error(COMMIT_DEADLINE_EXCEEDED_EVENT, undefined, { transactionId, threadId, deadlineMs: this.commitDeadlineMs });
+    } else {
+      const causeObj = cause instanceof Error ? cause : new Error(getErrorMessage(cause));
+      ailogger.error(`COMMIT outcome unknown for transaction ${transactionId}: the connection failed before the server replied`, causeObj);
+    }
+    await this.abandonTransactionConnection(transactionId, `COMMIT outcome unknown (${trigger})`);
+    throw new TransactionCommitOutcomeUnknownError(transactionId, trigger, this.commitDeadlineMs, cause === undefined ? undefined : { cause });
   }
 
   // Rollback a transaction
@@ -976,5 +1056,5 @@ class ConnectionManager {
 
 patchConnectionManager(ConnectionManager.getInstance());
 
-export { TransactionCallbackTimeoutError } from './transactionerrors';
+export { TransactionCallbackTimeoutError, TransactionCommitOutcomeUnknownError, TransactionNotActiveError, TransactionReapedError } from './transactionerrors';
 export default ConnectionManager;
