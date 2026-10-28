@@ -118,12 +118,14 @@ const APP_DB_SEED = {
   treeTag: '1',
   stemGUID: 1,
   stemTag: '1',
-  coreMeasurementId: 1
+  coreMeasurementId: 1,
+  plotCensusNumber: 1
 } as const;
 const ACTIVE_ATTRIBUTE_CODE = 'LI'; // app-db-seed.sql
 const UNKNOWN_ATTRIBUTE_CODES = ['ZZ', 'ZY'] as const;
 const INACTIVE_ONLY_ATTRIBUTE_CODE = 'OLD';
 const GENERATED_ATTRIBUTE_CODES: readonly (string | null)[] = [...UNKNOWN_ATTRIBUTE_CODES, INACTIVE_ONLY_ATTRIBUTE_CODE, null];
+const FIRST_PLOT_CENSUS_NUMBER = 1;
 const DECOY_PLOT_ID = 2;
 const PLOT_IDS = [APP_DB_SEED.plotId, DECOY_PLOT_ID] as const;
 const ERROR_IDS = [9501, 9502] as const;
@@ -305,7 +307,9 @@ interface World {
 class WorldBuilder {
   private readonly random: () => number;
   private readonly nextId: Record<keyof typeof FIRST_ID, number> = { ...FIRST_ID };
-  private readonly nextPlotCensusNumber = new Map<number, number>(PLOT_IDS.map(plotId => [plotId, plotId === APP_DB_SEED.plotId ? 2 : 1]));
+  private readonly nextPlotCensusNumber = new Map<number, number>(
+    PLOT_IDS.map(plotId => [plotId, plotId === APP_DB_SEED.plotId ? APP_DB_SEED.plotCensusNumber + 1 : FIRST_PLOT_CENSUS_NUMBER])
+  );
   private readonly quadratsByPlot = new Map<number, QuadratRow[]>();
   private readonly speciesPool: SpeciesRow[] = [];
   private cleanSpecies: SpeciesRow | null = null;
@@ -364,7 +368,7 @@ class WorldBuilder {
   }
 
   private allocatePlotCensusNumber(plotId: number): number {
-    const number = this.nextPlotCensusNumber.get(plotId) ?? 1;
+    const number = this.nextPlotCensusNumber.get(plotId) ?? FIRST_PLOT_CENSUS_NUMBER;
     this.nextPlotCensusNumber.set(plotId, number + 1);
     return number;
   }

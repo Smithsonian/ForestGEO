@@ -61,6 +61,10 @@ const FAILED_EVERY = 100; // a multiple of UNVALIDATED_EVERY: every failed row i
 const UNRESOLVED_ERROR_EVERY = 25;
 const UNVALIDATED_AND_UNRESOLVED_ERROR_EVERY = 100; // lcm(UNVALIDATED_EVERY, UNRESOLVED_ERROR_EVERY)
 const ERROR_TYPE_COUNT = 20;
+const QUADRAT_NAME_PREFIX = 'BQ';
+const SPECIES_CODE_PREFIX = 'BS';
+const ERROR_CODE_PREFIX = 'BENCH_';
+const TREE_TAG_PREFIX = 'T';
 // The numbers table holds rowsPerCensus rows and also seeds the quadrats, species and error types, so it must reach
 // the largest of them; otherwise stems would point at quadrats that were never created.
 const MIN_ROWS_PER_CENSUS = Math.max(QUADRAT_COUNT, SPECIES_COUNT, ERROR_TYPE_COUNT);
@@ -268,24 +272,24 @@ async function seedBenchmarkCensuses(conn: Connection, rowsPerCensus: number): P
     ]);
     await conn.query(
       `INSERT INTO quadrats (QuadratID, PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, IsActive)
-       SELECT ? + n, ?, CONCAT('BQ', n), n * ?, 0, ?, ?, ? * ?, 1 FROM bench_numbers WHERE n <= ?`,
-      [FIRST_GENERATED_ID, PLOT_ID, QUADRAT_SIDE, QUADRAT_SIDE, QUADRAT_SIDE, QUADRAT_SIDE, QUADRAT_SIDE, QUADRAT_COUNT]
+       SELECT ? + n, ?, CONCAT(?, n), n * ?, 0, ?, ?, ? * ?, 1 FROM bench_numbers WHERE n <= ?`,
+      [FIRST_GENERATED_ID, PLOT_ID, QUADRAT_NAME_PREFIX, QUADRAT_SIDE, QUADRAT_SIDE, QUADRAT_SIDE, QUADRAT_SIDE, QUADRAT_SIDE, QUADRAT_COUNT]
     );
     await conn.query(
       `INSERT INTO species (SpeciesID, GenusID, SpeciesCode, SpeciesName, IDLevel, IsActive)
-       SELECT ? + n, ?, CONCAT('BS', n), CONCAT('bench ', n), 'species', 1 FROM bench_numbers WHERE n <= ?`,
-      [FIRST_GENERATED_ID, SEED_GENUS_ID, SPECIES_COUNT]
+       SELECT ? + n, ?, CONCAT(?, n), CONCAT('bench ', n), 'species', 1 FROM bench_numbers WHERE n <= ?`,
+      [FIRST_GENERATED_ID, SEED_GENUS_ID, SPECIES_CODE_PREFIX, SPECIES_COUNT]
     );
     await conn.query(
-      `INSERT INTO measurement_errors (ErrorID, ErrorSource, ErrorCode, ErrorMessage) SELECT ? + n - 1, 'validation', CONCAT('BENCH_', n), CONCAT('Benchmark error ', n) FROM bench_numbers WHERE n <= ?`,
-      [FIRST_ERROR_ID, ERROR_TYPE_COUNT]
+      `INSERT INTO measurement_errors (ErrorID, ErrorSource, ErrorCode, ErrorMessage) SELECT ? + n - 1, 'validation', CONCAT(?, n), CONCAT('Benchmark error ', n) FROM bench_numbers WHERE n <= ?`,
+      [FIRST_ERROR_ID, ERROR_CODE_PREFIX, ERROR_TYPE_COUNT]
     );
     for (const [censusIndex, censusId] of CENSUS_IDS.entries()) {
       const firstId = FIRST_GENERATED_ID + censusIndex * rowsPerCensus;
       await conn.query(
         `INSERT INTO trees (TreeID, TreeTag, SpeciesID, CensusID, IsActive)
-         SELECT ? + n, CONCAT('T', ? + n), ? + MOD(n, ?) + 1, ?, 1 FROM bench_numbers`,
-        [firstId, firstId, FIRST_GENERATED_ID, SPECIES_COUNT, censusId]
+         SELECT ? + n, CONCAT(?, ? + n), ? + MOD(n, ?) + 1, ?, 1 FROM bench_numbers`,
+        [firstId, TREE_TAG_PREFIX, firstId, FIRST_GENERATED_ID, SPECIES_COUNT, censusId]
       );
       await conn.query(
         `INSERT INTO stems (StemGUID, TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
