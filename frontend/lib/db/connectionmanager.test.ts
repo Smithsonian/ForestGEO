@@ -911,9 +911,11 @@ describe('ConnectionManager typed transaction timeout', () => {
     expect(timeoutError.code).toBe(TIMEOUT_ERROR_CODE);
     expect(timeoutError.timeoutMs).toBe(TIMEOUT_MS);
     expect(timeoutError.message).toBe(`Transaction ${timeoutError.transactionId} timed out after ${TIMEOUT_MS}ms`);
-    expect(connection.release, 'the connection must be returned after the timeout rollback').toHaveBeenCalled();
+    expect(connection.destroy, 'a timed-out transaction is abandoned: its connection is quarantined').toHaveBeenCalledTimes(1);
+    expect(connection.release, 'never returned to the pool').not.toHaveBeenCalled();
+    expect(connection.rollback, 'no ROLLBACK: it would queue behind the running statement (A11)').not.toHaveBeenCalled();
     const { killQueryOnThread } = await import('@/lib/db/primitives');
-    expect(killQueryOnThread, 'the in-flight statement must be killed by thread id before rollback').toHaveBeenCalledWith(THREAD_ID, expect.any(String));
+    expect(killQueryOnThread, 'the in-flight statement must be killed by thread id').toHaveBeenCalledWith(THREAD_ID, expect.any(String));
     const internals = manager as unknown as { transactionConnections: Map<string, unknown>; transactionMeta: Map<string, unknown> };
     expect(internals.transactionConnections.has(timeoutError.transactionId), 'connection bookkeeping must be cleared').toBe(false);
     expect(internals.transactionMeta.has(timeoutError.transactionId), 'transaction metadata must be cleared').toBe(false);
@@ -1570,5 +1572,62 @@ describe('ConnectionManager COMMIT fails closed and is bounded (#563 §2.4, §3.
     console.log('[U13] outcome:', outcome);
     expect(outcome, 'today this resolves "looks fine" for work the server rolled back').toBeInstanceOf(TransactionNotActiveError);
     expect(connection.commit).not.toHaveBeenCalled();
+  });
+});
+
+describe('ConnectionManager ROLLBACK deadline and callback-timeout abandonment (#563 §3.4, §4)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    getConnMock.mockReset();
+    runQueryMock.mockReset();
+    runQueryMock.mockImplementation(async () => []);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('U14: a ROLLBACK with no reply by the deadline is quarantined and KILLed, then resolves', async () => {
+    const { killQueryOnThread } = await import('@/lib/db/primitives');
+    const { ROLLBACK_DEADLINE_EXCEEDED_EVENT } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const timersBefore = vi.getTimerCount();
+    const { ConnectionManagerClass, manager, internals } = await loadLifecycleManager();
+    const connection = makeLifecycleConnection();
+    connection.rollback.mockImplementation(() => neverSettles());
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await manager.beginTransaction();
+    const occupancyBefore = slotOccupancy(internals) - 1;
+
+    const rollback = outcomeOf(manager.rollbackTransaction(transactionId));
+    await vi.advanceTimersByTimeAsync(ConnectionManagerClass.DEFAULT_ROLLBACK_DEADLINE_MS);
+    const settled = await settledValue(rollback);
+    console.log('[U14] rollback outcome:', settled, 'timers:', vi.getTimerCount());
+
+    expect(settled, 'callers roll back from catch blocks; a throw here would mask their real error').toEqual({ resolved: undefined });
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(connection.release).not.toHaveBeenCalled();
+    expect(vi.mocked(killQueryOnThread)).toHaveBeenCalledWith(LIFECYCLE_THREAD_ID, expect.any(String));
+    expect(loggerMock.error).toHaveBeenCalledWith(ROLLBACK_DEADLINE_EXCEEDED_EVENT, undefined, expect.objectContaining({ transactionId }));
+    expect(slotOccupancy(internals)).toBe(occupancyBefore);
+    expect(vi.getTimerCount()).toBe(timersBefore);
+  });
+
+  it('R-7: a rollback while the transaction is committing sends no ROLLBACK', async () => {
+    const { manager } = await loadLifecycleManager();
+    const pendingCommit = deferred<void>();
+    const connection = makeLifecycleConnection();
+    connection.commit.mockImplementation(() => pendingCommit.promise);
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await manager.beginTransaction();
+
+    const commit = manager.commitTransaction(transactionId);
+    await manager.rollbackTransaction(transactionId);
+    pendingCommit.resolve();
+    await commit;
+
+    expect(connection.rollback).not.toHaveBeenCalled();
+    expect(connection.release).toHaveBeenCalledTimes(1);
   });
 });

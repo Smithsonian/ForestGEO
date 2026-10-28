@@ -3,6 +3,8 @@
  * ailogger are mocked, so quarantine cancellation and runQuery timers are exercised end to end without MySQL.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConnectionQuarantinedError } from './connectionquarantine';
+import { TransactionCallbackTimeoutError } from './transactionerrors';
 
 const { getConnectionMock, tryAcquireConnectionMock, killConnection } = vi.hoisted(() => ({
   getConnectionMock: vi.fn(),
@@ -120,6 +122,49 @@ describe('lock cleanup with the real runQuery (U24, R5)', () => {
     expect(connection.destroy).toHaveBeenCalledTimes(1);
     expect(connection.release).not.toHaveBeenCalled();
     expect(vi.getTimerCount(), 'a plain destroy() would leave the RELEASE_LOCK wrapper’s 660 s timer armed (+1)').toBe(timersBefore);
+    expect(slotOccupancy(internals)).toBe(occupancyBefore);
+  });
+});
+
+describe('callback-timeout abandonment with the real runQuery (U25, R5)', () => {
+  const CALLBACK_TIMEOUT_MS = 2_000;
+  const LONG_STATEMENT_SQL = 'SELECT SLEEP(100) AS slept';
+
+  it('U25: the callback’s pending statement is cancelled with ConnectionQuarantinedError when the timeout fires, and no timer survives', async () => {
+    const { manager, internals } = managerAtBaseline();
+    const connection = makeScriptedConnection(async sql => (sql.startsWith('SELECT SLEEP') ? neverSettles() : ROWS_OK));
+    getConnectionMock.mockResolvedValueOnce(connection);
+    const timersBefore = vi.getTimerCount();
+    const occupancyBefore = slotOccupancy(internals);
+    let statementOutcome: unknown = 'pending';
+
+    const outcome = manager
+      .withTransaction(
+        async tx => {
+          statementOutcome = await tx.query(LONG_STATEMENT_SQL).then(
+            () => 'resolved',
+            (error: unknown) => error
+          );
+          return 'callback finished';
+        },
+        { timeoutMs: CALLBACK_TIMEOUT_MS }
+      )
+      .then(
+        () => 'resolved',
+        (error: unknown) => error
+      );
+
+    await vi.advanceTimersByTimeAsync(CALLBACK_TIMEOUT_MS);
+    const settled = await outcome;
+    await vi.advanceTimersByTimeAsync(0);
+    console.log('[U25] withTransaction:', settled, 'statement:', statementOutcome, 'timers:', timersBefore, vi.getTimerCount());
+
+    expect(settled).toBeInstanceOf(TransactionCallbackTimeoutError);
+    expect(statementOutcome, 'the abandoned statement must be cancelled now, not after its 660 s timer').toBeInstanceOf(ConnectionQuarantinedError);
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(connection.rollback).not.toHaveBeenCalled();
+    expect(killConnection.query).toHaveBeenCalledWith(`KILL QUERY ${CANCELLATION_THREAD_ID}`);
+    expect(vi.getTimerCount()).toBe(timersBefore);
     expect(slotOccupancy(internals)).toBe(occupancyBefore);
   });
 });

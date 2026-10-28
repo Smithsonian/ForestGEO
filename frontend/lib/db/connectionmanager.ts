@@ -53,6 +53,7 @@ type ConnectionDisposition = 'release' | 'quarantine' | 'already_quarantined';
 export const APPLICATION_LOCK_CLEANUP_DEADLINE_MS = 10_000;
 export const LOCK_CLEANUP_UNCONFIRMED_EVENT = 'db.transaction.lock_cleanup_unconfirmed';
 export const COMMIT_DEADLINE_EXCEEDED_EVENT = 'db.transaction.commit_deadline_exceeded';
+export const ROLLBACK_DEADLINE_EXCEEDED_EVENT = 'db.transaction.rollback_deadline_exceeded';
 export const COMMIT_ACKNOWLEDGED_AFTER_DEADLINE_EVENT = 'db.transaction.commit_acknowledged_after_deadline';
 
 interface ReapedTransactionRecord {
@@ -467,24 +468,40 @@ class ConnectionManager {
     const connection = this.transactionConnections.get(transactionId);
     const meta = this.transactionMeta.get(transactionId);
     if (!connection || !meta) {
+      // Already finalized (or reaped): nothing can commit any more, so the postcondition holds.
+      this.reapedTransactions.delete(transactionId);
       ailogger.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
       return; // Avoid throwing an error for an already finalized transaction
     }
+    if (meta.phase !== 'active') {
+      ailogger.warn(`Rollback of transaction ${transactionId} ignored: it is already ${meta.phase}`);
+      return;
+    }
 
     this.leaveActivePhase(meta, 'rolling_back');
-    try {
-      await connection.rollback();
-    } catch (error: unknown) {
-      const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
-      ailogger.error(chalk.red(`Error rolling back transaction: ${getErrorMessage(error)}`), errorObj);
-      this.discardTransaction(transactionId, 'ROLLBACK failed');
-      throw error;
-    }
-    ailogger.warn(chalk.yellow(`Transaction rolled back: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
+    const threadId = (connection as PoolConnectionWithThreadId).threadId;
+    const settlement = await settleWithinDeadline(connection.rollback(), this.rollbackDeadlineMs, late => {
+      ailogger.info(`ROLLBACK for transaction ${transactionId} settled (${late.status}) after its ${this.rollbackDeadlineMs}ms deadline`);
+    });
 
-    // Discard any buffered changelog entries — the transaction was rolled back
-    discardTransactionChangelog(transactionId);
-    await this.releaseLocksAndFinalize(transactionId, 'ROLLBACK');
+    if (settlement.status === 'settled') {
+      ailogger.warn(chalk.yellow(`Transaction rolled back: ${transactionId} (thread: ${threadId})`));
+      discardTransactionChangelog(transactionId);
+      await this.releaseLocksAndFinalize(transactionId, 'ROLLBACK');
+      return;
+    }
+
+    if (settlement.status === 'failed') {
+      const errorObj = settlement.error instanceof Error ? settlement.error : new Error(getErrorMessage(settlement.error));
+      ailogger.error(chalk.red(`Error rolling back transaction ${transactionId}: ${getErrorMessage(settlement.error)}`), errorObj);
+      this.discardTransaction(transactionId, 'ROLLBACK failed');
+      throw settlement.error;
+    }
+
+    // No COMMIT was ever sent: KILL plus the session ending make the server roll back now, so resolving keeps the
+    // postcondition, and a throw here would replace the caller's real error in its catch block (A10).
+    ailogger.error(ROLLBACK_DEADLINE_EXCEEDED_EVENT, undefined, { transactionId, threadId, deadlineMs: this.rollbackDeadlineMs });
+    await this.abandonTransactionConnection(transactionId, `ROLLBACK not acknowledged within ${this.rollbackDeadlineMs}ms`);
   }
 
   /** Moves a transaction out of 'active' and stops its keep-alive in the same synchronous step. */
@@ -741,11 +758,10 @@ class ConnectionManager {
     });
 
     if (context.timedOut) {
-      const txConnection = this.transactionConnections.get(transactionId) as PoolConnectionWithThreadId | undefined;
-      const threadId = txConnection?.threadId;
-      if (typeof threadId === 'number') {
-        await killQueryOnThread(threadId, 'transaction timeout');
-      }
+      // The callback's statement may still be running on this connection, so a ROLLBACK would queue behind it.
+      // Quarantine cancels its wrapper at once; KILL ends the server session now (A11).
+      await this.abandonTransactionConnection(transactionId, 'transaction callback timeout');
+      return;
     }
 
     try {
