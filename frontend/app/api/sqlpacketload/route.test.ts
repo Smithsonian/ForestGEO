@@ -724,7 +724,7 @@ describe('sqlpacketload measurement scope validation', () => {
       return mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) => pattern.test(String(call[0])));
     }
 
-    it('R1: a first measurement chunk replaces the census outside the staging transaction (catches: route not calling the replacement, or calling it inside the staging transaction)', async () => {
+    it('R1: a first measurement chunk replaces the census outside, and before, the staging transaction (catches: route not calling the replacement, calling it inside the staging transaction, or opening the staging transaction before the replacement)', async () => {
       primeMeasurementQueries(mockConnectionManager, freshUploadSession(), PRIOR_CORE_MEASUREMENT_IDS);
 
       const res = (await POST(makeMeasurementRequest()))!;
@@ -733,6 +733,19 @@ describe('sqlpacketload measurement scope validation', () => {
       console.log('[R1] status:', res.status, 'transaction id and statement per call:', statementLog);
       expect(res.status).toBe(HTTPResponses.OK);
       expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith(STAGING_TRANSACTION_ID);
+
+      const lastReplacementTransactionOrder = Math.max(...mockConnectionManager.withTransaction.mock.invocationCallOrder);
+      const stagingTransactionOrder = mockConnectionManager.beginTransaction.mock.invocationCallOrder[0];
+      console.log(
+        '[R1] invocation order: last replacement withTransaction',
+        lastReplacementTransactionOrder,
+        'staging beginTransaction',
+        stagingTransactionOrder
+      );
+      expect(mockConnectionManager.withTransaction.mock.calls.length, 'the route must open replacement transactions').toBeGreaterThan(0);
+      expect(lastReplacementTransactionOrder, 'every replacement transaction must finish before the staging transaction begins').toBeLessThan(
+        stagingTransactionOrder
+      );
 
       for (const [kind, pattern] of REPLACEMENT_STATEMENT_KINDS) {
         const kindCalls = callsMatching(pattern);
