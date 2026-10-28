@@ -1,28 +1,41 @@
 /**
- * Census-replacement rehearsal at Mpala scale (#552, spec section 5.1) — OPT-IN.
+ * Census-replacement rehearsal at Mpala scale (#552, #555) — OPT-IN.
  *
- * A clean re-upload replaces the whole target census inside the FIRST chunk's
- * transaction (lib/background-jobs/worker.ts begin ~913, commit ~941). For Mpala
- * census 3 that one transaction must delete 412,427 parked rows and their error
- * links, write 412,427 DELETE-audit rows, delete 42 failed uploadmetrics rows, and
- * stage a 5,000-row chunk. ConnectionManager.cleanupStaleTransactions rolls back
- * ANY transaction in the process older than 240 s, and any user can trigger it
- * through "reingest all" on any site. This rehearsal measures that transaction
- * locally, against the real ConnectionManager singleton, on a seeded Mpala shape.
+ * A Clean Re-Upload replaces its census in separately committed transactions that run
+ * BEFORE the staging transaction opens (replaceCensusForCleanReupload: measurement
+ * windows of CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE ids, legacy failedmeasurements passes,
+ * uploadmetrics windows, then the session marker). For Mpala census 3 that is 412,427
+ * parked rows with their error links and DELETE-audit rows. ConnectionManager.cleanupStaleTransactions
+ * rolls back ANY transaction in the process older than 240 s, and any user can trigger it through
+ * "reingest all" on any site, so no single transaction may get near that. This rehearsal drives the
+ * production sequence on the real ConnectionManager singleton, on a seeded Mpala shape:
+ * replaceCensusForCleanReupload, then beginTransaction / stageMeasurementChunk / commitTransaction
+ * with the worker's parameters. Test-side only, it wraps the instance's beginTransaction,
+ * commitTransaction and rollbackTransaction (which withTransaction calls through `this`) to time every
+ * transaction from BEGIN to COMMIT or ROLLBACK, and classifies each by the statements it ran.
+ *
+ * Runs (each gated by RUN_EXPECTATIONS, the one list that also feeds SUMMARY.passed):
+ *   1 replacementRun      replacement + first chunk; every transaction within LOCAL_TRANSACTION_BUDGET_MS,
+ *                         exact replaced state, controls untouched, the window statements EXPLAIN as range on PRIMARY
+ *   2 interruptedRun      fresh seed; failure injected at the coremeasurements DELETE of the middle window;
+ *                         the committed windows stay deleted and audited, the marker stays unset, nothing is staged
+ *   3 resumedRun          retry of run 2 with the same batch and session; finishes the replacement, no double audit
+ *   4 stagingRollbackRun  fresh seed; failure injected at the staging insert after the replacement; staging rolls back,
+ *                         the marker stays set, the census stays replaced; the retry runs no replacement transaction
  *
  * Profiles (env CENSUS_REPLACEMENT_REHEARSAL):
- *   full  — the measured Mpala counts. The only profile that counts for the recovery gate.
+ *   full  — the measured Mpala counts. ONLY a full SUMMARY with "passed":true satisfies acceptance criterion 9
+ *           of the #555 spec; a smoke SUMMARY proves the harness, not the scale.
  *   smoke — same shape at about 1/20 scale, for authoring and self-checks.
  *   unset — every test is skipped; the normal suite and CI never pay for this file.
  *
- * Run (from frontend/, local MySQL up, no other integration suite running):
- *   caffeinate -dimsu env CENSUS_REPLACEMENT_REHEARSAL=full npm run test:integration -- census-replacement-rehearsal
+ * Run (from frontend/, local MySQL up, no other integration suite running; a full run writes several GB of binlog):
+ *   caffeinate -dimsu env CENSUS_REPLACEMENT_REHEARSAL=full npx vitest run --config vitest.integration.config.mts tests/integration/census-replacement-rehearsal.integration.test.ts
+ *   CENSUS_REPLACEMENT_REHEARSAL=smoke npx vitest run --config vitest.integration.config.mts tests/integration/census-replacement-rehearsal.integration.test.ts
  *
- * Pass rule (spec 5.1): both committed transactions finish begin-to-commit within
- * LOCAL_FIRST_CHUNK_BUDGET_MS, every count and fingerprint check holds in all three
- * runs, and the SUMMARY line reads "passed":true. Any failure triggers the stop
- * rule: escalate before anyone asks for the Mpala re-upload. A local pass is not
- * an Azure guarantee.
+ * Pass rule: every count, fingerprint and kind-count check holds in all four runs, every transaction of runs 1 and 3
+ * finishes begin-to-end within LOCAL_TRANSACTION_BUDGET_MS, and the SUMMARY line reads "passed":true. Any failure
+ * triggers the stop rule: escalate before anyone asks for the Mpala re-upload. A local pass is not an Azure guarantee.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -38,7 +51,17 @@ import {
   type TestDatabaseConfig
 } from '../setup/local-db-setup';
 import { getChunkRows } from '@/lib/background-jobs/worker';
-import { stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
+import {
+  CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS,
+  replaceCensusForCleanReupload,
+  stageMeasurementChunk,
+  type CensusReplacementOutcome,
+  type CensusReplacementParams,
+  type CensusReplacementResult
+} from '@/lib/uploads/stage-measurements';
+import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
+import { CENSUS_REPLACEMENT_STATEMENT } from '../setup/census-replacement-statement-patterns';
+import { captureCensusReplacementWindowStatements } from '../setup/census-replacement-statement-capture';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { CENSUS_REPLACEMENT_MARKER_COLUMN, resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE, SUB_BATCH_ORDINAL_WIDTH, SUB_BATCH_SEPARATOR } from '@/lib/uploads/batch-family';
@@ -92,7 +115,8 @@ const rehearsalProfile = resolveRehearsalProfile(process.env[REHEARSAL_ENV_FLAG]
 const STALE_TRANSACTION_REAPER_THRESHOLD_MS = ConnectionManager.DEFAULT_STALE_TRANSACTION_THRESHOLD_MS;
 /** Judgement margin for Azure (slower I/O, ~340 network round trips); not a measured ratio. */
 const AZURE_SAFETY_FACTOR = 4;
-const LOCAL_FIRST_CHUNK_BUDGET_MS = STALE_TRANSACTION_REAPER_THRESHOLD_MS / AZURE_SAFETY_FACTOR;
+/** Every transaction, BEGIN to COMMIT or ROLLBACK: the production callback deadline over the Azure factor (15,000 ms). */
+const LOCAL_TRANSACTION_BUDGET_MS = CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS / AZURE_SAFETY_FACTOR;
 
 const WORKER_FIRST_CHUNK_ROWS = getChunkRows();
 const FIRST_CHUNK_INDEX = 0;
@@ -114,7 +138,11 @@ const FAILED_TAG_PREFIX = 'C3T';
 const REHEARSAL_CHANGED_BY = 'census-replacement-rehearsal';
 const SESSION_USER = 'census-replacement-rehearsal@forestgeo.test';
 const SESSION_STATE_UPLOADING = 'uploading';
-const SESSION_ID = { COMMIT_RUN: 'rehearsal-commit-session', ROLLBACK_RUN: 'rehearsal-rollback-session' } as const;
+const SESSION_ID = {
+  REPLACEMENT_RUN: 'rehearsal-replacement-session',
+  INTERRUPTED_RUN: 'rehearsal-interrupted-session',
+  STAGING_ROLLBACK_RUN: 'rehearsal-staging-rollback-session'
+} as const;
 
 const SPECIES_CODE = 'ACERRU';
 const QUADRAT_NAME = 'Q01';
@@ -145,33 +173,41 @@ const STATEMENT_PREVIEW_LENGTH = 160;
 const SUMMARY_LOG_PREFIX = '[census-replacement-rehearsal] SUMMARY';
 
 // ---------------------------------------------------------------------------
-// Statement timing (test-side only; product code gets no instrumentation)
+// Statement and transaction timing (test-side only; product code gets no instrumentation)
 // ---------------------------------------------------------------------------
 
 const STATEMENT_PHASE = {
+  SESSION_LOCK: 'sessionLock',
   ERROR_LINK_DELETE: 'errorLinkDelete',
   COREMEASUREMENT_SELECT_FOR_UPDATE: 'coreMeasurementSelectForUpdate',
   COREMEASUREMENT_DELETE_AUDIT: 'coreMeasurementDeleteAudit',
   COREMEASUREMENT_DELETE: 'coreMeasurementDelete',
+  LEGACY_DELETE: 'legacyDelete',
   UPLOADMETRICS_DELETE: 'uploadMetricsDelete',
+  MARKER_UPDATE: 'markerUpdate',
   STAGING_INSERT: 'stagingInsert',
   OTHER: 'other'
 } as const;
 type StatementPhase = (typeof STATEMENT_PHASE)[keyof typeof STATEMENT_PHASE];
 
-/** Every phase except OTHER must match at least one statement in a committed run. */
+/** Every phase except OTHER must match at least one statement in a run that finishes the replacement and commits its staging. */
 const NAMED_STATEMENT_PHASES: readonly StatementPhase[] = Object.values(STATEMENT_PHASE).filter(phase => phase !== STATEMENT_PHASE.OTHER);
 
+/** The window's cursor SELECT, with or without the optimizer hint production puts in front of the select list. */
+const COREMEASUREMENT_SELECT_FOR_UPDATE_PATTERN =
+  /^\s*SELECT\s+(\/\*\+[^*]*\*\/\s+)?(DISTINCT\s+)?\S*CoreMeasurementID\s+FROM\s+\S+\.coremeasurements[\s\S]*FOR UPDATE\s*$/i;
+const STAGING_INSERT_PATTERN = /^\s*INSERT IGNORE INTO\s+\S+\.temporarymeasurements\b/i;
+
 const STATEMENT_PHASE_PATTERNS: ReadonlyArray<{ phase: StatementPhase; pattern: RegExp }> = [
-  { phase: STATEMENT_PHASE.ERROR_LINK_DELETE, pattern: /^\s*DELETE FROM\s+\S+\.measurement_error_log\b/i },
-  {
-    phase: STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE,
-    pattern: /^\s*SELECT\s+(DISTINCT\s+)?\S*CoreMeasurementID\s+FROM\s+\S+\.coremeasurements[\s\S]*FOR UPDATE\s*$/i
-  },
-  { phase: STATEMENT_PHASE.COREMEASUREMENT_DELETE_AUDIT, pattern: /^\s*INSERT INTO\s+\S+\.unifiedchangelog[\s\S]*FROM\s+\S+\.coremeasurements cm\b/i },
-  { phase: STATEMENT_PHASE.COREMEASUREMENT_DELETE, pattern: /^\s*DELETE FROM\s+\S+\.coremeasurements WHERE CoreMeasurementID IN/i },
-  { phase: STATEMENT_PHASE.UPLOADMETRICS_DELETE, pattern: /^\s*DELETE FROM\s+\S+\.uploadmetrics\b/i },
-  { phase: STATEMENT_PHASE.STAGING_INSERT, pattern: /^\s*INSERT IGNORE INTO\s+\S+\.temporarymeasurements\b/i }
+  { phase: STATEMENT_PHASE.SESSION_LOCK, pattern: CENSUS_REPLACEMENT_STATEMENT.SESSION_LOCK },
+  { phase: STATEMENT_PHASE.ERROR_LINK_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.ERROR_LINK_DELETE },
+  { phase: STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE, pattern: COREMEASUREMENT_SELECT_FOR_UPDATE_PATTERN },
+  { phase: STATEMENT_PHASE.COREMEASUREMENT_DELETE_AUDIT, pattern: CENSUS_REPLACEMENT_STATEMENT.DELETE_AUDIT },
+  { phase: STATEMENT_PHASE.COREMEASUREMENT_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE },
+  { phase: STATEMENT_PHASE.LEGACY_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.LEGACY_DELETE },
+  { phase: STATEMENT_PHASE.UPLOADMETRICS_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.METRICS_DELETE },
+  { phase: STATEMENT_PHASE.MARKER_UPDATE, pattern: CENSUS_REPLACEMENT_STATEMENT.MARKER_UPDATE },
+  { phase: STATEMENT_PHASE.STAGING_INSERT, pattern: STAGING_INSERT_PATTERN }
 ];
 
 function classifyStatement(sql: string): StatementPhase {
@@ -180,21 +216,29 @@ function classifyStatement(sql: string): StatementPhase {
 
 interface TimedStatement {
   phase: StatementPhase;
+  /** Null for statements run outside any transaction (the preliminary probes). */
+  transactionID: string | null;
   durationMs: number;
   preview: string;
 }
 
+/** Throw on the `occurrence`-th (1-based) statement of `phase`. */
+interface FailureInjection {
+  phase: StatementPhase;
+  occurrence: number;
+}
+
 interface StatementTimer {
   statements: TimedStatement[];
-  /** True once the injected failure has been thrown at `failOnPhase`. */
+  /** True once the injected failure has been thrown. */
   injectionFired(): boolean;
   restore(): void;
 }
 
-class InjectedStagingFailureError extends Error {
-  constructor() {
-    super('Injected failure at the staging insert (census-replacement rehearsal)');
-    this.name = 'InjectedStagingFailureError';
+class InjectedRehearsalFailureError extends Error {
+  constructor(injection: FailureInjection) {
+    super(`Injected failure at statement ${injection.occurrence} of phase ${injection.phase} (census-replacement rehearsal)`);
+    this.name = 'InjectedRehearsalFailureError';
   }
 }
 
@@ -202,21 +246,31 @@ function errorMessageOf(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
-function installStatementTimer(connectionManager: ConnectionManager, failOnPhase: StatementPhase | null): StatementTimer {
+function previewOf(sql: string): string {
+  return sql.replace(/\s+/g, ' ').trim().slice(0, STATEMENT_PREVIEW_LENGTH);
+}
+
+function installStatementTimer(connectionManager: ConnectionManager, injection: FailureInjection | null): StatementTimer {
   const originalExecuteQuery = connectionManager.executeQuery;
   const statements: TimedStatement[] = [];
+  let seenInInjectedPhase = 0;
   let fired = false;
   connectionManager.executeQuery = async (query: string, params?: unknown[], transactionId?: string) => {
     const phase = classifyStatement(query);
-    if (phase === failOnPhase) {
-      fired = true;
-      throw new InjectedStagingFailureError();
+    const transactionID = transactionId ?? null;
+    if (injection !== null && phase === injection.phase) {
+      seenInInjectedPhase += 1;
+      if (seenInInjectedPhase === injection.occurrence) {
+        fired = true;
+        statements.push({ phase, transactionID, durationMs: 0, preview: previewOf(query) });
+        throw new InjectedRehearsalFailureError(injection);
+      }
     }
     const startedAt = performance.now();
     try {
       return await originalExecuteQuery.call(connectionManager, query, params, transactionId);
     } finally {
-      statements.push({ phase, durationMs: performance.now() - startedAt, preview: query.replace(/\s+/g, ' ').trim().slice(0, STATEMENT_PREVIEW_LENGTH) });
+      statements.push({ phase, transactionID, durationMs: performance.now() - startedAt, preview: previewOf(query) });
     }
   };
   return {
@@ -224,6 +278,97 @@ function installStatementTimer(connectionManager: ConnectionManager, failOnPhase
     injectionFired: () => fired,
     restore: () => {
       connectionManager.executeQuery = originalExecuteQuery;
+    }
+  };
+}
+
+const TRANSACTION_KIND = {
+  MEASUREMENT_WINDOW: 'measurement_window',
+  LEGACY_PASS: 'legacy_pass',
+  METRICS_WINDOW: 'metrics_window',
+  COMPLETION: 'completion',
+  STAGING: 'staging',
+  UNCLASSIFIED: 'unclassified'
+} as const;
+type TransactionKind = (typeof TRANSACTION_KIND)[keyof typeof TRANSACTION_KIND];
+
+/** What the transaction's statements say it was; the first match wins. */
+const TRANSACTION_KIND_BY_PHASE: ReadonlyArray<{ phase: StatementPhase; kind: TransactionKind }> = [
+  { phase: STATEMENT_PHASE.STAGING_INSERT, kind: TRANSACTION_KIND.STAGING },
+  { phase: STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE, kind: TRANSACTION_KIND.MEASUREMENT_WINDOW },
+  { phase: STATEMENT_PHASE.LEGACY_DELETE, kind: TRANSACTION_KIND.LEGACY_PASS },
+  { phase: STATEMENT_PHASE.UPLOADMETRICS_DELETE, kind: TRANSACTION_KIND.METRICS_WINDOW },
+  { phase: STATEMENT_PHASE.MARKER_UPDATE, kind: TRANSACTION_KIND.COMPLETION }
+];
+
+function classifyTransaction(statements: TimedStatement[]): TransactionKind {
+  const phases = new Set(statements.map(statement => statement.phase));
+  return TRANSACTION_KIND_BY_PHASE.find(candidate => phases.has(candidate.phase))?.kind ?? TRANSACTION_KIND.UNCLASSIFIED;
+}
+
+type TransactionEnd = 'committed' | 'rolled_back' | 'commit_failed';
+
+interface TransactionRecord {
+  transactionID: string;
+  kind: TransactionKind;
+  end: TransactionEnd;
+  /** BEGIN to the end of COMMIT or ROLLBACK. */
+  durationMs: number;
+}
+
+interface TransactionTimer {
+  /** Finished transactions, classified by the statements the statement timer saw under their ids. */
+  records(statements: TimedStatement[]): TransactionRecord[];
+  restore(): void;
+}
+
+function installTransactionTimer(connectionManager: ConnectionManager): TransactionTimer {
+  const originalBegin = connectionManager.beginTransaction;
+  const originalCommit = connectionManager.commitTransaction;
+  const originalRollback = connectionManager.rollbackTransaction;
+  const beganAtByTransaction = new Map<string, number>();
+  const finished: Array<{ transactionID: string; end: TransactionEnd; durationMs: number }> = [];
+
+  const finish = (transactionID: string, end: TransactionEnd) => {
+    const beganAt = beganAtByTransaction.get(transactionID);
+    if (beganAt === undefined) return;
+    finished.push({ transactionID, end, durationMs: performance.now() - beganAt });
+    beganAtByTransaction.delete(transactionID);
+  };
+
+  connectionManager.beginTransaction = async () => {
+    const beganAt = performance.now();
+    const transactionID = await originalBegin.call(connectionManager);
+    beganAtByTransaction.set(transactionID, beganAt);
+    return transactionID;
+  };
+  connectionManager.commitTransaction = async (transactionID: string) => {
+    try {
+      await originalCommit.call(connectionManager, transactionID);
+    } catch (error) {
+      finish(transactionID, 'commit_failed');
+      throw error;
+    }
+    finish(transactionID, 'committed');
+  };
+  connectionManager.rollbackTransaction = async (transactionID: string) => {
+    try {
+      await originalRollback.call(connectionManager, transactionID);
+    } finally {
+      finish(transactionID, 'rolled_back');
+    }
+  };
+
+  return {
+    records: statements =>
+      finished.map(transaction => ({
+        ...transaction,
+        kind: classifyTransaction(statements.filter(statement => statement.transactionID === transaction.transactionID))
+      })),
+    restore: () => {
+      connectionManager.beginTransaction = originalBegin;
+      connectionManager.commitTransaction = originalCommit;
+      connectionManager.rollbackTransaction = originalRollback;
     }
   };
 }
@@ -248,6 +393,72 @@ function slowestStatement(statements: TimedStatement[]): TimedStatement | null {
     (slowest, statement) => (slowest === null || statement.durationMs > slowest.durationMs ? statement : slowest),
     null
   );
+}
+
+const MEDIAN_FRACTION = 0.5;
+const P95_FRACTION = 0.95;
+
+/** Nearest-rank percentile of an ascending-sorted, non-empty list. */
+function percentileOf(sortedAscending: number[], fraction: number): number {
+  return sortedAscending[Math.max(0, Math.ceil(fraction * sortedAscending.length) - 1)];
+}
+
+function emptyKindCounts(): Record<TransactionKind, number> {
+  return Object.fromEntries(Object.values(TRANSACTION_KIND).map(kind => [kind, 0])) as Record<TransactionKind, number>;
+}
+
+function countKinds(transactions: TransactionRecord[]): Record<TransactionKind, number> {
+  const counts = emptyKindCounts();
+  for (const transaction of transactions) counts[transaction.kind] += 1;
+  return counts;
+}
+
+interface TransactionDurationSummary {
+  transactionCount: number;
+  transactionMs: { p50: number; p95: number; max: number };
+  slowestTransactionKind: TransactionKind | null;
+}
+
+function summarizeTransactionDurations(transactions: TransactionRecord[]): TransactionDurationSummary {
+  if (transactions.length === 0) return { transactionCount: 0, transactionMs: { p50: 0, p95: 0, max: 0 }, slowestTransactionKind: null };
+  const sortedDurations = transactions.map(transaction => transaction.durationMs).sort((first, second) => first - second);
+  const slowest = transactions.reduce((slowestSoFar, transaction) => (transaction.durationMs > slowestSoFar.durationMs ? transaction : slowestSoFar));
+  return {
+    transactionCount: transactions.length,
+    transactionMs: {
+      p50: Math.round(percentileOf(sortedDurations, MEDIAN_FRACTION)),
+      p95: Math.round(percentileOf(sortedDurations, P95_FRACTION)),
+      max: Math.round(sortedDurations[sortedDurations.length - 1])
+    },
+    slowestTransactionKind: slowest.kind
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Expected shapes of the window sequence
+// ---------------------------------------------------------------------------
+
+const SINGLE_TRANSACTION = 1;
+const FIRST_WINDOW_ORDINAL = 1;
+
+/**
+ * Unit A's transactions for `rows` prior rows: one per window that deletes, plus the cursor-0
+ * confirming window, plus one empty continuation window when the last deleting window was full.
+ */
+function expectedMeasurementWindowCount(rows: number, windowSize: number): number {
+  const deletingWindows = Math.ceil(rows / windowSize);
+  const lastDeletingWindowWasFull = rows % windowSize === 0;
+  return deletingWindows + (lastDeletingWindowWasFull ? 2 : 1);
+}
+
+/** The middle deleting window (1-based): the one whose DELETE run 2 fails. */
+function interruptedWindowIndex(rows: number, windowSize: number): number {
+  return Math.max(FIRST_WINDOW_ORDINAL, Math.ceil(Math.ceil(rows / windowSize) / 2));
+}
+
+/** Rows the replacement has deleted when `windowIndex` (1-based) begins: every earlier window was full. */
+function rowsDeletedBeforeWindow(windowIndex: number): number {
+  return (windowIndex - FIRST_WINDOW_ORDINAL) * CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE;
 }
 
 // ---------------------------------------------------------------------------
@@ -322,34 +533,53 @@ function describeMismatches<T extends object>(expected: T, actual: T): string[] 
 // Summary (printed once, in afterAll)
 // ---------------------------------------------------------------------------
 
-type RunOutcome = 'committed' | 'rolled_back' | 'failed';
-type RunKey = 'commitRun' | 'rollbackRun' | 'retryRun';
+type RunOutcome = 'committed' | 'replacement_interrupted' | 'staging_rolled_back' | 'failed';
+type RunKey = 'replacementRun' | 'interruptedRun' | 'resumedRun' | 'stagingRollbackRun';
+const RUN_KEYS: readonly RunKey[] = ['replacementRun', 'interruptedRun', 'resumedRun', 'stagingRollbackRun'];
 
 /** Filled in after the run's state checks complete; null means verification never finished. */
 interface RunVerification {
-  /** Checks taken before the run started (the fresh census-3 seed for the rollback run). */
+  /** Checks taken before the run started (the fresh census-3 seed for runs 2 and 4). */
   preRunMismatches: string[];
+  /** EXPLAIN of the window's DELETE and audit INSERT (run 1 only). */
+  statementPlanMismatches: string[];
   countMismatches: string[];
   controlCensusMismatches: string[];
 }
 
-interface RunSummary {
+interface OverBudgetTransaction {
+  kind: TransactionKind;
+  end: TransactionEnd;
+  durationMs: number;
+}
+
+/** The attempt that follows run 4's staging rollback, with the same batch and session. */
+interface RetryAfterRollbackSummary {
   outcome: RunOutcome;
-  beginToEndMs: number;
-  commitMs: number | null;
-  rollbackMs: number | null;
-  withinBudget: boolean | null;
-  injectionPoint: StatementPhase | null;
+  replacementOutcome: CensusReplacementOutcome | null;
+  transactionKindCounts: Record<TransactionKind, number>;
+  error: string | null;
+  stateMismatches: string[];
+}
+
+interface RunSummary extends TransactionDurationSummary {
+  outcome: RunOutcome;
+  endToEndMs: number;
+  replacementOutcome: CensusReplacementOutcome | null;
+  /** Unit A's transactions: the windows that deleted plus the confirming window. */
+  measurementWindowCount: number;
+  transactionKindCounts: Record<TransactionKind, number>;
+  rolledBackTransactions: number;
+  overBudgetTransactions: OverBudgetTransaction[];
+  injection: FailureInjection | null;
   injectionFired: boolean;
-  /** The census-replacement cleanup ran to its last statement (coremeasurements and uploadmetrics deletes both issued). */
-  cleanupCompleted: boolean;
   error: string | null;
   rollbackError: string | null;
   phases: Record<StatementPhase, PhaseTotals>;
-  selectForUpdatePlusAuditMs: number;
   slowestStatement: TimedStatement | null;
   unmatchedPhases: StatementPhase[];
   verification: RunVerification | null;
+  retryAfterRollback: RetryAfterRollbackSummary | null;
 }
 
 interface RehearsalSummary {
@@ -360,6 +590,7 @@ interface RehearsalSummary {
   innodbBufferPoolBytes: number | null;
   budgetMs: number;
   reaperThresholdMs: number;
+  measurementWindowSize: number;
   seed: { censusOneRows: number; censusTwoRows: number; censusThreeFailedRows: number; failedSubBatches: number; seedMs: number; mismatches: string[] } | null;
   runs: Partial<Record<RunKey, RunSummary>>;
   failedChecks: string[];
@@ -372,8 +603,9 @@ const rehearsalSummary: RehearsalSummary = {
   schema: null,
   mysqlVersion: null,
   innodbBufferPoolBytes: null,
-  budgetMs: LOCAL_FIRST_CHUNK_BUDGET_MS,
+  budgetMs: LOCAL_TRANSACTION_BUDGET_MS,
   reaperThresholdMs: STALE_TRANSACTION_REAPER_THRESHOLD_MS,
+  measurementWindowSize: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   seed: null,
   runs: {},
   failedChecks: [],
@@ -382,29 +614,109 @@ const rehearsalSummary: RehearsalSummary = {
 
 interface RunExpectation {
   outcome: RunOutcome;
-  injectionPoint: StatementPhase | null;
+  /** Null when the replacement throws before returning. */
+  replacementOutcome: CensusReplacementOutcome | null;
+  injection: FailureInjection | null;
+  /** True when every transaction of the run must finish within LOCAL_TRANSACTION_BUDGET_MS. */
   budgeted: boolean;
+  transactionKindCounts: Record<TransactionKind, number>;
+  rolledBackTransactions: number;
+  expectsRetryAfterRollback: boolean;
+}
+
+function kindCounts(counts: Partial<Record<TransactionKind, number>>): Record<TransactionKind, number> {
+  return { ...emptyKindCounts(), ...counts };
+}
+
+function fullSequenceKindCounts(priorRows: number): Record<TransactionKind, number> {
+  return kindCounts({
+    [TRANSACTION_KIND.MEASUREMENT_WINDOW]: expectedMeasurementWindowCount(priorRows, CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE),
+    [TRANSACTION_KIND.LEGACY_PASS]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.METRICS_WINDOW]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.COMPLETION]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.STAGING]: SINGLE_TRANSACTION
+  });
 }
 
 /** The single definition of "this run passed", used by each test's assertion AND by SUMMARY.passed, so the two cannot diverge. */
-const RUN_EXPECTATIONS: Record<RunKey, RunExpectation> = {
-  commitRun: { outcome: 'committed', injectionPoint: null, budgeted: true },
-  rollbackRun: { outcome: 'rolled_back', injectionPoint: STATEMENT_PHASE.STAGING_INSERT, budgeted: false },
-  retryRun: { outcome: 'committed', injectionPoint: null, budgeted: true }
-};
+function buildRunExpectations(profile: RehearsalProfile): Record<RunKey, RunExpectation> {
+  const priorRows = failedRowTotal(profile);
+  const interruptedWindow = interruptedWindowIndex(priorRows, CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
+  const interruptedRunInjection: FailureInjection = { phase: STATEMENT_PHASE.COREMEASUREMENT_DELETE, occurrence: interruptedWindow };
+  const rowsLeftAfterInterruption = priorRows - rowsDeletedBeforeWindow(interruptedWindow);
+  return {
+    replacementRun: {
+      outcome: 'committed',
+      replacementOutcome: 'replaced',
+      injection: null,
+      budgeted: true,
+      transactionKindCounts: fullSequenceKindCounts(priorRows),
+      rolledBackTransactions: 0,
+      expectsRetryAfterRollback: false
+    },
+    interruptedRun: {
+      outcome: 'replacement_interrupted',
+      replacementOutcome: null,
+      injection: interruptedRunInjection,
+      budgeted: false,
+      transactionKindCounts: kindCounts({ [TRANSACTION_KIND.MEASUREMENT_WINDOW]: interruptedWindow }),
+      rolledBackTransactions: SINGLE_TRANSACTION,
+      expectsRetryAfterRollback: false
+    },
+    resumedRun: {
+      outcome: 'committed',
+      replacementOutcome: 'replaced',
+      injection: null,
+      budgeted: true,
+      transactionKindCounts: fullSequenceKindCounts(rowsLeftAfterInterruption),
+      rolledBackTransactions: 0,
+      expectsRetryAfterRollback: false
+    },
+    stagingRollbackRun: {
+      outcome: 'staging_rolled_back',
+      replacementOutcome: 'replaced',
+      injection: { phase: STATEMENT_PHASE.STAGING_INSERT, occurrence: SINGLE_TRANSACTION },
+      budgeted: false,
+      transactionKindCounts: fullSequenceKindCounts(priorRows),
+      rolledBackTransactions: SINGLE_TRANSACTION,
+      expectsRetryAfterRollback: true
+    }
+  };
+}
 
-function runFailedChecks(key: RunKey, run: RunSummary | undefined): string[] {
+const RETRY_AFTER_ROLLBACK_EXPECTATION = {
+  outcome: 'committed',
+  replacementOutcome: 'already_completed',
+  transactionKindCounts: kindCounts({ [TRANSACTION_KIND.STAGING]: SINGLE_TRANSACTION })
+} as const;
+
+function sameInjection(first: FailureInjection | null, second: FailureInjection | null): boolean {
+  return first?.phase === second?.phase && first?.occurrence === second?.occurrence;
+}
+
+function describeInjection(injection: FailureInjection | null): string {
+  return injection === null ? 'none' : `${injection.phase}#${injection.occurrence}`;
+}
+
+function runFailedChecks(key: RunKey, run: RunSummary | undefined, expectation: RunExpectation): string[] {
   if (!run) return [`${key}: never attempted`];
-  const expectation = RUN_EXPECTATIONS[key];
   const failed: string[] = [];
   if (run.outcome !== expectation.outcome) failed.push(`${key}: outcome ${run.outcome}, expected ${expectation.outcome}`);
   if (run.error !== null) failed.push(`${key}: unexpected error ${run.error}`);
   if (run.rollbackError !== null) failed.push(`${key}: rollback failed ${run.rollbackError}`);
-  if (run.injectionPoint !== expectation.injectionPoint) failed.push(`${key}: injection point ${run.injectionPoint}, expected ${expectation.injectionPoint}`);
-  if (run.injectionFired !== (expectation.injectionPoint !== null)) failed.push(`${key}: injection fired=${run.injectionFired}`);
-  if (!run.cleanupCompleted) failed.push(`${key}: the census-replacement cleanup did not run to completion`);
-  if (expectation.budgeted && run.withinBudget !== true)
-    failed.push(`${key}: begin-to-commit ${run.beginToEndMs} ms is over the ${LOCAL_FIRST_CHUNK_BUDGET_MS} ms budget`);
+  if (run.replacementOutcome !== expectation.replacementOutcome)
+    failed.push(`${key}: replacement outcome ${run.replacementOutcome}, expected ${expectation.replacementOutcome}`);
+  if (!sameInjection(run.injection, expectation.injection))
+    failed.push(`${key}: injection ${describeInjection(run.injection)}, expected ${describeInjection(expectation.injection)}`);
+  if (run.injectionFired !== (expectation.injection !== null)) failed.push(`${key}: injection fired=${run.injectionFired}`);
+  failed.push(...describeMismatches(expectation.transactionKindCounts, run.transactionKindCounts).map(mismatch => `${key}: transaction kind ${mismatch}`));
+  if (run.rolledBackTransactions !== expectation.rolledBackTransactions)
+    failed.push(`${key}: ${run.rolledBackTransactions} rolled-back transactions, expected ${expectation.rolledBackTransactions}`);
+  if (expectation.budgeted && run.overBudgetTransactions.length > 0)
+    failed.push(
+      `${key}: ${run.overBudgetTransactions.length} transactions over the ${LOCAL_TRANSACTION_BUDGET_MS} ms budget (slowest ${run.transactionMs.max} ms, a ${run.slowestTransactionKind}): ` +
+        JSON.stringify(run.overBudgetTransactions)
+    );
   if (expectation.outcome === 'committed' && run.unmatchedPhases.length > 0)
     failed.push(`${key}: phases matched no statement: ${run.unmatchedPhases.join(', ')}`);
   if (run.verification === null) {
@@ -414,14 +726,33 @@ function runFailedChecks(key: RunKey, run: RunSummary | undefined): string[] {
       if (mismatches.length > 0) failed.push(`${key}: ${label}: ${mismatches.join('; ')}`);
     }
   }
+  failed.push(...retryAfterRollbackFailedChecks(key, run.retryAfterRollback, expectation.expectsRetryAfterRollback));
   return failed;
 }
 
-function rehearsalFailedChecks(summary: RehearsalSummary): string[] {
+function retryAfterRollbackFailedChecks(key: RunKey, retry: RetryAfterRollbackSummary | null, expected: boolean): string[] {
+  if (!expected) return retry === null ? [] : [`${key}: unexpected retry record`];
+  if (retry === null) return [`${key}: the retry after the staging rollback never ran`];
+  const failed: string[] = [];
+  if (retry.outcome !== RETRY_AFTER_ROLLBACK_EXPECTATION.outcome)
+    failed.push(`${key} retry: outcome ${retry.outcome}, expected ${RETRY_AFTER_ROLLBACK_EXPECTATION.outcome}`);
+  if (retry.error !== null) failed.push(`${key} retry: unexpected error ${retry.error}`);
+  if (retry.replacementOutcome !== RETRY_AFTER_ROLLBACK_EXPECTATION.replacementOutcome)
+    failed.push(`${key} retry: replacement outcome ${retry.replacementOutcome}, expected ${RETRY_AFTER_ROLLBACK_EXPECTATION.replacementOutcome}`);
+  failed.push(
+    ...describeMismatches(RETRY_AFTER_ROLLBACK_EXPECTATION.transactionKindCounts, retry.transactionKindCounts).map(
+      mismatch => `${key} retry: transaction kind ${mismatch}`
+    )
+  );
+  failed.push(...retry.stateMismatches.map(mismatch => `${key} retry: ${mismatch}`));
+  return failed;
+}
+
+function rehearsalFailedChecks(summary: RehearsalSummary, expectations: Record<RunKey, RunExpectation>): string[] {
   const failed: string[] = [];
   if (summary.seed === null) failed.push('seed: did not complete');
   else if (summary.seed.mismatches.length > 0) failed.push(`seed: ${summary.seed.mismatches.join('; ')}`);
-  for (const key of Object.keys(RUN_EXPECTATIONS) as RunKey[]) failed.push(...runFailedChecks(key, summary.runs[key]));
+  for (const key of RUN_KEYS) failed.push(...runFailedChecks(key, summary.runs[key], expectations[key]));
   return failed;
 }
 
@@ -443,7 +774,10 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   let controlBaseline: ControlCensusFingerprint[];
   /** Set right before the first ConnectionManager call opens the real pool; afterAll closes that pool only then. */
   let connectionManagerPoolOpened = false;
-  const rollbackRunBatchID = generateShortBatchID();
+  /** Built in beforeAll: describe.skipIf still runs this callback with a null profile when the flag is unset. */
+  let runExpectations: Record<RunKey, RunExpectation>;
+  const interruptedRunBatchID = generateShortBatchID();
+  const stagingRollbackRunBatchID = generateShortBatchID();
 
   async function query(sql: string, params: unknown[] = []): Promise<RowDataPacket[]> {
     const [rows] = await setupConnection!.query<RowDataPacket[]>(sql, params);
@@ -670,116 +1004,124 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     }));
   }
 
-  interface FirstChunkResult {
+  function buildReplacementParams(batchID: string, sessionID: string): CensusReplacementParams {
+    return {
+      schema,
+      fileName: REPLACEMENT_FILE,
+      batchID,
+      plotID,
+      censusID: censusIDs.three,
+      uploadMode: UploadMode.CLEAN_REUPLOAD,
+      sourceFormat: SourceFormat.csv,
+      rawRows: buildReplacementChunk(),
+      csvHeaders: [...CSV_HEADERS],
+      delimiter: CSV_DELIMITER,
+      storedMapping: undefined,
+      uploadSessionID: sessionID,
+      firstRowOrdinal: FIRST_CHUNK_ROW_ORDINAL,
+      changedBy: REHEARSAL_CHANGED_BY,
+      suppressCensusReplacementCleanup: false,
+      chunkIdentity: `${batchID}:chunk${FIRST_CHUNK_INDEX}`
+    };
+  }
+
+  interface ReplacementAndFirstChunkResult {
     outcome: RunOutcome;
-    beginToEndMs: number;
-    commitMs: number | null;
-    rollbackMs: number | null;
-    injectionPoint: StatementPhase | null;
+    replacement: CensusReplacementResult | null;
+    endToEndMs: number;
+    injection: FailureInjection | null;
     injectionFired: boolean;
     error: string | null;
     rollbackError: string | null;
     statements: TimedStatement[];
+    transactions: TransactionRecord[];
+  }
+
+  function outcomeOf(failure: unknown, stagingBegan: boolean): RunOutcome {
+    if (failure === null) return 'committed';
+    if (!(failure instanceof InjectedRehearsalFailureError)) return 'failed';
+    return stagingBegan ? 'staging_rolled_back' : 'replacement_interrupted';
   }
 
   /**
-   * The worker's first-chunk transaction (worker.ts ~913-963), parameter for parameter.
-   * It always returns a result, including on an unexpected error (outcome 'failed', with the
-   * message in `error`), so the caller records the timings, the slowest statement and the
-   * rollback status before any assertion runs. That is recorded, not swallowed:
-   * runFailedChecks fails the test on any non-null `error`.
+   * The worker's sequence for a job's first chunk (worker.ts): the census replacement in its own
+   * transactions, then one staging transaction with begin / stage / commit and a rollback on error.
+   * It always returns a result, including on an unexpected error (outcome 'failed', with the message in
+   * `error`), so the caller records the timings and the rollback status before any assertion runs. That is
+   * recorded, not swallowed: runFailedChecks fails the test on any non-null `error`.
    */
-  async function runFirstChunk(batchID: string, sessionID: string, injectionPoint: StatementPhase | null): Promise<FirstChunkResult> {
+  async function runReplacementAndFirstChunk(batchID: string, sessionID: string, injection: FailureInjection | null): Promise<ReplacementAndFirstChunkResult> {
     resetUploadSessionReplacementMarkerCacheForTests();
-    const rawRows = buildReplacementChunk();
-    const timer = installStatementTimer(connectionManager, injectionPoint);
-    const beganAt = performance.now();
-    let transactionID: string | null = null;
+    const params = buildReplacementParams(batchID, sessionID);
+    const statementTimer = installStatementTimer(connectionManager, injection);
+    const transactionTimer = installTransactionTimer(connectionManager);
+    const startedAt = performance.now();
+    let replacement: CensusReplacementResult | null = null;
+    let stagingTransactionID: string | null = null;
+    let stagingCommitted = false;
+    let failure: unknown = null;
+    let rollbackError: string | null = null;
     try {
-      transactionID = await connectionManager.beginTransaction();
-      await stageMeasurementChunk(connectionManager, {
-        schema,
-        fileName: REPLACEMENT_FILE,
-        batchID,
-        plotID,
-        censusID: censusIDs.three,
-        uploadMode: UploadMode.CLEAN_REUPLOAD,
-        sourceFormat: SourceFormat.csv,
-        rawRows,
-        csvHeaders: [...CSV_HEADERS],
-        delimiter: CSV_DELIMITER,
-        storedMapping: undefined,
-        uploadSessionID: sessionID,
-        transactionID,
-        firstRowOrdinal: FIRST_CHUNK_ROW_ORDINAL,
-        changedBy: REHEARSAL_CHANGED_BY,
-        suppressCensusReplacementCleanup: false,
-        chunkIdentity: `${batchID}:chunk${FIRST_CHUNK_INDEX}`
-      });
-      const commitStartedAt = performance.now();
-      await connectionManager.commitTransaction(transactionID);
-      const committedAt = performance.now();
-      return {
-        outcome: 'committed',
-        beginToEndMs: committedAt - beganAt,
-        commitMs: committedAt - commitStartedAt,
-        rollbackMs: null,
-        injectionPoint,
-        injectionFired: timer.injectionFired(),
-        error: null,
-        rollbackError: null,
-        statements: timer.statements
-      };
+      replacement = await replaceCensusForCleanReupload(connectionManager, params);
+      stagingTransactionID = await connectionManager.beginTransaction();
+      await stageMeasurementChunk(connectionManager, { ...params, transactionID: stagingTransactionID });
+      await connectionManager.commitTransaction(stagingTransactionID);
+      stagingCommitted = true;
     } catch (error) {
-      const injected = error instanceof InjectedStagingFailureError;
-      if (!injected) console.error(`[census-replacement-rehearsal] unexpected error in the first-chunk run`, error);
-      const rollbackStartedAt = performance.now();
-      let rollbackError: string | null = null;
-      if (transactionID !== null) {
+      failure = error;
+      if (!(error instanceof InjectedRehearsalFailureError))
+        console.error(`[census-replacement-rehearsal] unexpected error in the replacement-and-first-chunk run`, error);
+      if (stagingTransactionID !== null && !stagingCommitted) {
         try {
-          await connectionManager.rollbackTransaction(transactionID);
+          await connectionManager.rollbackTransaction(stagingTransactionID);
         } catch (caughtRollbackError) {
           // Mirrors the worker: a failed rollback is recorded and never masks the original error.
           rollbackError = errorMessageOf(caughtRollbackError);
         }
       }
-      const rolledBackAt = performance.now();
-      return {
-        outcome: injected ? 'rolled_back' : 'failed',
-        beginToEndMs: rolledBackAt - beganAt,
-        commitMs: null,
-        rollbackMs: transactionID === null ? null : rolledBackAt - rollbackStartedAt,
-        injectionPoint,
-        injectionFired: timer.injectionFired(),
-        error: injected ? null : errorMessageOf(error),
-        rollbackError,
-        statements: timer.statements
-      };
     } finally {
-      timer.restore();
+      statementTimer.restore();
+      transactionTimer.restore();
     }
+    const endToEndMs = performance.now() - startedAt;
+    const outcome = outcomeOf(failure, stagingTransactionID !== null);
+    return {
+      outcome,
+      replacement,
+      endToEndMs,
+      injection,
+      injectionFired: statementTimer.injectionFired(),
+      error: outcome === 'failed' ? errorMessageOf(failure) : null,
+      rollbackError,
+      statements: statementTimer.statements,
+      transactions: transactionTimer.records(statementTimer.statements)
+    };
   }
 
   /** Records a run's timings in the summary immediately, before any verification query can fail. */
-  function recordRun(key: RunKey, result: FirstChunkResult): RunSummary {
+  function recordRun(key: RunKey, result: ReplacementAndFirstChunkResult): RunSummary {
     const phases = summarizePhases(result.statements);
+    const transactionKindCounts = countKinds(result.transactions);
     const run: RunSummary = {
       outcome: result.outcome,
-      beginToEndMs: Math.round(result.beginToEndMs),
-      commitMs: result.commitMs === null ? null : Math.round(result.commitMs),
-      rollbackMs: result.rollbackMs === null ? null : Math.round(result.rollbackMs),
-      withinBudget: result.outcome === 'committed' ? result.beginToEndMs <= LOCAL_FIRST_CHUNK_BUDGET_MS : null,
-      injectionPoint: result.injectionPoint,
+      endToEndMs: Math.round(result.endToEndMs),
+      replacementOutcome: result.replacement?.outcome ?? null,
+      measurementWindowCount: transactionKindCounts[TRANSACTION_KIND.MEASUREMENT_WINDOW],
+      ...summarizeTransactionDurations(result.transactions),
+      transactionKindCounts,
+      rolledBackTransactions: result.transactions.filter(transaction => transaction.end === 'rolled_back').length,
+      overBudgetTransactions: result.transactions
+        .filter(transaction => transaction.durationMs > LOCAL_TRANSACTION_BUDGET_MS)
+        .map(transaction => ({ kind: transaction.kind, end: transaction.end, durationMs: Math.round(transaction.durationMs) })),
+      injection: result.injection,
       injectionFired: result.injectionFired,
-      cleanupCompleted: phases[STATEMENT_PHASE.COREMEASUREMENT_DELETE].statements > 0 && phases[STATEMENT_PHASE.UPLOADMETRICS_DELETE].statements > 0,
       error: result.error,
       rollbackError: result.rollbackError,
       phases,
-      selectForUpdatePlusAuditMs:
-        phases[STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE].totalMs + phases[STATEMENT_PHASE.COREMEASUREMENT_DELETE_AUDIT].totalMs,
       slowestStatement: slowestStatement(result.statements),
       unmatchedPhases: NAMED_STATEMENT_PHASES.filter(phase => phases[phase].statements === 0),
-      verification: null
+      verification: null,
+      retryAfterRollback: null
     };
     rehearsalSummary.runs[key] = run;
     console.log(`[census-replacement-rehearsal] ${key} ${JSON.stringify(run)}`);
@@ -793,12 +1135,14 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     expectedState: CensusThreeState,
     batchID: string,
     sessionID: string,
-    preRunMismatches: string[]
+    preRunMismatches: string[],
+    statementPlanMismatches: string[] = []
   ): Promise<{ state: CensusThreeState; controls: ControlCensusFingerprint[] }> {
     const state = await readCensusThreeState(batchID, sessionID);
     const controls = await readControlFingerprints();
     run.verification = {
       preRunMismatches,
+      statementPlanMismatches,
       countMismatches: describeMismatches(expectedState, state),
       controlCensusMismatches: describeMismatches(controlBaseline, controls)
     };
@@ -816,6 +1160,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       throw new Error(`REFUSING TO RUN: TEST_DB_HOST is '${testDbHost}', not local. Aborting to avoid writing to a real database.`);
     }
 
+    runExpectations = buildRunExpectations(profile);
     const seedStartedAt = performance.now();
     const setup = await setupTestDatabase({ ...DEFAULT_TEST_CONFIG, database: `${DEFAULT_TEST_CONFIG.database}${REHEARSAL_SCHEMA_SUFFIX}` });
     setupConnection = setup.connection;
@@ -843,7 +1188,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     await seedIngestedControlCensus(censusIDs.two, profile.censusTwoRows, CONTROL_TAG_PREFIX.CENSUS_TWO, MEASUREMENT_DATE.CENSUS_TWO);
     await seedFailedCensusThreeFamily();
     controlBaseline = await readControlFingerprints();
-    const seededState = await readCensusThreeState(generateShortBatchID(), SESSION_ID.COMMIT_RUN);
+    const seededState = await readCensusThreeState(generateShortBatchID(), SESSION_ID.REPLACEMENT_RUN);
     const seedMismatches = [
       ...describeMismatches(expectedSeedState(profile), seededState),
       ...describeMismatches(
@@ -880,7 +1225,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   }, SEED_TIMEOUT_MS);
 
   afterAll(async () => {
-    rehearsalSummary.failedChecks = rehearsalFailedChecks(rehearsalSummary);
+    rehearsalSummary.failedChecks = rehearsalFailedChecks(rehearsalSummary, runExpectations);
     rehearsalSummary.passed = rehearsalSummary.failedChecks.length === 0;
     console.log(`${SUMMARY_LOG_PREFIX} ${JSON.stringify(rehearsalSummary)}`);
     try {
@@ -892,16 +1237,144 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     }
   }, TEARDOWN_TIMEOUT_MS);
 
+  const RANGE_PLAN_TYPE = 'range';
+  const PRIMARY_KEY_NAME = 'PRIMARY';
+  const RANGE_OPTIMIZATION_SKIPPED_WARNING_CODE = 3170;
+  const COREMEASUREMENTS_PLAN_TABLES = ['coremeasurements', 'cm'];
+
+  /**
+   * EXPLAINs the exact DELETE and audit INSERT production issues for one full window of census-3 ids.
+   * Catches a window that falls back to scanning coremeasurements under row locks (warning 3170 or a non-PRIMARY plan).
+   */
+  async function describeWindowStatementPlanMismatches(batchID: string): Promise<string[]> {
+    const windowRows = await query(`SELECT CoreMeasurementID FROM coremeasurements WHERE CensusID = ? ORDER BY CoreMeasurementID LIMIT ?`, [
+      censusIDs.three,
+      CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE
+    ]);
+    const windowIDs = windowRows.map(row => Number(row.CoreMeasurementID));
+    if (windowIDs.length !== CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE)
+      return [`census 3 has ${windowIDs.length} rows, fewer than the ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}-id window the plan check needs`];
+
+    const statements = await captureCensusReplacementWindowStatements(
+      { schema, incomingBatchID: batchID, plotID, censusID: censusIDs.three, afterCoreMeasurementID: 0, changedBy: REHEARSAL_CHANGED_BY },
+      windowIDs
+    );
+    const mismatches: string[] = [];
+    for (const [label, statement] of [
+      ['window DELETE', statements.coreMeasurementDelete],
+      ['window audit INSERT', statements.deleteAudit]
+    ] as const) {
+      const planRows = await query(`EXPLAIN ${statement.sql}`, statement.params);
+      const warningCodes = (await query('SHOW WARNINGS')).map(warning => Number(warning.Code));
+      console.log(
+        `[census-replacement-rehearsal] EXPLAIN ${label}: ${planRows.map(row => `${row.table}:type=${row.type},key=${row.key}`).join('; ')} warningCodes=[${warningCodes.join(',')}]`
+      );
+      const coreMeasurementRows = planRows.filter(row => COREMEASUREMENTS_PLAN_TABLES.includes(String(row.table)));
+      if (coreMeasurementRows.length === 0)
+        mismatches.push(`${label}: no plan row reads coremeasurements (tables: ${planRows.map(row => row.table).join(', ')})`);
+      for (const row of coreMeasurementRows) {
+        if (String(row.type) !== RANGE_PLAN_TYPE || String(row.key) !== PRIMARY_KEY_NAME)
+          mismatches.push(`${label}: expected type=${RANGE_PLAN_TYPE} key=${PRIMARY_KEY_NAME}, got type=${row.type} key=${row.key}`);
+      }
+      if (warningCodes.includes(RANGE_OPTIMIZATION_SKIPPED_WARNING_CODE))
+        mismatches.push(`${label}: range optimization skipped (warning ${RANGE_OPTIMIZATION_SKIPPED_WARNING_CODE})`);
+    }
+    return mismatches;
+  }
+
+  interface InterruptionPrefix {
+    deletedRows: number;
+    lastDeletedID: number;
+    deletedErrorLinks: Record<keyof typeof ERROR_CODE, number>;
+  }
+
+  /** The first `deletedRows` census-3 ids in id order and their error links: exactly what the interrupted replacement must have deleted. */
+  async function readInterruptionPrefix(deletedRows: number): Promise<InterruptionPrefix> {
+    const prefixIDs = await query(`SELECT CoreMeasurementID FROM coremeasurements WHERE CensusID = ? ORDER BY CoreMeasurementID LIMIT ?`, [
+      censusIDs.three,
+      deletedRows
+    ]);
+    const linkRows = await query(
+      `SELECT me.ErrorCode AS errorCode, COUNT(*) AS linkCount
+       FROM (SELECT CoreMeasurementID FROM coremeasurements WHERE CensusID = ? ORDER BY CoreMeasurementID LIMIT ?) prefix
+       JOIN measurement_error_log mel ON mel.MeasurementID = prefix.CoreMeasurementID
+       JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+       GROUP BY me.ErrorCode`,
+      [censusIDs.three, deletedRows]
+    );
+    const linkCount = (code: string) => Number(linkRows.find(row => String(row.errorCode) === code)?.linkCount ?? 0);
+    return {
+      deletedRows,
+      lastDeletedID: Number(prefixIDs[prefixIDs.length - 1].CoreMeasurementID),
+      deletedErrorLinks: {
+        MISSING_FIELD_SPECIESCODE: linkCount(ERROR_CODE.MISSING_FIELD_SPECIESCODE),
+        SQL_EXCEPTION: linkCount(ERROR_CODE.SQL_EXCEPTION)
+      }
+    };
+  }
+
+  function expectedInterruptedState(prefix: InterruptionPrefix): CensusThreeState {
+    const seed = expectedSeedState(profile);
+    return {
+      ...seed,
+      failedFamilyRows: seed.failedFamilyRows - prefix.deletedRows,
+      failedFamilyErrorLinks: {
+        MISSING_FIELD_SPECIESCODE: seed.failedFamilyErrorLinks.MISSING_FIELD_SPECIESCODE - prefix.deletedErrorLinks.MISSING_FIELD_SPECIESCODE,
+        SQL_EXCEPTION: seed.failedFamilyErrorLinks.SQL_EXCEPTION - prefix.deletedErrorLinks.SQL_EXCEPTION
+      },
+      censusThreeMeasurementRows: seed.censusThreeMeasurementRows - prefix.deletedRows,
+      deleteAuditRows: prefix.deletedRows,
+      distinctDeleteAuditRecords: prefix.deletedRows
+    };
+  }
+
+  /** The deleted rows must be the first ones by id, not merely as many: nothing at or below the cursor survives, and each is audited. */
+  async function describePrefixMismatches(prefix: InterruptionPrefix): Promise<string[]> {
+    const survivorsInPrefix = await countOf(`SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ? AND CoreMeasurementID <= ?`, [
+      censusIDs.three,
+      prefix.lastDeletedID
+    ]);
+    const auditedInPrefix = await countOf(
+      `SELECT COUNT(DISTINCT RecordID) AS total FROM unifiedchangelog WHERE TableName = ? AND Operation = ? AND CensusID = ? AND RecordID <= ?`,
+      [CHANGELOG_TABLE_COREMEASUREMENTS, CHANGELOG_OPERATION.DELETE, censusIDs.three, prefix.lastDeletedID]
+    );
+    const mismatches: string[] = [];
+    if (survivorsInPrefix !== 0) mismatches.push(`${survivorsInPrefix} rows at or below id ${prefix.lastDeletedID} survived the interrupted replacement`);
+    if (auditedInPrefix !== prefix.deletedRows)
+      mismatches.push(`${auditedInPrefix} audited ids at or below ${prefix.lastDeletedID}, expected ${prefix.deletedRows}`);
+    return mismatches;
+  }
+
+  async function reseedCensusThree(batchID: string, sessionID: string): Promise<string[]> {
+    await clearCensusThreeScope();
+    await seedFailedCensusThreeFamily();
+    const reseededState = await readCensusThreeState(batchID, sessionID);
+    const preRunMismatches = describeMismatches(expectedSeedState(profile), reseededState);
+    await seedUploadSession(sessionID);
+    return preRunMismatches;
+  }
+
   it(
-    '(A) commit run: the first-chunk replacement commits within budget with exact counts',
+    '(1) replacement run: every transaction commits within budget with exact counts (catches: a replacement transaction that grows with the census)',
     async () => {
       const batchID = generateShortBatchID();
-      await seedUploadSession(SESSION_ID.COMMIT_RUN);
-      const result = await runFirstChunk(batchID, SESSION_ID.COMMIT_RUN, RUN_EXPECTATIONS.commitRun.injectionPoint);
-      const run = recordRun('commitRun', result);
-      const { state, controls } = await verifyRun('commitRun', run, expectedReplacedState(profile), batchID, SESSION_ID.COMMIT_RUN, []);
+      await seedUploadSession(SESSION_ID.REPLACEMENT_RUN);
+      const statementPlanMismatches = await describeWindowStatementPlanMismatches(batchID);
+      const expectation = runExpectations.replacementRun;
 
-      expect(runFailedChecks('commitRun', run), 'every commit-run check (the same list feeds SUMMARY.passed)').toEqual([]);
+      const result = await runReplacementAndFirstChunk(batchID, SESSION_ID.REPLACEMENT_RUN, expectation.injection);
+      const run = recordRun('replacementRun', result);
+      const { state, controls } = await verifyRun(
+        'replacementRun',
+        run,
+        expectedReplacedState(profile),
+        batchID,
+        SESSION_ID.REPLACEMENT_RUN,
+        [],
+        statementPlanMismatches
+      );
+
+      expect(runFailedChecks('replacementRun', run, expectation), 'every replacement-run check (the same list feeds SUMMARY.passed)').toEqual([]);
       expect(state).toEqual(expectedReplacedState(profile));
       expect(controls).toEqual(controlBaseline);
     },
@@ -909,45 +1382,83 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   );
 
   it(
-    '(B) injected staging failure: the rollback restores the census-3 seed exactly',
+    '(2) interrupted run: a failure at the middle window leaves exactly the committed windows deleted and audited, the marker unset (catches: a replacement that rolls back or over-deletes)',
     async () => {
-      await clearCensusThreeScope();
-      await seedFailedCensusThreeFamily();
-      const reseededState = await readCensusThreeState(rollbackRunBatchID, SESSION_ID.ROLLBACK_RUN);
-      const preRunMismatches = describeMismatches(expectedSeedState(profile), reseededState);
-      await seedUploadSession(SESSION_ID.ROLLBACK_RUN);
+      const expectation = runExpectations.interruptedRun;
+      const preRunMismatches = await reseedCensusThree(interruptedRunBatchID, SESSION_ID.INTERRUPTED_RUN);
+      const interruptedWindow = expectation.injection!.occurrence;
+      const prefix = await readInterruptionPrefix(rowsDeletedBeforeWindow(interruptedWindow));
+      console.log(`[census-replacement-rehearsal] interruptedRun expects prefix ${JSON.stringify(prefix)} (window ${interruptedWindow} fails)`);
 
-      const result = await runFirstChunk(rollbackRunBatchID, SESSION_ID.ROLLBACK_RUN, RUN_EXPECTATIONS.rollbackRun.injectionPoint);
-      const run = recordRun('rollbackRun', result);
+      const result = await runReplacementAndFirstChunk(interruptedRunBatchID, SESSION_ID.INTERRUPTED_RUN, expectation.injection);
+      const run = recordRun('interruptedRun', result);
       const { state, controls } = await verifyRun(
-        'rollbackRun',
+        'interruptedRun',
         run,
-        expectedSeedState(profile),
-        rollbackRunBatchID,
-        SESSION_ID.ROLLBACK_RUN,
+        expectedInterruptedState(prefix),
+        interruptedRunBatchID,
+        SESSION_ID.INTERRUPTED_RUN,
+        preRunMismatches
+      );
+      run.verification!.countMismatches.push(...(await describePrefixMismatches(prefix)));
+
+      expect(runFailedChecks('interruptedRun', run, expectation), 'every interrupted-run check (the same list feeds SUMMARY.passed)').toEqual([]);
+      expect(state).toEqual(expectedInterruptedState(prefix));
+      expect(controls).toEqual(controlBaseline);
+    },
+    RUN_TIMEOUT_MS
+  );
+
+  it(
+    '(3) resumed run: the retry finishes the replacement within budget with no double audit (catches: a retry that starts over or skips the left-over rows)',
+    async () => {
+      const expectation = runExpectations.resumedRun;
+
+      const result = await runReplacementAndFirstChunk(interruptedRunBatchID, SESSION_ID.INTERRUPTED_RUN, expectation.injection);
+      const run = recordRun('resumedRun', result);
+      const { state, controls } = await verifyRun('resumedRun', run, expectedReplacedState(profile), interruptedRunBatchID, SESSION_ID.INTERRUPTED_RUN, []);
+
+      expect(runFailedChecks('resumedRun', run, expectation), 'every resumed-run check (the same list feeds SUMMARY.passed)').toEqual([]);
+      expect(state, 'DELETE-audit rows equal the failed-row total and are all distinct').toEqual(expectedReplacedState(profile));
+      expect(controls).toEqual(controlBaseline);
+    },
+    RUN_TIMEOUT_MS
+  );
+
+  it(
+    '(4) staging rollback run: the replacement survives a staging failure and the retry runs no replacement transaction (catches: replacement and staging sharing one transaction)',
+    async () => {
+      const expectation = runExpectations.stagingRollbackRun;
+      const preRunMismatches = await reseedCensusThree(stagingRollbackRunBatchID, SESSION_ID.STAGING_ROLLBACK_RUN);
+      const replacedAndUnstaged: CensusThreeState = { ...expectedReplacedState(profile), stagedReplacementRows: 0 };
+
+      const result = await runReplacementAndFirstChunk(stagingRollbackRunBatchID, SESSION_ID.STAGING_ROLLBACK_RUN, expectation.injection);
+      const run = recordRun('stagingRollbackRun', result);
+      const { state, controls } = await verifyRun(
+        'stagingRollbackRun',
+        run,
+        replacedAndUnstaged,
+        stagingRollbackRunBatchID,
+        SESSION_ID.STAGING_ROLLBACK_RUN,
         preRunMismatches
       );
 
-      // runFailedChecks covers: outcome rolled_back, injection fired at the staging insert,
-      // the cleanup ran to completion first, no rollback error, and an exact restore.
-      expect(runFailedChecks('rollbackRun', run), 'every rollback-run check (the same list feeds SUMMARY.passed)').toEqual([]);
-      expect(reseededState, 'fresh census-3 seed before the rollback run').toEqual(expectedSeedState(profile));
-      expect(state).toEqual(expectedSeedState(profile));
-      expect(controls).toEqual(controlBaseline);
-    },
-    RUN_TIMEOUT_MS
-  );
+      const retryResult = await runReplacementAndFirstChunk(stagingRollbackRunBatchID, SESSION_ID.STAGING_ROLLBACK_RUN, null);
+      const retryState = await readCensusThreeState(stagingRollbackRunBatchID, SESSION_ID.STAGING_ROLLBACK_RUN);
+      const retryTransactionKindCounts = countKinds(retryResult.transactions);
+      run.retryAfterRollback = {
+        outcome: retryResult.outcome,
+        replacementOutcome: retryResult.replacement?.outcome ?? null,
+        transactionKindCounts: retryTransactionKindCounts,
+        error: retryResult.error,
+        stateMismatches: describeMismatches(expectedReplacedState(profile), retryState)
+      };
+      console.log(`[census-replacement-rehearsal] stagingRollbackRun retry ${JSON.stringify(run.retryAfterRollback)} state=${JSON.stringify(retryState)}`);
 
-  it(
-    '(C) retry after the rollback: the same batch and session commit within budget with exact counts',
-    async () => {
-      const result = await runFirstChunk(rollbackRunBatchID, SESSION_ID.ROLLBACK_RUN, RUN_EXPECTATIONS.retryRun.injectionPoint);
-      const run = recordRun('retryRun', result);
-      const { state, controls } = await verifyRun('retryRun', run, expectedReplacedState(profile), rollbackRunBatchID, SESSION_ID.ROLLBACK_RUN, []);
-
-      expect(runFailedChecks('retryRun', run), 'every retry-run check (the same list feeds SUMMARY.passed)').toEqual([]);
-      expect(state).toEqual(expectedReplacedState(profile));
+      expect(runFailedChecks('stagingRollbackRun', run, expectation), 'every staging-rollback-run check (the same list feeds SUMMARY.passed)').toEqual([]);
+      expect(state).toEqual(replacedAndUnstaged);
       expect(controls).toEqual(controlBaseline);
+      expect(retryState).toEqual(expectedReplacedState(profile));
     },
     RUN_TIMEOUT_MS
   );

@@ -98,7 +98,7 @@ async function stageFamily(family: Family, totalRows: number, prePartitioned: bo
         batchID: family.batchID,
         plotID: testData.plots[0].plotID,
         censusID: testData.census[0].censusID,
-        uploadMode: UploadMode.CLEAN_REUPLOAD,
+        uploadMode: UploadMode.REVISIONS,
         sourceFormat: SourceFormat.csv,
         rawRows: buildChunk(family, firstRowIndex, rowsInChunk),
         csvHeaders: CSV_HEADERS,

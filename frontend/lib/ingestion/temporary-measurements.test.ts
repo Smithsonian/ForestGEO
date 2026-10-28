@@ -4,6 +4,8 @@ import {
   CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   cleanupPreviousFileUploads,
   cleanupStaleMeasurementBatchesForFile,
+  CENSUS_REPLACEMENT_SCAN_INDEX,
+  deleteCensusReplacementChunk,
   familyHasStagedRows,
   findDroppedMeasurementCandidates,
   isUnsignedIntFieldInvalid,
@@ -13,6 +15,7 @@ import {
 import { SourceFormat } from '@/config/macros/formdetails';
 import type ConnectionManager from '@/lib/db/connectionmanager';
 import type { FileRow } from '@/config/macros/formdetails';
+import { buildSubBatchPattern } from '@/lib/uploads/batch-family';
 
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
@@ -259,7 +262,7 @@ describe('cleanupPreviousFileUploads bounded-delete loop control', () => {
   // audit them, then DELETE by id — so every chunk's audit rows and deleted
   // rows are provably the same row set. These markers identify each of the
   // three statements in the executeQuery call log.
-  const SELECT_IDS_MARKER = 'SELECT CoreMeasurementID FROM `forestgeo_testing`.coremeasurements';
+  const SELECT_IDS_MARKER = `SELECT /*+ INDEX(coremeasurements ${CENSUS_REPLACEMENT_SCAN_INDEX}) */ CoreMeasurementID FROM \`forestgeo_testing\`.coremeasurements`;
   const AUDIT_INSERT_MARKER = 'INSERT INTO `forestgeo_testing`.unifiedchangelog';
   const CM_DELETE_MARKER = 'DELETE FROM `forestgeo_testing`.coremeasurements WHERE CoreMeasurementID IN';
   const NOTHING_DELETED = { affectedRows: 0 };
@@ -328,20 +331,32 @@ describe('cleanupPreviousFileUploads bounded-delete loop control', () => {
     return executeQuery.mock.calls.filter(call => String(call[0]).includes(AUDIT_INSERT_MARKER)).length;
   }
 
-  it('keeps requesting pages while the server keeps filling the limit, then stops on the first short page', async () => {
+  it('keeps requesting pages while the server keeps filling the limit, then stops after a short page and one confirming pass at cursor 0', async () => {
     const { connectionManager, executeQuery } = makeConnectionManager([
       makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE),
       makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE),
-      makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE - 1)
+      makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE - 1),
+      []
     ]);
 
     const deleted = await runCleanup(connectionManager);
 
+    const selectCursors = executeQuery.mock.calls
+      .filter(call => String(call[0]).includes(SELECT_IDS_MARKER))
+      .map(call => (call as unknown[])[1] as unknown[])
+      .map(params => params[params.length - 1]);
+    console.log('[U2] cursor sent with each window SELECT:', selectCursors);
     expect(deleted, 'returned total must be the sum of every page, not just the last').toBe(
       CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE * 2 + (CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE - 1)
     );
-    expect(countCoreMeasurementDeletes(executeQuery), 'one DELETE per page').toBe(3);
+    expect(countCoreMeasurementDeletes(executeQuery), 'one DELETE per non-empty page').toBe(3);
     expect(countAuditInserts(executeQuery), 'one audit INSERT per page, matching the DELETE count 1:1').toBe(3);
+    expect(selectCursors, 'start at 0, advance past each full page, restart at 0 for the confirming pass').toEqual([
+      0,
+      CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
+      CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
+      0
+    ]);
   });
 
   it('stops after one page when the very first page is short', async () => {
@@ -427,5 +442,88 @@ describe('cleanupPreviousFileUploads bounded-delete loop control', () => {
     expect(auditCall, 'audit INSERT was never issued').toBeDefined();
     const [, auditParams] = auditCall!;
     expect(auditParams[0]).toBe(TEST_CHANGED_BY);
+  });
+});
+
+describe('deleteCensusReplacementChunk — one measurement window (#555)', () => {
+  const SCHEMA = 'forestgeo_testing';
+  const BATCH_ID = 'incoming-batch-0001';
+  const PLOT_ID = 22;
+  const CENSUS_ID = 32;
+  const CHANGED_BY = 'window-test-user';
+  const TRANSACTION_ID = 'tx-u1';
+  const CURSOR = 4242;
+  const HINTED_SELECT_PREFIX = `SELECT /*+ INDEX(coremeasurements ${CENSUS_REPLACEMENT_SCAN_INDEX}) */ CoreMeasurementID FROM \`${SCHEMA}\`.coremeasurements`;
+  const STATEMENTS_PER_NON_EMPTY_WINDOW = 4;
+  const LEGACY_FALLBACK_WINDOW_SIZE = 3;
+
+  function windowIDs(count: number): number[] {
+    return Array.from({ length: count }, (_, index) => CURSOR + 1 + index);
+  }
+
+  function makeRecorder(ids: number[], options: { linkTableMissing?: boolean } = {}) {
+    const calls: Array<{ sql: string; params: unknown[]; transactionID: string | undefined }> = [];
+    const executeQuery = vi.fn(async (sql: string, params: unknown[] = [], transactionID?: string) => {
+      calls.push({ sql: String(sql), params, transactionID });
+      const text = String(sql).trimStart();
+      if (text.startsWith('SELECT')) return ids.map(id => ({ CoreMeasurementID: id }));
+      if (options.linkTableMissing && text.includes('.measurement_error_log')) {
+        throw Object.assign(new Error(`Table '${SCHEMA}.measurement_error_log' doesn't exist`), { code: 'ER_NO_SUCH_TABLE' });
+      }
+      return { affectedRows: ids.length };
+    });
+    return { connectionManager: { executeQuery } as unknown as ConnectionManager, calls };
+  }
+
+  // Catches: the link delete reverting to the census-wide subquery; the audit after the delete;
+  // an IN-list longer than the window; the index hint or the cursor dropped.
+  it('locks the window above the cursor, then deletes its links by id, audits it, and deletes it, in one transaction', async () => {
+    const ids = windowIDs(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
+    const { connectionManager, calls } = makeRecorder(ids);
+
+    const result = await deleteCensusReplacementChunk(connectionManager, SCHEMA, BATCH_ID, PLOT_ID, CENSUS_ID, CURSOR, CHANGED_BY, TRANSACTION_ID);
+
+    console.log(
+      '[U1] statements:',
+      calls.map(call => `${call.transactionID} ${call.sql.replace(/\s+/g, ' ').trim().slice(0, 140)}`)
+    );
+    expect(calls.map(call => call.transactionID)).toEqual(Array(STATEMENTS_PER_NON_EMPTY_WINDOW).fill(TRANSACTION_ID));
+    const [select, linkDelete, audit, measurementDelete] = calls;
+    expect(select.sql.replace(/\s+/g, ' ').trimStart().startsWith(HINTED_SELECT_PREFIX), 'hinted keyset SELECT').toBe(true);
+    expect(select.sql).toContain('AND CoreMeasurementID > ?');
+    expect(select.sql).toMatch(new RegExp(`ORDER BY CoreMeasurementID\\s+LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}\\s+FOR UPDATE\\s*$`));
+    expect(select.params).toEqual([CENSUS_ID, BATCH_ID, buildSubBatchPattern(BATCH_ID), CURSOR]);
+    expect(linkDelete.sql).toMatch(/^\s*DELETE FROM `forestgeo_testing`\.measurement_error_log WHERE MeasurementID IN \(/);
+    expect(linkDelete.sql, 'no census-wide subquery').not.toMatch(/SELECT/i);
+    expect(linkDelete.params).toEqual(ids);
+    expect(audit.sql).toMatch(/^\s*INSERT INTO `forestgeo_testing`\.unifiedchangelog/);
+    expect(audit.params.slice(3)).toEqual(ids);
+    expect(measurementDelete.sql).toMatch(/^\s*DELETE FROM `forestgeo_testing`\.coremeasurements WHERE CoreMeasurementID IN \(/);
+    expect(measurementDelete.params).toEqual(ids);
+    expect(result).toEqual({ deletedRows: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE, lastCoreMeasurementID: ids[ids.length - 1] });
+  });
+
+  it('issues only the SELECT for an empty window and hands the cursor back unchanged', async () => {
+    const { connectionManager, calls } = makeRecorder([]);
+    const result = await deleteCensusReplacementChunk(connectionManager, SCHEMA, BATCH_ID, PLOT_ID, CENSUS_ID, CURSOR, CHANGED_BY, TRANSACTION_ID);
+    console.log(
+      '[U1-empty] statements:',
+      calls.map(call => call.sql.trim().slice(0, 80))
+    );
+    expect(calls).toHaveLength(1);
+    expect(result).toEqual({ deletedRows: 0, lastCoreMeasurementID: CURSOR });
+  });
+
+  it('falls back to a per-id cmverrors delete when measurement_error_log is missing (legacy schema)', async () => {
+    const ids = windowIDs(LEGACY_FALLBACK_WINDOW_SIZE);
+    const { connectionManager, calls } = makeRecorder(ids, { linkTableMissing: true });
+    await deleteCensusReplacementChunk(connectionManager, SCHEMA, BATCH_ID, PLOT_ID, CENSUS_ID, CURSOR, CHANGED_BY, TRANSACTION_ID);
+    const legacy = calls.find(call => call.sql.includes('.cmverrors'));
+    console.log(
+      '[U1-legacy] statements:',
+      calls.map(call => call.sql.trim().slice(0, 80))
+    );
+    expect(legacy?.sql).toMatch(/^\s*DELETE FROM `forestgeo_testing`\.cmverrors WHERE CoreMeasurementID IN \(/);
+    expect(legacy?.params).toEqual(ids);
   });
 });

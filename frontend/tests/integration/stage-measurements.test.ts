@@ -77,6 +77,19 @@ vi.mock('@/lib/db/connectionmanager', () => {
       await sharedState.connection.rollback();
       sharedState.activeTransactionID = null;
     },
+    // replaceCensusForCleanReupload runs each unit in its own withTransaction; this
+    // mock begins, commits or rolls back on the shared connection like the real one.
+    withTransaction: async <T>(fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; readonly id: string }) => Promise<T>): Promise<T> => {
+      const id = await manager.beginTransaction();
+      try {
+        const result = await fn({ id, query: (sql: string, params?: unknown[]) => manager.executeQuery(sql, params, id) });
+        await manager.commitTransaction(id);
+        return result;
+      } catch (error) {
+        await manager.rollbackTransaction(id);
+        throw error;
+      }
+    },
     // Real MySQL GET_LOCK/RELEASE_LOCK (#507) — recordAuditedIngestionFailureRows
     // serializes its bounded before-snapshot per (schema, batchID) with this.
     acquireApplicationLock: async (lockName: string, transactionID: string, timeoutMs: number) => {
@@ -103,9 +116,18 @@ vi.mock('@/ailogger', () => ({
 }));
 
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { countStagedRows, EmptyMeasurementUploadError, stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
+import {
+  CensusReplacementIncompleteError,
+  countStagedRows,
+  EmptyMeasurementUploadError,
+  replaceCensusForCleanReupload,
+  stageMeasurementChunk,
+  type CensusReplacementParams,
+  type StageMeasurementChunkParams
+} from '@/lib/uploads/stage-measurements';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { TEMPORARY_MEASUREMENT_INSERT_COLUMNS } from '@/lib/ingestion/temporary-measurements';
+import { CENSUS_REPLACEMENT_STATEMENT } from '../setup/census-replacement-statement-patterns';
 import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
 
 // ---------------------------------------------------------------------------
@@ -273,7 +295,28 @@ describe('stageMeasurementChunk — integration', () => {
     return rows.length === 0 || rows[0].marker === null ? null : String(rows[0].marker);
   }
 
+  /** The sync route's and worker's production sequence: finish the census replacement, then open the staging transaction. */
+  async function replaceThenBegin(overrides: Partial<StageMeasurementChunkParams> = {}): Promise<string> {
+    const replacementParams = baseReplacementParams(overrides);
+    if (replacementParams.uploadSessionID !== null) await ensureUploadSession(replacementParams.uploadSessionID);
+    const replacement = await replaceCensusForCleanReupload(connectionManager, replacementParams);
+    console.log(
+      `[replace] outcome=${replacement.outcome} deletedRows=${replacement.deletedRows} windowCount=${replacement.windowCount} ` +
+        `session=${replacementParams.uploadSessionID}`
+    );
+    return connectionManager.beginTransaction();
+  }
+
+  async function ensureUploadSession(sessionID: string): Promise<void> {
+    const [existing] = await connection.query<RowDataPacket[]>(`SELECT 1 FROM upload_sessions WHERE session_id = ?`, [sessionID]);
+    if (existing.length === 0) await seedUploadSession(sessionID);
+  }
+
   function baseParams(transactionID: string, overrides: Partial<StageMeasurementChunkParams> = {}): StageMeasurementChunkParams {
+    return { ...baseReplacementParams(overrides), transactionID, ...overrides };
+  }
+
+  function baseReplacementParams(overrides: Partial<StageMeasurementChunkParams> = {}): CensusReplacementParams {
     return {
       schema,
       fileName: FILE_NAME,
@@ -286,7 +329,6 @@ describe('stageMeasurementChunk — integration', () => {
       csvHeaders: CSV_HEADERS,
       delimiter: CSV_DELIMITER,
       uploadSessionID: UPLOAD_SESSION_ID,
-      transactionID,
       firstRowOrdinal: null,
       changedBy: CHANGED_BY,
       ...overrides
@@ -310,7 +352,7 @@ describe('stageMeasurementChunk — integration', () => {
   }
 
   it('stages a fixture chunk through server-side resolution and inserts the exact column values', async () => {
-    const transactionID = await connectionManager.beginTransaction();
+    const transactionID = await replaceThenBegin();
     const result = await stageMeasurementChunk(connectionManager, baseParams(transactionID));
     await connectionManager.commitTransaction(transactionID);
 
@@ -491,7 +533,12 @@ describe('stageMeasurementChunk — integration', () => {
       });
 
     try {
-      const transactionID = await connectionManager.beginTransaction();
+      const transactionID = await replaceThenBegin({
+        fileName: 'stage-measurements-drop-fixture.csv',
+        batchID: 'stage-drop-batch-0001',
+        rawRows,
+        csvHeaders: coordCsvHeaders
+      });
       const result = await stageMeasurementChunk(
         connectionManager,
         baseParams(transactionID, {
@@ -623,7 +670,7 @@ describe('stageMeasurementChunk — integration', () => {
     const firstFixture = buildTwoRowDropFixture(DROPPED_TREETAG, '-0.271', '267.5');
     const firstSpy = buildTreeTagDropSpy(DROPPED_TREETAG);
     try {
-      const tx1 = await connectionManager.beginTransaction();
+      const tx1 = await replaceThenBegin({ fileName, batchID, ...firstFixture });
       await stageMeasurementChunk(connectionManager, baseParams(tx1, { fileName, batchID, ...firstFixture }));
       await connectionManager.commitTransaction(tx1);
     } finally {
@@ -642,7 +689,7 @@ describe('stageMeasurementChunk — integration', () => {
     const secondFixture = buildTwoRowDropFixture(DROPPED_TREETAG, '-0.512', '301.25');
     const secondSpy = buildTreeTagDropSpy(DROPPED_TREETAG);
     try {
-      const tx2 = await connectionManager.beginTransaction();
+      const tx2 = await replaceThenBegin({ fileName, batchID, ...secondFixture });
       await stageMeasurementChunk(connectionManager, baseParams(tx2, { fileName, batchID, ...secondFixture }));
       await connectionManager.commitTransaction(tx2);
     } finally {
@@ -685,7 +732,7 @@ describe('stageMeasurementChunk — integration', () => {
     for (let attempt = 0; attempt < 2; attempt++) {
       const spy = buildTreeTagDropSpy(DROPPED_TREETAG);
       try {
-        const tx = await connectionManager.beginTransaction();
+        const tx = await replaceThenBegin({ fileName, batchID, ...fixture });
         await stageMeasurementChunk(connectionManager, baseParams(tx, { fileName, batchID, ...fixture }));
         await connectionManager.commitTransaction(tx);
       } finally {
@@ -729,7 +776,7 @@ describe('stageMeasurementChunk — integration', () => {
     });
 
     try {
-      const transactionID = await connectionManager.beginTransaction();
+      const transactionID = await replaceThenBegin({ fileName, batchID, ...fixture });
       // finally-bounded: if the `rejects` assertion itself throws (e.g. the
       // call unexpectedly resolves), the transaction must still be rolled
       // back, or it dangles open and every later test's beginTransaction in
@@ -756,7 +803,7 @@ describe('stageMeasurementChunk — integration', () => {
   });
 
   it('countStagedRows matches insertedCount for the staged scope and 0 elsewhere', async () => {
-    const transactionID = await connectionManager.beginTransaction();
+    const transactionID = await replaceThenBegin();
     const result = await stageMeasurementChunk(connectionManager, baseParams(transactionID));
     await connectionManager.commitTransaction(transactionID);
 
@@ -771,11 +818,11 @@ describe('stageMeasurementChunk — integration', () => {
   });
 
   it('re-staging the identical chunk with the same batchID re-inserts rows (no unique key on temporarymeasurements) and reports droppedCount=0', async () => {
-    const firstTransactionID = await connectionManager.beginTransaction();
+    const firstTransactionID = await replaceThenBegin();
     const firstResult = await stageMeasurementChunk(connectionManager, baseParams(firstTransactionID));
     await connectionManager.commitTransaction(firstTransactionID);
 
-    const secondTransactionID = await connectionManager.beginTransaction();
+    const secondTransactionID = await replaceThenBegin();
     const secondResult = await stageMeasurementChunk(connectionManager, baseParams(secondTransactionID));
     await connectionManager.commitTransaction(secondTransactionID);
 
@@ -828,11 +875,11 @@ describe('stageMeasurementChunk — integration', () => {
   it('staging a genuinely NEW batchID for the same attempt accumulates into the running total (#507)', async () => {
     const NEW_CHUNK_BATCH_ID = 'stage-batch-0001-chunk2';
 
-    const firstTransactionID = await connectionManager.beginTransaction();
+    const firstTransactionID = await replaceThenBegin();
     const firstResult = await stageMeasurementChunk(connectionManager, baseParams(firstTransactionID));
     await connectionManager.commitTransaction(firstTransactionID);
 
-    const secondTransactionID = await connectionManager.beginTransaction();
+    const secondTransactionID = await replaceThenBegin({ batchID: NEW_CHUNK_BATCH_ID });
     const secondResult = await stageMeasurementChunk(connectionManager, baseParams(secondTransactionID, { batchID: NEW_CHUNK_BATCH_ID }));
     await connectionManager.commitTransaction(secondTransactionID);
 
@@ -867,11 +914,11 @@ describe('stageMeasurementChunk — integration', () => {
     const CHUNK_0_IDENTITY = `${BATCH_ID}:chunk0`;
     const CHUNK_1_IDENTITY = `${BATCH_ID}:chunk1`;
 
-    const chunk0TransactionID = await connectionManager.beginTransaction();
+    const chunk0TransactionID = await replaceThenBegin({ chunkIdentity: CHUNK_0_IDENTITY });
     const chunk0Result = await stageMeasurementChunk(connectionManager, baseParams(chunk0TransactionID, { chunkIdentity: CHUNK_0_IDENTITY }));
     await connectionManager.commitTransaction(chunk0TransactionID);
 
-    const chunk1TransactionID = await connectionManager.beginTransaction();
+    const chunk1TransactionID = await replaceThenBegin({ chunkIdentity: CHUNK_1_IDENTITY });
     const chunk1Result = await stageMeasurementChunk(connectionManager, baseParams(chunk1TransactionID, { chunkIdentity: CHUNK_1_IDENTITY }));
     await connectionManager.commitTransaction(chunk1TransactionID);
 
@@ -891,7 +938,7 @@ describe('stageMeasurementChunk — integration', () => {
     // A worker retry of chunk 0 (same batchID, same chunkIdentity — the
     // worker reprocesses the file from chunkIndex 0 again after a transient
     // failure further down the file).
-    const chunk0RetryTransactionID = await connectionManager.beginTransaction();
+    const chunk0RetryTransactionID = await replaceThenBegin({ chunkIdentity: CHUNK_0_IDENTITY });
     const chunk0RetryResult = await stageMeasurementChunk(connectionManager, baseParams(chunk0RetryTransactionID, { chunkIdentity: CHUNK_0_IDENTITY }));
     await connectionManager.commitTransaction(chunk0RetryTransactionID);
     expect(chunk0RetryResult.insertedCount).toBe(EXPECTED_STAGED_ROW_COUNT);
@@ -914,12 +961,12 @@ describe('stageMeasurementChunk — integration', () => {
     const rowsA = Array.from({ length: 100 }, (_, index) => fixtureRow({ treetag: `SIZEDA${index}`, quadrat: 'Q01', speciescode: 'ACERRU' }));
     const rowsB = Array.from({ length: 50 }, (_, index) => fixtureRow({ treetag: `SIZEDB${index}`, quadrat: 'Q01', speciescode: 'ACERRU' }));
 
-    const txA = await connectionManager.beginTransaction();
+    const txA = await replaceThenBegin({ chunkIdentity: CHUNK_A_IDENTITY, rawRows: rowsA });
     const resultA = await stageMeasurementChunk(connectionManager, baseParams(txA, { chunkIdentity: CHUNK_A_IDENTITY, rawRows: rowsA }));
     await connectionManager.commitTransaction(txA);
     expect(resultA.insertedCount).toBe(100);
 
-    const txB = await connectionManager.beginTransaction();
+    const txB = await replaceThenBegin({ chunkIdentity: CHUNK_B_IDENTITY, rawRows: rowsB });
     const resultB = await stageMeasurementChunk(connectionManager, baseParams(txB, { chunkIdentity: CHUNK_B_IDENTITY, rawRows: rowsB }));
     await connectionManager.commitTransaction(txB);
     expect(resultB.insertedCount).toBe(50);
@@ -931,7 +978,7 @@ describe('stageMeasurementChunk — integration', () => {
 
     // A retry of chunk A (same chunkIdentity) must REPLACE its own
     // contribution, not add a third 100 on top of the existing 150.
-    const txARetry = await connectionManager.beginTransaction();
+    const txARetry = await replaceThenBegin({ chunkIdentity: CHUNK_A_IDENTITY, rawRows: rowsA });
     const resultARetry = await stageMeasurementChunk(connectionManager, baseParams(txARetry, { chunkIdentity: CHUNK_A_IDENTITY, rawRows: rowsA }));
     await connectionManager.commitTransaction(txARetry);
     expect(resultARetry.insertedCount).toBe(100);
@@ -947,11 +994,11 @@ describe('stageMeasurementChunk — integration', () => {
     const POSITION_1_IDENTITY = `${BATCH_ID}:chunk1`;
     const POSITION_2_IDENTITY = `${BATCH_ID}:chunk2`;
 
-    const tx1 = await connectionManager.beginTransaction();
+    const tx1 = await replaceThenBegin({ chunkIdentity: POSITION_1_IDENTITY, rawRows: sharedRows });
     await stageMeasurementChunk(connectionManager, baseParams(tx1, { chunkIdentity: POSITION_1_IDENTITY, rawRows: sharedRows }));
     await connectionManager.commitTransaction(tx1);
 
-    const tx2 = await connectionManager.beginTransaction();
+    const tx2 = await replaceThenBegin({ chunkIdentity: POSITION_2_IDENTITY, rawRows: sharedRows });
     await stageMeasurementChunk(connectionManager, baseParams(tx2, { chunkIdentity: POSITION_2_IDENTITY, rawRows: sharedRows }));
     await connectionManager.commitTransaction(tx2);
 
@@ -965,7 +1012,7 @@ describe('stageMeasurementChunk — integration', () => {
     const SECOND_ATTEMPT_SESSION_ID = 'stage-int-test-session-second-attempt';
     await seedUploadSession(UPLOAD_SESSION_ID);
 
-    const firstAttemptTransactionID = await connectionManager.beginTransaction();
+    const firstAttemptTransactionID = await replaceThenBegin({ uploadSessionID: UPLOAD_SESSION_ID });
     await stageMeasurementChunk(connectionManager, baseParams(firstAttemptTransactionID, { uploadSessionID: UPLOAD_SESSION_ID }));
     await connectionManager.commitTransaction(firstAttemptTransactionID);
 
@@ -986,7 +1033,7 @@ describe('stageMeasurementChunk — integration', () => {
     // attempt's session ended). This must never be merged into the first
     // attempt's running totals: buildFileUploadChangelogRecordID keys the
     // changelog row by attempt, not by filename alone.
-    const secondAttemptTransactionID = await connectionManager.beginTransaction();
+    const secondAttemptTransactionID = await replaceThenBegin({ uploadSessionID: SECOND_ATTEMPT_SESSION_ID, batchID: 'stage-batch-0001-second-attempt' });
     await stageMeasurementChunk(
       connectionManager,
       baseParams(secondAttemptTransactionID, { uploadSessionID: SECOND_ATTEMPT_SESSION_ID, batchID: 'stage-batch-0001-second-attempt' })
@@ -1127,7 +1174,7 @@ describe('stageMeasurementChunk — integration', () => {
     await seedUploadSession(UPLOAD_SESSION_ID);
 
     // File A of the upload stages and records two rejected rows.
-    const firstTransactionID = await connectionManager.beginTransaction();
+    const firstTransactionID = await replaceThenBegin();
     await stageMeasurementChunk(connectionManager, baseParams(firstTransactionID));
     await connectionManager.commitTransaction(firstTransactionID);
     expect(await censusReplacementMarker(UPLOAD_SESSION_ID), 'file A must record that it replaced the census').not.toBeNull();
@@ -1139,7 +1186,7 @@ describe('stageMeasurementChunk — integration', () => {
     // file before any ingestion, so file A has no uploadmetrics row yet and its
     // batches are outside file B's family — a second census-wide replacement
     // here would destroy the only record of what file A rejected.
-    const secondTransactionID = await connectionManager.beginTransaction();
+    const secondTransactionID = await replaceThenBegin({ fileName: SECOND_FILE_NAME, batchID: SECOND_BATCH_ID, uploadSessionID: UPLOAD_SESSION_ID });
     await stageMeasurementChunk(
       connectionManager,
       baseParams(secondTransactionID, { fileName: SECOND_FILE_NAME, batchID: SECOND_BATCH_ID, uploadSessionID: UPLOAD_SESSION_ID })
@@ -1158,7 +1205,7 @@ describe('stageMeasurementChunk — integration', () => {
     await seedEarlierFileFailureRow('previous-upload-batch');
     expect(await countCensusMeasurements()).toBe(1);
 
-    const transactionID = await connectionManager.beginTransaction();
+    const transactionID = await replaceThenBegin({ uploadSessionID: newSessionID });
     await stageMeasurementChunk(connectionManager, baseParams(transactionID, { uploadSessionID: newSessionID }));
     await connectionManager.commitTransaction(transactionID);
 
@@ -1191,7 +1238,7 @@ describe('stageMeasurementChunk — integration', () => {
     // quadrat), so nothing is staged. Its rejects still land in
     // coremeasurements, which is what must survive.
     const allInvalidNonblankRows = buildFixtureChunk().map(row => ({ ...row, quadrat: '' }));
-    const firstTransactionID = await connectionManager.beginTransaction();
+    const firstTransactionID = await replaceThenBegin({ rawRows: allInvalidNonblankRows });
     await stageMeasurementChunk(connectionManager, baseParams(firstTransactionID, { rawRows: allInvalidNonblankRows }));
     await connectionManager.commitTransaction(firstTransactionID);
 
@@ -1204,7 +1251,7 @@ describe('stageMeasurementChunk — integration', () => {
     expect(await countCensusMeasurements()).toBe(1);
 
     // File B of the same session must NOT replace the census again.
-    const secondTransactionID = await connectionManager.beginTransaction();
+    const secondTransactionID = await replaceThenBegin({ fileName: SECOND_FILE_NAME, batchID: SECOND_BATCH_ID, uploadSessionID: UPLOAD_SESSION_ID });
     await stageMeasurementChunk(
       connectionManager,
       baseParams(secondTransactionID, { fileName: SECOND_FILE_NAME, batchID: SECOND_BATCH_ID, uploadSessionID: UPLOAD_SESSION_ID })
@@ -1227,17 +1274,11 @@ describe('stageMeasurementChunk — integration', () => {
   // -------------------------------------------------------------------------
   describe('empty/blank input guard (issue #504)', () => {
     /**
-     * In-transaction reads via connectionManager — NOT the suite's separate
-     * `connection`, which cannot see uncommitted writes. These exist because
-     * the companion test "loses the marker with the cleanup when the
-     * transaction rolls back" (below) proves that a cleanup + marker write
-     * that FULLY RUNS and then rolls back leaves the exact same post-rollback
-     * state as a cleanup that never ran at all. Asserting only after rollback
-     * would therefore still pass if the EmptyMeasurementUploadError guard were
-     * moved to AFTER the destructive cleanup — rollback would quietly mask the
-     * damage. Reading mid-transaction is the only way to prove the cleanup
-     * DELETE, the marker UPDATE, and the staging INSERT never ran in the first
-     * place.
+     * In-transaction reads via connectionManager, NOT the suite's separate
+     * `connection`, which cannot see uncommitted writes. These direct staging
+     * calls prove staging's own empty-input guard fires before it writes anything:
+     * asserting only after rollback could not tell "the guard ran first" from "a
+     * write ran, then rolled back". Reading mid-transaction can.
      */
     async function countCensusMeasurementsInTransaction(transactionID: string): Promise<number> {
       const countSQL = safeFormatQuery(schema, `SELECT COUNT(*) AS count FROM ??.coremeasurements WHERE CensusID = ?`);
@@ -1359,7 +1400,7 @@ describe('stageMeasurementChunk — integration', () => {
       // it is "zero valid rows", not "empty input", and must still run the
       // census-replacement cleanup and record the rows as invalid.
       const allInvalidNonblankRows = buildFixtureChunk().map(row => ({ ...row, quadrat: '' }));
-      const transactionID = await connectionManager.beginTransaction();
+      const transactionID = await replaceThenBegin({ rawRows: allInvalidNonblankRows });
       const result = await stageMeasurementChunk(connectionManager, baseParams(transactionID, { rawRows: allInvalidNonblankRows }));
       await connectionManager.commitTransaction(transactionID);
 
@@ -1369,35 +1410,133 @@ describe('stageMeasurementChunk — integration', () => {
     });
   });
 
-  it('loses the marker with the cleanup when the transaction rolls back, so the retry cleans again', async () => {
+  class InjectedWindowFailure extends Error {}
+
+  it('keeps the marker unset when a replacement window rolls back, leaves that window intact, and the retry finishes the replacement', async () => {
     await seedUploadSession(UPLOAD_SESSION_ID);
     await seedEarlierFileFailureRow('previous-upload-batch');
     expect(await countCensusMeasurements()).toBe(1);
 
-    // Attempt 1: cleanup + marker both happen, then the caller rolls back.
-    const abortedTransactionID = await connectionManager.beginTransaction();
-    await stageMeasurementChunk(connectionManager, baseParams(abortedTransactionID));
-    await connectionManager.rollbackTransaction(abortedTransactionID);
+    const originalExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
+    const failingDeleteSpy = vi
+      .spyOn(connectionManager, 'executeQuery')
+      .mockImplementation(async (query: string, params?: unknown[], transactionID?: string) => {
+        if (CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE.test(query)) throw new InjectedWindowFailure('injected failure at the census measurement DELETE');
+        return originalExecuteQuery(query, params, transactionID);
+      });
+    let replacementError: unknown;
+    try {
+      await replaceCensusForCleanReupload(connectionManager, baseReplacementParams());
+    } catch (error) {
+      replacementError = error;
+    } finally {
+      failingDeleteSpy.mockRestore();
+    }
 
-    // Neither survives — the marker cannot claim a cleanup that was undone.
-    console.log(`[rollback] marker after rollback=${await censusReplacementMarker(UPLOAD_SESSION_ID)} priorRows=${await countCensusMeasurements()}`);
-    expect(await censusReplacementMarker(UPLOAD_SESSION_ID)).toBeNull();
-    expect(await countCensusMeasurements(), 'the rolled-back cleanup must not have removed the prior row').toBe(1);
+    console.log(
+      `[window-rollback] error=${replacementError instanceof Error ? replacementError.name : String(replacementError)} ` +
+        `marker=${await censusReplacementMarker(UPLOAD_SESSION_ID)} priorRows=${await countCensusMeasurements()}`
+    );
+    expect(replacementError).toBeInstanceOf(InjectedWindowFailure);
+    expect(await censusReplacementMarker(UPLOAD_SESSION_ID), 'a rolled-back window must not leave a marker claiming the replacement finished').toBeNull();
+    expect(await countCensusMeasurements(), 'the rolled-back window must not have removed the prior row').toBe(1);
 
-    // Attempt 2 therefore performs the replacement it owes.
-    const retryTransactionID = await connectionManager.beginTransaction();
+    const retryTransactionID = await replaceThenBegin();
     await stageMeasurementChunk(connectionManager, baseParams(retryTransactionID));
     await connectionManager.commitTransaction(retryTransactionID);
 
-    console.log(`[rollback] after retry: marker=${await censusReplacementMarker(UPLOAD_SESSION_ID)} priorRows=${await countCensusMeasurements()}`);
+    console.log(`[window-rollback] after retry: marker=${await censusReplacementMarker(UPLOAD_SESSION_ID)} priorRows=${await countCensusMeasurements()}`);
     expect(await censusReplacementMarker(UPLOAD_SESSION_ID)).not.toBeNull();
     expect(await countCensusMeasurements()).toBe(0);
+  });
+
+  describe('I6: a staging rollback does not undo the replacement', () => {
+    const PRIOR_ROW_COUNT = 3;
+
+    async function countDeleteAudits(): Promise<number> {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND Operation = 'DELETE' AND PlotID = ? AND CensusID = ?`,
+        [plotID, censusID]
+      );
+      return Number(rows[0].count);
+    }
+
+    it('a retry with the same session replaces nothing again, stages, and adds no DELETE audits (catches: a replacement that re-runs, or a marker rolled back with staging)', async () => {
+      await seedUploadSession(UPLOAD_SESSION_ID);
+      for (let priorRow = 0; priorRow < PRIOR_ROW_COUNT; priorRow++) await seedEarlierFileFailureRow(`previous-upload-batch-${priorRow}`);
+      expect(await countCensusMeasurements()).toBe(PRIOR_ROW_COUNT);
+
+      const abortedTransactionID = await replaceThenBegin();
+      await stageMeasurementChunk(connectionManager, baseParams(abortedTransactionID));
+      await connectionManager.rollbackTransaction(abortedTransactionID);
+
+      const auditsAfterReplacement = await countDeleteAudits();
+      console.log(
+        `[staging-rollback] marker=${await censusReplacementMarker(UPLOAD_SESSION_ID)} priorRows=${await countCensusMeasurements()} ` +
+          `deleteAudits=${auditsAfterReplacement} staged=${await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID)}`
+      );
+      expect(await censusReplacementMarker(UPLOAD_SESSION_ID), 'the replacement committed on its own; rolling back staging must not unset it').not.toBeNull();
+      expect(await countCensusMeasurements(), 'the committed replacement stays applied').toBe(0);
+      expect(auditsAfterReplacement, 'every removed row was audited').toBe(PRIOR_ROW_COUNT);
+      expect(await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID)).toBe(0);
+
+      const retryReplacement = await replaceCensusForCleanReupload(connectionManager, baseReplacementParams());
+      console.log(`[staging-rollback] retry replacement: ${JSON.stringify(retryReplacement)}`);
+      expect(retryReplacement).toEqual({ outcome: 'already_completed', deletedRows: 0, windowCount: 0 });
+
+      const retryTransactionID = await connectionManager.beginTransaction();
+      const retryResult = await stageMeasurementChunk(connectionManager, baseParams(retryTransactionID));
+      await connectionManager.commitTransaction(retryTransactionID);
+
+      expect(retryResult.insertedCount).toBe(EXPECTED_STAGED_ROW_COUNT);
+      expect(await countDeleteAudits(), 'the retry must not delete or audit anything again').toBe(auditsAfterReplacement);
+    });
+  });
+
+  it('refuses a clean re-upload first chunk whose replacement never ran, without touching the census', async () => {
+    await seedUploadSession(UPLOAD_SESSION_ID);
+    await seedEarlierFileFailureRow('previous-upload-batch');
+
+    const transactionID = await connectionManager.beginTransaction();
+    await expect(stageMeasurementChunk(connectionManager, baseParams(transactionID))).rejects.toThrow(CensusReplacementIncompleteError);
+    const stagedInTransaction = await connectionManager.executeQuery(
+      safeFormatQuery(schema, `SELECT COUNT(*) AS count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`),
+      [FILE_NAME, BATCH_ID],
+      transactionID
+    );
+    await connectionManager.rollbackTransaction(transactionID);
+
+    console.log(`[guard] stagedInTransaction=${stagedInTransaction[0]?.count} priorRows=${await countCensusMeasurements()}`);
+    expect(Number(stagedInTransaction[0]?.count ?? 0), 'nothing may be staged before the guard refuses').toBe(0);
+    expect(await countCensusMeasurements(), 'the guard must not delete census rows').toBe(1);
+    expect(await censusReplacementMarker(UPLOAD_SESSION_ID)).toBeNull();
+  });
+
+  it('still removes the stale staged batches of the same file in the staging transaction once the guard passes (catches: dropping the stale-batch cleanup with the census cleanup)', async () => {
+    const ABANDONED_BATCH_ID = 'abandoned-earlier-attempt-batch';
+    await seedUploadSession(UPLOAD_SESSION_ID);
+    const abandonedTransactionID = await replaceThenBegin({ batchID: ABANDONED_BATCH_ID });
+    await stageMeasurementChunk(connectionManager, baseParams(abandonedTransactionID, { batchID: ABANDONED_BATCH_ID }));
+    await connectionManager.commitTransaction(abandonedTransactionID);
+    expect(await countStagedRows(connectionManager, schema, FILE_NAME, ABANDONED_BATCH_ID, plotID, censusID), 'setup: the abandoned batch is staged').toBe(
+      EXPECTED_STAGED_ROW_COUNT
+    );
+
+    const freshTransactionID = await replaceThenBegin();
+    await stageMeasurementChunk(connectionManager, baseParams(freshTransactionID));
+    await connectionManager.commitTransaction(freshTransactionID);
+
+    const abandonedAfter = await countStagedRows(connectionManager, schema, FILE_NAME, ABANDONED_BATCH_ID, plotID, censusID);
+    const freshAfter = await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID);
+    console.log(`[stale-batch] abandonedAfter=${abandonedAfter} freshAfter=${freshAfter}`);
+    expect(abandonedAfter, 'the abandoned batch of the same file must be removed when a new batch starts').toBe(0);
+    expect(freshAfter).toBe(EXPECTED_STAGED_ROW_COUNT);
   });
 
   it('does not re-run cleanup for later chunks of the same file once the marker is committed', async () => {
     await seedUploadSession(UPLOAD_SESSION_ID);
 
-    const firstChunkTransactionID = await connectionManager.beginTransaction();
+    const firstChunkTransactionID = await replaceThenBegin();
     await stageMeasurementChunk(connectionManager, baseParams(firstChunkTransactionID));
     await connectionManager.commitTransaction(firstChunkTransactionID);
     const markerAfterFirstChunk = await censusReplacementMarker(UPLOAD_SESSION_ID);
@@ -1408,7 +1547,7 @@ describe('stageMeasurementChunk — integration', () => {
 
     // A later chunk of the SAME file and session: same batch id, so it is not
     // even the multi-file case — it must still not clean.
-    const secondChunkTransactionID = await connectionManager.beginTransaction();
+    const secondChunkTransactionID = await replaceThenBegin();
     await stageMeasurementChunk(connectionManager, baseParams(secondChunkTransactionID));
     await connectionManager.commitTransaction(secondChunkTransactionID);
 
@@ -1418,7 +1557,7 @@ describe('stageMeasurementChunk — integration', () => {
   });
 
   it('rolling back the caller-owned transaction leaves no staged rows behind', async () => {
-    const transactionID = await connectionManager.beginTransaction();
+    const transactionID = await replaceThenBegin();
     const result = await stageMeasurementChunk(connectionManager, baseParams(transactionID));
     expect(result.insertedCount).toBe(EXPECTED_STAGED_ROW_COUNT);
 
@@ -1460,7 +1599,7 @@ describe('stageMeasurementChunk — integration', () => {
       });
 
     try {
-      const transactionID = await connectionManager.beginTransaction();
+      const transactionID = await replaceThenBegin();
       await expect(stageMeasurementChunk(connectionManager, baseParams(transactionID))).rejects.toThrow(SIMULATED_CHANGELOG_FAILURE);
 
       // The temporarymeasurements INSERT ran earlier in the same statement
