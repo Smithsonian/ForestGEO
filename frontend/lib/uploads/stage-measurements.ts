@@ -275,6 +275,7 @@ export interface PreparedMeasurementChunk {
   firstRowOrdinal: number | null;
   chunkRows: FileRow[];
   chunkRowOffsets: number[];
+  rowBatchIDs: string[];
   invalidRows: FileRow[];
   diagnostics: StageMeasurementChunkResult['diagnostics'];
 }
@@ -338,17 +339,17 @@ export function prepareMeasurementChunkForStaging(params: CensusReplacementParam
     }
   }
 
-  return { firstRowOrdinal, chunkRows, chunkRowOffsets, invalidRows, diagnostics };
+  const rowBatchIDs =
+    firstRowOrdinal === null ? chunkRows.map(() => batchID) : chunkRowOffsets.map(offset => subBatchIDForRowOrdinal(batchID, firstRowOrdinal + offset));
+
+  return { firstRowOrdinal, chunkRows, chunkRowOffsets, rowBatchIDs, invalidRows, diagnostics };
 }
 
 export async function stageMeasurementChunk(connectionManager: ConnectionManager, params: StageMeasurementChunkParams): Promise<StageMeasurementChunkResult> {
-  const { firstRowOrdinal, chunkRows, chunkRowOffsets, invalidRows, diagnostics } = prepareMeasurementChunkForStaging(params);
+  const { firstRowOrdinal, chunkRows, chunkRowOffsets, rowBatchIDs, invalidRows, diagnostics } = prepareMeasurementChunkForStaging(params);
   params.onInvalidRows?.(invalidRows);
 
   const { schema, fileName, batchID, plotID, censusID, uploadMode, sourceFormat, uploadSessionID, transactionID, changedBy } = params;
-
-  const rowBatchIDs =
-    firstRowOrdinal === null ? chunkRows.map(() => batchID) : chunkRowOffsets.map(offset => subBatchIDForRowOrdinal(batchID, firstRowOrdinal + offset));
 
   await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
 

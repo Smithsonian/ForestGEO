@@ -6,7 +6,13 @@ import { UploadSessionOwnershipError, UploadSessionState } from '@/config/upload
 import type ConnectionManager from '@/lib/db/connectionmanager';
 import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
 import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
-import { MAX_ORIGINAL_BATCH_ID_LENGTH, OriginalBatchIDTooLongError } from '@/lib/uploads/batch-family';
+import {
+  getIngestionBatchSize,
+  MAX_ORIGINAL_BATCH_ID_LENGTH,
+  MAX_SUB_BATCH_ORDINAL,
+  OriginalBatchIDTooLongError,
+  SubBatchOrdinalOverflowError
+} from '@/lib/uploads/batch-family';
 import {
   CENSUS_REPLACEMENT_COMPLETED_EVENT,
   CENSUS_REPLACEMENT_REAPER_HEADROOM_FACTOR,
@@ -510,6 +516,16 @@ describe('replaceCensusForCleanReupload', () => {
         'a batch id too long to take a sub-batch suffix',
         { batchID: 'b'.repeat(MAX_ORIGINAL_BATCH_ID_LENGTH + 1), firstRowOrdinal: 0 },
         OriginalBatchIDTooLongError
+      ],
+      [
+        'a first row ordinal past the last nameable sub-batch',
+        { firstRowOrdinal: getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL },
+        SubBatchOrdinalOverflowError
+      ],
+      [
+        'a first row ordinal at the largest safe integer, whose second row would not be a safe integer',
+        { firstRowOrdinal: Number.MAX_SAFE_INTEGER, rawRows: [VALID_ROW, VALID_ROW] },
+        SubBatchOrdinalOverflowError
       ]
     ])('%s throws before any replacement transaction opens', async (label, overrides, expectedError) => {
       if (label === MISALIGNED) {

@@ -296,6 +296,8 @@ function makeGenericFormTypeRequest(fileRowSet: Record<string, unknown>, overrid
  * `undefined` to a downstream call and surfacing as an unrelated 500. Keying on
  * the SQL keeps these tests about the behaviour they name.
  */
+const PRIOR_CORE_MEASUREMENT_IDS_FOR_OVERFLOW_TEST = [501, 502];
+
 function primeMeasurementQueries(manager: any, session: FakeUploadSession = freshUploadSession(), priorCoreMeasurementIDs: number[] = []): void {
   let priorIDsStillToServe = [...priorCoreMeasurementIDs];
   // insertedCount is the INSERT IGNORE affectedRows sum, so a staging INSERT
@@ -546,21 +548,25 @@ describe('sqlpacketload measurement scope validation', () => {
   it('rejects a firstRowOrdinal past the last nameable sub-batch with INVALID_REQUEST and stages nothing', async () => {
     const firstRowOrdinal = getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL;
     const expectedCode = new SubBatchOrdinalOverflowError(TEST_BATCH_ID, firstRowOrdinal, MAX_SUB_BATCH_ORDINAL + 1).code;
-    primeMeasurementQueries(mockConnectionManager);
+    primeMeasurementQueries(mockConnectionManager, freshUploadSession(), PRIOR_CORE_MEASUREMENT_IDS_FOR_OVERFLOW_TEST);
 
     const res = (await POST(makeMeasurementRequest({ firstRowOrdinal })))!;
     const body = await res.json();
     const stagingInserts = mockConnectionManager.executeQuery.mock.calls.filter(
       (call: any[]) => String(call[0]).includes('temporarymeasurements') && String(call[0]).trimStart().startsWith('INSERT')
     );
+    const deletes = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) => /^\s*DELETE\b/.test(String(call[0])));
     console.log(
-      `[sub-batch-overflow] firstRowOrdinal=${firstRowOrdinal} status=${res.status} body=${JSON.stringify(body)} stagingInserts=${stagingInserts.length}`
+      `[sub-batch-overflow] firstRowOrdinal=${firstRowOrdinal} status=${res.status} body=${JSON.stringify(body)} stagingInserts=${stagingInserts.length} ` +
+        `withTransaction=${mockConnectionManager.withTransaction.mock.calls.length} deletes=${deletes.length}`
     );
 
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     expect(body.code).toBe(expectedCode);
     expect(stagingInserts).toHaveLength(0);
     expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.withTransaction, 'the census must not be replaced for an ordinal that can never be staged').not.toHaveBeenCalled();
+    expect(deletes, 'no DELETE may run for an ordinal that can never be staged').toHaveLength(0);
   });
 
   it('accepts valid scope and inserts temporary rows using the resolved plot/census IDs', async () => {
