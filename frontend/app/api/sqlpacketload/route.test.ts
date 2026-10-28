@@ -285,6 +285,8 @@ function makeGenericFormTypeRequest(fileRowSet: Record<string, unknown>, overrid
   return req;
 }
 
+const PRIOR_CORE_MEASUREMENT_IDS_FOR_OVERFLOW_TEST = [501, 502];
+
 /**
  * Primes the measurement-staging query mocks by STATEMENT rather than by call
  * order.
@@ -296,8 +298,6 @@ function makeGenericFormTypeRequest(fileRowSet: Record<string, unknown>, overrid
  * `undefined` to a downstream call and surfacing as an unrelated 500. Keying on
  * the SQL keeps these tests about the behaviour they name.
  */
-const PRIOR_CORE_MEASUREMENT_IDS_FOR_OVERFLOW_TEST = [501, 502];
-
 function primeMeasurementQueries(manager: any, session: FakeUploadSession = freshUploadSession(), priorCoreMeasurementIDs: number[] = []): void {
   let priorIDsStillToServe = [...priorCoreMeasurementIDs];
   // insertedCount is the INSERT IGNORE affectedRows sum, so a staging INSERT
