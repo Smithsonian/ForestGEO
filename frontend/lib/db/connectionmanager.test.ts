@@ -1866,6 +1866,8 @@ describe('ConnectionManager exit-path accounting (#563 §6, U20)', () => {
   const LOCK_WAIT_MS = 1_000;
   const REAPER_DEADLINE_MS = 1_000;
   const CALLBACK_TIMEOUT_MS = 5_000;
+  const KEEP_ALIVE_CALLBACK_TIMEOUT_MS = 100_000;
+  const CALLBACK_RESULT = 'callback-result';
   const STATEMENT_TIMEOUT_MS = 660_000;
   const NEVER_BEGUN_TRANSACTION_ID = 'never-begun-exit-path';
 
@@ -1997,6 +1999,31 @@ describe('ConnectionManager exit-path accounting (#563 §6, U20)', () => {
       drive: async context => {
         const outcome = outcomeOf(context.manager.withTransaction(() => neverSettles<string>(), { timeoutMs: CALLBACK_TIMEOUT_MS }));
         await vi.advanceTimersByTimeAsync(CALLBACK_TIMEOUT_MS);
+        await outcome;
+      }
+    },
+    {
+      exit: 'callback success, COMMIT ack',
+      disposition: 'release',
+      drive: async context => {
+        const result = await context.manager.withTransaction(async () => CALLBACK_RESULT, { timeoutMs: CALLBACK_TIMEOUT_MS });
+        expect(result).toBe(CALLBACK_RESULT);
+      }
+    },
+    {
+      exit: 'callback success with the keep-alive armed, COMMIT ack',
+      disposition: 'release',
+      drive: async context => {
+        const result = await context.manager.withTransaction(async () => CALLBACK_RESULT, { timeoutMs: KEEP_ALIVE_CALLBACK_TIMEOUT_MS });
+        expect(result).toBe(CALLBACK_RESULT);
+      }
+    },
+    {
+      exit: 'callback timeout with the keep-alive armed',
+      disposition: 'quarantine',
+      drive: async context => {
+        const outcome = outcomeOf(context.manager.withTransaction(() => neverSettles<string>(), { timeoutMs: KEEP_ALIVE_CALLBACK_TIMEOUT_MS }));
+        await vi.advanceTimersByTimeAsync(KEEP_ALIVE_CALLBACK_TIMEOUT_MS);
         await outcome;
       }
     },
