@@ -41,6 +41,97 @@ vi.mock('chalk', () => ({
   }
 }));
 
+const LIFECYCLE_THREAD_ID = 5_630;
+const STILL_PENDING = Symbol('still pending');
+
+type LifecycleConnection = {
+  threadId: number;
+  query: ReturnType<typeof vi.fn>;
+  beginTransaction: ReturnType<typeof vi.fn>;
+  commit: ReturnType<typeof vi.fn>;
+  rollback: ReturnType<typeof vi.fn>;
+  ping: ReturnType<typeof vi.fn>;
+  release: ReturnType<typeof vi.fn>;
+  destroy: ReturnType<typeof vi.fn>;
+};
+
+type LifecycleMeta = {
+  startedAt: number;
+  deadlineAt: number;
+  phase: string;
+  inFlightStatements: number;
+  keepAliveHandle: NodeJS.Timeout | null;
+  resourceLocks: Set<string>;
+};
+
+type LifecycleInternals = {
+  transactionConnections: Map<string, unknown>;
+  transactionMeta: Map<string, LifecycleMeta>;
+  reapedTransactions?: Map<string, { deadlineAt: number; reapedAt: number }>;
+  transactionSlotQueue: Array<() => void>;
+  startingTransactions: number;
+  commitDeadlineMs: number;
+  rollbackDeadlineMs: number;
+  MAX_CONCURRENT_TRANSACTIONS: number;
+};
+
+function makeLifecycleConnection(threadId: number = LIFECYCLE_THREAD_ID): LifecycleConnection {
+  return {
+    threadId,
+    query: vi.fn().mockResolvedValue([[]]),
+    beginTransaction: vi.fn().mockResolvedValue(undefined),
+    commit: vi.fn().mockResolvedValue(undefined),
+    rollback: vi.fn().mockResolvedValue(undefined),
+    ping: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn(),
+    destroy: vi.fn()
+  };
+}
+
+/** Loads the real manager and returns it at a clean baseline (the singleton survives between tests). */
+async function loadLifecycleManager() {
+  const managerModule = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+  const manager = managerModule.default.getInstance();
+  const internals = manager as unknown as LifecycleInternals;
+  internals.transactionConnections.clear();
+  internals.transactionMeta.clear();
+  internals.reapedTransactions?.clear();
+  internals.transactionSlotQueue.length = 0;
+  internals.startingTransactions = 0;
+  return { managerModule, ConnectionManagerClass: managerModule.default, manager, internals };
+}
+
+function slotOccupancy(internals: LifecycleInternals): number {
+  return internals.transactionConnections.size + internals.startingTransactions;
+}
+
+function neverSettles<T>(): Promise<T> {
+  return new Promise<T>(() => undefined);
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** The settled value, or STILL_PENDING; call after advancing timers so settled promises have run their reactions. */
+async function settledValue<T>(promise: Promise<T>): Promise<T | typeof STILL_PENDING> {
+  return Promise.race([promise, Promise.resolve(STILL_PENDING)]);
+}
+
+/** Never throws: the rejection value or `{ resolved }`. */
+function outcomeOf<T>(promise: Promise<T>): Promise<unknown> {
+  return promise.then(
+    value => ({ resolved: value }),
+    (error: unknown) => error
+  );
+}
+
 describe('ConnectionManager.executeQuery timing', () => {
   const originalThreshold = process.env.CONNECTION_QUERY_TIMING_THRESHOLD_MS;
 
@@ -654,7 +745,7 @@ describe('ConnectionManager.discardTransaction', () => {
 
   type TxInternals = {
     transactionConnections: Map<string, unknown>;
-    transactionMeta: Map<string, { timeoutHandle: NodeJS.Timeout | null; keepAliveHandle: NodeJS.Timeout | null }>;
+    transactionMeta: Map<string, { keepAliveHandle: NodeJS.Timeout | null }>;
     transactionSlotQueue: Array<() => void>;
     startingTransactions: number;
   };
@@ -700,9 +791,7 @@ describe('ConnectionManager.discardTransaction', () => {
     getConnMock.mockResolvedValueOnce(connection);
     const transactionId = await cm.beginTransaction();
     const meta = internals.transactionMeta.get(transactionId)!;
-    meta.timeoutHandle = setTimeout(() => undefined, PENDING_TIMER_MS);
     meta.keepAliveHandle = setInterval(() => undefined, PENDING_TIMER_MS);
-    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 
     cm.discardTransaction(transactionId, DISCARD_REASON);
@@ -714,7 +803,6 @@ describe('ConnectionManager.discardTransaction', () => {
     expect(connection.release, 'a discarded session must never return to the pool').not.toHaveBeenCalled();
     expect(connection.rollback, 'later rollback must take the already-finalized path').not.toHaveBeenCalled();
     expect(connection.commit, 'later commit must take the already-finalized path').not.toHaveBeenCalled();
-    expect(clearTimeoutSpy).toHaveBeenCalledWith(meta.timeoutHandle);
     expect(clearIntervalSpy).toHaveBeenCalledWith(meta.keepAliveHandle);
     expect(vi.mocked(discardTransactionChangelog)).toHaveBeenCalledWith(transactionId);
     expect(vi.mocked(flushTransactionChangelog)).not.toHaveBeenCalled();
@@ -882,5 +970,237 @@ describe('ConnectionManager lock release after COMMIT (review finding 1)', () =>
     const internals = manager as unknown as { transactionConnections: Map<string, unknown>; transactionMeta: Map<string, unknown> };
     expect(internals.transactionConnections.has(transactionId), 'connection bookkeeping must be cleared').toBe(false);
     expect(internals.transactionMeta.has(transactionId), 'transaction metadata must be cleared').toBe(false);
+  });
+});
+
+describe('ConnectionManager transaction lifecycle record (#563 §1, §4)', () => {
+  const REAPER_DEADLINE_MS = 1_000;
+  const CALLBACK_TIMEOUT_MS = 5_000;
+  const DISCARD_REASON = 'callback discarded its own transaction';
+  const SET_WAIT_TIMEOUT_PREFIX = 'SET SESSION wait_timeout';
+  const SET_LOCK_WAIT_PREFIX = 'SET SESSION innodb_lock_wait_timeout';
+  /** Mirror connectionmanager.ts's MILLISECONDS_PER_SECOND and SESSION_TIMEOUT_BUFFER_SECONDS (module-private there). */
+  const MILLISECONDS_PER_SECOND_IN_TEST = 1000;
+  const SESSION_TIMEOUT_BUFFER_SECONDS_IN_TEST = 300;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    getConnMock.mockReset();
+    runQueryMock.mockReset();
+    runQueryMock.mockImplementation(async () => []);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('records phase active, zero statements in flight and the default 240 s reaper deadline for a direct begin', async () => {
+    const { ConnectionManagerClass, manager, internals } = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(makeLifecycleConnection());
+
+    const transactionId = await manager.beginTransaction();
+    const meta = internals.transactionMeta.get(transactionId)!;
+    console.log('[lifecycle] direct begin meta:', { ...meta, resourceLocks: meta.resourceLocks.size });
+
+    expect(meta.phase).toBe('active');
+    expect(meta.inFlightStatements).toBe(0);
+    expect(meta.deadlineAt - meta.startedAt).toBe(ConnectionManagerClass.DEFAULT_STALE_TRANSACTION_THRESHOLD_MS);
+    expect('timeoutHandle' in meta, 'the callback timer belongs to withTransaction, not the shared meta').toBe(false);
+    await manager.rollbackTransaction(transactionId);
+  });
+
+  it('uses the caller’s reaperDeadlineMs for deadlineAt', async () => {
+    const { manager, internals } = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(makeLifecycleConnection());
+
+    const transactionId = await manager.beginTransaction({ reaperDeadlineMs: REAPER_DEADLINE_MS });
+    const meta = internals.transactionMeta.get(transactionId)!;
+    expect(meta.deadlineAt - meta.startedAt).toBe(REAPER_DEADLINE_MS);
+    await manager.rollbackTransaction(transactionId);
+  });
+
+  it.each([0, Number.NaN, -1, Number.POSITIVE_INFINITY])(
+    'U8: rejects reaperDeadlineMs=%s with RangeError before reserving a slot or a connection',
+    async invalidDeadline => {
+      const { manager, internals } = await loadLifecycleManager();
+      const occupancyBefore = slotOccupancy(internals);
+      const queueBefore = internals.transactionSlotQueue.length;
+
+      const outcome = await outcomeOf(manager.beginTransaction({ reaperDeadlineMs: invalidDeadline }));
+      console.log(`[U8] reaperDeadlineMs=${invalidDeadline} →`, outcome);
+
+      expect(outcome).toBeInstanceOf(RangeError);
+      expect(getConnMock, 'no connection may be acquired for an invalid deadline').not.toHaveBeenCalled();
+      expect(slotOccupancy(internals)).toBe(occupancyBefore);
+      expect(internals.transactionSlotQueue.length).toBe(queueBefore);
+    }
+  );
+
+  it('begins a withTransaction with reaperDeadlineMs = timeoutMs + TRANSACTION_REAPER_GRACE_MS', async () => {
+    const { ConnectionManagerClass, manager, internals } = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(makeLifecycleConnection());
+    const beginSpy = vi.spyOn(manager, 'beginTransaction');
+    let observedDeadlineSpan: number | undefined;
+
+    await manager.withTransaction(
+      async tx => {
+        const meta = internals.transactionMeta.get(tx.id)!;
+        observedDeadlineSpan = meta.deadlineAt - meta.startedAt;
+      },
+      { timeoutMs: CALLBACK_TIMEOUT_MS }
+    );
+
+    console.log('[lifecycle] withTransaction begin args:', beginSpy.mock.calls, 'deadline span:', observedDeadlineSpan);
+    expect(beginSpy).toHaveBeenCalledWith({ reaperDeadlineMs: CALLBACK_TIMEOUT_MS + ConnectionManagerClass.TRANSACTION_REAPER_GRACE_MS });
+    expect(observedDeadlineSpan).toBe(CALLBACK_TIMEOUT_MS + ConnectionManagerClass.TRANSACTION_REAPER_GRACE_MS);
+  });
+
+  it('counts a transaction statement as in flight until it settles, on success and on failure', async () => {
+    const { manager, internals } = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(makeLifecycleConnection());
+    const transactionId = await manager.beginTransaction();
+    const meta = internals.transactionMeta.get(transactionId)!;
+
+    const pendingStatement = deferred<unknown[]>();
+    runQueryMock.mockImplementationOnce(() => pendingStatement.promise);
+    const statement = manager.executeQuery('SELECT * FROM forestgeo_testing.trees', [], transactionId);
+    await vi.advanceTimersByTimeAsync(0);
+    console.log('[lifecycle] in flight while pending:', meta.inFlightStatements);
+    expect(meta.inFlightStatements).toBe(1);
+    pendingStatement.resolve([]);
+    await statement;
+    expect(meta.inFlightStatements).toBe(0);
+
+    const statementError = new Error("Table 'forestgeo_testing.nonexistent' doesn't exist");
+    runQueryMock.mockImplementationOnce(async () => {
+      throw statementError;
+    });
+    await expect(manager.executeQuery('SELECT * FROM forestgeo_testing.nonexistent', [], transactionId)).rejects.toBe(statementError);
+    expect(meta.inFlightStatements, 'a failed statement must not leave the counter raised').toBe(0);
+    await manager.rollbackTransaction(transactionId);
+  });
+
+  it('arms the callback timer before the session setup: a setup statement that never settles still rejects at timeoutMs and fn never runs', async () => {
+    const { manager } = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(makeLifecycleConnection());
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => (String(sql).startsWith(SET_WAIT_TIMEOUT_PREFIX) ? neverSettles() : []));
+    const fn = vi.fn(async () => 'callback ran');
+    const { TransactionCallbackTimeoutError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+
+    const outcome = outcomeOf(manager.withTransaction(fn, { timeoutMs: CALLBACK_TIMEOUT_MS }));
+    await vi.advanceTimersByTimeAsync(CALLBACK_TIMEOUT_MS);
+    const settled = await settledValue(outcome);
+    await vi.advanceTimersByTimeAsync(0);
+    console.log('[lifecycle] setup stall outcome:', settled, 'fn calls:', fn.mock.calls.length);
+
+    expect(settled, 'withTransaction must reject at timeoutMs even though setup never finished').toBeInstanceOf(TransactionCallbackTimeoutError);
+    expect(fn, 'the callback must never run once its deadline passed during setup').not.toHaveBeenCalled();
+  });
+
+  it('U19: a callback that discards its transaction and then hangs still rejects at timeoutMs', async () => {
+    const { manager } = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(makeLifecycleConnection());
+    const { TransactionCallbackTimeoutError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+
+    const outcome = outcomeOf(
+      manager.withTransaction(
+        async tx => {
+          manager.discardTransaction(tx.id, DISCARD_REASON);
+          return neverSettles<string>();
+        },
+        { timeoutMs: CALLBACK_TIMEOUT_MS }
+      )
+    );
+    await vi.advanceTimersByTimeAsync(CALLBACK_TIMEOUT_MS);
+    const settled = await settledValue(outcome);
+    console.log('[U19] discard-then-hang outcome:', settled);
+    expect(settled, 'discarding must not disarm the callback timer').toBeInstanceOf(TransactionCallbackTimeoutError);
+  });
+
+  it('rethrows a ConnectionQuarantinedError from the session setup and never runs the callback (amendment 2)', async () => {
+    const { manager } = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(makeLifecycleConnection());
+    const { ConnectionQuarantinedError } = await vi.importActual<typeof import('./connectionquarantine')>('./connectionquarantine');
+    const cancellation = new ConnectionQuarantinedError(LIFECYCLE_THREAD_ID, 'unit test cancellation');
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => {
+      if (String(sql).startsWith(SET_WAIT_TIMEOUT_PREFIX)) throw cancellation;
+      return [];
+    });
+    const fn = vi.fn(async () => 'callback ran');
+
+    const outcome = await outcomeOf(manager.withTransaction(fn, { timeoutMs: CALLBACK_TIMEOUT_MS }));
+    console.log('[lifecycle] setup cancellation outcome:', outcome);
+    expect(outcome).toBe(cancellation);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('keeps warn-and-continue for an ordinary session setup failure', async () => {
+    const { manager } = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(makeLifecycleConnection());
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => {
+      if (String(sql).startsWith(SET_WAIT_TIMEOUT_PREFIX)) throw new Error('Variable is read only');
+      return [];
+    });
+
+    await expect(manager.withTransaction(async () => 'callback ran', { timeoutMs: CALLBACK_TIMEOUT_MS })).resolves.toBe('callback ran');
+    expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to apply enhanced connection settings'));
+  });
+
+  it('sends the session settings as validated integer literals with no bound parameters (ER_WRONG_TYPE_FOR_VAR, rule 12)', async () => {
+    const { manager } = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(makeLifecycleConnection());
+    const expectedTimeoutSeconds = Math.ceil(CALLBACK_TIMEOUT_MS / MILLISECONDS_PER_SECOND_IN_TEST);
+    const expectedSessionSeconds = expectedTimeoutSeconds + SESSION_TIMEOUT_BUFFER_SECONDS_IN_TEST;
+
+    await manager.withTransaction(async () => 'callback ran', { timeoutMs: CALLBACK_TIMEOUT_MS });
+    const setupCalls = runQueryMock.mock.calls
+      .filter(([, sql]) => /^SET SESSION (wait_timeout|interactive_timeout|innodb_lock_wait_timeout)\b/.test(String(sql)))
+      .map(([, sql, params]) => ({ sql: String(sql), params }));
+    console.log('[lifecycle] setup statements:', setupCalls);
+
+    expect(setupCalls).toEqual([
+      { sql: `SET SESSION wait_timeout = ${expectedSessionSeconds}`, params: undefined },
+      { sql: `SET SESSION interactive_timeout = ${expectedSessionSeconds}`, params: undefined },
+      { sql: `SET SESSION innodb_lock_wait_timeout = ${expectedTimeoutSeconds}`, params: undefined }
+    ]);
+  });
+
+  it('a setup statement that settles only after the deadline never starts the callback', async () => {
+    const { manager } = await loadLifecycleManager();
+    getConnMock.mockResolvedValueOnce(makeLifecycleConnection());
+    const lateSetup = deferred<unknown[]>();
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => (String(sql).startsWith(SET_LOCK_WAIT_PREFIX) ? lateSetup.promise : []));
+    const fn = vi.fn(async () => 'callback ran');
+
+    const outcome = outcomeOf(manager.withTransaction(fn, { timeoutMs: CALLBACK_TIMEOUT_MS }));
+    await vi.advanceTimersByTimeAsync(CALLBACK_TIMEOUT_MS);
+    await outcome;
+    lateSetup.resolve([]);
+    await vi.advanceTimersByTimeAsync(0);
+    console.log('[lifecycle] late setup: fn calls', fn.mock.calls.length);
+    expect(fn, 'a mocked runQuery cannot be cancelled, so only the timedOut guard stops the callback here').not.toHaveBeenCalled();
+  });
+
+  it.each([Number.NaN, -1, Number.POSITIVE_INFINITY])('rejects timeoutMs=%s with RangeError before beginning, without retrying', async invalidTimeout => {
+    const { manager } = await loadLifecycleManager();
+    const beginSpy = vi.spyOn(manager, 'beginTransaction');
+
+    const outcome = await outcomeOf(manager.withTransaction(async () => 'never', { timeoutMs: invalidTimeout }));
+    console.log(`[lifecycle] timeoutMs=${invalidTimeout} →`, outcome);
+
+    expect(outcome).toBeInstanceOf(RangeError);
+    expect(beginSpy).not.toHaveBeenCalled();
+    expect(getConnMock).not.toHaveBeenCalled();
+  });
+
+  it('does not retry a RangeError from beginTransaction', async () => {
+    const { manager } = await loadLifecycleManager();
+    const beginSpy = vi.spyOn(manager, 'beginTransaction').mockRejectedValue(new RangeError('reaperDeadlineMs must be a finite number'));
+
+    const outcome = await outcomeOf(manager.withTransaction(async () => 'never', { timeoutMs: CALLBACK_TIMEOUT_MS }));
+    expect(outcome).toBeInstanceOf(RangeError);
+    expect(beginSpy, 'a programming error is not a transient connection problem').toHaveBeenCalledTimes(1);
   });
 });

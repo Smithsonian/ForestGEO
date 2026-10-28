@@ -3,6 +3,7 @@ import '@/lib/connectionlogger';
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
+import { ConnectionQuarantinedError } from '@/lib/db/connectionquarantine';
 import { getConn, killQueryOnThread, QueryTimeoutError, runQuery } from '@/lib/db/primitives';
 import { v4 as uuidv4 } from 'uuid';
 import { patchConnectionManager, flushTransactionChangelog, discardTransactionChangelog } from '@/lib/connectionlogger';
@@ -17,6 +18,27 @@ interface MySQLError extends Error {
   sqlState?: string;
   sqlMessage?: string;
 }
+
+export type TransactionPhase = 'active' | 'committing' | 'rolling_back';
+
+interface TransactionMeta {
+  startedAt: number;
+  /** After this (epoch ms, same clock as startedAt) an idle active transaction may be reaped. */
+  deadlineAt: number;
+  phase: TransactionPhase;
+  /** Statements issued through executeQuery with this transaction's id that have not settled yet. */
+  inFlightStatements: number;
+  keepAliveHandle: NodeJS.Timeout | null;
+  resourceLocks: Set<string>;
+  /** In-flight acquireApplicationLock calls for this transaction, keyed by lock name — see acquireApplicationLock's doc comment. */
+  pendingLockAcquisitions: Map<string, Promise<boolean>>;
+}
+
+const MILLISECONDS_PER_SECOND = 1000;
+/** Extra session idle time beyond the transaction timeout, so the server never drops a live transaction's session. */
+const SESSION_TIMEOUT_BUFFER_SECONDS = 300;
+/** Cap on innodb_lock_wait_timeout for withTransaction sessions. */
+const MAX_TRANSACTION_LOCK_WAIT_SECONDS = 300;
 
 /**
  * Scoped query executor handed to `ConnectionManager.withTransaction` callbacks.
@@ -127,19 +149,11 @@ class ObservableMap<K, V> extends Map<K, V> {
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
   private transactionConnections = new ObservableMap<string, PoolConnection>(); // Store transaction-specific connections
-  private transactionMeta = new Map<
-    string,
-    {
-      startedAt: number;
-      timeoutHandle: NodeJS.Timeout | null;
-      keepAliveHandle: NodeJS.Timeout | null;
-      resourceLocks: Set<string>;
-      /** In-flight acquireApplicationLock calls for this transaction, keyed by lock name — see acquireApplicationLock's doc comment. */
-      pendingLockAcquisitions: Map<string, Promise<boolean>>;
-    }
-  >();
+  private transactionMeta = new Map<string, TransactionMeta>();
   private static readonly DEFAULT_TX_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
   public static readonly DEFAULT_STALE_TRANSACTION_THRESHOLD_MS = ConnectionManager.DEFAULT_TX_TIMEOUT_MS * 2;
+  /** Added to a withTransaction's timeoutMs to form its reaper deadline, so the reaper can never act before the callback timer. */
+  public static readonly TRANSACTION_REAPER_GRACE_MS = 60_000;
   private readonly MAX_CONCURRENT_TRANSACTIONS = 12; // Reduced to prevent overwhelming connection pool
   // Removed in-memory applicationLocks Map - now using MySQL GET_LOCK/RELEASE_LOCK for distributed locking
   private readonly LOCK_TIMEOUT_MS = 2 * 60 * 1000; // Reduced from 5 to 2 minutes for application locks
@@ -171,6 +185,9 @@ class ConnectionManager {
     if (!connection) {
       throw new Error(transactionId ? `No connection found for transaction: ${transactionId}` : 'Unable to acquire connection.');
     }
+
+    const meta = transactionId ? this.transactionMeta.get(transactionId) : undefined;
+    if (meta) meta.inFlightStatements += 1;
 
     const schema = extractSchemaFromQuery(query);
     let schemaUseMs = 0;
@@ -222,6 +239,7 @@ class ConnectionManager {
       }
       throw error;
     } finally {
+      if (meta) meta.inFlightStatements -= 1;
       this.logQueryTiming({
         schema,
         transactionId,
@@ -249,7 +267,11 @@ class ConnectionManager {
   // releaseTransactionStartSlot() so a queued waiter is woken. This means EVERY
   // path into an open transaction — withTransaction AND the ~20 direct callers —
   // is gated by the same cap.
-  public async beginTransaction(): Promise<string> {
+  public async beginTransaction(opts?: { reaperDeadlineMs?: number }): Promise<string> {
+    const reaperDeadlineMs = opts?.reaperDeadlineMs ?? ConnectionManager.DEFAULT_STALE_TRANSACTION_THRESHOLD_MS;
+    if (!Number.isFinite(reaperDeadlineMs) || reaperDeadlineMs <= 0) {
+      throw new RangeError(`reaperDeadlineMs must be a finite number of milliseconds greater than 0 (got ${reaperDeadlineMs})`);
+    }
     const startTime = Date.now();
     const transactionId = uuidv4();
     let connection: PoolConnection | null = null;
@@ -278,14 +300,16 @@ class ConnectionManager {
           slotHandedOff = true;
 
           // Initialize transaction metadata with resource locks tracking
-          const meta = {
-            startedAt: Date.now(),
-            timeoutHandle: null as NodeJS.Timeout | null,
-            keepAliveHandle: null as NodeJS.Timeout | null,
+          const startedAt = Date.now();
+          this.transactionMeta.set(transactionId, {
+            startedAt,
+            deadlineAt: startedAt + reaperDeadlineMs,
+            phase: 'active',
+            inFlightStatements: 0,
+            keepAliveHandle: null,
             resourceLocks: new Set<string>(),
             pendingLockAcquisitions: new Map<string, Promise<boolean>>()
-          };
-          this.transactionMeta.set(transactionId, meta);
+          });
 
           ailogger.info(chalk.green(`Transaction started: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
           return transactionId;
@@ -335,7 +359,6 @@ class ConnectionManager {
       // Clean up metadata even if connection is gone
       const meta = this.transactionMeta.get(transactionId);
       if (meta) {
-        if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
         if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
         this.transactionMeta.delete(transactionId);
       }
@@ -364,7 +387,6 @@ class ConnectionManager {
       // CRITICAL FIX: Clean up metadata to prevent leaks
       const meta = this.transactionMeta.get(transactionId);
       if (meta) {
-        if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
         if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
         this.transactionMeta.delete(transactionId);
       }
@@ -383,7 +405,6 @@ class ConnectionManager {
       // Clean up metadata even if connection is gone
       const meta = this.transactionMeta.get(transactionId);
       if (meta) {
-        if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
         if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
         this.transactionMeta.delete(transactionId);
       }
@@ -409,7 +430,6 @@ class ConnectionManager {
       // CRITICAL FIX: Clean up metadata to prevent leaks
       const meta = this.transactionMeta.get(transactionId);
       if (meta) {
-        if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
         if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
         this.transactionMeta.delete(transactionId);
       }
@@ -451,7 +471,6 @@ class ConnectionManager {
 
     const meta = this.transactionMeta.get(transactionId);
     if (meta) {
-      if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
       if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
       this.transactionMeta.delete(transactionId);
     }
@@ -504,24 +523,35 @@ class ConnectionManager {
    * server keeps executing until the statement is KILLed. The orphan
    * `fnPromise` rejection (the KILLed statement) is swallowed so it cannot
    * surface as an unhandled rejection.
+   *
+   * The callback timer is a local of this method, armed BEFORE the session
+   * setup, so a stalled setup statement and a discarded transaction are both
+   * still bounded by `timeoutMs`.
    */
   public async withTransaction<T>(fn: (tx: TxExecutor) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
     const timeoutMs = opts?.timeoutMs ?? ConnectionManager.DEFAULT_TX_TIMEOUT_MS;
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+      throw new RangeError(`timeoutMs must be a finite, non-negative number of milliseconds (got ${timeoutMs})`);
+    }
+    const reaperDeadlineMs = timeoutMs + ConnectionManager.TRANSACTION_REAPER_GRACE_MS;
 
-    // Slot reservation is owned entirely by beginTransaction now: each attempt
-    // reserves its own slot and, on failure, releases it before throwing. So
-    // this retry loop just rethrows on exhaustion — there is no slot to unwind
-    // here.
     let transactionId: string;
     let retryCount = 0;
     const maxRetries = 3;
 
-    // Retry transaction start in case of connection issues
+    // Retry transaction start in case of connection issues. beginTransaction owns
+    // slot reservation, so there is no slot to unwind here. A RangeError is a
+    // programming error, never retried. A BEGIN-statement QueryTimeoutError is
+    // not a deadlock, so beginTransaction rethrows it at once (its connection
+    // already quarantined and KILLed by runQuery) and this loop retries it on a
+    // fresh connection: at most maxRetries × 2 statements × 30 s + 1 s + 2 s of
+    // pauses ≈ 183 s of BEGIN stalls, plus slot waits, before rejecting.
     while (retryCount < maxRetries) {
       try {
-        transactionId = await this.beginTransaction();
+        transactionId = await this.beginTransaction({ reaperDeadlineMs });
         break;
       } catch (error: unknown) {
+        if (error instanceof RangeError) throw error;
         retryCount++;
         if (retryCount >= maxRetries) {
           throw new Error(`Failed to start transaction after ${maxRetries} retries: ${getErrorMessage(error)}`);
@@ -531,43 +561,14 @@ class ConnectionManager {
       }
     }
 
-    const connection = this.transactionConnections.get(transactionId!);
-    if (!connection) {
-      // beginTransaction succeeded, so it handed its reserved slot to the map
-      // entry — but that entry is now gone. Fully unwind so the slot is not
-      // leaked: drop any map/meta remnants (freeing the slot from occupancy),
-      // then release to wake a queued waiter. Do NOT call
-      // releaseTransactionStartSlot here — the starting-counter reservation was
-      // already consumed by beginTransaction's handoff.
+    const meta = this.transactionMeta.get(transactionId!);
+    if (!meta || !this.transactionConnections.has(transactionId!)) {
       this.transactionConnections.delete(transactionId!);
-      const orphanMeta = this.transactionMeta.get(transactionId!);
-      if (orphanMeta) {
-        if (orphanMeta.timeoutHandle) clearTimeout(orphanMeta.timeoutHandle);
-        if (orphanMeta.keepAliveHandle) clearInterval(orphanMeta.keepAliveHandle);
-        this.transactionMeta.delete(transactionId!);
-      }
+      this.transactionMeta.delete(transactionId!);
       this.releaseTransactionSlot();
       throw new Error(`Connection lost immediately after transaction start for ${transactionId!}`);
     }
-
-    // Enhanced connection configuration for long-running transactions
-    try {
-      await connection.query('SET SESSION wait_timeout = ?', [Math.ceil(timeoutMs / 1000) + 300]); // Add 5 minutes buffer
-      await connection.query('SET SESSION interactive_timeout = ?', [Math.ceil(timeoutMs / 1000) + 300]);
-      await connection.query('SET SESSION innodb_lock_wait_timeout = ?', [Math.min(300, Math.ceil(timeoutMs / 1000))]); // Cap at 5 minutes
-      ailogger.info(`Enhanced connection settings applied for transaction ${transactionId!}`);
-    } catch (configError: unknown) {
-      ailogger.warn(`Failed to apply enhanced connection settings: ${getErrorMessage(configError)}`);
-    }
-
-    // set up metadata / timeout with resource locks
-    const meta = this.transactionMeta.get(transactionId!) || {
-      startedAt: Date.now(),
-      timeoutHandle: null as NodeJS.Timeout | null,
-      keepAliveHandle: null as NodeJS.Timeout | null,
-      resourceLocks: new Set<string>(),
-      pendingLockAcquisitions: new Map<string, Promise<boolean>>()
-    };
+    const startedAt = meta.startedAt;
 
     // Enhanced keep-alive mechanism: ping every 90 seconds for long transactions
     if (timeoutMs > 90 * 1000) {
@@ -589,85 +590,110 @@ class ConnectionManager {
       }, pingInterval);
     }
 
-    // Tracks whether the timeout (not an ordinary callback error) ended the
-    // race, so the catch block knows to KILL the still-running statement.
-    let timedOut = false;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      meta.timeoutHandle = setTimeout(() => {
-        timedOut = true;
-        reject(new TransactionCallbackTimeoutError(transactionId!, timeoutMs));
-      }, timeoutMs);
-    });
-
-    // Scoped executor: binds executeQuery to this transaction's connection so
-    // callbacks call tx.query(...) instead of threading the id string. tx.id is
-    // the migration bridge for legacy helpers still typed against a string id.
     const tx: TxExecutor = {
       query: (sql, params) => this.executeQuery(sql, params, transactionId!),
       id: transactionId!
     };
 
-    // Capture the fn promise so we can handle its rejection if a timeout fires.
-    // Without this, the orphaned fn promise produces an unhandled rejection that
-    // can crash the Node.js process when it eventually fails (e.g. "No connection
-    // found for transaction" after the connection was released by rollback).
-    // Defer invocation into a promise so a non-async callback that throws
-    // before returning a promise follows the same rollback/cleanup path as an
-    // asynchronously rejected callback.
-    const fnPromise = Promise.resolve().then(() => fn(tx));
+    // withTransaction alone owns the callback timer. It is armed BEFORE the
+    // session setup so a stalled setup statement is bounded by timeoutMs too.
+    let timedOut = false;
+    let callbackTimeoutHandle: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      callbackTimeoutHandle = setTimeout(() => {
+        timedOut = true;
+        reject(new TransactionCallbackTimeoutError(transactionId!, timeoutMs));
+      }, timeoutMs);
+    });
+
+    // Deferred so a non-async callback that throws synchronously follows the
+    // same rollback path as an asynchronously rejected one.
+    const fnPromise = Promise.resolve().then(async () => {
+      await this.applySessionSettings(tx, timeoutMs);
+      // A setup statement that settled after the deadline must not start the callback on an abandoned transaction.
+      if (timedOut) throw new TransactionCallbackTimeoutError(transactionId!, timeoutMs);
+      return fn(tx);
+    });
+
+    let result: T;
+    try {
+      result = (await Promise.race([fnPromise, timeoutPromise])) as T;
+    } catch (err: unknown) {
+      clearTimeout(callbackTimeoutHandle);
+      await this.endFailedCallbackTransaction(transactionId!, err, { timedOut, fnPromise, startedAt });
+      throw err;
+    }
+    clearTimeout(callbackTimeoutHandle);
+    await this.commitTransaction(transactionId!);
+    return result;
+  }
+
+  /**
+   * Session settings for a withTransaction session. Runs inside the timed body, through executeQuery, so each
+   * statement is bounded by runQuery, counted in flight, and covered by the callback deadline. A cancellation
+   * (quarantine) or a statement timeout ends the transaction and must stop the callback from running; any other
+   * failure keeps the historical warn-and-continue.
+   */
+  private async applySessionSettings(tx: TxExecutor, timeoutMs: number): Promise<void> {
+    const timeoutSeconds = Math.ceil(timeoutMs / MILLISECONDS_PER_SECOND);
+    const sessionTimeoutSeconds = timeoutSeconds + SESSION_TIMEOUT_BUFFER_SECONDS;
+    const lockWaitSeconds = Math.min(MAX_TRANSACTION_LOCK_WAIT_SECONDS, timeoutSeconds);
+    // Interpolated, never bound: over the prepared protocol mysql2 binds a JS number as DOUBLE and MySQL rejects it
+    // for these variables (ER_WRONG_TYPE_FOR_VAR). Each value is proven an integer first, so nothing else can reach
+    // the SQL text (same pattern as processorhelperfunctions.tsx's MAX_EXECUTION_TIME).
+    for (const seconds of [sessionTimeoutSeconds, lockWaitSeconds]) {
+      if (!Number.isInteger(seconds) || seconds < 0) {
+        throw new RangeError(`Session timeout must be a non-negative integer number of seconds (got ${seconds})`);
+      }
+    }
+    try {
+      await tx.query(`SET SESSION wait_timeout = ${sessionTimeoutSeconds}`);
+      await tx.query(`SET SESSION interactive_timeout = ${sessionTimeoutSeconds}`);
+      await tx.query(`SET SESSION innodb_lock_wait_timeout = ${lockWaitSeconds}`);
+      ailogger.info(`Enhanced connection settings applied for transaction ${tx.id}`);
+    } catch (configError: unknown) {
+      if (configError instanceof QueryTimeoutError || configError instanceof ConnectionQuarantinedError) {
+        throw configError;
+      }
+      ailogger.warn(`Failed to apply enhanced connection settings: ${getErrorMessage(configError)}`);
+    }
+  }
+
+  /** Ends a transaction whose callback rejected or timed out; never throws, so the callback's error reaches the caller. */
+  private async endFailedCallbackTransaction(
+    transactionId: string,
+    err: unknown,
+    context: { timedOut: boolean; fnPromise: Promise<unknown>; startedAt: number }
+  ): Promise<void> {
+    // The callback may still have a statement in flight. Attach the swallow
+    // handler BEFORE anything below so its eventual rejection can never surface
+    // as an unhandled rejection.
+    context.fnPromise.catch((fnErr: unknown) => {
+      ailogger.warn(`Orphaned callback error for transaction ${transactionId} (expected after abort/rollback): ${getErrorMessage(fnErr)}`);
+    });
+
+    const errMessage = getErrorMessage(err);
+    const errorObj = err instanceof Error ? err : new Error(errMessage);
+    ailogger.error(`Transaction ${transactionId} failed: ${errMessage}`, errorObj, {
+      transactionId,
+      duration: Date.now() - context.startedAt,
+      errorType: err instanceof Error ? err.constructor.name : 'Unknown',
+      isConnectionError: this.isConnectionError(err),
+      isTimeoutError: this.isLockTimeoutError(err) || errMessage.includes('timed out')
+    });
+
+    if (context.timedOut) {
+      const txConnection = this.transactionConnections.get(transactionId) as PoolConnectionWithThreadId | undefined;
+      const threadId = txConnection?.threadId;
+      if (typeof threadId === 'number') {
+        await killQueryOnThread(threadId, 'transaction timeout');
+      }
+    }
 
     try {
-      const result = (await Promise.race([fnPromise, timeoutPromise])) as T;
-      // success path
-      if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
-      if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-      await this.commitTransaction(transactionId!);
-      this.transactionMeta.delete(transactionId!);
-      return result;
-    } catch (err: unknown) {
-      // on error / timeout
-      if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
-      if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-
-      // The callback may still have a statement in flight (especially on
-      // timeout). Attach the swallow handler BEFORE the KILL/rollback below so
-      // the eventual rejection of that orphaned statement can never surface as
-      // an unhandled rejection in the window between abort and handler attach.
-      fnPromise.catch((fnErr: unknown) => {
-        ailogger.warn(`Orphaned callback error for transaction ${transactionId!} (expected after abort/rollback): ${getErrorMessage(fnErr)}`);
-      });
-
-      // Enhanced error logging
-      const errMessage = getErrorMessage(err);
-      const errorType = err instanceof Error ? err.constructor.name : 'Unknown';
-      const errorObj = err instanceof Error ? err : new Error(errMessage);
-      ailogger.error(`Transaction ${transactionId!} failed: ${errMessage}`, errorObj, {
-        transactionId: transactionId!,
-        duration: Date.now() - meta.startedAt,
-        errorType,
-        isConnectionError: this.isConnectionError(err),
-        isTimeoutError: this.isLockTimeoutError(err) || errMessage.includes('timed out')
-      });
-
-      // On timeout the callback's statement is still running on the tx's
-      // dedicated connection; the ROLLBACK below would queue behind it. KILL it
-      // from a separate connection first so rollback/release proceed promptly.
-      if (timedOut) {
-        const txConnection = this.transactionConnections.get(transactionId!) as PoolConnectionWithThreadId | undefined;
-        const threadId = txConnection?.threadId;
-        if (typeof threadId === 'number') {
-          await killQueryOnThread(threadId, 'transaction timeout');
-        }
-      }
-
-      try {
-        await this.rollbackTransaction(transactionId!);
-      } catch (rbErr: unknown) {
-        ailogger.error(`Rollback failed for transaction ${transactionId!}: ${getErrorMessage(rbErr)}`);
-      }
-
-      this.transactionMeta.delete(transactionId!);
-      throw err;
+      await this.rollbackTransaction(transactionId);
+    } catch (rbErr: unknown) {
+      ailogger.error(`Rollback failed for transaction ${transactionId}: ${getErrorMessage(rbErr)}`);
     }
   }
 
