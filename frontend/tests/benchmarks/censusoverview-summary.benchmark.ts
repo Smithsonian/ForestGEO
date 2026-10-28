@@ -34,7 +34,8 @@ const DEFAULT_LABEL = 'unlabelled';
 const CENSUSOVERVIEW_BENCH_SETUP_HOOK_TIMEOUT_MS = 120_000;
 const CENSUSOVERVIEW_BENCH_TEST_TIMEOUT_MS = 45 * 60 * 1000;
 const CENSUSOVERVIEW_BENCH_TEARDOWN_HOOK_TIMEOUT_MS = 5 * 60 * 1000;
-const SCHEMA = `forestgeo_bench_censusoverview_${process.pid}`;
+// Fixed, not per-process: a run killed before afterAll leaves the schema behind, and the next run's createTestDatabase drops it.
+const SCHEMA = 'forestgeo_bench_censusoverview';
 const CONNECTION_CHARSET = 'UTF8MB4_0900_AI_CI';
 const BENCH_USER_EMAIL = 'benchmark-runner@forestgeo.test';
 const SUMMARY_ROUTE_PATH = '/api/censusoverview/summary';
@@ -170,6 +171,25 @@ function assertLocalHostsOrRefuse(): void {
   const appHost = process.env.AZURE_SQL_SERVER;
   if (!appHost || !LOCAL_HOSTS.includes(appHost)) throw new Error(`REFUSING TO RUN: AZURE_SQL_SERVER is '${appHost}', not local.`);
   if (!LOCAL_HOSTS.includes(DEFAULT_TEST_CONFIG.host)) throw new Error(`REFUSING TO RUN: TEST_DB_HOST is '${DEFAULT_TEST_CONFIG.host}', not local.`);
+}
+
+async function assertBenchSchemaNotInUse(): Promise<void> {
+  const guardConnection = await mysql.createConnection({
+    host: DEFAULT_TEST_CONFIG.host,
+    port: DEFAULT_TEST_CONFIG.port,
+    user: DEFAULT_TEST_CONFIG.user,
+    password: DEFAULT_TEST_CONFIG.password
+  });
+  try {
+    const [sessions] = await guardConnection.query<RowDataPacket[]>('SELECT ID, USER, COMMAND, TIME FROM information_schema.PROCESSLIST WHERE DB = ?', [
+      SCHEMA
+    ]);
+    if (sessions.length > 0) {
+      throw new Error(`REFUSING TO RUN: ${SCHEMA} is in use, so another benchmark is running; dropping it would destroy that run: ${JSON.stringify(sessions)}`);
+    }
+  } finally {
+    guardConnection.destroy();
+  }
 }
 
 async function openRawConnection(): Promise<Connection> {
@@ -473,6 +493,7 @@ function expectedExportPreview(rowsPerCensus: number): CensusOverviewSummary['ex
 describe('census overview summary benchmark (opt-in, real local MySQL)', () => {
   beforeAll(async () => {
     assertLocalHostsOrRefuse();
+    await assertBenchSchemaNotInUse();
     setupConnection = await createTestDatabase({ ...DEFAULT_TEST_CONFIG, database: SCHEMA });
     workConnection = await openRawConnection();
     snapshotConnection = await openRawConnection();
