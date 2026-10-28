@@ -1860,3 +1860,228 @@ describe('ConnectionManager reaper: own deadline, idle, active (#563 §2)', () =
     expect(newestCommit).toBeInstanceOf(TransactionReapedError);
   });
 });
+
+describe('ConnectionManager exit-path accounting (#563 §6, U20)', () => {
+  const LOCK_NAME = 'upload:file:563-exit-paths';
+  const LOCK_WAIT_MS = 1_000;
+  const REAPER_DEADLINE_MS = 1_000;
+  const CALLBACK_TIMEOUT_MS = 5_000;
+  const STATEMENT_TIMEOUT_MS = 660_000;
+  const NEVER_BEGUN_TRANSACTION_ID = 'never-begun-exit-path';
+
+  type ExitDisposition = 'release' | 'quarantine' | 'untouched';
+  type Loaded = Awaited<ReturnType<typeof loadLifecycleManager>>;
+  type ExitContext = Loaded & { connection: LifecycleConnection; constants: typeof import('./connectionmanager') };
+  type ExitScenario = { exit: string; disposition: ExitDisposition; drive: (context: ExitContext) => Promise<void> };
+
+  const transportLoss = () =>
+    Object.assign(new Error('Connection lost: The server closed the connection.'), { code: 'PROTOCOL_CONNECTION_LOST', sqlMessage: undefined });
+  const serverRejection = () =>
+    Object.assign(new Error('Got error 1 during COMMIT'), { errno: 1180, sqlState: 'HY000', sqlMessage: 'Got error 1 during COMMIT' });
+
+  function answerStatements(releaseLock: () => Promise<unknown>) {
+    runQueryMock.mockImplementation(async (_connection: unknown, sql: string) => {
+      if (String(sql).includes('GET_LOCK')) return [{ acquired: 1 }];
+      if (String(sql).includes('RELEASE_LOCK')) return releaseLock();
+      return [];
+    });
+  }
+
+  async function beginHoldingLock(context: ExitContext, releaseLock: () => Promise<unknown>): Promise<string> {
+    answerStatements(releaseLock);
+    const transactionId = await context.manager.beginTransaction();
+    expect(await context.manager.acquireApplicationLock(LOCK_NAME, transactionId, LOCK_WAIT_MS)).toBe(true);
+    return transactionId;
+  }
+
+  /** Stands in for primitives.runQuery's timeout path: quarantine (via the real registry), then reject. */
+  async function timeOutLikeRunQuery(connection: unknown): Promise<never> {
+    const { quarantineConnection } = await vi.importActual<typeof import('./connectionquarantine')>('./connectionquarantine');
+    const { QueryTimeoutError } = await vi.importActual<typeof import('./primitives')>('./primitives');
+    quarantineConnection(connection as never, 'query timeout');
+    throw new QueryTimeoutError(STATEMENT_TIMEOUT_MS, LIFECYCLE_THREAD_ID);
+  }
+
+  const EXIT_SCENARIOS: ExitScenario[] = [
+    {
+      exit: 'COMMIT ack, locks confirmed',
+      disposition: 'release',
+      drive: async context => {
+        await context.manager.commitTransaction(await beginHoldingLock(context, async () => [{ released: 1 }]));
+      }
+    },
+    {
+      exit: 'COMMIT ack, lock release error',
+      disposition: 'quarantine',
+      drive: async context => {
+        await context.manager.commitTransaction(await beginHoldingLock(context, async () => Promise.reject(transportLoss())));
+      }
+    },
+    {
+      exit: 'COMMIT ack, lock release past its deadline',
+      disposition: 'quarantine',
+      drive: async context => {
+        const commit = context.manager.commitTransaction(await beginHoldingLock(context, () => neverSettles()));
+        await vi.advanceTimersByTimeAsync(context.constants.APPLICATION_LOCK_CLEANUP_DEADLINE_MS);
+        await commit;
+      }
+    },
+    {
+      exit: 'COMMIT server rejection',
+      disposition: 'quarantine',
+      drive: async context => {
+        context.connection.commit.mockRejectedValue(serverRejection());
+        await outcomeOf(context.manager.commitTransaction(await context.manager.beginTransaction()));
+      }
+    },
+    {
+      exit: 'COMMIT transport loss',
+      disposition: 'quarantine',
+      drive: async context => {
+        context.connection.commit.mockRejectedValue(transportLoss());
+        await outcomeOf(context.manager.commitTransaction(await context.manager.beginTransaction()));
+      }
+    },
+    {
+      exit: 'COMMIT deadline',
+      disposition: 'quarantine',
+      drive: async context => {
+        context.connection.commit.mockImplementation(() => neverSettles());
+        const commit = outcomeOf(context.manager.commitTransaction(await context.manager.beginTransaction()));
+        await vi.advanceTimersByTimeAsync(context.ConnectionManagerClass.DEFAULT_COMMIT_DEADLINE_MS);
+        await commit;
+      }
+    },
+    {
+      exit: 'commit on a non-active id',
+      disposition: 'untouched',
+      drive: async context => {
+        await outcomeOf(context.manager.commitTransaction(NEVER_BEGUN_TRANSACTION_ID));
+      }
+    },
+    {
+      exit: 'ROLLBACK ack, locks confirmed',
+      disposition: 'release',
+      drive: async context => {
+        await context.manager.rollbackTransaction(await beginHoldingLock(context, async () => [{ released: 1 }]));
+      }
+    },
+    {
+      exit: 'ROLLBACK ack, lock release error',
+      disposition: 'quarantine',
+      drive: async context => {
+        await context.manager.rollbackTransaction(await beginHoldingLock(context, async () => Promise.reject(transportLoss())));
+      }
+    },
+    {
+      exit: 'ROLLBACK error',
+      disposition: 'quarantine',
+      drive: async context => {
+        context.connection.rollback.mockRejectedValue(transportLoss());
+        await outcomeOf(context.manager.rollbackTransaction(await context.manager.beginTransaction()));
+      }
+    },
+    {
+      exit: 'ROLLBACK deadline',
+      disposition: 'quarantine',
+      drive: async context => {
+        context.connection.rollback.mockImplementation(() => neverSettles());
+        const rollback = context.manager.rollbackTransaction(await context.manager.beginTransaction());
+        await vi.advanceTimersByTimeAsync(context.ConnectionManagerClass.DEFAULT_ROLLBACK_DEADLINE_MS);
+        await rollback;
+      }
+    },
+    {
+      exit: 'callback timeout',
+      disposition: 'quarantine',
+      drive: async context => {
+        const outcome = outcomeOf(context.manager.withTransaction(() => neverSettles<string>(), { timeoutMs: CALLBACK_TIMEOUT_MS }));
+        await vi.advanceTimersByTimeAsync(CALLBACK_TIMEOUT_MS);
+        await outcome;
+      }
+    },
+    {
+      exit: 'reaped',
+      disposition: 'quarantine',
+      drive: async context => {
+        await context.manager.beginTransaction({ reaperDeadlineMs: REAPER_DEADLINE_MS });
+        await vi.advanceTimersByTimeAsync(REAPER_DEADLINE_MS);
+        expect(await context.manager.cleanupStaleTransactions()).toBe(1);
+      }
+    },
+    {
+      exit: 'BEGIN statement timeout',
+      disposition: 'quarantine',
+      drive: async context => {
+        runQueryMock.mockImplementation(async (connection: unknown, sql: string) =>
+          sql === context.constants.START_TRANSACTION_SQL ? timeOutLikeRunQuery(connection) : []
+        );
+        await outcomeOf(context.manager.beginTransaction());
+      }
+    },
+    {
+      exit: 'discardTransaction',
+      disposition: 'quarantine',
+      drive: async context => {
+        context.manager.discardTransaction(await context.manager.beginTransaction(), 'exit-path test');
+      }
+    },
+    {
+      exit: 'statement timeout',
+      disposition: 'quarantine',
+      drive: async context => {
+        const transactionId = await context.manager.beginTransaction();
+        runQueryMock.mockImplementation(async (connection: unknown) => timeOutLikeRunQuery(connection));
+        await outcomeOf(context.manager.executeQuery('CALL bulkingestionprocess(?, ?)', ['f', 'b'], transactionId));
+      }
+    }
+  ];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    getConnMock.mockReset();
+    runQueryMock.mockReset();
+    runQueryMock.mockImplementation(async () => []);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it.each(EXIT_SCENARIOS)(
+    '$exit: occupancy, queue and timers return to baseline and the connection is released or quarantined exactly once',
+    async scenario => {
+      const loaded = await loadLifecycleManager();
+      const constants = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+      const connection = makeLifecycleConnection();
+      getConnMock.mockResolvedValue(connection);
+      const occupancyBefore = slotOccupancy(loaded.internals);
+      const queueBefore = loaded.internals.transactionSlotQueue.length;
+      const timersBefore = vi.getTimerCount();
+
+      await scenario.drive({ ...loaded, connection, constants });
+      await vi.advanceTimersByTimeAsync(0);
+
+      const releases = connection.release.mock.calls.length;
+      const destroys = connection.destroy.mock.calls.length;
+      console.log('[U20]', {
+        exit: scenario.exit,
+        releases,
+        destroys,
+        occupancy: slotOccupancy(loaded.internals),
+        occupancyBefore,
+        queue: loaded.internals.transactionSlotQueue.length,
+        timers: vi.getTimerCount(),
+        timersBefore
+      });
+
+      expect(slotOccupancy(loaded.internals), 'slot occupancy must return to the pre-BEGIN baseline').toBe(occupancyBefore);
+      expect(loaded.internals.transactionSlotQueue.length).toBe(queueBefore);
+      expect(vi.getTimerCount(), 'no deadline, lock-cleanup or callback timer may survive the exit').toBe(timersBefore);
+      const expected = { release: [1, 0], quarantine: [0, 1], untouched: [0, 0] }[scenario.disposition];
+      expect([releases, destroys], `release/destroy counts for "${scenario.exit}"`).toEqual(expected);
+    }
+  );
+});
