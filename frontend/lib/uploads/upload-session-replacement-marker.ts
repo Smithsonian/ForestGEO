@@ -178,7 +178,7 @@ export async function lockUploadSessionForCensusReplacement(
   return session[CENSUS_REPLACEMENT_MARKER_COLUMN] === null ? 'proceed' : 'marker_already_set';
 }
 
-/** Records that this session's replacement has run. Same transaction as the delete it guards. */
+/** Records that this session's replacement has run. The reference marker shares a transaction with its delete; the census marker is set in its own final transaction, after every window has committed. */
 export async function markUploadSessionReplacementCompleted(
   connectionManager: ConnectionManager,
   schema: string,
