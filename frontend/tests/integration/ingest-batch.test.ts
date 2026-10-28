@@ -128,7 +128,15 @@ vi.mock('@/ailogger', () => ({
 }));
 
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
+import {
+  replaceCensusForCleanReupload,
+  stageMeasurementChunk,
+  type CensusReplacementParams,
+  type StageMeasurementChunkParams
+} from '@/lib/uploads/stage-measurements';
+import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
+import { startFreshUploadSession } from '../setup/upload-session-fixtures';
 import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
 import { BatchFamilyScopeError } from '@/lib/uploads/batch-family';
 import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
@@ -206,12 +214,17 @@ describe('ingestBatch — integration', () => {
     plotID = testData.plots[0].plotID;
     censusID = testData.census[0].censusID;
     sharedState.connection = connection;
+    await ensureUploadSessionsTable(schema);
     console.log(`[setup] schema=${schema} plotID=${plotID} censusID=${censusID}`);
   }, 120000);
 
   afterAll(async () => {
     sharedState.connection = null;
-    await teardownTestDatabase(connection, config);
+    try {
+      await getPoolMonitorInstance().closeAllConnections();
+    } finally {
+      await teardownTestDatabase(connection, config);
+    }
   });
 
   beforeEach(async () => {
@@ -228,8 +241,7 @@ describe('ingestBatch — integration', () => {
   // -------------------------------------------------------------------------
 
   async function stageFixtureRows(fileName: string = FILE_NAME): Promise<void> {
-    const transactionID = await connectionManager.beginTransaction();
-    const params: StageMeasurementChunkParams = {
+    const replacementParams: CensusReplacementParams = {
       schema,
       fileName,
       batchID: BATCH_ID,
@@ -241,10 +253,14 @@ describe('ingestBatch — integration', () => {
       csvHeaders: CSV_HEADERS,
       delimiter: CSV_DELIMITER,
       uploadSessionID: UPLOAD_SESSION_ID,
-      transactionID,
       firstRowOrdinal: null,
       changedBy: CHANGED_BY
     };
+    await startFreshUploadSession(connection, { schema, sessionID: UPLOAD_SESSION_ID, plotID, censusID });
+    const replacement = await replaceCensusForCleanReupload(connectionManager, replacementParams);
+    console.log(`[replace] outcome=${replacement.outcome} deletedRows=${replacement.deletedRows} windowCount=${replacement.windowCount}`);
+    const transactionID = await connectionManager.beginTransaction();
+    const params: StageMeasurementChunkParams = { ...replacementParams, transactionID };
     const result = await stageMeasurementChunk(connectionManager, params);
     await connectionManager.commitTransaction(transactionID);
     console.log(`[stage] insertedCount=${result.insertedCount} invalidRows=${result.invalidRows.length} droppedCount=${result.droppedCount}`);
@@ -1587,8 +1603,7 @@ describe('ingestBatch — integration', () => {
 
   it('ingests a negative local coordinate instead of hard-failing it', async () => {
     const fileName = 'ingest-batch-negative-coord.csv';
-    const transactionID = await connectionManager.beginTransaction();
-    const params: StageMeasurementChunkParams = {
+    const replacementParams: CensusReplacementParams = {
       schema,
       fileName,
       batchID: BATCH_ID,
@@ -1602,10 +1617,14 @@ describe('ingestBatch — integration', () => {
       csvHeaders: CSV_HEADERS,
       delimiter: CSV_DELIMITER,
       uploadSessionID: UPLOAD_SESSION_ID,
-      transactionID,
       firstRowOrdinal: null,
       changedBy: CHANGED_BY
     };
+    await startFreshUploadSession(connection, { schema, sessionID: UPLOAD_SESSION_ID, plotID, censusID });
+    const replacement = await replaceCensusForCleanReupload(connectionManager, replacementParams);
+    console.log(`[negative-coord] replacement outcome=${replacement.outcome} deletedRows=${replacement.deletedRows}`);
+    const transactionID = await connectionManager.beginTransaction();
+    const params: StageMeasurementChunkParams = { ...replacementParams, transactionID };
     const stageResult = await stageMeasurementChunk(connectionManager, params);
     await connectionManager.commitTransaction(transactionID);
     console.log(`[negative-coord] insertedCount=${stageResult.insertedCount} invalidRows=${stageResult.invalidRows.length}`);
