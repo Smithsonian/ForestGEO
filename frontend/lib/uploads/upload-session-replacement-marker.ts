@@ -8,9 +8,16 @@
  * erases the rows the first file just committed.
  *
  * The fact is durable rather than inferred: a timestamp column on
- * `upload_sessions`, written in the SAME transaction as the delete it guards, so
- * the marker and the delete can never disagree — a rollback loses both, a commit
- * keeps both.
+ * `upload_sessions`. Its meaning differs by marker:
+ *
+ * - Census marker: set in its own last transaction, after every replacement
+ *   window has committed. Set means the prior rows, error links, audits and
+ *   metrics of the census are gone. Unset means the replacement is incomplete or
+ *   has not started, and staging must refuse (CensusReplacementIncompleteError)
+ *   rather than append to the old census.
+ * - Reference marker: set in the SAME transaction as the delete it guards, so
+ *   the marker and the delete can never disagree — a rollback loses both, a
+ *   commit keeps both.
  *
  * Two independent markers exist because the two destructive resets are
  * independent: measurements replace a census scope, reference tables replace a
@@ -100,10 +107,9 @@ export async function uploadSessionHasCompletedReplacement(
     return Array.isArray(rows) && rows.length > 0 && rows[0][markerColumn] !== null;
   } catch (error: unknown) {
     if (markerColumn === REFERENCE_REPLACEMENT_MARKER_COLUMN || !isMissingTableError(error, UPLOAD_SESSIONS_TABLE)) throw error;
-    // No session table in this schema: fall back to "has not replaced", which
-    // reproduces the pre-marker behaviour (replace on every file) rather than
-    // failing the upload outright.
-    ailogger.warn(`No upload_sessions table in ${schema}; ${markerColumn} cannot be tracked per session for ${uploadSessionID}.`);
+    // No session table in this schema: the replacement cannot be confirmed, so
+    // answer "has not replaced" and let staging refuse (CensusReplacementIncompleteError).
+    ailogger.warn(`No upload_sessions table in ${schema}; ${markerColumn} cannot be confirmed for ${uploadSessionID}, so staging will refuse.`);
     return false;
   }
 }
@@ -188,11 +194,10 @@ export async function markUploadSessionReplacementCompleted(
         throw new Error(`Upload session ${uploadSessionID} was not found; reference replacement could not be recorded.`);
       }
       // The marker lives on the session row, so a session id with no row cannot
-      // be marked — and the next file of that "session" would replace again.
-      // Never silent: this is the shape of the bug the marker replaced.
+      // be marked. Never silent: staging will refuse this upload.
       ailogger.warn(
         `Upload session ${uploadSessionID} has no row in ${schema}.upload_sessions; ${markerColumn} could not be recorded, ` +
-          `so a later file in the same session will run the same replacement again.`
+          `so the upload will refuse to stage.`
       );
     }
   } catch (error: unknown) {

@@ -11,6 +11,11 @@
  * The caller owns the surrounding transaction (begin/commit/rollback/retry):
  * stageMeasurementChunk only issues statements against the provided
  * transactionID.
+ *
+ * Staging never deletes census rows. A CLEAN_REUPLOAD replaces its census in
+ * replaceCensusForCleanReupload, in separately committed transactions that run
+ * before the staging transaction opens; a first chunk whose replacement has not
+ * completed is refused with CensusReplacementIncompleteError.
  */
 
 import crypto from 'crypto';
@@ -25,7 +30,6 @@ import { ColumnMapping } from '@/lib/column-mapping/types';
 import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
 import {
   buildDroppedMeasurementFailureReason,
-  cleanupPreviousFileUploads,
   CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   cleanupStaleMeasurementBatchesForFile,
   deleteCensusReplacementChunk,
@@ -117,6 +121,24 @@ export function parseFirstRowOrdinal(value: unknown): number | null {
   return value;
 }
 
+/** A CLEAN_REUPLOAD's first chunk reached staging before its census replacement finished; staging would append to the old census. */
+export class CensusReplacementIncompleteError extends Error {
+  readonly fileName: string;
+  readonly batchID: string;
+  readonly uploadSessionID: string | null;
+
+  constructor(fileName: string, batchID: string, uploadSessionID: string | null) {
+    super(
+      `Refusing to stage ${fileName} (batch ${batchID}): upload session ${uploadSessionID ?? '(none)'} has not completed the census replacement. ` +
+        `Run replaceCensusForCleanReupload before the first staging transaction.`
+    );
+    this.name = 'CensusReplacementIncompleteError';
+    this.fileName = fileName;
+    this.batchID = batchID;
+    this.uploadSessionID = uploadSessionID;
+  }
+}
+
 /**
  * Thrown when a chunk's input is structurally empty (see blank-measurement-input.ts)
  * BEFORE any write or the destructive CLEAN_REUPLOAD cleanup. Second line of defense
@@ -170,14 +192,15 @@ export interface StageMeasurementChunkParams {
   /** Recorded as unifiedchangelog.ChangedBy for the file-upload tracking row. */
   changedBy?: string;
   /**
-   * Skip the CLEAN_REUPLOAD census-replacement cleanup for this chunk even when
-   * uploadMode is CLEAN_REUPLOAD. The async upload worker ingests file-by-file,
-   * so by the time its second file stages, the first file's batch is already
-   * 'completed' in uploadmetrics — running cleanupPreviousFileUploads again
-   * would destroy that batch's freshly ingested rows (the cleanup deletes every
-   * census batch except the current one). The worker therefore allows the
-   * census replacement only while staging the job's FIRST file. The synchronous
-   * upload route stages all files before any ingestion, so it never sets this.
+   * Opt this chunk out of the CLEAN_REUPLOAD census replacement, and out of the
+   * guard that requires it, even when uploadMode is CLEAN_REUPLOAD. The async
+   * upload worker ingests file-by-file, so by the time its second file stages,
+   * the first file's batch is already 'completed' in uploadmetrics — replacing
+   * the census again would destroy that batch's freshly ingested rows (the
+   * replacement deletes every census batch except the current one). The worker
+   * therefore runs replaceCensusForCleanReupload only for the job's FIRST file.
+   * The synchronous upload route stages all files before any ingestion, so it
+   * never sets this.
    */
   suppressCensusReplacementCleanup?: boolean;
   /**
@@ -350,45 +373,17 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
 
   const expectedRowCount = chunkRows.length;
 
-  // A retry of the same file should not inherit stale batches that were left
-  // behind by an earlier interrupted upload for the same plot/census. Only the
-  // first chunk to land for the family cleans. Browser chunks are sent serially,
-  // so they only arrive out of order through retries.
-  // Any staged member of this batch family, including `__subNNN` rows, means this
-  // upload is already in progress; batch IDs are fresh per upload attempt, and the
-  // worker clears the family before a retry.
+  // The family probe gates the guard: a chunk of a family that already staged rows
+  // belongs to an upload in progress, whose first chunk already passed the guard.
+  // Batch IDs are fresh per upload attempt and the worker clears the family before
+  // a retry, so only the first chunk to land cleans stale batches of this file.
   if (!(await familyHasStagedRows(connectionManager, schema, fileName, batchID, transactionID))) {
     if (uploadMode === UploadMode.CLEAN_REUPLOAD && !params.suppressCensusReplacementCleanup) {
-      // Clean up data from any previous uploads for this census.
-      // Clean re-upload is census replacement, not filename replacement.
-      //
-      // Exactly ONCE per upload session, though: the synchronous route stages
-      // every file before any ingestion, so a second file re-running the
-      // census-wide cleanup would delete the failure rows the earlier files of
-      // this same upload just recorded (their batch IDs are outside the
-      // incoming family, and no uploadmetrics row exists yet to identify them
-      // as ours).
-      //
-      // "Has this session already replaced the census" is answered by a durable
-      // marker, not by "has this session staged any rows". The proxy was only
-      // almost equivalent: when every row of the first file dropped as an
-      // INSERT IGNORE duplicate, nothing was staged, and the second file re-ran
-      // the cleanup and destroyed the first file's failure rows.
-      //
-      // The marker is written in THIS transaction, alongside the cleanup, so the
-      // two always agree — a rollback loses both and the retry cleans again, a
-      // commit keeps both and later files skip.
-      const sessionAlreadyReplacedCensus =
+      const censusReplacementCompleted =
         uploadSessionID !== null &&
         (await uploadSessionHasCompletedReplacement(connectionManager, schema, uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID));
-      if (!sessionAlreadyReplacedCensus) {
-        await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, changedBy ?? null, transactionID);
-        if (uploadSessionID !== null) {
-          await markUploadSessionReplacementCompleted(connectionManager, schema, uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID);
-        }
-      }
+      if (!censusReplacementCompleted) throw new CensusReplacementIncompleteError(fileName, batchID, uploadSessionID);
     }
-
     await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
   }
 

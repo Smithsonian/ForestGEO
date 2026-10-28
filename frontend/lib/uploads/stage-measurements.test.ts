@@ -12,11 +12,13 @@ import {
   CENSUS_REPLACEMENT_REAPER_HEADROOM_FACTOR,
   CENSUS_REPLACEMENT_STARTED_EVENT,
   CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS,
+  CensusReplacementIncompleteError,
   EmptyMeasurementUploadError,
   InvalidFirstRowOrdinalError,
   MeasurementChunkResolutionError,
   parseFirstRowOrdinal,
   replaceCensusForCleanReupload,
+  stageMeasurementChunk,
   type CensusReplacementParams
 } from './stage-measurements';
 import { CensusReplacementMarkerColumnMissingError, resetUploadSessionReplacementMarkerCacheForTests } from './upload-session-replacement-marker';
@@ -605,6 +607,55 @@ describe('replaceCensusForCleanReupload', () => {
       expect(transactions.map(transactionKind)).not.toContain(COMPLETION);
     });
   });
+});
+
+describe('U9: staging refuses a clean re-upload whose census replacement is incomplete', () => {
+  const STAGING_TRANSACTION_ID = 'staging-tx';
+  const SOURCE_FORMAT_COLUMN_CHECK = /information_schema\.COLUMNS[\s\S]*SourceFormat/;
+  const STAGING_INSERT = /INSERT IGNORE INTO\s+\S+\.temporarymeasurements/;
+  const ANY_DELETE = /^\s*DELETE\b/i;
+
+  function makeStagingConnectionManager(markerValue: string | null) {
+    const issuedSQL: string[] = [];
+    const executeQuery = async (sql: string) => {
+      const statement = String(sql);
+      issuedSQL.push(statement);
+      if (SOURCE_FORMAT_COLUMN_CHECK.test(statement)) return [{ count: 1 }];
+      if (CENSUS_REPLACEMENT_STATEMENT.MARKER_COLUMN_STATE.test(statement)) return [{ tableCount: 1, columnCount: 1 }];
+      if (CENSUS_REPLACEMENT_STATEMENT.MARKER_PROBE.test(statement)) return [{ census_replacement_completed_at: markerValue }];
+      if (CENSUS_REPLACEMENT_STATEMENT.FAMILY_PROBE.test(statement)) return [];
+      throw new Error(`Staging reached a statement the guard should have prevented: ${statement.replace(/\s+/g, ' ').slice(0, 160)}`);
+    };
+    const connectionManager = { executeQuery, acquireApplicationLock: async () => true } as unknown as ConnectionManager;
+    return { connectionManager, issuedSQL };
+  }
+
+  it.each([
+    ['a session whose marker is unset', SESSION_ID],
+    ['no upload session at all', null]
+  ])(
+    'a CLEAN first chunk with %s throws CensusReplacementIncompleteError before any INSERT or DELETE (catches: leaving the inline cleanup in staging; silently appending to the old census)',
+    async (_label, uploadSessionID) => {
+      const { connectionManager, issuedSQL } = makeStagingConnectionManager(null);
+      let thrown: unknown;
+      try {
+        await stageMeasurementChunk(connectionManager, { ...replacementParams({ uploadSessionID }), transactionID: STAGING_TRANSACTION_ID });
+      } catch (error) {
+        thrown = error;
+      }
+      console.log(`[U9] session=${String(uploadSessionID)} threw=${thrown instanceof Error ? `${thrown.name}: ${thrown.message}` : String(thrown)}`);
+      console.log(
+        '[U9] statements issued',
+        issuedSQL.map(sql => sql.replace(/\s+/g, ' ').slice(0, 100))
+      );
+
+      expect(thrown).toBeInstanceOf(CensusReplacementIncompleteError);
+      const incomplete = thrown as CensusReplacementIncompleteError;
+      expect([incomplete.fileName, incomplete.batchID, incomplete.uploadSessionID]).toEqual([FILE_NAME, BATCH_ID, uploadSessionID]);
+      expect(issuedSQL.filter(sql => STAGING_INSERT.test(sql))).toEqual([]);
+      expect(issuedSQL.filter(sql => ANY_DELETE.test(sql))).toEqual([]);
+    }
+  );
 });
 
 describe('CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS', () => {
