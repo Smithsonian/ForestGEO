@@ -511,6 +511,7 @@ describe('UploadFireSQL — the reconciled upload outcome (#525 item 4)', () => 
   const ARCGIS_FILE_NAME = 'arcgis-import.xlsx';
   const ARCGIS_STAGED_ROWS = 4;
   const ARCGIS_COMMITTED_ROWS = 3;
+  const ARCGIS_SERVER_BATCH = 'arc0000000000000000000000561';
 
   interface VerifiedCounts {
     processedCount: number;
@@ -533,7 +534,7 @@ describe('UploadFireSQL — the reconciled upload outcome (#525 item 4)', () => 
         const body = JSON.parse(String(init?.body));
         return Promise.resolve(jsonResponse({ transactionCompleted: true, batchID: body.batchID, failingRows: [], ...sqlPacketLoadExtras }));
       }
-      if (url.pathname === '/api/arcgis/commit') return Promise.resolve(jsonResponse({ rowCount: ARCGIS_COMMITTED_ROWS }));
+      if (url.pathname === '/api/arcgis/commit') return Promise.resolve(jsonResponse({ rowCount: ARCGIS_COMMITTED_ROWS, batchID: ARCGIS_SERVER_BATCH }));
       if (url.pathname === '/api/verifyupload') return Promise.resolve(jsonResponse({ count: stagedRowsByFile[url.searchParams.get('fileName') ?? ''] }));
       if (url.pathname === '/api/verifyprocessing') return Promise.resolve(jsonResponse({ processedCount: 0, failedCount: 0, remainingCount: 0 }));
       if (url.pathname === '/api/verifysession') return Promise.resolve(jsonResponse(verifiedByFile[url.searchParams.get('fileID') ?? '']));
@@ -674,5 +675,48 @@ describe('UploadFireSQL — the reconciled upload outcome (#525 item 4)', () => 
     await waitFor(() => expect(setReviewState).toHaveBeenCalledWith(ReviewStates.UPLOAD_AZURE), { timeout: UPLOAD_COMPLETION_TIMEOUT_MS });
     logCalls('ArcGIS');
     expect(recordedOutcomes()).toEqual([{ kind: 'ingestion', sourceRows: ARCGIS_STAGED_ROWS, insertedRows: 3, failedRows: 1 }]);
+  });
+
+  it('sends no batch, then verifies and ingests the batch the ArcGIS commit returns (UA1, #561)', async () => {
+    fetchMock.mockImplementation(
+      routeMeasurementUpload({ [ARCGIS_FILE_NAME]: ARCGIS_COMMITTED_ROWS }, { [ARCGIS_FILE_NAME]: { processedCount: 3, failedCount: 1 } })
+    );
+    const arcgisFile = new FileWithStream(new File(['xlsx'], ARCGIS_FILE_NAME), false);
+    renderMeasurementUpload([arcgisFile], {
+      sourceFormat: SourceFormat.arcgis_xlsx,
+      arcgisImportSession: { importSessionId: 'arcgis-session-561', fileName: ARCGIS_FILE_NAME, rowCount: ARCGIS_STAGED_ROWS },
+      selectedDelimiters: {}
+    });
+
+    await waitFor(() => expect(setReviewState).toHaveBeenCalledWith(ReviewStates.UPLOAD_AZURE), { timeout: UPLOAD_COMPLETION_TIMEOUT_MS });
+    const requestedURLs = fetchMock.mock.calls.map(([input]) => new URL(String(input), 'http://localhost'));
+    const commitBody = JSON.parse(String(fetchMock.mock.calls.find(([input]) => String(input).includes('/api/arcgis/commit'))?.[1]?.body));
+    const verify = requestedURLs.find(url => url.pathname === '/api/verifyupload');
+    const ingest = requestedURLs.find(url => url.pathname.startsWith('/api/setupbulkprocedure/'));
+    console.log(`[UA1] commit body=${JSON.stringify(commitBody)} verify=${verify?.search} ingest=${ingest?.pathname}`);
+    expect(commitBody, 'a stale-batch guard (P21) refuses any batch the UI sends, so the UI sends none').not.toHaveProperty('batchID');
+    expect(verify?.searchParams.get('batchID')).toBe(ARCGIS_SERVER_BATCH);
+    expect(ingest?.pathname).toBe(`/api/setupbulkprocedure/${encodeURIComponent(ARCGIS_FILE_NAME)}/${ARCGIS_SERVER_BATCH}`);
+  });
+
+  it('fails the upload when the commit answer carries no batch (catches: a silent fallback to a batch the server never staged)', async () => {
+    const route = routeMeasurementUpload({ [ARCGIS_FILE_NAME]: ARCGIS_COMMITTED_ROWS }, { [ARCGIS_FILE_NAME]: { processedCount: 3, failedCount: 1 } });
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(input), 'http://localhost').pathname === '/api/arcgis/commit'
+        ? Promise.resolve(jsonResponse({ rowCount: ARCGIS_COMMITTED_ROWS }))
+        : route(input, init)
+    );
+    const arcgisFile = new FileWithStream(new File(['xlsx'], ARCGIS_FILE_NAME), false);
+    renderMeasurementUpload([arcgisFile], {
+      sourceFormat: SourceFormat.arcgis_xlsx,
+      arcgisImportSession: { importSessionId: 'arcgis-session-561', fileName: ARCGIS_FILE_NAME, rowCount: ARCGIS_STAGED_ROWS },
+      selectedDelimiters: {}
+    });
+
+    await waitFor(() => expect(setUploadError).toHaveBeenCalled(), { timeout: UPLOAD_COMPLETION_TIMEOUT_MS });
+    const reportedError = String(setUploadError.mock.calls[0]?.[0]?.message ?? setUploadError.mock.calls[0]?.[0]);
+    console.log(`[UA1] missing batch error: ${reportedError}`);
+    expect(reportedError).toContain(ARCGIS_FILE_NAME);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/setupbulkprocedure/'))).toBe(false);
   });
 });

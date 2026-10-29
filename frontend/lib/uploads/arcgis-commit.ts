@@ -1,51 +1,72 @@
 /**
- * ArcGIS commit orchestration — the single mechanism for committing a
- * pre-flighted ArcGIS import session into `temporarymeasurements`.
+ * ArcGIS commit orchestration (#561) — the single mechanism for committing a pre-flighted ArcGIS import session.
+ * Both POST /api/arcgis/commit and the background upload worker call commitArcgisImport; the caller owns
+ * authentication, scope and upload-session ownership.
  *
- * Both the HTTP commit route (app/api/arcgis/commit/route.ts) and the
- * background upload worker call commitArcgisImport; neither owns any commit
- * internals of its own. The caller owns authentication, scope, and
- * upload-session-ownership checks; this function owns the commit transaction
- * (claim -> staging insert -> dropped-row persistence -> changelog ->
- * mark-committed) and is idempotent for same-batch retries via the
- * alreadyCommitted path of claimArcgisImportSessionForCommit.
+ * Contract (replaces the old all-or-nothing transaction): an ArcGIS commit is a sequence of short, separately
+ * committed transactions tracked on its import session — claim (C), clear this file's staged rows (S0), clear this
+ * import's own rows in the census (F0), stage the import rows in windows (S), replace the census for a CLEAN_REUPLOAD
+ * (R, #555's windows), finalize (F). Each transaction is atomic on its own. The session reaches `committed` only in F,
+ * after verifying that every source row is accounted for; until then nothing is complete and nothing ingests it.
+ * Every retry restarts from the durable import rows. Rows are staged before the census is replaced, so a failure in
+ * S leaves the old census whole, and a failure in R or F leaves it partly or fully emptied until a retry finishes the
+ * commit — the consequence the user accepted.
  */
-
-import moment from 'moment';
+import crypto from 'crypto';
 import ailogger from '@/ailogger';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
-import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import {
+  ARCGIS_COMMIT_CLAIM_KIND,
   ArcgisImportSessionError,
-  claimArcgisImportSessionForCommit,
+  claimArcgisImportCommitAttempt,
   ensureArcgisImportTables,
-  markArcgisImportSessionCommitted
+  lockArcgisImportSessionForCommitUnit,
+  markArcgisImportCensusReplacementCompleted,
+  type ArcgisCommitAttempt,
+  type ArcgisCommitClaim,
+  type ArcgisCommitClaimKind,
+  type ArcgisCommitUnitSnapshot
 } from '@/lib/arcgis/import-session';
 import {
-  buildDroppedMeasurementFailureReason,
-  cleanupPreviousFileUploads,
-  cleanupStaleMeasurementBatchesForFile,
-  ensureTemporaryMeasurementsSourceFormatColumn,
-  findDroppedMeasurementCandidates,
-  insertTemporaryMeasurementsInBatches,
-  type DroppedMeasurementRow
+  CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
+  deleteBatchFamilyRowsWindow,
+  deleteStagedRowsForFileWindow,
+  ensureTemporaryMeasurementsSourceFormatColumn
 } from '@/lib/ingestion/temporary-measurements';
-import { buildFileUploadChangelogRecordID, measurementFileIDValidationError, mergeFileUploadChunkIntoMetadata } from '@/lib/uploads/file-names';
-import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
 import {
   BatchIDContainsSubBatchSeparatorError,
   MAX_ORIGINAL_BATCH_ID_LENGTH,
   OriginalBatchIDTooLongError,
-  SUB_BATCH_SEPARATOR,
-  SubBatchOrdinalOverflowError,
-  subBatchIDForRowOrdinal
+  SUB_BATCH_SEPARATOR
 } from '@/lib/uploads/batch-family';
+import {
+  CENSUS_REPLACEMENT_COMPLETED_EVENT,
+  CENSUS_REPLACEMENT_STARTED_EVENT,
+  CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS,
+  runCensusReplacementUnits,
+  type CensusReplacementOwner
+} from '@/lib/uploads/stage-measurements';
+import { CENSUS_REPLACEMENT_MARKER_COLUMN, ensureUploadSessionReplacementMarkerColumn } from '@/lib/uploads/upload-session-replacement-marker';
+import { stageArcgisImportWindow } from '@/lib/uploads/arcgis-commit-staging';
+import { finalizeArcgisCommit } from '@/lib/uploads/arcgis-commit-finalize';
 
-const ARCGIS_COMMIT_INSERT_FAILURE_FALLBACK = 'Unknown error during insert';
-const CHANGELOG_TABLE_NAME = 'file_upload';
+export { ArcgisCensusReplacementIncompleteError, ArcgisCommitVerificationError } from '@/lib/uploads/arcgis-commit-finalize';
+
+/** Source rows per staging window: the worker's chunk size, measured at p95 ≤ 0.6 s at 150k rows. */
+export const ARCGIS_STAGING_WINDOW_ROWS = 5_000;
+export const ARCGIS_COMMIT_COMPLETED_EVENT = 'upload.arcgis_commit.completed';
+export const ARCGIS_COMMIT_FAILED_EVENT = 'upload.arcgis_commit.failed';
+export const ARCGIS_COMMIT_UNIT = {
+  CLAIM: 'claim',
+  CLEAR_STAGED: 'clear_staged',
+  CLEAR_FAMILY: 'clear_family',
+  STAGING_WINDOW: 'staging_window',
+  REPLACEMENT: 'replacement',
+  FINALIZE: 'finalize'
+} as const;
+type ArcgisCommitUnit = (typeof ARCGIS_COMMIT_UNIT)[keyof typeof ARCGIS_COMMIT_UNIT];
 
 export interface CommitArcgisImportParams {
   schema: string;
@@ -53,7 +74,8 @@ export interface CommitArcgisImportParams {
   censusID: number;
   importSessionId: string;
   fileName: string;
-  batchID: string;
+  /** Ignored except to replay a session committed before #561; shape-checked when present. */
+  batchID?: string;
   uploadMode: UploadMode;
   userId: string;
   uploadSessionID: string;
@@ -63,238 +85,296 @@ export interface CommitArcgisImportResult {
   rowCount: number;
   fileName: string;
   alreadyCommitted: boolean;
+  /** The batch the rows were staged under: derived from the import session, or the stored batch of a legacy replay. */
+  batchID: string;
 }
 
-function toNullableNumber(value: unknown): number | null {
-  if (value === undefined || value === null || value === '') return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+interface ArcgisCommitProgress {
+  unit: ArcgisCommitUnit;
+  phase: string | null;
+  claim: ArcgisCommitClaimKind | null;
+  previousUploadSessionID: string | null;
+  batchID: string | null;
+  lastDurableCursor: number;
+  stagedRows: number;
+  droppedRows: number;
+  leftoverStagedRowsCleared: number;
+  leftoverFamilyRowsCleared: number;
+  stagingWindowCount: number;
+  slowestTransactionMs: number;
 }
 
-/**
- * Stages each row under its final sub-batch, so setup has nothing to split. The
- * batch ID length is checked before the transaction; a session with more rows
- * than the sub-batch suffix can name is only knowable once it is claimed.
- */
-function assignArcgisRowBatchIDs(batchID: string, rowCount: number): string[] {
-  try {
-    return Array.from({ length: rowCount }, (_, rowOrdinal) => subBatchIDForRowOrdinal(batchID, rowOrdinal));
-  } catch (error: unknown) {
-    if (error instanceof SubBatchOrdinalOverflowError) {
-      throw new ArcgisImportSessionError(error.message, HTTPResponses.INVALID_REQUEST);
-    }
-    throw error;
-  }
-}
+type GuardedUnitOutcome<T> = { commitCompleted: true; snapshot: ArcgisCommitUnitSnapshot } | { commitCompleted: false; value: T };
 
-export async function commitArcgisImport(connectionManager: ConnectionManager, params: CommitArcgisImportParams): Promise<CommitArcgisImportResult> {
-  const { schema, plotID, censusID, importSessionId, batchID, uploadMode, userId, uploadSessionID } = params;
-
+function assertRequestBatchShape(batchID: string): void {
   if (batchID.length > MAX_ORIGINAL_BATCH_ID_LENGTH) {
     throw new ArcgisImportSessionError(new OriginalBatchIDTooLongError(batchID).message, HTTPResponses.INVALID_REQUEST);
   }
-
   if (batchID.includes(SUB_BATCH_SEPARATOR)) {
     throw new ArcgisImportSessionError(new BatchIDContainsSubBatchSeparatorError(batchID).message, HTTPResponses.INVALID_REQUEST);
   }
+}
 
-  await ensureArcgisImportTables(schema);
-  await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
+async function timed<T>(progress: ArcgisCommitProgress, run: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    return await run();
+  } finally {
+    progress.slowestTransactionMs = Math.max(progress.slowestTransactionMs, Date.now() - startedAt);
+  }
+}
 
-  let insertedCount = 0;
-  let fileName = params.fileName;
-  let alreadyCommitted = false;
-  await connectionManager.withTransaction(async tx => {
-    const transactionID = tx.id;
-    const staged = await claimArcgisImportSessionForCommit(
-      {
-        schema,
-        importSessionId,
-        plotID,
-        censusID,
-        userId,
-        fileName: params.fileName,
-        batchID,
-        uploadSessionID
+/** Every transaction after the claim: the guard first, then the unit's work only if this attempt still owns the import. */
+function runGuardedUnit<T>(
+  connectionManager: ConnectionManager,
+  attempt: ArcgisCommitAttempt,
+  progress: ArcgisCommitProgress,
+  work: (snapshot: ArcgisCommitUnitSnapshot, transactionID: string) => Promise<T>
+): Promise<GuardedUnitOutcome<T>> {
+  return timed(progress, () =>
+    connectionManager.withTransaction<GuardedUnitOutcome<T>>(
+      async tx => {
+        const snapshot = await lockArcgisImportSessionForCommitUnit(connectionManager, attempt, tx.id);
+        progress.lastDurableCursor = snapshot.stagingNextRowIndex;
+        if (snapshot.commitCompleted) return { commitCompleted: true, snapshot };
+        return { commitCompleted: false, value: await work(snapshot, tx.id) };
       },
-      transactionID
+      { timeoutMs: CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS }
+    )
+  );
+}
+
+async function clearLeftoverStagedRows(
+  connectionManager: ConnectionManager,
+  attempt: ArcgisCommitAttempt,
+  fileName: string,
+  progress: ArcgisCommitProgress
+): Promise<ArcgisCommitUnitSnapshot | null> {
+  progress.unit = ARCGIS_COMMIT_UNIT.CLEAR_STAGED;
+  for (let windowOrdinal = 1; ; windowOrdinal += 1) {
+    progress.phase = `window ${windowOrdinal}`;
+    const unit = await runGuardedUnit(connectionManager, attempt, progress, (_snapshot, transactionID) =>
+      deleteStagedRowsForFileWindow(connectionManager, attempt.schema, fileName, attempt.plotID, attempt.censusID, ARCGIS_STAGING_WINDOW_ROWS, transactionID)
     );
-    fileName = staged.fileName;
-    if (staged.alreadyCommitted) {
-      insertedCount = staged.rowCount;
-      alreadyCommitted = true;
-      return;
-    }
+    if (unit.commitCompleted) return unit.snapshot;
+    progress.leftoverStagedRowsCleared += unit.value;
+    if (unit.value < ARCGIS_STAGING_WINDOW_ROWS) return null;
+  }
+}
 
-    // The committed name comes from the stored session, not params.fileName, and
-    // arcgis_import_sessions.file_id is varchar(255) — wider than the FileID
-    // chain this row set is about to enter. Re-check at the write boundary so a
-    // session captured before the length contract existed fails with a readable
-    // error instead of ER_DATA_TOO_LONG mid-transaction.
-    const fileIDError = measurementFileIDValidationError(fileName);
-    if (fileIDError) {
-      throw new ArcgisImportSessionError(fileIDError, HTTPResponses.INVALID_REQUEST);
-    }
-
-    if (staged.rows.length === 0) {
-      throw new ArcgisImportSessionError('ArcGIS import session contains no rows', HTTPResponses.UNPROCESSABLE_ENTITY);
-    }
-
-    const rowBatchIDs = assignArcgisRowBatchIDs(batchID, staged.rows.length);
-
-    if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-      await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, userId, transactionID);
-    }
-    await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
-
-    insertedCount = await insertTemporaryMeasurementsInBatches(
-      connectionManager,
-      schema,
-      staged.rows,
-      fileName,
-      rowBatchIDs,
-      uploadSessionID,
-      SourceFormat.arcgis_xlsx,
-      plotID,
-      censusID,
-      transactionID
-    );
-
-    const droppedRowCount = staged.rows.length - insertedCount;
-    if (droppedRowCount > 0) {
-      ailogger.error(
-        `DATA INTEGRITY WARNING: Expected ${staged.rows.length} ArcGIS rows but only ${insertedCount} were inserted for ${fileName}-${batchID}. ` +
-          `${droppedRowCount} row(s) were silently dropped by INSERT IGNORE (likely duplicates). This indicates potential data loss!`
-      );
-
-      const droppedCandidates = await findDroppedMeasurementCandidates(
+async function clearLeftoverFamilyRows(
+  connectionManager: ConnectionManager,
+  attempt: ArcgisCommitAttempt,
+  fileName: string,
+  progress: ArcgisCommitProgress
+): Promise<ArcgisCommitUnitSnapshot | null> {
+  progress.unit = ARCGIS_COMMIT_UNIT.CLEAR_FAMILY;
+  for (let windowOrdinal = 1; ; windowOrdinal += 1) {
+    progress.phase = `window ${windowOrdinal}`;
+    const unit = await runGuardedUnit(connectionManager, attempt, progress, (_snapshot, transactionID) =>
+      deleteBatchFamilyRowsWindow(
         connectionManager,
-        schema,
+        attempt.schema,
         fileName,
-        rowBatchIDs,
-        plotID,
-        censusID,
-        staged.rows,
+        attempt.batchID,
+        attempt.plotID,
+        attempt.censusID,
+        attempt.changedBy,
         transactionID
-      );
-      const droppedRows: DroppedMeasurementRow[] = droppedCandidates.map(candidate => {
-        const row = staged.rows[candidate.rowOrdinal - 1];
-        return Object.assign({}, row, {
-          failureReason: buildDroppedMeasurementFailureReason(row, candidate.existingBatch),
-          sourceRowIndex: candidate.rowOrdinal
-        }) as DroppedMeasurementRow;
-      });
-
-      if (droppedRows.length !== droppedRowCount) {
-        ailogger.warn(
-          `Dropped-row batch detection identified ${droppedRows.length} of ${droppedRowCount} dropped ArcGIS row(s) for ${fileName}-${batchID}. ` +
-            `Persisted unresolved ingestion errors may be incomplete for this commit.`
-        );
-      }
-
-      if (droppedRows.length > 0) {
-        // Unlike the CSV sqlpacketload path, which wraps failure-row persistence in a retry-once-then-uploadintegrityalerts
-        // best-effort fallback, this commit deliberately persists dropped rows inside the same transaction as the staging
-        // insert so the commit is all-or-nothing: if failure-row persistence (or its audit) throws, the entire commit rolls
-        // back rather than leaving a half-committed batch. Do not "restore parity" with a best-effort fallback here — that
-        // would weaken atomicity. recordAuditedIngestionFailureRows (#507) bounds its before/after audit to exactly these
-        // rows' (fileID, batchID, SourceRowIndex) keys, never the whole batch scope.
-        const droppedRowAuditResult = await recordAuditedIngestionFailureRows({
-          connectionManager,
-          schema,
-          rows: droppedRows.map(row => ({
-            plotID,
-            censusID,
-            tag: row.tag,
-            stemTag: row.stemtag || null,
-            spCode: row.spcode,
-            quadrat: row.quadrat,
-            x: toNullableNumber(row.lx),
-            y: toNullableNumber(row.ly),
-            dbh: toNullableNumber(row.dbh),
-            hom: toNullableNumber(row.hom),
-            date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-            codes: row.codes || null,
-            comments: null,
-            fileID: fileName,
-            batchID,
-            sourceRowIndex: row.sourceRowIndex,
-            failureReason: row.failureReason || ARCGIS_COMMIT_INSERT_FAILURE_FALLBACK
-          })),
-          transactionID,
-          changedBy: userId,
-          plotID,
-          censusID
-        });
-        ailogger.info(
-          `Persisted ${droppedRows.length} dropped ArcGIS rows as unresolved ingestion errors for ${fileName}-${batchID} ` +
-            `(audited: ${droppedRowAuditResult.insertedCount} inserted, ${droppedRowAuditResult.updatedCount} updated, ` +
-            `${droppedRowAuditResult.unchangedCount} unchanged)`
-        );
-      }
-    }
-
-    // Mirror the CSV measurements path (POST /api/sqlpacketload): record a single
-    // file_upload row in unifiedchangelog so the ArcGIS commit surfaces in the
-    // upload-history UI with the same provenance shape (sourceFormat tags it as
-    // arcgis_xlsx). Unlike the CSV path, this write stays inside the commit
-    // transaction with no best-effort try/catch fallback: the commit is
-    // all-or-nothing, so if changelog tracking fails the staging insert rolls
-    // back too rather than leaving an upload invisible in history.
-    //
-    // RecordID is keyed by upload ATTEMPT (uploadSessionID), not by fileName
-    // alone — see buildFileUploadChangelogRecordID's doc comment (#507). ArcGIS
-    // commits always carry a non-null uploadSessionID, so there is no fallback
-    // branch here.
-    const fileUploadRecordID = buildFileUploadChangelogRecordID(fileName, uploadSessionID);
-    // FOR UPDATE: serializes this read-merge-write against any concurrent
-    // writer of the SAME RecordID under the existing per-commit transaction
-    // (same reasoning as the CSV path's identical lock).
-    const existingEntrySQL = safeFormatQuery(
-      schema,
-      `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
-       WHERE TableName = '${CHANGELOG_TABLE_NAME}' AND RecordID = ? AND CensusID = ?
-       ORDER BY ChangeID DESC LIMIT 1
-       FOR UPDATE`
+      )
     );
-    const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileUploadRecordID, censusID], transactionID);
+    if (unit.commitCompleted) return unit.snapshot;
+    progress.leftoverFamilyRowsCleared += unit.value;
+    if (unit.value < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return null;
+  }
+}
 
-    if (existingEntry.length === 0) {
-      const uploadMetadata: Record<string, unknown> = {
-        fileName,
-        uploadSessionID,
-        formType: FormType.measurements,
-        sourceFormat: SourceFormat.arcgis_xlsx,
-        uploadMode
-      };
-      mergeFileUploadChunkIntoMetadata(uploadMetadata, batchID, { rowCount: insertedCount, droppedCount: droppedRowCount });
-      const insertChangelogSQL = safeFormatQuery(
-        schema,
-        `INSERT INTO ??.unifiedchangelog
-        (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
-        VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`
-      );
-      await connectionManager.executeQuery(
-        insertChangelogSQL,
-        [CHANGELOG_TABLE_NAME, fileUploadRecordID, 'INSERT', JSON.stringify(uploadMetadata), userId, plotID, censusID],
-        transactionID
-      );
-    } else {
-      // Keyed by batchID (#507), same as the CSV path — see
-      // mergeFileUploadChunkIntoMetadata's doc comment. A retry that reaches
-      // this branch under the SAME batchID (claimArcgisImportSessionForCommit
-      // normally short-circuits that case via alreadyCommitted, so this is
-      // belt-and-suspenders) replaces its own contribution rather than adding to it.
-      const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-      metadata.sourceFormat = SourceFormat.arcgis_xlsx;
-      metadata.uploadMode = uploadMode;
-      mergeFileUploadChunkIntoMetadata(metadata, batchID, { rowCount: insertedCount, droppedCount: droppedRowCount });
-      const updateChangelogSQL = safeFormatQuery(schema, `UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`);
-      await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
-    }
+async function stageImportRows(
+  connectionManager: ConnectionManager,
+  attempt: ArcgisCommitAttempt,
+  rowCount: number,
+  progress: ArcgisCommitProgress
+): Promise<ArcgisCommitUnitSnapshot | null> {
+  progress.unit = ARCGIS_COMMIT_UNIT.STAGING_WINDOW;
+  let nextRowIndex = 0;
+  while (nextRowIndex < rowCount) {
+    progress.phase = `window ${progress.stagingWindowCount + 1}`;
+    const unit = await runGuardedUnit(connectionManager, attempt, progress, (snapshot, transactionID) =>
+      stageArcgisImportWindow(connectionManager, attempt, snapshot, ARCGIS_STAGING_WINDOW_ROWS, transactionID)
+    );
+    if (unit.commitCompleted) return unit.snapshot;
+    nextRowIndex = unit.value.nextRowIndex;
+    progress.lastDurableCursor = nextRowIndex;
+    progress.stagingWindowCount += 1;
+    progress.stagedRows += unit.value.insertedRows;
+    progress.droppedRows += unit.value.failureRows;
+  }
+  return null;
+}
 
-    await markArcgisImportSessionCommitted({ schema, importSessionId, insertedRowCount: insertedCount }, transactionID);
+/** The census replacement's owner for an ArcGIS commit: the unit guard as the lock, the per-import marker as the completion. */
+function arcgisCensusReplacementOwner(
+  connectionManager: ConnectionManager,
+  attempt: ArcgisCommitAttempt,
+  progress: ArcgisCommitProgress
+): CensusReplacementOwner {
+  let replacementTransactionOrdinal = 0;
+  return {
+    lockForUnit: async transactionID => {
+      replacementTransactionOrdinal += 1;
+      progress.phase = `replacement transaction ${replacementTransactionOrdinal}`;
+      const snapshot = await lockArcgisImportSessionForCommitUnit(connectionManager, attempt, transactionID);
+      return snapshot.commitCompleted || snapshot.censusReplacementCompleted ? 'marker_already_set' : 'proceed';
+    },
+    recordCompletion: transactionID => markArcgisImportCensusReplacementCompleted(connectionManager, attempt, transactionID)
+  };
+}
+
+async function replaceCensus(connectionManager: ConnectionManager, attempt: ArcgisCommitAttempt, progress: ArcgisCommitProgress): Promise<void> {
+  progress.unit = ARCGIS_COMMIT_UNIT.REPLACEMENT;
+  progress.phase = null;
+  const logKeys = {
+    schema: attempt.schema,
+    plotID: attempt.plotID,
+    censusID: attempt.censusID,
+    uploadSessionID: attempt.uploadSessionID,
+    batchID: attempt.batchID,
+    importSessionId: attempt.importSessionId
+  };
+  ailogger.info(CENSUS_REPLACEMENT_STARTED_EVENT, logKeys);
+  const startedAt = Date.now();
+  const run = await runCensusReplacementUnits(
+    connectionManager,
+    { schema: attempt.schema, plotID: attempt.plotID, censusID: attempt.censusID, incomingBatchID: attempt.batchID, changedBy: attempt.changedBy },
+    arcgisCensusReplacementOwner(connectionManager, attempt, progress)
+  );
+  progress.slowestTransactionMs = Math.max(progress.slowestTransactionMs, run.slowestWindowMs);
+  ailogger.info(CENSUS_REPLACEMENT_COMPLETED_EVENT, { ...logKeys, ...run, elapsedMs: Date.now() - startedAt });
+}
+
+function claimTransaction(
+  connectionManager: ConnectionManager,
+  params: CommitArcgisImportParams,
+  attemptID: string,
+  progress: ArcgisCommitProgress
+): Promise<ArcgisCommitClaim> {
+  return timed(progress, () =>
+    connectionManager.withTransaction(
+      tx =>
+        claimArcgisImportCommitAttempt(
+          connectionManager,
+          {
+            schema: params.schema,
+            importSessionId: params.importSessionId,
+            plotID: params.plotID,
+            censusID: params.censusID,
+            userId: params.userId,
+            fileName: params.fileName,
+            requestBatchID: params.batchID ?? null,
+            uploadMode: params.uploadMode,
+            uploadSessionID: params.uploadSessionID,
+            attemptID
+          },
+          tx.id
+        ),
+      { timeoutMs: CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS }
+    )
+  );
+}
+
+export async function commitArcgisImport(connectionManager: ConnectionManager, params: CommitArcgisImportParams): Promise<CommitArcgisImportResult> {
+  if (params.batchID !== undefined) assertRequestBatchShape(params.batchID);
+
+  await ensureArcgisImportTables(params.schema);
+  await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, params.schema);
+  await ensureUploadSessionReplacementMarkerColumn(connectionManager, params.schema, CENSUS_REPLACEMENT_MARKER_COLUMN);
+
+  const attemptID = crypto.randomUUID();
+  const startedAt = Date.now();
+  const progress: ArcgisCommitProgress = {
+    unit: ARCGIS_COMMIT_UNIT.CLAIM,
+    phase: null,
+    claim: null,
+    previousUploadSessionID: null,
+    batchID: null,
+    lastDurableCursor: 0,
+    stagedRows: 0,
+    droppedRows: 0,
+    leftoverStagedRowsCleared: 0,
+    leftoverFamilyRowsCleared: 0,
+    stagingWindowCount: 0,
+    slowestTransactionMs: 0
+  };
+  const identity = () => ({
+    schema: params.schema,
+    plotID: params.plotID,
+    censusID: params.censusID,
+    importSessionId: params.importSessionId,
+    batchID: progress.batchID,
+    uploadSessionID: params.uploadSessionID,
+    attemptID,
+    claim: progress.claim,
+    previousUploadSessionID: progress.previousUploadSessionID
   });
 
-  return { rowCount: insertedCount, fileName, alreadyCommitted };
+  try {
+    const claim = await claimTransaction(connectionManager, params, attemptID, progress);
+    progress.claim = claim.kind;
+    progress.previousUploadSessionID = claim.previousUploadSessionID;
+    progress.batchID = claim.batchID;
+    const complete = (rowCount: number, alreadyCommitted: boolean): CommitArcgisImportResult => {
+      ailogger.info(ARCGIS_COMMIT_COMPLETED_EVENT, {
+        ...identity(),
+        alreadyCommitted,
+        stagedRows: progress.stagedRows,
+        droppedRows: progress.droppedRows,
+        leftoverStagedRowsCleared: progress.leftoverStagedRowsCleared,
+        leftoverFamilyRowsCleared: progress.leftoverFamilyRowsCleared,
+        stagingWindowCount: progress.stagingWindowCount,
+        slowestTransactionMs: progress.slowestTransactionMs,
+        elapsedMs: Date.now() - startedAt
+      });
+      return { rowCount, fileName: claim.fileName, alreadyCommitted, batchID: claim.batchID };
+    };
+    if (claim.kind === ARCGIS_COMMIT_CLAIM_KIND.ALREADY_COMMITTED) return complete(claim.rowCount, true);
+
+    const attempt: ArcgisCommitAttempt = {
+      schema: params.schema,
+      importSessionId: params.importSessionId,
+      plotID: params.plotID,
+      censusID: params.censusID,
+      batchID: claim.batchID,
+      uploadMode: params.uploadMode,
+      uploadSessionID: params.uploadSessionID,
+      attemptID,
+      changedBy: params.userId
+    };
+    const finishedByPeer =
+      (await clearLeftoverStagedRows(connectionManager, attempt, claim.fileName, progress)) ??
+      (await clearLeftoverFamilyRows(connectionManager, attempt, claim.fileName, progress)) ??
+      (await stageImportRows(connectionManager, attempt, claim.rowCount, progress));
+    if (finishedByPeer) return complete(finishedByPeer.committedRowCount, true);
+
+    if (params.uploadMode === UploadMode.CLEAN_REUPLOAD) await replaceCensus(connectionManager, attempt, progress);
+
+    progress.unit = ARCGIS_COMMIT_UNIT.FINALIZE;
+    progress.phase = null;
+    const finalUnit = await runGuardedUnit(connectionManager, attempt, progress, (snapshot, transactionID) =>
+      finalizeArcgisCommit(connectionManager, attempt, snapshot, transactionID)
+    );
+    if (finalUnit.commitCompleted) return complete(finalUnit.snapshot.committedRowCount, true);
+    return complete(finalUnit.value.committedRowCount, false);
+  } catch (error: unknown) {
+    // A logging boundary, not a handler: the original error object is rethrown unchanged.
+    ailogger.error(ARCGIS_COMMIT_FAILED_EVENT, error instanceof Error ? error : undefined, {
+      ...identity(),
+      unit: progress.unit,
+      phase: progress.phase,
+      lastDurableCursor: progress.lastDurableCursor,
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      elapsedMs: Date.now() - startedAt
+    });
+    throw error;
+  }
 }

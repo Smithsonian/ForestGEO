@@ -25,6 +25,8 @@ import {
   ensureUploadSessionsTable
 } from '@/config/uploadsessiontracker';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { deleteOrphanedTemporaryMeasurements, findOrphanedTemporaryMeasurements } from '@/lib/uploads/orphaned-staging-cleanup';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
 
@@ -40,61 +42,6 @@ interface CleanupResult {
   staleTransactionsCleared: number;
   errors: string[];
   duration: number;
-}
-
-/**
- * Find orphaned temporary measurements (not associated with active session)
- */
-async function findOrphanedTemporaryMeasurements(schema: string): Promise<{ fileId: string; rowCount: number }[]> {
-  const query = `
-    SELECT
-      tm.FileID as fileId,
-      COUNT(*) as rowCount
-    FROM ${schema}.temporarymeasurements tm
-    LEFT JOIN ${schema}.upload_sessions us ON tm.FileID = us.file_id
-      AND us.state IN ('initialized', 'uploading', 'uploaded', 'processing', 'collapsing')
-    WHERE us.session_id IS NULL
-      AND tm.id IS NOT NULL
-    GROUP BY tm.FileID
-  `;
-
-  let conn: PoolConnection | null = null;
-  try {
-    conn = await getConn();
-    const results = await runQuery(conn, query);
-    if (!Array.isArray(results)) return [];
-    return results.map((row: any) => ({
-      fileId: row.fileId,
-      rowCount: row.rowCount
-    }));
-  } catch (error: any) {
-    // Table might not exist yet
-    if (error.code === 'ER_NO_SUCH_TABLE') {
-      return [];
-    }
-    throw error;
-  } finally {
-    if (conn) conn.release();
-  }
-}
-
-/**
- * Delete orphaned temporary measurements by FileID
- */
-async function deleteOrphanedTemporaryMeasurements(schema: string, fileIds: string[]): Promise<number> {
-  if (fileIds.length === 0) return 0;
-
-  const placeholders = fileIds.map(() => '?').join(',');
-  const query = `DELETE FROM ${schema}.temporarymeasurements WHERE FileID IN (${placeholders})`;
-
-  let conn: PoolConnection | null = null;
-  try {
-    conn = await getConn();
-    const result = await runQuery(conn, query, fileIds);
-    return (result as any).affectedRows || 0;
-  } finally {
-    if (conn) conn.release();
-  }
 }
 
 /**
@@ -228,12 +175,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // 2. Find and cleanup orphaned temporary measurements
     if (cleanupOrphanedTemp) {
       try {
-        const orphaned = await findOrphanedTemporaryMeasurements(schema);
+        const orphaned = await findOrphanedTemporaryMeasurements(ConnectionManager.getInstance(), schema);
         result.orphanedTempRowsFound = orphaned.reduce((sum, o) => sum + o.rowCount, 0);
 
         if (!dryRun && orphaned.length > 0) {
           const fileIds = orphaned.map(o => o.fileId);
-          const deleted = await deleteOrphanedTemporaryMeasurements(schema, fileIds);
+          const deleted = await deleteOrphanedTemporaryMeasurements(ConnectionManager.getInstance(), schema, fileIds);
           result.orphanedTempRowsDeleted += deleted;
           ailogger.info(`[Cleanup API] Deleted ${deleted} orphaned temporary measurements`);
         }
@@ -326,7 +273,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
 
     try {
-      const orphaned = await findOrphanedTemporaryMeasurements(schema);
+      const orphaned = await findOrphanedTemporaryMeasurements(ConnectionManager.getInstance(), schema);
       status.orphanedTempMeasurements = orphaned.reduce((sum, o) => sum + o.rowCount, 0);
     } catch (error: any) {
       ailogger.warn('[Cleanup API] Could not get orphaned temp status:', error.message);

@@ -694,7 +694,11 @@ create table if not exists arcgis_import_sessions
     committed_row_count         int                                 null,
     committed_at                timestamp                           null,
     created_at                  timestamp default CURRENT_TIMESTAMP not null,
-    updated_at                  timestamp default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP
+    updated_at                  timestamp default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    committed_upload_mode           varchar(32)                         null,
+    commit_attempt_id               varchar(64)                         null,
+    census_replacement_completed_at timestamp default null              null,
+    staging_next_row_index          int       default 0                 not null
 );
 
 create index idx_arcgis_import_scope

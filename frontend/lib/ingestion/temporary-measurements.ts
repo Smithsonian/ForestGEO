@@ -292,6 +292,63 @@ export async function cleanupStaleMeasurementBatchesForFile(
 }
 
 /**
+ * One bounded window of an ArcGIS commit's unit S0 (#561): staged rows of `fileName` in this plot/census, whatever
+ * their batch. At the start of a commit attempt nothing of that attempt is staged yet, so every such row is an earlier
+ * attempt's or another batch's stale row. Pinned to the same (PlotID, CensusID, FileID, BatchID) index as the
+ * stale-batch delete; the caller loops until a window deletes fewer than `rowLimit`.
+ */
+export async function deleteStagedRowsForFileWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  plotID: number,
+  censusID: number,
+  rowLimit: number,
+  transactionID: string
+): Promise<number> {
+  if (!Number.isSafeInteger(rowLimit) || rowLimit <= 0) {
+    throw new RangeError(`Staged-row window limit must be a positive integer; received ${rowLimit}`);
+  }
+  const deleteSQL = safeFormatQuery(
+    schema,
+    `DELETE /*+ INDEX(temporarymeasurements ${STALE_BATCH_SCAN_INDEX}) */ FROM ??.temporarymeasurements
+     WHERE PlotID = ? AND CensusID = ? AND FileID = ? LIMIT ${rowLimit}`
+  );
+  return requireAffectedRows(await connectionManager.executeQuery(deleteSQL, [plotID, censusID, fileName], transactionID), deleteSQL);
+}
+
+/** Rows one abandoned-session sweep window deletes from staging, so no sweep transaction holds more row locks than a census-replacement window. */
+export const SESSION_STAGED_ROW_DELETE_WINDOW_ROWS = 1000;
+
+/**
+ * One bounded window of the abandoned-session sweep for an ArcGIS import (#561): the session's own staged rows in one
+ * batch family. Scoped by SessionID, so rows a later attempt staged under another session are never touched. The
+ * caller loops until a window deletes fewer than `rowLimit`.
+ */
+export async function deleteStagedBatchFamilyOfSessionWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  sessionID: string,
+  fileName: string,
+  rootBatchID: string,
+  rowLimit: number,
+  transactionID: string
+): Promise<number> {
+  if (!Number.isSafeInteger(rowLimit) || rowLimit <= 0) {
+    throw new RangeError(`Staged-row window limit must be a positive integer; received ${rowLimit}`);
+  }
+  const deleteSQL = safeFormatQuery(
+    schema,
+    `DELETE FROM ??.temporarymeasurements
+     WHERE SessionID = ? AND FileID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}) LIMIT ${rowLimit}`
+  );
+  return requireAffectedRows(
+    await connectionManager.executeQuery(deleteSQL, [sessionID, fileName, rootBatchID, buildSubBatchPattern(rootBatchID)], transactionID),
+    deleteSQL
+  );
+}
+
+/**
  * Rows a census-replacement statement touches per window, and the longest id
  * list an audited coremeasurements DELETE builds.
  *
@@ -464,6 +521,20 @@ async function deleteErrorLinksForMeasurements(connectionManager: ConnectionMana
   }
 }
 
+/** The window tail every bounded coremeasurements delete shares: error links, one DELETE-audit row per id, then the ids. */
+async function deleteWindowMeasurementsWithLinksAndAudit(
+  connectionManager: ConnectionManager,
+  schema: string,
+  ids: number[],
+  changedBy: string | null,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  await deleteErrorLinksForMeasurements(connectionManager, schema, ids, transactionID);
+  return auditAndDeleteCoreMeasurements(connectionManager, schema, ids, changedBy, plotID, censusID, transactionID);
+}
+
 export interface CensusReplacementChunkResult {
   deletedRows: number;
   /** The cursor after this window: its last id, or the incoming cursor when the window was empty. */
@@ -501,8 +572,7 @@ export async function deleteCensusReplacementChunk(
     transactionID
   );
   if (ids.length === 0) return { deletedRows: 0, lastCoreMeasurementID: afterCoreMeasurementID };
-  await deleteErrorLinksForMeasurements(connectionManager, schema, ids, transactionID);
-  const deletedRows = await auditAndDeleteCoreMeasurements(connectionManager, schema, ids, changedBy, plotID, censusID, transactionID);
+  const deletedRows = await deleteWindowMeasurementsWithLinksAndAudit(connectionManager, schema, ids, changedBy, plotID, censusID, transactionID);
   return { deletedRows, lastCoreMeasurementID: ids[ids.length - 1] };
 }
 
@@ -569,6 +639,50 @@ export async function deleteCensusReplacementMetricsWindow(
 }
 
 /**
+ * F0's window walks this (UploadFileID, UploadBatchID, CensusID, StemGUID) index in its own order, so the scan stops
+ * after one window. Ordering by CoreMeasurementID instead would force a filesort, and under READ COMMITTED a
+ * FOR UPDATE filesort X-locks every family row it reads, not just the window; without the hint the optimizer could
+ * also pick idx_censusid and walk the whole census. A hint, not FORCE INDEX, like the other scan indexes here.
+ * #562's read-once PRIMARY window primitive is the eventual shared form of this window.
+ */
+export const BATCH_FAMILY_SCAN_INDEX = 'idx_cm_uploadfile_batch_census_stem';
+
+/**
+ * One bounded window of an ArcGIS commit's unit F0 (#561): rows of `fileName` under `batchID`'s family in this census,
+ * resolved or not, with their error links and one DELETE-audit row each. The family is derived from the import
+ * session's primary key and no other upload can produce it, so before the import is committed every such row is a
+ * leftover of an earlier attempt of this import (a dropped-row failure, or staged rows the abandoned-session sweep
+ * moved). The caller loops until a window deletes fewer than CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE.
+ */
+export async function deleteBatchFamilyRowsWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  batchID: string,
+  plotID: number,
+  censusID: number,
+  changedBy: string | null,
+  transactionID: string
+): Promise<number> {
+  const selectIdsSQL = safeFormatQuery(
+    schema,
+    `SELECT /*+ INDEX(coremeasurements ${BATCH_FAMILY_SCAN_INDEX}) */ CoreMeasurementID FROM ??.coremeasurements
+     WHERE UploadFileID = ? AND (UploadBatchID = ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}) AND CensusID = ?
+     ORDER BY UploadFileID, UploadBatchID, CensusID, StemGUID, CoreMeasurementID
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}
+     FOR UPDATE`
+  );
+  const ids = await selectCoreMeasurementWindowIDs(
+    connectionManager,
+    selectIdsSQL,
+    [fileName, batchID, buildSubBatchPattern(batchID), censusID],
+    transactionID
+  );
+  if (ids.length === 0) return 0;
+  return deleteWindowMeasurementsWithLinksAndAudit(connectionManager, schema, ids, changedBy, plotID, censusID, transactionID);
+}
+
+/**
  * Clean up all data from previous uploads for the same plot/census scope.
  * Clean measurement uploads are census replacements: a new upload fully replaces
  * any earlier measurement batches for that census, even if the filename changed.
@@ -578,6 +692,8 @@ export async function deleteCensusReplacementMetricsWindow(
  * Runs every window in the caller's one transaction, so the row locks of all
  * windows are held until that transaction ends. replaceCensusForCleanReupload
  * is the bounded, separately committed form of the same windows.
+ * It has no production caller since the ArcGIS commit moved to bounded units (#561);
+ * integration suites keep it as the one-transaction reference.
  *
  * `changedBy` attributes the coremeasurements DELETE audit rows this writes
  * to `unifiedchangelog` (#507). `null` records an unattributed cleanup rather

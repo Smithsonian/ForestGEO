@@ -16,7 +16,10 @@ import { createHash } from 'node:crypto';
 import { getConn, runQuery } from '@/lib/db/primitives';
 import ailogger from '@/ailogger';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
+import { deleteStagedBatchFamilyOfSessionWindow, SESSION_STAGED_ROW_DELETE_WINDOW_ROWS } from '@/lib/ingestion/temporary-measurements';
+import { familyRootOf, isArcgisCommitBatchShape } from '@/lib/uploads/batch-family';
 
 /**
  * Upload session states
@@ -481,6 +484,30 @@ export async function updateSessionState(schema: string, sessionId: string, stat
 }
 
 /**
+ * Move a session to abandoned only while it is still active. A session that has already failed, completed or been
+ * cleaned up keeps its state: updateSessionState would overwrite it. Returns whether a row was abandoned.
+ */
+export async function abandonActiveSession(schema: string, sessionId: string, errorMessage: string): Promise<boolean> {
+  const abandonSQL = safeFormatQuery(
+    schema,
+    `UPDATE ??.upload_sessions
+    SET state = ?, error_message = ?, last_heartbeat = CURRENT_TIMESTAMP
+    WHERE session_id = ? AND state IN (${ACTIVE_UPLOAD_SESSION_STATE_LIST})`
+  );
+
+  let conn: PoolConnection | null = null;
+  try {
+    conn = await getConn();
+    const result = await runQuery(conn, abandonSQL, [UploadSessionState.ABANDONED, errorMessage, sessionId]);
+    const abandoned = result.affectedRows > 0;
+    ailogger.info(`[UploadSessionTracker] ${abandoned ? 'Abandoned' : 'Left unchanged (not active)'} session ${sessionId}`);
+    return abandoned;
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+/**
  * Update session progress (chunk/batch counts)
  */
 export async function updateSessionProgress(
@@ -668,10 +695,35 @@ export async function findAbandonedSessionsNeedingCleanup(schema: string): Promi
   }
 }
 
+async function deleteArcgisFamilyInWindows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  sessionId: string,
+  fileId: string,
+  rootBatchId: string
+): Promise<number> {
+  let deletedRows = 0;
+  let windowRows: number;
+  do {
+    windowRows = await connectionManager.withTransaction(tx =>
+      deleteStagedBatchFamilyOfSessionWindow(connectionManager, schema, sessionId, fileId, rootBatchId, SESSION_STAGED_ROW_DELETE_WINDOW_ROWS, tx.id)
+    );
+    deletedRows += windowRows;
+  } while (windowRows === SESSION_STAGED_ROW_DELETE_WINDOW_ROWS);
+  return deletedRows;
+}
+
 /**
  * Clean up orphaned data for a session
  */
-export async function cleanupOrphanedData(schema: string, session: UploadSession): Promise<{ temporaryDeleted: number; failedDeleted: number }> {
+export interface OrphanedDataCleanupResult {
+  temporaryDeleted: number;
+  failedDeleted: number;
+  /** The session was no longer abandoned under its lock, so nothing was cleaned. */
+  skipped: boolean;
+}
+
+export async function cleanupOrphanedData(schema: string, session: UploadSession): Promise<OrphanedDataCleanupResult> {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | null = null;
   let temporaryDeleted = 0;
@@ -680,6 +732,26 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
 
   try {
     transactionID = await connectionManager.beginTransaction();
+
+    // Lock the session row before reading any staged row, and re-check it under the lock: the caller listed this
+    // session outside the transaction, and since then a takeover may have flipped it to failed (#561) or another
+    // sweep may have cleaned it. Lock order — session row, then data rows — matches the ArcGIS commit units.
+    const lockedSessionRows = await connectionManager.executeQuery(
+      safeFormatQuery(schema, 'SELECT state FROM ??.upload_sessions WHERE session_id = ? FOR UPDATE'),
+      [session.sessionId],
+      transactionID
+    );
+    const lockedState = Array.isArray(lockedSessionRows) && lockedSessionRows.length === 1 ? String(lockedSessionRows[0].state) : null;
+    if (lockedState !== UploadSessionState.ABANDONED) {
+      const lockingTransactionID = transactionID;
+      // Cleared before the rollback, so a rollback failure reaching the catch below is not rolled back twice.
+      transactionID = null;
+      await connectionManager.rollbackTransaction(lockingTransactionID);
+      ailogger.info(
+        `[UploadSessionTracker] Skipping cleanup of session ${session.sessionId}: it is ${lockedState ?? 'no longer present'}, not abandoned, under the lock`
+      );
+      return { temporaryDeleted: 0, failedDeleted: 0, skipped: true };
+    }
 
     // Move orphaned temporarymeasurements that belong to THIS session.
     // Scoping by SessionID (rather than PlotID/CensusID) avoids a TOCTOU race
@@ -701,7 +773,21 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
             .filter((row): row is { fileId: string; batchId: string } => Boolean(row.fileId) && Boolean(row.batchId))
         : [];
 
-      for (const { fileId, batchId } of sessionBatches) {
+      const arcgisFamilies = new Map<string, { fileId: string; rootBatchId: string }>();
+      const csvBatches: typeof sessionBatches = [];
+      for (const batch of sessionBatches) {
+        const rootBatchId = familyRootOf(batch.batchId);
+        if (isArcgisCommitBatchShape(rootBatchId)) arcgisFamilies.set(`${batch.fileId}\u0000${rootBatchId}`, { fileId: batch.fileId, rootBatchId });
+        else csvBatches.push(batch);
+      }
+
+      // An ArcGIS import keeps its durable source in arcgis_import_rows and the next commit restages from it, so moving
+      // these rows into the census would only leave failure rows no later commit removes.
+      for (const { fileId, rootBatchId } of arcgisFamilies.values()) {
+        temporaryDeleted += await deleteArcgisFamilyInWindows(connectionManager, schema, session.sessionId, fileId, rootBatchId);
+      }
+
+      for (const { fileId, batchId } of csvBatches) {
         const movedRows = await moveTemporaryBatchToFailedMeasurements(
           connectionManager,
           schema,
@@ -773,7 +859,11 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
         }
       }
 
-      cleanupNote = failedDeleted > 0 ? `Cleanup: moved ${failedDeleted} temp rows to unresolved failures` : `Cleanup: deleted ${temporaryDeleted} temp rows`;
+      const deletedWithoutFailureRows = temporaryDeleted - failedDeleted;
+      cleanupNote =
+        failedDeleted > 0
+          ? `Cleanup: moved ${failedDeleted} temp rows to unresolved failures${deletedWithoutFailureRows > 0 ? `, deleted ${deletedWithoutFailureRows} restageable ArcGIS temp rows` : ''}`
+          : `Cleanup: deleted ${temporaryDeleted} temp rows`;
     }
 
     // Mark session as cleaned up
@@ -787,7 +877,7 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
 
     ailogger.info(`[UploadSessionTracker] Cleaned up session ${session.sessionId}: ${temporaryDeleted} temporary rows deleted`);
 
-    return { temporaryDeleted, failedDeleted };
+    return { temporaryDeleted, failedDeleted, skipped: false };
   } catch (error: unknown) {
     if (transactionID) {
       await connectionManager.rollbackTransaction(transactionID);
@@ -828,6 +918,7 @@ export async function runSessionCleanup(schema: string): Promise<{
   for (const session of abandonedSessions) {
     try {
       const result = await cleanupOrphanedData(schema, session);
+      if (result.skipped) continue;
       cleanedUp++;
       totalTempDeleted += result.temporaryDeleted;
     } catch (error: unknown) {

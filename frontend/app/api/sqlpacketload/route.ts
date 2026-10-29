@@ -37,6 +37,7 @@ import {
   LIKE_ESCAPE_CLAUSE,
   MAX_ORIGINAL_BATCH_ID_LENGTH,
   OriginalBatchIDTooLongError,
+  ReservedBatchIDError,
   SUB_BATCH_SEPARATOR,
   SubBatchOrdinalOverflowError
 } from '@/lib/uploads/batch-family';
@@ -616,7 +617,7 @@ export async function POST(request: NextRequest) {
             status: HTTPResponses.UNPROCESSABLE_ENTITY
           });
         }
-        if (e instanceof OriginalBatchIDTooLongError || e instanceof SubBatchOrdinalOverflowError) {
+        if (e instanceof OriginalBatchIDTooLongError || e instanceof SubBatchOrdinalOverflowError || e instanceof ReservedBatchIDError) {
           return NextResponse.json({ error: e.message, code: e.code }, { status: HTTPResponses.INVALID_REQUEST });
         }
 
