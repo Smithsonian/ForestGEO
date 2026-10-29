@@ -434,6 +434,11 @@ describe('ArcGIS resumable commit against the cleanup paths, on the real Connect
           `[AI18 during F] orphan DELETE path=${observed.path}${observed.lockWait ? ` thread=${observed.lockWait.threadId} ${observed.lockWait.queryHead}` : ''} (deadline ${BARRIER_DEADLINE_MS} ms)`
         );
 
+        expect(
+          observed.path,
+          'the orphan DELETE evaluates a staged row owned through the import’s SessionID, so it must wait for F’s lock on that upload session'
+        ).toBe('lock_wait');
+
         finalizeHoldingLocks.release();
         const commitResult = await withinDeadline(commit, 'F to commit', harness.renderStatementLog);
         const deletedRows = await withinDeadline(deletion, 'orphan DELETE to resolve after F committed', harness.renderStatementLog);
