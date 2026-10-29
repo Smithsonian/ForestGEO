@@ -165,9 +165,7 @@ export async function lockActiveUploadSessionForCensus(
     );
   }
   if (!Array.isArray(rows) || rows.length !== 1) {
-    throw new UploadSessionOwnershipError(
-      `Upload session ${uploadSessionID} was not found in ${schema}; census ${scope.censusID} was not replaced. ${COMMITTED_UNITS_REMAIN_NOTE}`
-    );
+    throw new UploadSessionOwnershipError(`Upload session ${uploadSessionID} was not found in ${schema}. ${COMMITTED_UNITS_REMAIN_NOTE}`);
   }
   const session = rows[0] as { state: string; plot_id: number; census_id: number } & Record<string, unknown>;
   if (!(ACTIVE_UPLOAD_SESSION_STATES as readonly string[]).includes(String(session.state))) {
