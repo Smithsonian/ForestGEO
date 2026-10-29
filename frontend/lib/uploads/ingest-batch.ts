@@ -6,9 +6,10 @@
  * and the background upload worker call ingestBatch; neither owns any ingestion
  * internals of its own. The sequence is:
  *
+ *   Phase 0 (failed first census only, #562): recoverFailedInitialCensusInBoundedTransactions,
+ *     separately committed census-locked transactions, before setup opens
  *   Phase 1 (one transaction, application-locked):
  *     - discover the staged batch family once and check its scope and member sizes
- *     - recover dirty failed first-load census state if detected
  *     - remove stale unresolved ingestion rows that match the staged rows
  *     - split rows still staged under the original BatchID (legacy fallback)
  *   Phase 2 (one caller-owned transaction PER sub-batch — #507/#527):
@@ -37,7 +38,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { TransactionCallbackTimeoutError, TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
-import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
+import { shouldRecoverFailedInitialCensus, type FailedInitialCensusRecoveryState } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import type { SystemFailureKind } from '@/config/measurementerrors';
 import {
@@ -61,10 +62,24 @@ import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/
 import { auditCoreMeasurementsScopeDiff, snapshotCoreMeasurementsScope } from '@/lib/changelog/ingestion-audit';
 import { ChangelogOperation, ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
-import { deleteCoreMeasurementsInBoundedChunksWithAudit } from '@/lib/ingestion/temporary-measurements';
+import {
+  CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
+  COREMEASUREMENTS_JOIN_ALIAS,
+  deleteCoreMeasurementsInBoundedChunksWithAudit,
+  lockAuditAndDeleteCoreMeasurementWindow,
+  MEASUREMENT_ERROR_LOG_JOIN_ALIAS,
+  PLAIN_COREMEASUREMENTS_FROM_SQL,
+  selectCoreMeasurementIDsInScope,
+  sliceIntoDeleteWindows,
+  toCoreMeasurementIDs,
+  type CoreMeasurementDeleteScope,
+  type CoreMeasurementLockAlias
+} from '@/lib/ingestion/temporary-measurements';
+import { DEADLOCK_RETRY_BACKOFF_CAP_MS, DEADLOCK_RETRY_BACKOFF_MULTIPLIER, isDeadlockError, retryWholeTransactionOnDeadlock } from '@/lib/db/deadlock-retry';
+import { CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS } from '@/lib/uploads/stage-measurements';
 
 const MAX_ATTEMPTS_PER_SUBBATCH = 5;
-const SETUP_PHASE_TIMEOUT_MS = 2 * 60 * 1000;
+export const SETUP_PHASE_TIMEOUT_MS = 2 * 60 * 1000;
 
 // Retry / backoff constants for processSubBatch
 const INITIAL_RETRY_DELAY_MS = 100;
@@ -79,15 +94,12 @@ const LOCK_GIVE_UP_AFTER_ATTEMPTS = 2;
 const LOCK_CONTENTION_BACKOFF_MS = 15_000; // flat delay — don't escalate; just back off and retry once
 const CONNECTION_BACKOFF_MULTIPLIER = 3;
 const CONNECTION_BACKOFF_CAP_MS = 15_000;
-const DEADLOCK_BACKOFF_MULTIPLIER = 1.5;
-const DEADLOCK_BACKOFF_CAP_MS = 3_000;
 const DEFAULT_BACKOFF_MULTIPLIER = 2;
 const DEFAULT_BACKOFF_CAP_MS = 5_000;
 const RETRY_JITTER_MAX_MS = 1_000;
 
 // MySQL error numbers for connection-loss and deadlock conditions
 const MYSQL_ERRNO_TCP_LOST = 2013; // CR_SERVER_LOST — TCP connection lost during query
-const MYSQL_ERRNO_DEADLOCK = 1213; // ER_LOCK_DEADLOCK
 
 /**
  * mysql2's code when the SERVER closed the connection underneath a running
@@ -102,6 +114,17 @@ const MYSQL_ERRNO_DEADLOCK = 1213; // ER_LOCK_DEADLOCK
  * ECONNRESET and CR_SERVER_LOST/2013 (network-layer loss) stay retryable.
  */
 const PROTOCOL_CONNECTION_LOST_CODE = 'PROTOCOL_CONNECTION_LOST';
+
+const SUB_BATCH_CENSUS_SHARE_LOCK_TEMPLATE = 'SELECT CensusID FROM ??.census WHERE CensusID = ? FOR SHARE';
+
+/**
+ * The first statement of every transaction that snapshots and then audits a sub-batch's coremeasurements
+ * (the CALL attempt and both failure transfers): a recovery window that deleted this family's stale rows commits
+ * before the snapshot reads them, so the snapshot diff never audits a row the recovery already audited (#562).
+ */
+async function takeCensusShareLock(connectionManager: ConnectionManager, schema: string, censusID: number, transactionID: string): Promise<void> {
+  await transactionExecutorFor(connectionManager, transactionID).query(safeFormatQuery(schema, SUB_BATCH_CENSUS_SHARE_LOCK_TEMPLATE), [censusID]);
+}
 
 /**
  * MySQL GET_LOCK names may not exceed 64 characters. Hash the full logical
@@ -274,6 +297,11 @@ function assertExpectedScope(family: BatchFamilyScope, plotID: number, censusID:
   }
 }
 
+/** The family checks the recovery runs before it deletes anything; setup reports the same errors under its discovery step. */
+function isFamilyDiscoveryFailure(error: unknown): boolean {
+  return error instanceof BatchFamilyScopeError || error instanceof OversizedSubBatchError;
+}
+
 export interface IngestBatchResult {
   processedSubBatches: number;
   totalRows: number;
@@ -336,16 +364,54 @@ function toOptionalMessage(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-async function recoverFailedInitialCensusIfNeeded(
+export type FailedCensusRecoveryOutcome = 'not_due' | 'recovered' | 'superseded';
+
+export interface FailedCensusRecoveryParams {
+  schema: string;
+  fileID: string;
+  batchID: string;
+  plotID: number;
+  censusID: number;
+  changedBy: string | null;
+}
+
+export interface FailedCensusRecoveryResult {
+  outcome: FailedCensusRecoveryOutcome;
+  /** coremeasurements rows deleted, each with its DELETE-audit row. */
+  deletedRows: number;
+  /** Committed measurement-window transactions; the final transaction is not counted. */
+  windowCount: number;
+  /** The longest single window attempt, BEGIN to COMMIT/ROLLBACK; deadlock backoff waits are not included. */
+  slowestWindowMs: number;
+  deadlockRetries: number;
+}
+
+export const FAILED_CENSUS_RECOVERY_STARTED_EVENT = 'upload.failed_census_recovery.started';
+export const FAILED_CENSUS_RECOVERY_COMPLETED_EVENT = 'upload.failed_census_recovery.completed';
+export const FAILED_CENSUS_RECOVERY_FAILED_EVENT = 'upload.failed_census_recovery.failed';
+export const FAILED_CENSUS_RECOVERY_WINDOW_TRANSACTION = 'failed_census_recovery_window';
+export const FAILED_CENSUS_RECOVERY_FINAL_TRANSACTION = 'failed_census_recovery_final';
+/** One more than a window: a final read that returns this many ids means rows arrived after the scope read. */
+export const FAILED_CENSUS_RECOVERY_FINAL_READ_LIMIT = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE + 1;
+
+type FailedCensusRecoveryProgress = Omit<FailedCensusRecoveryResult, 'outcome'>;
+type RecoveryTransactionResult<T> = { superseded: true } | { superseded: false; value: T };
+type FinalRecoveryStep = { step: 'no_longer_due' } | { step: 'rows_arrived' } | { step: 'deleted'; deletedRows: number };
+
+const NOT_DUE_RECOVERY: FailedCensusRecoveryResult = { outcome: 'not_due', deletedRows: 0, windowCount: 0, slowestWindowMs: 0, deadlockRetries: 0 };
+
+/** C1: the whole census. */
+export function failedCensusRecoveryScope(censusID: number): CoreMeasurementDeleteScope {
+  return { whereSQL: 'CensusID = ?', whereParams: [censusID], fromSQL: PLAIN_COREMEASUREMENTS_FROM_SQL };
+}
+
+async function readFailedInitialCensusRecoveryState(
   connectionManager: ConnectionManager,
   schema: string,
-  fileID: string,
-  batchID: string,
   plotID: number,
   censusID: number,
-  changedBy: string | null,
-  transactionID: string
-): Promise<boolean> {
+  transactionID?: string
+): Promise<FailedInitialCensusRecoveryState> {
   const recoveryStateSQL = safeFormatQuery(
     schema,
     `SELECT
@@ -355,67 +421,82 @@ async function recoverFailedInitialCensusIfNeeded(
        (SELECT COUNT(*) FROM ??.stems WHERE CensusID = ?) AS stemCount,
        (SELECT COUNT(*) FROM ??.coremeasurements WHERE CensusID = ?) AS coreMeasurementCount`
   );
-
   const recoveryStateRows = await connectionManager.executeQuery(
     recoveryStateSQL,
     [plotID, censusID, plotID, censusID, censusID, censusID, censusID],
     transactionID
   );
   const recoveryStateRow = recoveryStateRows[0] ?? {};
-  const recoveryState = {
+  return {
     completedUploads: toCount(recoveryStateRow.completedUploads),
     incompleteUploads: toCount(recoveryStateRow.incompleteUploads),
     treeCount: toCount(recoveryStateRow.treeCount),
     stemCount: toCount(recoveryStateRow.stemCount),
     coreMeasurementCount: toCount(recoveryStateRow.coreMeasurementCount)
   };
+}
 
-  if (!shouldRecoverFailedInitialCensus(recoveryState)) {
-    return false;
-  }
-
-  ailogger.warn(`Recovering dirty failed first-load census state for plot ${plotID}, census ${censusID} before processing ${fileID}-${batchID}`, {
-    plotID,
-    censusID,
-    fileID,
-    batchID,
-    recoveryState
-  });
-
-  // measurementssummary is derived/reconstructable, not a primary audit trail
-  // (same discipline as cleanupPreviousFileUploads — see
-  // deleteCoreMeasurementsInBoundedChunksWithAudit's doc comment) — delete it
-  // unaudited, before the audited coremeasurements delete below.
-  await connectionManager.executeQuery(safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CensusID = ?'), [censusID], transactionID);
-
-  // Every coremeasurements row in this census is a real committed write and
-  // must be audited before removal (#507): reuse the same bounded,
-  // FOR-UPDATE-locked select-audit-delete sequence Clean Re-Upload's own
-  // census-wide cleanup uses (cleanupPreviousFileUploads), rather than a raw
-  // unaudited DELETE.
-  const recoveredCoreMeasurementsCount = await deleteCoreMeasurementsInBoundedChunksWithAudit(
-    connectionManager,
-    schema,
-    'CensusID = ?',
-    [censusID],
-    changedBy,
-    plotID,
-    censusID,
+/**
+ * The first two statements of every recovery transaction. Every writer of the census's trees, stems or
+ * measurement rows holds a shared lock on the census row through its foreign key until it commits, so this
+ * FOR UPDATE waits for any such writer in flight and keeps new ones out until this transaction commits; the
+ * guard then reads the census's completed uploads under that lock (spec #562 §3, D3, D10, E-6).
+ */
+async function recoveryIsSupersededUnderCensusLock(
+  connectionManager: ConnectionManager,
+  params: FailedCensusRecoveryParams,
+  transactionID: string
+): Promise<boolean> {
+  const censusRows = await connectionManager.executeQuery(
+    safeFormatQuery(params.schema, 'SELECT CensusID FROM ??.census WHERE CensusID = ? FOR UPDATE'),
+    [params.censusID],
     transactionID
   );
-  if (recoveredCoreMeasurementsCount > 0) {
-    ailogger.warn(`Recovery removed ${recoveredCoreMeasurementsCount} coremeasurement(s) from dirty failed first-load census ${censusID}`);
-  }
+  if (!Array.isArray(censusRows) || censusRows.length === 0) return true;
+  const guardRows = await connectionManager.executeQuery(
+    safeFormatQuery(params.schema, "SELECT COUNT(*) AS completedUploads FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status = 'completed'"),
+    [params.plotID, params.censusID],
+    transactionID
+  );
+  return toCount(guardRows?.[0]?.completedUploads) > 0;
+}
 
-  const cleanupSteps = [
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.stems WHERE CensusID = ?'),
-      params: [censusID]
-    },
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.trees WHERE CensusID = ?'),
-      params: [censusID]
-    },
+async function runRecoveryTransaction<T>(
+  connectionManager: ConnectionManager,
+  params: FailedCensusRecoveryParams,
+  progress: FailedCensusRecoveryProgress,
+  transactionKind: string,
+  timeoutMs: number,
+  work: (transactionID: string) => Promise<T>
+): Promise<RecoveryTransactionResult<T>> {
+  const attemptTransaction = async (): Promise<RecoveryTransactionResult<T>> => {
+    const attemptStartedAt = Date.now();
+    try {
+      return await connectionManager.withTransaction<RecoveryTransactionResult<T>>(
+        async tx =>
+          (await recoveryIsSupersededUnderCensusLock(connectionManager, params, tx.id))
+            ? { superseded: true }
+            : { superseded: false, value: await work(tx.id) },
+        { timeoutMs }
+      );
+    } finally {
+      if (transactionKind === FAILED_CENSUS_RECOVERY_WINDOW_TRANSACTION)
+        progress.slowestWindowMs = Math.max(progress.slowestWindowMs, Date.now() - attemptStartedAt);
+    }
+  };
+  return retryWholeTransactionOnDeadlock(transactionKind, attemptTransaction, () => {
+    progress.deadlockRetries += 1;
+  });
+}
+
+/** Today's residue statements, in today's order. */
+function failedCensusResidueStatements(params: FailedCensusRecoveryParams): Array<{ sql: string; params: unknown[] }> {
+  const { schema, fileID, batchID, plotID, censusID } = params;
+  return [
+    // measurementssummary is derived and reconstructable, not a primary audit trail: deleted unaudited.
+    { sql: safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CensusID = ?'), params: [censusID] },
+    { sql: safeFormatQuery(schema, 'DELETE FROM ??.stems WHERE CensusID = ?'), params: [censusID] },
+    { sql: safeFormatQuery(schema, 'DELETE FROM ??.trees WHERE CensusID = ?'), params: [censusID] },
     {
       sql: safeFormatQuery(
         schema,
@@ -433,21 +514,202 @@ async function recoverFailedInitialCensusIfNeeded(
       ),
       params: [plotID, censusID, fileID, batchID, buildSubBatchPattern(batchID)]
     },
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.uploadintegrityalerts WHERE PlotID = ? AND CensusID = ?'),
-      params: [plotID, censusID]
-    },
+    { sql: safeFormatQuery(schema, 'DELETE FROM ??.uploadintegrityalerts WHERE PlotID = ? AND CensusID = ?'), params: [plotID, censusID] },
     {
       sql: safeFormatQuery(schema, "DELETE FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status IN ('failed', 'processing')"),
       params: [plotID, censusID]
     }
   ];
+}
 
-  for (const step of cleanupSteps) {
-    await connectionManager.executeQuery(step.sql, step.params, transactionID);
+/**
+ * The final transaction: under the census lock no uncommitted insert into the census can exist or start, so this
+ * read is complete. The held-back slice goes in the same transaction as the metrics, alerts, staged rows, stems
+ * and trees, so the census keeps the predicate's evidence until everything commits (spec #562 D4, G5).
+ *
+ * The pre-check read "due" before any lock was taken, and the guard only rules out a completed upload. The whole
+ * predicate is therefore evaluated again here, under the lock: another runner may have recovered the census and a
+ * writer that is not an upload may have added trees, stems and measurements since, and none of that may be deleted.
+ */
+async function finishFailedCensusRecovery(
+  connectionManager: ConnectionManager,
+  params: FailedCensusRecoveryParams,
+  scope: CoreMeasurementDeleteScope,
+  transactionID: string
+): Promise<FinalRecoveryStep> {
+  const stateUnderCensusLock = await readFailedInitialCensusRecoveryState(connectionManager, params.schema, params.plotID, params.censusID, transactionID);
+  if (!shouldRecoverFailedInitialCensus(stateUnderCensusLock)) return { step: 'no_longer_due' };
+  const remainingRows = await connectionManager.executeQuery(
+    safeFormatQuery(
+      params.schema,
+      `SELECT CoreMeasurementID FROM ??.coremeasurements WHERE CensusID = ? ORDER BY CoreMeasurementID LIMIT ${FAILED_CENSUS_RECOVERY_FINAL_READ_LIMIT}`
+    ),
+    [params.censusID],
+    transactionID
+  );
+  const remainingIDs = toCoreMeasurementIDs(remainingRows);
+  if (remainingIDs.length > CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return { step: 'rows_arrived' };
+  const deletedRows = await lockAuditAndDeleteCoreMeasurementWindow(
+    connectionManager,
+    params.schema,
+    scope,
+    remainingIDs,
+    params.changedBy,
+    params.plotID,
+    params.censusID,
+    transactionID
+  );
+  for (const statement of failedCensusResidueStatements(params)) {
+    await connectionManager.executeQuery(statement.sql, statement.params, transactionID);
   }
+  return { step: 'deleted', deletedRows };
+}
 
-  return true;
+/**
+ * Each pass reads the census once and deletes what it read. A pass ends early ("rows arrived") only when more than
+ * a window of rows exists under the final transaction's census lock, i.e. other writers added failure rows after the
+ * read; those writers are failed attempts (a completed upload makes the guard stop the recovery), and every pass
+ * deletes everything it read, so the loop only continues while new failed attempts keep landing in this census.
+ * Deliberately not capped: a cap would leave a census half-recovered for a reason the next ingestBatch repeats.
+ */
+async function runFailedCensusRecovery(
+  connectionManager: ConnectionManager,
+  params: FailedCensusRecoveryParams,
+  progress: FailedCensusRecoveryProgress
+): Promise<Exclude<FailedCensusRecoveryOutcome, 'not_due'>> {
+  const scope = failedCensusRecoveryScope(params.censusID);
+  for (;;) {
+    const windows = sliceIntoDeleteWindows(await selectCoreMeasurementIDsInScope(connectionManager, params.schema, scope));
+    const heldBackWindowIndex = windows.length - 1;
+    for (const windowIDs of windows.slice(0, heldBackWindowIndex)) {
+      const window = await runRecoveryTransaction(
+        connectionManager,
+        params,
+        progress,
+        FAILED_CENSUS_RECOVERY_WINDOW_TRANSACTION,
+        CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS,
+        transactionID =>
+          lockAuditAndDeleteCoreMeasurementWindow(
+            connectionManager,
+            params.schema,
+            scope,
+            windowIDs,
+            params.changedBy,
+            params.plotID,
+            params.censusID,
+            transactionID
+          )
+      );
+      if (window.superseded) return 'superseded';
+      progress.windowCount += 1;
+      progress.deletedRows += window.value;
+    }
+    const final = await runRecoveryTransaction(
+      connectionManager,
+      params,
+      progress,
+      FAILED_CENSUS_RECOVERY_FINAL_TRANSACTION,
+      SETUP_PHASE_TIMEOUT_MS,
+      transactionID => finishFailedCensusRecovery(connectionManager, params, scope, transactionID)
+    );
+    if (final.superseded || final.value.step === 'no_longer_due') return 'superseded';
+    if (final.value.step === 'deleted') {
+      progress.deletedRows += final.value.deletedRows;
+      return 'recovered';
+    }
+  }
+}
+
+/**
+ * Recovers a census whose first load failed (shouldRecoverFailedInitialCensus) BEFORE ingestBatch's setup
+ * transaction opens, in separately committed transactions of at most CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE
+ * measurement rows each (#562). Every transaction takes the census row FOR UPDATE, re-checks for a completed
+ * upload, and is re-run whole on a deadlock. An interruption anywhere leaves a census that is still due, or one
+ * that is fully recovered, so the next ingestBatch resumes (spec #562 §3).
+ */
+export async function recoverFailedInitialCensusInBoundedTransactions(
+  connectionManager: ConnectionManager,
+  params: FailedCensusRecoveryParams
+): Promise<FailedCensusRecoveryResult> {
+  const { schema, fileID, batchID, plotID, censusID } = params;
+  const recoveryState = await readFailedInitialCensusRecoveryState(connectionManager, schema, plotID, censusID);
+  if (!shouldRecoverFailedInitialCensus(recoveryState)) return { ...NOT_DUE_RECOVERY };
+
+  const family = await discoverBatchFamily((sql, sqlParams) => connectionManager.executeQuery(sql, sqlParams), schema, fileID, batchID);
+  if (!family) return { ...NOT_DUE_RECOVERY };
+  assertExpectedScope(family, plotID, censusID, fileID, batchID);
+  assertMembersWithinBatchSize(family, fileID, batchID, getIngestionBatchSize());
+
+  const logKeys = { schema, plotID, censusID, fileID, batchID, recoveryState };
+  ailogger.info(FAILED_CENSUS_RECOVERY_STARTED_EVENT, logKeys);
+  const startedAt = Date.now();
+  const progress: FailedCensusRecoveryProgress = { deletedRows: 0, windowCount: 0, slowestWindowMs: 0, deadlockRetries: 0 };
+  let outcome: Exclude<FailedCensusRecoveryOutcome, 'not_due'>;
+  try {
+    outcome = await runFailedCensusRecovery(connectionManager, params, progress);
+  } catch (recoveryError: unknown) {
+    // Committed windows stay deleted and the next ingestBatch resumes; this line says how far this attempt got.
+    ailogger.error(FAILED_CENSUS_RECOVERY_FAILED_EVENT, recoveryError instanceof Error ? recoveryError : undefined, {
+      ...logKeys,
+      ...progress,
+      elapsedMs: Date.now() - startedAt,
+      errorMessage: recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
+    });
+    throw recoveryError;
+  }
+  ailogger.info(FAILED_CENSUS_RECOVERY_COMPLETED_EVENT, { ...logKeys, outcome, ...progress, elapsedMs: Date.now() - startedAt });
+  return { outcome, ...progress };
+}
+
+/**
+ * The cross-file cleanup locks the rows its predicate reads that can change under it: measurements and their
+ * error links (resolveMeasurementErrors and the single-failure re-ingest update `mel` alone). It does not lock
+ * the measurement_errors catalog, which nothing updates. It does not lock the incoming family's staged rows
+ * (`tm`) either, and the setup's per-file application lock does not guard them: staging takes a different
+ * application lock, and the worker's cleanupBatchArtifacts deletes staged rows with no application lock at all.
+ * They stay unlocked by decision (spec #562 D11, E-7), not because the setup's lock covers them.
+ */
+export const CROSS_FILE_CLEANUP_LOCKED_ALIASES: readonly CoreMeasurementLockAlias[] = [COREMEASUREMENTS_JOIN_ALIAS, MEASUREMENT_ERROR_LOG_JOIN_ALIAS];
+
+/** Unresolved rows of the incoming file in batch families other than the incoming one (C2). */
+export function sameFileUnresolvedFailureScope(fileID: string, batchID: string, censusID: number): CoreMeasurementDeleteScope {
+  return {
+    whereSQL: `CensusID = ? AND StemGUID IS NULL AND UploadFileID = ? AND NOT (UploadBatchID <=> ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`,
+    whereParams: [censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    fromSQL: PLAIN_COREMEASUREMENTS_FROM_SQL
+  };
+}
+
+/** Unresolved ingestion failures of other files that match a staged row of the incoming family (C3). */
+export function crossFileUnresolvedFailureScope(fileID: string, batchID: string, censusID: number): CoreMeasurementDeleteScope {
+  return {
+    whereSQL: `cm.CensusID = ? AND cm.StemGUID IS NULL AND NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`,
+    // The JOIN binds the incoming family (FileID, BatchID, LIKE pattern) before the WHERE's census and exclusion params.
+    whereParams: [fileID, batchID, buildSubBatchPattern(batchID), censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    fromSQL: `??.coremeasurements cm
+     INNER JOIN ??.measurement_error_log mel
+       ON mel.MeasurementID = cm.CoreMeasurementID
+      AND mel.IsResolved = FALSE
+     INNER JOIN ??.measurement_errors me
+       ON me.ErrorID = mel.ErrorID
+      AND me.ErrorSource = 'ingestion'
+     INNER JOIN ??.temporarymeasurements tm
+       ON tm.CensusID = cm.CensusID
+      AND tm.FileID = ?
+      AND (tm.BatchID = ? OR tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
+      AND tm.TreeTag <=> cm.RawTreeTag
+      AND tm.StemTag <=> cm.RawStemTag
+      AND tm.SpeciesCode <=> cm.RawSpCode
+      AND tm.QuadratName <=> cm.RawQuadrat
+      AND tm.LocalX <=> cm.RawX
+      AND tm.LocalY <=> cm.RawY
+      AND tm.DBH <=> cm.MeasuredDBH
+      AND tm.HOM <=> cm.MeasuredHOM
+      AND tm.MeasurementDate <=> cm.MeasurementDate
+      AND tm.Codes <=> cm.RawCodes
+      AND tm.Comments <=> cm.RawComments`,
+    lockedAliases: CROSS_FILE_CLEANUP_LOCKED_ALIASES
+  };
 }
 
 async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
@@ -470,17 +732,21 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
   // (a different family never matches the new one's pattern).
   //
   // Both deletes go through deleteCoreMeasurementsInBoundedChunksWithAudit
-  // (#507): every removed row is a real committed write and must be audited,
-  // same as Clean Re-Upload's own census-wide cleanup.
+  // (#507, #562): one non-locking read of the scope, primary-key windows with
+  // the predicate re-checked under lock, every removed row audited, and a
+  // locking confirmation before the walk ends. Both stay inside the setup
+  // transaction (spec #562 D7).
+  const sameFileScope = sameFileUnresolvedFailureScope(fileID, batchID, censusID);
   const sameFileDeletedRows = await deleteCoreMeasurementsInBoundedChunksWithAudit(
     connectionManager,
     schema,
-    `CensusID = ? AND StemGUID IS NULL AND UploadFileID = ? AND NOT (UploadBatchID <=> ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`,
-    [censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    sameFileScope.whereSQL,
+    sameFileScope.whereParams,
     changedBy,
     plotID,
     censusID,
-    transactionID
+    transactionID,
+    sameFileScope.fromSQL
   );
 
   if (sameFileDeletedRows > 0) {
@@ -503,42 +769,19 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
     return sameFileDeletedRows;
   }
 
-  // Cross-file match requires joining the incoming file's staged rows, so
-  // this goes through the JOIN-aware `fromSQL` form (aliased `cm`, DISTINCT
-  // id selection) rather than the plain-table default.
-  const crossFileFromSQL = `??.coremeasurements cm
-     INNER JOIN ??.measurement_error_log mel
-       ON mel.MeasurementID = cm.CoreMeasurementID
-      AND mel.IsResolved = FALSE
-     INNER JOIN ??.measurement_errors me
-       ON me.ErrorID = mel.ErrorID
-      AND me.ErrorSource = 'ingestion'
-     INNER JOIN ??.temporarymeasurements tm
-       ON tm.CensusID = cm.CensusID
-      AND tm.FileID = ?
-      AND (tm.BatchID = ? OR tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
-      AND tm.TreeTag <=> cm.RawTreeTag
-      AND tm.StemTag <=> cm.RawStemTag
-      AND tm.SpeciesCode <=> cm.RawSpCode
-      AND tm.QuadratName <=> cm.RawQuadrat
-      AND tm.LocalX <=> cm.RawX
-      AND tm.LocalY <=> cm.RawY
-      AND tm.DBH <=> cm.MeasuredDBH
-      AND tm.HOM <=> cm.MeasuredHOM
-      AND tm.MeasurementDate <=> cm.MeasurementDate
-      AND tm.Codes <=> cm.RawCodes
-      AND tm.Comments <=> cm.RawComments`;
-
+  // Cross-file match joins the incoming family's staged rows; its windows lock only cm and mel (spec #562 D11).
+  const crossFileScope = crossFileUnresolvedFailureScope(fileID, batchID, censusID);
   const deletedRows = await deleteCoreMeasurementsInBoundedChunksWithAudit(
     connectionManager,
     schema,
-    `cm.CensusID = ? AND cm.StemGUID IS NULL AND NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`,
-    [fileID, batchID, buildSubBatchPattern(batchID), censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    crossFileScope.whereSQL,
+    crossFileScope.whereParams,
     changedBy,
     plotID,
     censusID,
     transactionID,
-    crossFileFromSQL
+    crossFileScope.fromSQL,
+    crossFileScope.lockedAliases
   );
 
   if (deletedRows > 0) {
@@ -708,6 +951,9 @@ async function processSubBatch(
       transactionID = await connectionManager.beginTransaction();
       const tx = transactionExecutorFor(connectionManager, transactionID);
 
+      // The CALL takes the same shared lock on its first census read, so this adds no lock the transaction would not hold anyway.
+      await takeCensusShareLock(connectionManager, schema, censusID, transactionID);
+
       // Snapshotted BEFORE the CALL: a self-heal that deletes stale residue
       // and re-inserts can net to zero rows, but a count delta would miss
       // every new row's INSERT audit and every removed row's DELETE audit —
@@ -794,7 +1040,7 @@ async function processSubBatch(
       // underneath an audit failure still gets the SAME bounded backoff.
       const classificationSource: any = e instanceof ChangelogWriteError ? e.cause : e;
       const isConnectionError = classificationSource?.code === 'ECONNRESET' || classificationSource?.errno === MYSQL_ERRNO_TCP_LOST;
-      const isDeadlock = classificationSource?.code === 'ER_LOCK_DEADLOCK' || classificationSource?.errno === MYSQL_ERRNO_DEADLOCK;
+      const isDeadlock = isDeadlockError(e);
       const isLockContention = e.message?.includes('Failed to acquire application lock') || e.message?.includes('Another upload is in progress');
       // Any other audit/consistency failure is non-transient: the same CALL
       // would fail identically on replay, so retrying wastes the budget (#507).
@@ -855,7 +1101,7 @@ async function processSubBatch(
       } else if (isConnectionError) {
         delay = Math.min(delay * CONNECTION_BACKOFF_MULTIPLIER, CONNECTION_BACKOFF_CAP_MS);
       } else if (isDeadlock) {
-        delay = Math.min(delay * DEADLOCK_BACKOFF_MULTIPLIER, DEADLOCK_BACKOFF_CAP_MS);
+        delay = Math.min(delay * DEADLOCK_RETRY_BACKOFF_MULTIPLIER, DEADLOCK_RETRY_BACKOFF_CAP_MS);
       } else {
         delay = Math.min(delay * DEFAULT_BACKOFF_MULTIPLIER, DEFAULT_BACKOFF_CAP_MS);
       }
@@ -889,6 +1135,7 @@ async function processSubBatch(
   const giveUpTransactionID = await connectionManager.beginTransaction();
   let movedRows: number;
   try {
+    await takeCensusShareLock(connectionManager, schema, censusID, giveUpTransactionID);
     movedRows = await moveSubBatchToFailedMeasurementsWithAudit(
       connectionManager,
       schema,
@@ -974,7 +1221,29 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
   // A deliberate loss, not a bug: ChangedBy is varchar(64) (see identity.ts).
   const changedBy = params.changedBy ? params.changedBy.slice(0, CHANGED_BY_MAX_LENGTH) : null;
 
-  // --- Phase 1: Setup (lock, discover the family, recovery, cleanup, fallback split) ---
+  // --- Phase 0: failed-first-census recovery, in its own bounded transactions (#562) ---
+  activeStep = 'recovery';
+  emit({ outcome: 'started' });
+  let recovery: FailedCensusRecoveryResult;
+  try {
+    recovery = await recoverFailedInitialCensusInBoundedTransactions(connectionManager, {
+      schema,
+      fileID,
+      batchID,
+      plotID: expectedPlotID,
+      censusID: expectedCensusID,
+      changedBy
+    });
+  } catch (error: unknown) {
+    const recoveryError = error instanceof TransactionCallbackTimeoutError ? new SetupCallbackTimeoutError(error) : error;
+    const failedStep: SetupDiagnostic['step'] = isFamilyDiscoveryFailure(error) ? 'discovery' : 'recovery';
+    emit({ step: failedStep, outcome: 'failed', errorCode: errorCodeOf(recoveryError), terminal: true });
+    throw recoveryError;
+  }
+  emit({ outcome: 'completed' });
+  const recoveredBeforeSetup = recovery.outcome === 'recovered';
+
+  // --- Phase 1: Setup (lock, discover the family, cleanup, fallback split) ---
   let setupResult: SetupResult | null;
   try {
     setupResult = await connectionManager.withTransaction<SetupResult | null>(
@@ -986,8 +1255,8 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
           throw new SetupLockUnavailableError(fileID);
         }
 
-        // One current-read discovery under the lock. Recovery and the unresolved-row
-        // cleanup below never delete this family's staged rows, so nothing re-reads it.
+        // One current-read discovery under the lock. The unresolved-row cleanup
+        // below never deletes this family's staged rows, so nothing re-reads it.
         activeStep = 'discovery';
         emit({ outcome: 'started' });
         const family = await discoverBatchFamily((sql, sqlParams) => tx.query(sql, sqlParams), schema, fileID, batchID, { currentRead: true });
@@ -995,20 +1264,6 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
         assertExpectedScope(family, expectedPlotID, expectedCensusID, fileID, batchID);
         const batchSize = getIngestionBatchSize();
         assertMembersWithinBatchSize(family, fileID, batchID, batchSize);
-        emit({ outcome: 'completed', rowCount: family.totalRows });
-
-        activeStep = 'recovery';
-        emit({ outcome: 'started', rowCount: family.totalRows });
-        const recovered = await recoverFailedInitialCensusIfNeeded(
-          connectionManager,
-          schema,
-          fileID,
-          batchID,
-          expectedPlotID,
-          expectedCensusID,
-          changedBy,
-          tx.id
-        );
         emit({ outcome: 'completed', rowCount: family.totalRows });
 
         activeStep = 'cleanup';
@@ -1056,7 +1311,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
         return {
           totalRows: family.totalRows,
           subBatchIDs,
-          recovered,
+          recovered: recoveredBeforeSetup,
           resumedSubBatchCount: family.orphanedSubBatchIDs.length
         };
       },
@@ -1158,6 +1413,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       let cleanupTransactionID: string | undefined;
       try {
         cleanupTransactionID = await connectionManager.beginTransaction();
+        await takeCensusShareLock(connectionManager, schema, censusID, cleanupTransactionID);
         for (let j = i; j < subBatchIDs.length; j++) {
           const movedRows = await moveSubBatchToFailedMeasurementsWithAudit(
             connectionManager,

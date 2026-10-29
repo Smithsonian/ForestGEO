@@ -3,6 +3,7 @@ import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-failure';
+import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
 
 const { loggerInfo, loggerDebug, loggerWarn, loggerError } = vi.hoisted(() => ({
   loggerInfo: vi.fn(),
@@ -193,16 +194,29 @@ function primeSetupBulkProcedureQueries(options: SetupBulkProcedureFixtureOption
   const procedureResult = options.procedureResult ?? [[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}];
   const subBatchRowsAfterCall = options.subBatchRowsAfterCall ?? {};
   const calledSubBatchIDs = new Set<string>();
+  // Rows the fixture has "deleted": every later read, confirmation and lock statement stops returning them,
+  // exactly as the database would once the bounded DELETE ran.
+  const deletedCoreMeasurementIDs = new Set<number>();
+  const configuredCaptureIDs = new Set<number>([
+    ...(options.recoveryCaptureIDs ?? []),
+    ...(options.sameFileCaptureIDs ?? []),
+    ...(options.crossFileCaptureIDs ?? [])
+  ]);
+  const remaining = (rows: Array<{ CoreMeasurementID: number }>) => rows.filter(row => !deletedCoreMeasurementIDs.has(row.CoreMeasurementID));
 
   cm.acquireApplicationLock.mockResolvedValue(true);
-  cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
-    fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: PHASE1_TRANSACTION_ID })
-  );
+  let withTransactionCalls = 0;
+  cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) => {
+    withTransactionCalls += 1;
+    const id = `tx-${withTransactionCalls}`;
+    return fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params, id), id });
+  });
 
   cm.executeQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
     const text = String(sql);
 
     if (text.includes('.temporarymeasurements') && text.includes('GROUP BY BatchID')) return familyRows(familyMembers);
+    if (/\.census WHERE CensusID = \? FOR UPDATE/.test(text)) return [{ CensusID: params[0] }];
     if (text.includes('completedUploads')) return [recoveryState];
     // processSubBatch's before/after coremeasurements scope snapshot: the
     // same statement runs twice per sub-batch attempt, before and after its
@@ -229,16 +243,24 @@ function primeSetupBulkProcedureQueries(options: SetupBulkProcedureFixtureOption
       return { affectedRows: Math.max(params.length - 3, 0) };
     }
 
-    // deleteCoreMeasurementsInBoundedChunksWithAudit's bounded DELETE: params
-    // are exactly the captured ids.
+    // deleteCoreMeasurementsInBoundedChunksWithAudit's bounded DELETE: params are exactly the locked ids.
     if (text.trimStart().toUpperCase().startsWith('DELETE FROM') && text.includes('.coremeasurements') && text.includes('CoreMeasurementID IN')) {
+      for (const id of params) deletedCoreMeasurementIDs.add(Number(id));
       return { affectedRows: params.length };
     }
 
-    // Three distinct FOR-UPDATE id-capture SELECTs; most specific predicate first.
-    if (text.includes('DISTINCT cm.CoreMeasurementID')) return crossFileCaptureRows;
-    if (text.includes('FOR UPDATE') && text.includes('StemGUID IS NULL') && text.includes('UploadFileID = ?')) return sameFileCaptureRows;
-    if (text.includes('FOR UPDATE') && text.includes('SELECT CoreMeasurementID FROM') && !text.includes('StemGUID')) return recoveryCaptureRows;
+    // A window's lock statement (primary-key hint, explicit id list): it finds the requested ids that a cleanup
+    // was configured to capture and that are not deleted yet.
+    if (text.includes('/*+') && text.includes('CoreMeasurementID IN')) {
+      return coreMeasurementIdRows(
+        params.filter((value): value is number => typeof value === 'number' && configuredCaptureIDs.has(value) && !deletedCoreMeasurementIDs.has(value))
+      );
+    }
+
+    // The walk's read and its locking confirmation, per cleanup; most specific predicate first.
+    if (text.includes('DISTINCT cm.CoreMeasurementID')) return remaining(crossFileCaptureRows);
+    if (text.includes('StemGUID IS NULL') && text.includes('UploadFileID = ?')) return remaining(sameFileCaptureRows);
+    if (text.includes('SELECT CoreMeasurementID FROM') && !text.includes('StemGUID')) return remaining(recoveryCaptureRows);
 
     if (text.trim().startsWith('SELECT 1')) return crossFileCandidateExists ? [{ 1: 1 }] : [];
 
@@ -250,16 +272,44 @@ function primeSetupBulkProcedureQueries(options: SetupBulkProcedureFixtureOption
   return cm;
 }
 
+const WALK_CONFIRMATION_PATTERN = new RegExp(`LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}\\s+FOR UPDATE(?: OF [\\w, ]+)?\\s*$`);
+
+interface WalkStatementIndexes {
+  readIndex: number;
+  lockIndex: number;
+  confirmationIndex: number;
+}
+
+/**
+ * Finds, among the statements `isScopeStatement` recognises, the walk's one unlocked read, its first window lock
+ * (recognised by the primary-key hint) and its locking confirmation (recognised by `LIMIT <window> FOR UPDATE`).
+ */
+function locateWalkStatements(calls: [string, unknown[], string?][], isScopeStatement: (sql: string) => boolean, diagnostic: string): WalkStatementIndexes {
+  const indexOfScope = (matches: (sql: string) => boolean) => calls.findIndex(([sql]) => isScopeStatement(String(sql)) && matches(String(sql)));
+  const indexes = {
+    readIndex: indexOfScope(sql => /^\s*SELECT/.test(sql) && !sql.includes('FOR UPDATE') && !sql.includes('/*+')),
+    lockIndex: indexOfScope(sql => sql.includes('/*+')),
+    confirmationIndex: indexOfScope(sql => WALK_CONFIRMATION_PATTERN.test(sql))
+  };
+  expect(
+    Object.values(indexes).every(index => index > -1),
+    `${diagnostic}\nwalk statement indexes: ${JSON.stringify(indexes)}`
+  ).toBe(true);
+  expect(indexes.readIndex, `${diagnostic}\nread precedes lock`).toBeLessThan(indexes.lockIndex);
+  expect(indexes.lockIndex, `${diagnostic}\nlock precedes confirmation`).toBeLessThan(indexes.confirmationIndex);
+  return indexes;
+}
+
 /**
  * Shared assertion for the three audited bounded-delete cleanups (recovery,
  * same-file, cross-file): finds the sole OldRowState-only unifiedchangelog
  * audit INSERT and the sole bounded coremeasurements DELETE, requires both to
- * target exactly `expectedIDs`, both to run on PHASE1_TRANSACTION_ID, and
- * capture < audit < delete in call order — proving the audit runs before the
- * delete, not just that both happened somewhere. Requiring exactly one of
- * each also proves no delete ran against ids outside `expectedIDs`.
+ * target exactly `expectedIDs` on `expectedTransactionID`, and lock < audit <
+ * delete in call order — proving the audit runs before the delete, not just
+ * that both happened somewhere. Requiring exactly one of each also proves no
+ * delete ran against ids outside `expectedIDs`.
  */
-function expectAuditedBoundedDelete(cm: any, captureCallIndex: number, expectedIDs: number[], diagnostic: string): void {
+function expectAuditedBoundedDelete(cm: any, lockCallIndex: number, expectedIDs: number[], expectedTransactionID: string, diagnostic: string): void {
   const calls = cm.executeQuery.mock.calls as [string, unknown[], string?][];
   const isAuditInsert = (sql: string) => sql.includes('.unifiedchangelog') && sql.includes('OldRowState') && !sql.includes('NewRowState');
   const isBoundedDelete = (sql: string) =>
@@ -274,12 +324,12 @@ function expectAuditedBoundedDelete(cm: any, captureCallIndex: number, expectedI
   const [, deleteParams, deleteTx] = deleteCalls[0];
   expect((auditParams as unknown[]).slice(3), diagnostic).toEqual(expectedIDs);
   expect(deleteParams, diagnostic).toEqual(expectedIDs);
-  expect(auditTx, diagnostic).toBe(PHASE1_TRANSACTION_ID);
-  expect(deleteTx, diagnostic).toBe(PHASE1_TRANSACTION_ID);
+  expect(auditTx, diagnostic).toBe(expectedTransactionID);
+  expect(deleteTx, diagnostic).toBe(expectedTransactionID);
 
   const auditIndex = calls.findIndex(([sql]) => isAuditInsert(String(sql)));
   const deleteIndex = calls.findIndex(([sql]) => isBoundedDelete(String(sql)));
-  expect(auditIndex, `${diagnostic}\ncapture must precede audit`).toBeGreaterThan(captureCallIndex);
+  expect(auditIndex, `${diagnostic}\nlock must precede audit`).toBeGreaterThan(lockCallIndex);
   expect(deleteIndex, `${diagnostic}\naudit must precede delete`).toBeGreaterThan(auditIndex);
 }
 
@@ -393,7 +443,7 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     expect(cm.rollbackTransaction).not.toHaveBeenCalled();
   });
 
-  it('narrows failed first-load cleanup to temp rows tied to incomplete uploadmetrics batches, auditing the bounded census-wide capture', async () => {
+  it('recovers a dirty failed first-load census in its own transactions before setup, auditing the held-back slice and narrowing the staged-row cleanup to incomplete uploadmetrics batches', async () => {
     shouldRecoverFailedInitialCensus.mockReturnValue(true);
     const recoveredCoreMeasurementIDs = [9001, 9002];
     const cm = primeSetupBulkProcedureQueries({
@@ -424,14 +474,28 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       diagnostic
     ).toBe(false);
 
-    const captureIndex = calls.findIndex(
-      ([sql]) => String(sql).includes('SELECT CoreMeasurementID FROM') && String(sql).includes('FOR UPDATE') && !String(sql).includes('StemGUID')
-    );
-    expect(captureIndex, diagnostic).toBeGreaterThan(-1);
-    expect(calls[captureIndex][1]).toEqual([DISCOVERED_CENSUS_ID]);
-    expect(calls[captureIndex][2]).toBe(PHASE1_TRANSACTION_ID);
+    const censusLockCall = calls.find(([sql]) => /\.census WHERE CensusID = \? FOR UPDATE/.test(String(sql)));
+    expect(censusLockCall, diagnostic).toBeDefined();
+    const recoveryTransactionID = String(censusLockCall![2]);
+    const setupTransactionID = String(cm.acquireApplicationLock.mock.calls[0][1]);
+    expect(recoveryTransactionID, 'the recovery runs in its own transaction').not.toBe(setupTransactionID);
+    expect(
+      calls.find(
+        ([sql, , transactionID]) => /^\s*SELECT CoreMeasurementID FROM/.test(String(sql)) && transactionID === undefined && !String(sql).includes('LIMIT')
+      ),
+      'one scope read outside any transaction'
+    ).toBeDefined();
+    const lockIndex = calls.findIndex(([sql]) => String(sql).includes('/*+ INDEX(coremeasurements PRIMARY) */') && String(sql).includes('(CensusID = ?)'));
+    expect(lockIndex, diagnostic).toBeGreaterThan(-1);
+    expect(calls[lockIndex][1]).toEqual([DISCOVERED_CENSUS_ID, ...recoveredCoreMeasurementIDs]);
+    expect(calls[lockIndex][2]).toBe(recoveryTransactionID);
 
-    expectAuditedBoundedDelete(cm, captureIndex, recoveredCoreMeasurementIDs, diagnostic);
+    expectAuditedBoundedDelete(cm, lockIndex, recoveredCoreMeasurementIDs, recoveryTransactionID, diagnostic);
+    const setupDeletes = calls.filter(([sql, , transactionID]) => transactionID === setupTransactionID && /^\s*DELETE/i.test(String(sql)));
+    expect(
+      setupDeletes.map(([sql]) => String(sql)),
+      'setup runs no recovery DELETE'
+    ).toEqual([]);
   });
 
   it('removes stale unresolved rows from prior same-file batches, auditing exactly the captured ids in the same transaction', async () => {
@@ -448,23 +512,24 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     const calls = cm.executeQuery.mock.calls as [string, unknown[], string?][];
     const diagnostic = `executed SQL:\n${calls.map(([sql]) => String(sql)).join('\n')}`;
 
-    const captureIndex = calls.findIndex(([sql]) => {
-      const normalizedSql = String(sql);
-      return (
-        normalizedSql.includes('FOR UPDATE') &&
+    const sameFileScopeParams = [DISCOVERED_CENSUS_ID, FILE_ID, BATCH_ID, SUB_BATCH_LIKE_PATTERN];
+    const { readIndex, lockIndex, confirmationIndex } = locateWalkStatements(
+      calls,
+      normalizedSql =>
         normalizedSql.includes('StemGUID IS NULL') &&
         normalizedSql.includes('UploadFileID = ?') &&
         // Family-sparing exclusion: on a worker retry the batch ID is reused
         // and completed sub-batches' proc-recorded failure rows live under
         // suffixed IDs — a bare-ID exclusion would delete them permanently.
-        normalizedSql.includes('NOT (UploadBatchID <=> ? OR UploadBatchID LIKE ?')
-      );
-    });
-    expect(captureIndex, diagnostic).toBeGreaterThan(-1);
-    expect(calls[captureIndex][1]).toEqual([DISCOVERED_CENSUS_ID, FILE_ID, BATCH_ID, SUB_BATCH_LIKE_PATTERN]);
-    expect(calls[captureIndex][2]).toBe(PHASE1_TRANSACTION_ID);
+        normalizedSql.includes('NOT (UploadBatchID <=> ? OR UploadBatchID LIKE ?'),
+      diagnostic
+    );
+    expect(calls[readIndex][1]).toEqual(sameFileScopeParams);
+    expect(calls[lockIndex][1]).toEqual([...sameFileScopeParams, ...sameFileCoreMeasurementIDs]);
+    expect(calls[confirmationIndex][1]).toEqual(sameFileScopeParams);
+    expect(calls[lockIndex][2]).toBe(PHASE1_TRANSACTION_ID);
 
-    expectAuditedBoundedDelete(cm, captureIndex, sameFileCoreMeasurementIDs, diagnostic);
+    expectAuditedBoundedDelete(cm, lockIndex, sameFileCoreMeasurementIDs, PHASE1_TRANSACTION_ID, diagnostic);
   });
 
   it('removes stale unresolved ingestion rows that match the current staged upload even when the file name changed', async () => {
@@ -486,9 +551,11 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     const candidateCall = calls.find(([sql]) => String(sql).trim().startsWith('SELECT 1'));
     expect(candidateCall, diagnostic).toBeDefined();
 
-    const captureIndex = calls.findIndex(([sql]) => {
-      const normalizedSql = String(sql);
-      return (
+    // The JOIN binds the incoming family (FileID, BatchID, LIKE pattern) before the WHERE's census and exclusion params.
+    const crossFileScopeParams = [FILE_ID, BATCH_ID, SUB_BATCH_LIKE_PATTERN, DISCOVERED_CENSUS_ID, FILE_ID, BATCH_ID, SUB_BATCH_LIKE_PATTERN];
+    const { readIndex, lockIndex, confirmationIndex } = locateWalkStatements(
+      calls,
+      normalizedSql =>
         normalizedSql.includes('DISTINCT cm.CoreMeasurementID') &&
         normalizedSql.includes(`JOIN ${SCHEMA}.measurement_error_log mel`) &&
         normalizedSql.includes("me.ErrorSource = 'ingestion'") &&
@@ -496,15 +563,24 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
         normalizedSql.includes('tm.FileID = ?') &&
         normalizedSql.includes('tm.BatchID = ?') &&
         // Family-sparing (see the same-file cleanup test above).
-        normalizedSql.includes('NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ?')
-      );
-    });
-    expect(captureIndex, diagnostic).toBeGreaterThan(-1);
-    // The JOIN binds the incoming family (FileID, BatchID, LIKE pattern) before the WHERE's census and exclusion params.
-    expect(calls[captureIndex][1]).toEqual([FILE_ID, BATCH_ID, SUB_BATCH_LIKE_PATTERN, DISCOVERED_CENSUS_ID, FILE_ID, BATCH_ID, SUB_BATCH_LIKE_PATTERN]);
-    expect(calls[captureIndex][2]).toBe(PHASE1_TRANSACTION_ID);
+        normalizedSql.includes('NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ?'),
+      diagnostic
+    );
+    expect(calls[readIndex][1]).toEqual(crossFileScopeParams);
+    expect(calls[lockIndex][1]).toEqual([...crossFileScopeParams, ...crossFileCoreMeasurementIDs]);
+    expect(calls[confirmationIndex][1]).toEqual(crossFileScopeParams);
+    expect(calls[lockIndex][2]).toBe(PHASE1_TRANSACTION_ID);
 
-    expectAuditedBoundedDelete(cm, captureIndex, crossFileCoreMeasurementIDs, diagnostic);
+    const crossFileLockingStatements = calls
+      .map(([sql]) => String(sql))
+      .filter(sql => sql.includes('DISTINCT cm.CoreMeasurementID') && sql.includes('FOR UPDATE'));
+    console.log(`[R1 cross-file locks]\n${crossFileLockingStatements.map(sql => sql.replace(/\s+/g, ' ').slice(-60)).join('\n')}`);
+    expect(crossFileLockingStatements.length, `${diagnostic}\nexpected a window lock and a confirmation`).toBe(2);
+    for (const sql of crossFileLockingStatements) {
+      expect(sql, 'C3 locks only measurement and link rows (spec D11)').toMatch(/FOR UPDATE OF cm, mel\s*$/);
+    }
+
+    expectAuditedBoundedDelete(cm, lockIndex, crossFileCoreMeasurementIDs, PHASE1_TRANSACTION_ID, diagnostic);
   });
 
   // 2026-07-27 Harvard Forest incident: an unsuffixed-ID-only lookup after a
