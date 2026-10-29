@@ -6,7 +6,7 @@
  * finishes first and is seen by the guard, or waits until the recovery transaction commits. These tests run the
  * real ConnectionManager (one pooled connection per transaction) against local MySQL.
  *   I5  a census writer started between a recovery transaction's guard and its commit waits, and none of its rows is deleted or cascaded
- *   I8  two unbarriered runners of one census finish without a lock error and every row is audited exactly once
+ *   I8  two overlapping unbarriered runners of one census finish without a lock error and every row is audited exactly once
  *   I12 ingestion's CALL waits on a recovery transaction's census lock before it writes anything, then completes once
  *   I14 the failure transfer (give-up, mid-batch cleanup) waits on a recovery transaction's census lock before its snapshot and audits once
  *
@@ -351,12 +351,8 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
       expect([first.status, second.status], `runner outcomes: ${JSON.stringify([first, second])}`).toEqual(['fulfilled', 'fulfilled']);
       const results = [first, second].map(settled => (settled as PromiseFulfilledResult<FailedCensusRecoveryResult>).value);
       expect(
-        results.some(result => result.outcome === 'recovered'),
-        'one runner recovered the census'
-      ).toBe(true);
-      expect(
-        results.every(result => result.outcome === 'recovered' || result.outcome === 'not_due'),
-        `the other runner recovered or found nothing due: ${JSON.stringify(results)}`
+        results.every(result => result.outcome !== 'not_due' && result.windowCount > 0),
+        `both runners entered the recovery and committed window transactions, so they overlapped (a runner that read the census after the other finished is not_due with no window): ${JSON.stringify(results)}`
       ).toBe(true);
       expect(
         results.reduce((sum, result) => sum + result.deletedRows, 0),
