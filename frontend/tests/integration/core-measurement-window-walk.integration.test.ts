@@ -113,6 +113,14 @@ const CONTROL_UNLINKED_BATCH = 'walk-control-unlinked';
 const CONTROL_LINKABLE_BATCH = 'walk-control-linkable';
 /** INNODB_TRX.trx_query holds only the first 1024 characters, so a C3 window statement is recognised by its hint, not its FOR UPDATE tail. */
 const C3_WINDOW_LOCK_STATEMENT_HEAD = /^SELECT \/\*\+ JOIN_PREFIX\(cm\)/;
+const FAMILY_SUB_BATCH = `${INCOMING_BATCH}__sub001`;
+const LOW_ID_FAMILY_TAG = 'I14LOW';
+const HIGH_ID_FAMILY_TAG = 'I14HIGH';
+const WALK_WINDOW_WAITING_STATEMENT_HEAD = /INDEX\(coremeasurements PRIMARY\)/;
+const FAMILY_ROWS = 2;
+const DEADLOCK_VICTIM_ROLLBACKS = 1;
+const WALK_TRANSACTIONS_WITH_ONE_RETRY = 3;
+const INNODB_DEADLOCK_METRIC = 'lock_deadlocks';
 
 describe('bounded window walks (#562)', () => {
   let connection: Connection;
@@ -915,6 +923,86 @@ describe('bounded window walks (#562)', () => {
         });
       } finally {
         await resolver.end();
+      }
+    },
+    WALK_TEST_TIMEOUT_MS
+  );
+
+  async function innodbDeadlockCount(observer: Connection): Promise<number> {
+    return countOf(observer, 'SELECT COUNT AS total FROM information_schema.INNODB_METRICS WHERE NAME = ?', [INNODB_DEADLOCK_METRIC]);
+  }
+
+  it(
+    'I14: two overlapping own-transaction family walks with different discovery snapshots form a real 1213; both succeed, the victim re-runs its whole walk, and every row is deleted and audited once (catches: no own-transaction retry; double audit)',
+    async () => {
+      const writer = await openSideConnection(schema, SIDE_LOCK_WAIT_SECONDS);
+      const harness = createStatementHarness(realManager);
+      const runFamilyWalk = () =>
+        deleteUnresolvedRowsForBatchFamily(realManager, schema, INCOMING_FILE, INCOMING_BATCH, targetCensusID, undefined, [], CHANGED_BY, plotID);
+      const isFamilyScopeRead = matching(WINDOW_WALK_STATEMENT.SCOPE_READ, statement => WALK_SCOPE_MARKER.C4.test(statement.sql));
+      try {
+        await writer.beginTransaction();
+        const [lowInsert] = await insertLateUnresolvedRow(writer, targetCensusID, INCOMING_FILE, FAMILY_SUB_BATCH, LOW_ID_FAMILY_TAG);
+        const [highInsert] = await insertLateUnresolvedRow(connection, targetCensusID, INCOMING_FILE, FAMILY_SUB_BATCH, HIGH_ID_FAMILY_TAG);
+        const lowID = lowInsert.insertId;
+        const highID = highInsert.insertId;
+        expect(lowID, 'the row held open by the writer must have the lower id').toBeLessThan(highID);
+        const deadlocksBefore = await innodbDeadlockCount(connection);
+
+        await runBarrierScenario(harness, async () => {
+          const walkAHoldsHigh = harness.placeBarrier(matching(WINDOW_WALK_STATEMENT.WINDOW_LOCK), 1, 'after');
+          const walkA = harness.track(runFamilyWalk());
+          await withinDeadline(walkAHoldsHigh.reached, 'walk A holding the higher id after its first window', harness.renderStatementLog);
+          const walkAScopeRead = harness.statements.find(isFamilyScopeRead);
+          const walkAWindow = harness.statements.find(matching(WINDOW_WALK_STATEMENT.WINDOW_LOCK));
+          expect(
+            walkAWindow?.params.map(Number),
+            'walk A discovered only the committed higher id, so the writer’s open row is outside its first window'
+          ).toEqual(expect.arrayContaining([highID]));
+          expect(walkAWindow?.params.map(Number)).not.toContain(lowID);
+
+          await writer.commit();
+          const walkB = harness.track(runFamilyWalk());
+          await waitForLockWait(
+            connection,
+            { schema, table: 'coremeasurements', waitingStatement: WALK_WINDOW_WAITING_STATEMENT_HEAD },
+            harness,
+            'walk B waiting on the higher id walk A holds'
+          );
+          walkAHoldsHigh.release();
+          const [settledA, settledB] = await withinDeadline(Promise.allSettled([walkA, walkB]), 'both walks to finish', harness.renderStatementLog);
+
+          const deadlocksFormed = (await innodbDeadlockCount(connection)) - deadlocksBefore;
+          const audits = await deleteAuditCounts(connection, targetCensusID);
+          const survivors = await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [[lowID, highID]]);
+          const walkTransactions = harness.transactionsRunning(isFamilyScopeRead);
+          console.log(
+            `[I14] lowID=${lowID} highID=${highID} walkAScopeReadTransaction=${walkAScopeRead?.transactionID} A=${JSON.stringify(settledA)} B=${JSON.stringify(settledB)} ` +
+              `innodbDeadlocksFormed=${deadlocksFormed} survivors=${survivors} audits=${JSON.stringify([...audits])} walkTransactions=${JSON.stringify(walkTransactions)} ` +
+              `rollbacks=${JSON.stringify(harness.rollbackOrder)} commits=${JSON.stringify(harness.commitOrder)}\n${harness.renderStatementLog()}`
+          );
+          expect(deadlocksFormed, 'InnoDB must have detected a real deadlock between the two walks').toBeGreaterThanOrEqual(1);
+          expect([settledA.status, settledB.status], 'neither walk surfaces the deadlock').toEqual(['fulfilled', 'fulfilled']);
+          expect(survivors, 'both family rows are deleted').toBe(0);
+          const deletedByWalks = [settledA, settledB].reduce((total, settled) => total + (settled.status === 'fulfilled' ? settled.value : 0), 0);
+          expect(deletedByWalks, 'the walks report exactly the two family rows between them').toBe(FAMILY_ROWS);
+          expect(
+            [...audits.keys()].sort((first, second) => first - second),
+            'exactly the two family rows are audited'
+          ).toEqual([lowID, highID]);
+          expect(audits.get(lowID), 'the low row has exactly one DELETE audit').toEqual({ count: 1, changedBy: CHANGED_BY });
+          expect(audits.get(highID), 'the high row has exactly one DELETE audit').toEqual({ count: 1, changedBy: CHANGED_BY });
+          expect(harness.rollbackOrder, 'exactly one walk transaction was rolled back as the deadlock victim').toHaveLength(DEADLOCK_VICTIM_ROLLBACKS);
+          expect(walkTransactions, 'the victim re-ran its whole walk, scope read included, in a transaction of its own').toHaveLength(
+            WALK_TRANSACTIONS_WITH_ONE_RETRY
+          );
+          expect(walkTransactions, 'the rolled-back transaction is one of the two original walks, not the retry').toContain(harness.rollbackOrder[0]);
+          expect(walkTransactions.indexOf(harness.rollbackOrder[0]), 'the retry is the walk transaction that started last').toBeLessThan(
+            WALK_TRANSACTIONS_WITH_ONE_RETRY - 1
+          );
+        });
+      } finally {
+        await writer.end();
       }
     },
     WALK_TEST_TIMEOUT_MS
