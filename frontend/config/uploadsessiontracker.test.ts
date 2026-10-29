@@ -45,7 +45,14 @@ vi.mock('@/ailogger', () => ({
 
 import { SESSION_STAGED_ROW_DELETE_WINDOW_ROWS } from '@/lib/ingestion/temporary-measurements';
 import { deriveArcgisCommitBatchID, buildSubBatchID } from '@/lib/uploads/batch-family';
-import { abandonActiveSession, ACTIVE_UPLOAD_SESSION_STATES, cleanupOrphanedData, createUploadSession, UploadSessionState } from './uploadsessiontracker';
+import {
+  abandonActiveSession,
+  ACTIVE_UPLOAD_SESSION_STATES,
+  cleanupOrphanedData,
+  createUploadSession,
+  runSessionCleanup,
+  UploadSessionState
+} from './uploadsessiontracker';
 
 const WINDOW_TRANSACTION_ID = 'tx-window';
 
@@ -83,7 +90,7 @@ describe('cleanupOrphanedData', () => {
       updatedAt: new Date()
     });
 
-    expect(result).toEqual({ temporaryDeleted: 3, failedDeleted: 3 });
+    expect(result).toEqual({ temporaryDeleted: 3, failedDeleted: 3, skipped: false });
     expect(mocks.beginTransaction).toHaveBeenCalledTimes(1);
     expect(mocks.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledWith(
       expect.any(Object),
@@ -123,7 +130,7 @@ describe('cleanupOrphanedData', () => {
       updatedAt: new Date()
     });
 
-    expect(result).toEqual({ temporaryDeleted: 2, failedDeleted: 2 });
+    expect(result).toEqual({ temporaryDeleted: 2, failedDeleted: 2, skipped: false });
     expect(mocks.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledWith(
       expect.any(Object),
       'forestgeo_testing',
@@ -183,7 +190,7 @@ describe('cleanupOrphanedData', () => {
     const result = await cleanupOrphanedData('forestgeo_testing', abandonedSession);
     const statements = mocks.executeQuery.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' ').trim());
     console.log(`[AU12] result=${JSON.stringify(result)} statements=${JSON.stringify(statements)}`);
-    expect(result).toEqual({ temporaryDeleted: 0, failedDeleted: 0 });
+    expect(result).toEqual({ temporaryDeleted: 0, failedDeleted: 0, skipped: true });
     expect(statements).toHaveLength(1);
     expect(statements[0]).toMatch(SESSION_LOCK_SQL);
     expect(mocks.moveTemporaryBatchToFailedMeasurements).not.toHaveBeenCalled();
@@ -205,7 +212,7 @@ describe('cleanupOrphanedData', () => {
     console.log(`[AU12] lock at ${lockIndex}, first staged-row statement at ${firstStagedIndex}, result=${JSON.stringify(result)}`);
     expect(lockIndex).toBe(0);
     expect(firstStagedIndex).toBeGreaterThan(lockIndex);
-    expect(result).toEqual({ temporaryDeleted: 4, failedDeleted: 4 });
+    expect(result).toEqual({ temporaryDeleted: 4, failedDeleted: 4, skipped: false });
   });
 
   describe('ArcGIS staged rows (the import row restages them, so the sweep deletes instead of moving)', () => {
@@ -242,7 +249,7 @@ describe('cleanupOrphanedData', () => {
       expect(windowDeletes[0].params).toEqual(['sweep-session', 'arcgis.xlsx', ARCGIS_ROOT_BATCH, expect.stringContaining(ARCGIS_ROOT_BATCH)]);
       expect(mocks.withTransaction).toHaveBeenCalledTimes(2);
       expect(mocks.moveTemporaryBatchToFailedMeasurements).not.toHaveBeenCalled();
-      expect(result).toEqual({ temporaryDeleted: SESSION_STAGED_ROW_DELETE_WINDOW_ROWS + LAST_WINDOW_ROWS, failedDeleted: 0 });
+      expect(result).toEqual({ temporaryDeleted: SESSION_STAGED_ROW_DELETE_WINDOW_ROWS + LAST_WINDOW_ROWS, failedDeleted: 0, skipped: false });
     });
 
     it('runs the deletes only after the session was re-checked as abandoned under its lock', async () => {
@@ -271,7 +278,7 @@ describe('cleanupOrphanedData', () => {
       );
       expect(mocks.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledTimes(1);
       expect(mocks.moveTemporaryBatchToFailedMeasurements.mock.calls[0].slice(2, 4)).toEqual(['upload.csv', CSV_BATCH]);
-      expect(result).toEqual({ temporaryDeleted: LAST_WINDOW_ROWS + 2, failedDeleted: 2 });
+      expect(result).toEqual({ temporaryDeleted: LAST_WINDOW_ROWS + 2, failedDeleted: 2, skipped: false });
     });
 
     it('rolls back the session lock and leaves the session abandoned when a window delete fails', async () => {
@@ -340,6 +347,45 @@ describe('abandonActiveSession', () => {
     await expect(abandonActiveSession('forestgeo_testing', 'session-9', 'x')).resolves.toBe(false);
     mocks.runQuery.mockResolvedValueOnce({ affectedRows: 1 });
     await expect(abandonActiveSession('forestgeo_testing', 'session-9', 'x')).resolves.toBe(true);
+  });
+});
+
+describe('runSessionCleanup', () => {
+  const release = vi.fn();
+  const abandonedRow = (sessionId: string) => ({
+    session_id: sessionId,
+    schema_name: 'forestgeo_testing',
+    plot_id: 1,
+    census_id: 2,
+    user_id: 'mason',
+    state: UploadSessionState.ABANDONED,
+    file_id: 'file.csv',
+    last_heartbeat: new Date(),
+    created_at: new Date(),
+    updated_at: new Date()
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getConn.mockResolvedValue({ release });
+    mocks.beginTransaction.mockResolvedValue('tx-cleanup');
+    mocks.commitTransaction.mockResolvedValue(undefined);
+    mocks.rollbackTransaction.mockResolvedValue(undefined);
+  });
+
+  it('counts only sessions it actually cleaned: one a takeover failed under the lock is skipped, not cleaned', async () => {
+    mocks.runQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([abandonedRow('taken-over'), abandonedRow('really-abandoned')]);
+    mocks.executeQuery
+      .mockResolvedValueOnce([{ state: UploadSessionState.FAILED }])
+      .mockResolvedValueOnce([{ state: UploadSessionState.ABANDONED }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 1 });
+
+    const summary = await runSessionCleanup('forestgeo_testing');
+
+    console.log(`[N-b] summary=${JSON.stringify(summary)}`);
+    expect(summary).toEqual({ staleMarked: 0, cleanedUp: 1, totalTempDeleted: 0 });
   });
 });
 

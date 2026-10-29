@@ -715,7 +715,14 @@ async function deleteArcgisFamilyInWindows(
 /**
  * Clean up orphaned data for a session
  */
-export async function cleanupOrphanedData(schema: string, session: UploadSession): Promise<{ temporaryDeleted: number; failedDeleted: number }> {
+export interface OrphanedDataCleanupResult {
+  temporaryDeleted: number;
+  failedDeleted: number;
+  /** The session was no longer abandoned under its lock, so nothing was cleaned. */
+  skipped: boolean;
+}
+
+export async function cleanupOrphanedData(schema: string, session: UploadSession): Promise<OrphanedDataCleanupResult> {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | null = null;
   let temporaryDeleted = 0;
@@ -742,7 +749,7 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
       ailogger.info(
         `[UploadSessionTracker] Skipping cleanup of session ${session.sessionId}: it is ${lockedState ?? 'no longer present'}, not abandoned, under the lock`
       );
-      return { temporaryDeleted: 0, failedDeleted: 0 };
+      return { temporaryDeleted: 0, failedDeleted: 0, skipped: true };
     }
 
     // Move orphaned temporarymeasurements that belong to THIS session.
@@ -869,7 +876,7 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
 
     ailogger.info(`[UploadSessionTracker] Cleaned up session ${session.sessionId}: ${temporaryDeleted} temporary rows deleted`);
 
-    return { temporaryDeleted, failedDeleted };
+    return { temporaryDeleted, failedDeleted, skipped: false };
   } catch (error: unknown) {
     if (transactionID) {
       await connectionManager.rollbackTransaction(transactionID);
@@ -910,6 +917,7 @@ export async function runSessionCleanup(schema: string): Promise<{
   for (const session of abandonedSessions) {
     try {
       const result = await cleanupOrphanedData(schema, session);
+      if (result.skipped) continue;
       cleanedUp++;
       totalTempDeleted += result.temporaryDeleted;
     } catch (error: unknown) {
