@@ -68,6 +68,7 @@ import {
   findAbandonedSessionsNeedingCleanup,
   getSession,
   SESSION_TIMEOUTS,
+  updateSessionState,
   UploadSessionState,
   type OrphanedDataCleanupResult,
   type UploadSession
@@ -114,6 +115,8 @@ const AI11A_CONTROL = { FILE: 'ai11a-ctl.xlsx', TAG_PREFIX: 'ai11c-', SESSION_FI
 const AI11B = { FILE: 'ai11b.xlsx', TAG_PREFIX: 'ai11b-', SESSION_FIRST: 'ai11b-first', SESSION_TAKEOVER: 'ai11b-takeover' } as const;
 const M1_ARCGIS = { FILE: 'm1.xlsx', TAG_PREFIX: 'm1-', SESSION_FIRST: 'm1-first', SESSION_RETRY: 'm1-retry' } as const;
 const M1_CSV = { FILE: 'm1-csv.csv', SESSION: 'm1-csv-session' } as const;
+const M1_SCOPING = { FILE: 'm1s.xlsx', TAG_PREFIX: 'm1s-', SESSION_FIRST: 'm1s-first', SESSION_TAKEOVER: 'm1s-takeover' } as const;
+const SUPERSEDED_ATTEMPT_STRAGGLER_ROWS = 3;
 const L1_SESSIONS = { FAILED: 'l1-failed', ACTIVE: 'l1-active' } as const;
 const AI18_DURING_F = {
   FILE: 'ai18f.xlsx',
@@ -517,11 +520,18 @@ describe('ArcGIS resumable commit against the cleanup paths, on the real Connect
     BARRIER_TEST_TIMEOUT_MS
   );
 
-  async function seedStagedRows(importScope: ArcgisImportScope, fileName: string, batchID: string, sessionID: string, rowCount: number): Promise<void> {
+  async function seedStagedRows(
+    importScope: ArcgisImportScope,
+    fileName: string,
+    batchID: string,
+    sessionID: string,
+    rowCount: number,
+    treeTagPrefix = batchID
+  ): Promise<void> {
     for (let ordinal = 0; ordinal < rowCount; ordinal += 1) {
       await connection.query(
         `INSERT INTO temporarymeasurements (FileID, BatchID, SessionID, SourceFormat, PlotID, CensusID, TreeTag) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [fileName, batchID, sessionID, ORPHAN_SOURCE_FORMAT, importScope.plotID, importScope.censusID, `${batchID}-${ordinal}`]
+        [fileName, batchID, sessionID, ORPHAN_SOURCE_FORMAT, importScope.plotID, importScope.censusID, `${treeTagPrefix}-${ordinal}`]
       );
     }
   }
@@ -598,6 +608,44 @@ describe('ArcGIS resumable commit against the cleanup paths, on the real Connect
       expect(staged).toBe(NO_ROWS);
       expect(movedFailureRows).toBe(CSV_ROW_COUNT);
       expect(await readSessionState(M1_CSV.SESSION)).toBe(UploadSessionState.CLEANED_UP);
+    },
+    BARRIER_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'M1 scoping: re-abandoning a `failed` predecessor and sweeping it deletes only its own staged rows in the family, never the takeover’s',
+    async () => {
+      await startSessionWithFileId(M1_SCOPING.SESSION_FIRST, M1_SCOPING.SESSION_FIRST);
+      const seeded = await seedArcgisImport(scope, M1_SCOPING.FILE, LARGE_IMPORT_ROW_COUNT, M1_SCOPING.TAG_PREFIX);
+      const harness = installBarrierHarness(realManager);
+      await runBarrierScenario(harness, async () => {
+        await failFirstAttemptAfterWindowOne(harness, seeded, M1_SCOPING.SESSION_FIRST);
+        await abandonLongAgo(M1_SCOPING.SESSION_FIRST);
+        await startSessionWithFileId(M1_SCOPING.SESSION_TAKEOVER, M1_SCOPING.SESSION_TAKEOVER);
+        await withinDeadline(commitImport(seeded, M1_SCOPING.SESSION_TAKEOVER), 'takeover under the second session', harness.renderStatementLog);
+        expect(await readSessionState(M1_SCOPING.SESSION_FIRST), 'the takeover flips the abandoned predecessor').toBe(UploadSessionState.FAILED);
+
+        await seedStagedRows(scope, seeded.fileName, seeded.batchID, M1_SCOPING.SESSION_FIRST, SUPERSEDED_ATTEMPT_STRAGGLER_ROWS, M1_SCOPING.TAG_PREFIX);
+        await updateSessionState(scope.schema, M1_SCOPING.SESSION_FIRST, UploadSessionState.ABANDONED);
+        const predecessor = await getSession(scope.schema, M1_SCOPING.SESSION_FIRST);
+        if (!predecessor) throw new Error(`upload session ${M1_SCOPING.SESSION_FIRST} vanished before the sweep`);
+        const takeoverRowsBeforeSweep = await countStagedRowsOfSession(M1_SCOPING.SESSION_TAKEOVER);
+
+        const sweep = await cleanupOrphanedData(scope.schema, predecessor);
+
+        const takeoverRowsAfterSweep = await countStagedRowsOfSession(M1_SCOPING.SESSION_TAKEOVER);
+        const predecessorRowsAfterSweep = await countStagedRowsOfSession(M1_SCOPING.SESSION_FIRST);
+        const familyRowsAfterSweep = await countStagedFamilyRows(connection, seeded.fileName, seeded.batchID);
+        console.log(
+          `[M1 scoping] sweep=${JSON.stringify(sweep)} takeoverRows ${takeoverRowsBeforeSweep}->${takeoverRowsAfterSweep} ` +
+            `predecessorRows=${predecessorRowsAfterSweep} familyRows=${familyRowsAfterSweep}`
+        );
+        expect(takeoverRowsBeforeSweep, 'the takeover staged the whole import in the same family').toBe(LARGE_IMPORT_ROW_COUNT);
+        expect(sweep).toEqual({ temporaryDeleted: SUPERSEDED_ATTEMPT_STRAGGLER_ROWS, failedDeleted: NO_ROWS, skipped: false });
+        expect(predecessorRowsAfterSweep).toBe(NO_ROWS);
+        expect(takeoverRowsAfterSweep, 'every row the takeover staged survives the predecessor’s sweep').toBe(LARGE_IMPORT_ROW_COUNT);
+        expect(familyRowsAfterSweep).toBe(LARGE_IMPORT_ROW_COUNT);
+      });
     },
     BARRIER_TEST_TIMEOUT_MS
   );
