@@ -16,7 +16,10 @@ export interface CensusSummaryPanelsProps {
 /** Validation Errors beside "If you publish now"; they stack when there is no room for both. */
 export default function CensusSummaryPanels({ summary }: CensusSummaryPanelsProps) {
   return (
-    <Box data-testid="census-summary-panels" sx={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${PANEL_MIN_WIDTH_PX}px, 1fr))`, gap: 2 }}>
+    <Box
+      data-testid="census-summary-panels"
+      sx={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${PANEL_MIN_WIDTH_PX}px), 1fr))`, gap: 2 }}
+    >
       <ValidationErrorsCard errorOverview={summary?.errorOverview ?? null} />
       <PublishPreviewCard exportPreview={summary?.exportPreview ?? null} />
     </Box>
