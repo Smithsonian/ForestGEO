@@ -29,15 +29,15 @@ export interface ArcgisCommitVerificationDetail {
   foundFailureRows: number;
 }
 
-/** A CLEAN_REUPLOAD import reached finalize before its upload session recorded the census replacement. Retryable: the next attempt replaces first. */
+/** A CLEAN_REUPLOAD import reached finalize before the import session recorded the census replacement. Retryable: the next attempt restages and re-runs the replacement. */
 export class ArcgisCensusReplacementIncompleteError extends Error {
   readonly importSessionId: string;
   readonly uploadSessionID: string;
 
   constructor(importSessionId: string, uploadSessionID: string) {
     super(
-      `ArcGIS import ${importSessionId} could not be finalized: upload session ${uploadSessionID} has not recorded the completed census replacement. ` +
-        `Re-run the import; the retry replaces the census before staging.`
+      `ArcGIS import ${importSessionId} reached finalize before its census replacement completed. ` +
+        `Re-run the import; the retry restages and re-runs the replacement.`
     );
     this.name = 'ArcgisCensusReplacementIncompleteError';
     this.importSessionId = importSessionId;

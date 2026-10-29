@@ -110,6 +110,17 @@ describe('POST /api/arcgis/commit (#561)', () => {
     expect(mocks.commit).not.toHaveBeenCalled();
   });
 
+  it('returns the replacement-incomplete message verbatim, without the route repeating its re-run advice', async () => {
+    const incomplete = new ArcgisCensusReplacementIncompleteError(BODY.importSessionId, UPLOAD_SESSION_ID);
+    mocks.commit.mockRejectedValueOnce(incomplete);
+    const response = await POST(request(BODY));
+    const payload = await response.json();
+    console.log(`[route] replacement incomplete -> ${response.status} ${JSON.stringify(payload)}`);
+    expect(response.status).toBe(HTTPResponses.CONFLICT);
+    expect(payload.error).toBe(incomplete.message);
+    expect(payload.error.match(/re-run the import/gi)).toHaveLength(1);
+  });
+
   it.each([
     [
       'ArcgisCommitVerificationError',

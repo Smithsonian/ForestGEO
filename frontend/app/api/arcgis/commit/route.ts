@@ -93,7 +93,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (error instanceof UploadSessionOwnershipError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    if (error instanceof ArcgisCommitVerificationError || error instanceof ArcgisCensusReplacementIncompleteError) {
+    if (error instanceof ArcgisCensusReplacementIncompleteError) {
+      ailogger.warn(`ArcGIS commit for ${importSessionId} is not finished and can be retried: ${error.message}`);
+      return NextResponse.json({ error: error.message }, { status: HTTPResponses.CONFLICT });
+    }
+    if (error instanceof ArcgisCommitVerificationError) {
       ailogger.warn(`ArcGIS commit for ${importSessionId} is not finished and can be retried: ${error.message}`);
       return NextResponse.json({ error: `${error.message} Re-run the import to finish it.` }, { status: HTTPResponses.CONFLICT });
     }

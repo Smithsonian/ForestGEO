@@ -113,7 +113,9 @@ describe('finalizeArcgisCommit', () => {
     expect((refusal as Error).message, 'the CSV error tells the user to call a function an ArcGIS import cannot run').not.toMatch(
       /replaceCensusForCleanReupload/
     );
-    expect((refusal as Error).message).toMatch(/re-run the import/i);
+    expect((refusal as Error).message).toBe(
+      `ArcGIS import ${IMPORT_SESSION_ID} reached finalize before its census replacement completed. Re-run the import; the retry restages and re-runs the replacement.`
+    );
     await expect(finalizeArcgisCommit(manager, ATTEMPT, { ...SNAPSHOT, stagingNextRowIndex: ROW_COUNT - 7 }, TX)).rejects.toBeInstanceOf(
       ArcgisImportSessionInvariantError
     );
