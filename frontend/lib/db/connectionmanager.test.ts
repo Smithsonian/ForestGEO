@@ -756,6 +756,102 @@ describe('ConnectionManager transaction finalization after a statement timeout',
 });
 
 /**
+ * runQuery quarantines a connection whose statement was KILLed (ER_QUERY_INTERRUPTED, 1317) or whose connection was
+ * killed (1927) and destroys the socket, but rejects with the server's own error rather than a QueryTimeoutError. The
+ * transaction used to stay registered as active on that destroyed socket, so the caller's rollback threw mysql2's
+ * closed-state error over the real one, and a later commit was misreported as an unknown outcome although no COMMIT
+ * was ever sent.
+ */
+describe('ConnectionManager transaction finalization after a KILLed statement', () => {
+  const KILLED_THREAD_ID = 1_317;
+  const MYSQL_ERRNO_QUERY_INTERRUPTED = 1317;
+  const QUERY_INTERRUPTED_CODE = 'ER_QUERY_INTERRUPTED';
+  const QUARANTINE_REASON = 'statement killed';
+
+  type TxInternals = {
+    transactionConnections: Map<string, unknown>;
+    transactionMeta: Map<string, unknown>;
+    transactionSlotQueue: Array<() => void>;
+    startingTransactions: number;
+  };
+
+  function makeKilledSocketConnection() {
+    const closedState = () => new Error("Can't add new command when connection is in closed state");
+    return {
+      threadId: KILLED_THREAD_ID,
+      query: vi.fn().mockResolvedValue([[]]),
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockRejectedValue(closedState()),
+      rollback: vi.fn().mockRejectedValue(closedState()),
+      release: vi.fn(),
+      destroy: vi.fn()
+    };
+  }
+
+  beforeEach(() => {
+    getConnMock.mockReset();
+    runQueryMock.mockReset();
+    loggerMock.info.mockReset();
+    loggerMock.warn.mockReset();
+    loggerMock.error.mockReset();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('finalizes the transaction on a quarantined connection, so rollback is a no-op, commit is refused and the 1317 error reaches the caller unchanged', async () => {
+    const { quarantineConnection } = await vi.importActual<typeof import('./connectionquarantine')>('./connectionquarantine');
+    const { TransactionNotActiveError } = await vi.importActual<typeof import('./transactionerrors')>('./transactionerrors');
+    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const cm = ConnectionManager.getInstance();
+    const internals = cm as unknown as TxInternals;
+    const occupancyBefore = internals.transactionConnections.size + internals.startingTransactions;
+    const queueLengthBefore = internals.transactionSlotQueue.length;
+
+    const connection = makeKilledSocketConnection();
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await cm.beginTransaction();
+
+    const killedStatementError = Object.assign(new Error('Query execution was interrupted'), {
+      code: QUERY_INTERRUPTED_CODE,
+      errno: MYSQL_ERRNO_QUERY_INTERRUPTED
+    });
+    runQueryMock.mockImplementation(async (queriedConnection: unknown, sql: string) => {
+      if (String(sql).startsWith('USE ')) return [];
+      quarantineConnection(queriedConnection as never, QUARANTINE_REASON);
+      throw killedStatementError;
+    });
+
+    const thrown = await cm.executeQuery('CALL forestgeo_test.bulkingestionprocess(?, ?)', ['f', 'b'], transactionId).then(
+      () => {
+        throw new Error('executeQuery resolved but runQuery rejected with a killed-statement error');
+      },
+      (error: unknown) => error
+    );
+    expect(
+      runQueryMock.mock.calls.some(([, sql]) => String(sql).startsWith('CALL')),
+      'the CALL itself must be the killed statement'
+    ).toBe(true);
+    expect(thrown, 'the original 1317 error must reach the caller unwrapped').toBe(killedStatementError);
+
+    expect(internals.transactionConnections.has(transactionId), 'the transaction on a quarantined connection must be finalized').toBe(false);
+    expect(internals.transactionMeta.has(transactionId)).toBe(false);
+    expect(internals.transactionConnections.size + internals.startingTransactions, 'the slot must be freed exactly once').toBe(occupancyBefore);
+    expect(internals.transactionSlotQueue.length).toBe(queueLengthBefore);
+    expect(connection.release, 'a quarantined connection must never return to the pool').not.toHaveBeenCalled();
+
+    await expect(cm.rollbackTransaction(transactionId), 'rollback after the kill must not throw the closed-state error').resolves.toBeUndefined();
+    expect(connection.rollback, 'no ROLLBACK may be sent over a destroyed socket').not.toHaveBeenCalled();
+    await expect(cm.commitTransaction(transactionId), 'a commit after the kill was never sent and must not read as an unknown outcome').rejects.toBeInstanceOf(
+      TransactionNotActiveError
+    );
+    expect(connection.commit, 'no COMMIT may be sent over a destroyed socket').not.toHaveBeenCalled();
+  });
+});
+
+/**
  * discardTransaction is for a transaction whose session state can no longer be
  * trusted (e.g. a session variable that could not be reset). Its connection must
  * be destroyed, never released back to the pool, and the transaction's

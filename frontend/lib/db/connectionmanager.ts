@@ -292,15 +292,17 @@ class ConnectionManager {
       queryMs = queryMs || Date.now() - startedAt - acquireMs - schemaUseMs;
       const errMsg = error instanceof Error ? error.message : String(error);
       ailogger.error(chalk.red(`Error executing query: ${errMsg}`));
-      if (transactionId && error instanceof QueryTimeoutError) {
-        // runQuery destroyed this connection, so the transaction is over: the
-        // server rolls it back when the socket closes. Without finalizing here,
-        // the caller's `rollbackTransaction` in its catch/finally would find the
-        // map entry still present, call rollback() on a closed connection, and
-        // throw "closed state" — replacing the QueryTimeoutError in the route's
-        // 500 with a misleading one. Finalize now so that later rollback takes
-        // the existing already-finalized no-op path.
-        this.finalizeTransactionAfterConnectionLoss(transactionId, `statement timed out after ${error.timeoutMs}ms`);
+      if (transactionId && (error instanceof QueryTimeoutError || isConnectionQuarantined(connection))) {
+        // runQuery quarantined and destroyed this connection (statement timeout, KILLed statement or killed
+        // connection), so the transaction is over: the server rolls it back when the socket closes. Without
+        // finalizing here, the caller's `rollbackTransaction` in its catch/finally would find the map entry
+        // still present, call rollback() on a closed connection, and throw "closed state" — replacing the
+        // original error in the route's 500 with a misleading one, and a later commit would be misreported as
+        // an unknown outcome although no COMMIT was sent. Finalize now so a later rollback takes the existing
+        // already-finalized no-op path and a later commit throws TransactionNotActiveError.
+        const reason =
+          error instanceof QueryTimeoutError ? `statement timed out after ${error.timeoutMs}ms` : `statement failed on a quarantined connection: ${errMsg}`;
+        this.finalizeTransactionAfterConnectionLoss(transactionId, reason);
       }
       throw error;
     } finally {
