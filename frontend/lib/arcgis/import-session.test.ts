@@ -8,12 +8,19 @@ import { deriveArcgisCommitBatchID, getIngestionBatchSize, MAX_SUB_BATCH_ORDINAL
 import { ARCGIS_COMMIT_STATEMENT, WRITE_STATEMENT } from '@/tests/setup/arcgis-commit-statement-patterns';
 import { CENSUS_REPLACEMENT_STATEMENT } from '@/tests/setup/census-replacement-statement-patterns';
 import {
+  advanceArcgisImportStagingCursor,
   ARCGIS_COMMIT_CLAIM_KIND,
   ARCGIS_IMPORT_SESSION_STATE,
+  ArcgisCommitSupersededError,
   ArcgisImportSessionError,
   ArcgisImportSessionInvariantError,
   assertUploadableArcgisSession,
   claimArcgisImportCommitAttempt,
+  loadArcgisImportRowWindow,
+  lockArcgisImportSessionForCommitUnit,
+  markArcgisImportCensusReplacementCompleted,
+  markArcgisImportCommitCompleted,
+  type ArcgisCommitAttempt,
   type ArcgisCommitClaimInput
 } from './import-session';
 
@@ -428,5 +435,227 @@ describe('claimArcgisImportCommitAttempt kinds (AU3)', () => {
   it('a CAS that matches no row is a 409', async () => {
     const { manager } = scriptedClaimConnection({ importRow: importRow(), claimAffectedRows: 0 });
     await expect(claimArcgisImportCommitAttempt(manager, claimInput(), TRANSACTION_ID)).rejects.toMatchObject({ status: HTTPResponses.CONFLICT });
+  });
+});
+
+const UNIT_TRANSACTION_ID = 'unit-tx';
+const UNIT_WINDOW_START = 5_000;
+const UNIT_WINDOW_SIZE = 3;
+const UNIT_WINDOW_END = UNIT_WINDOW_START + UNIT_WINDOW_SIZE;
+const CURSOR_ADVANCE_END = 10_000;
+const CURSOR_INSERTED_ROWS = 4_999;
+const SUPERSEDING_ATTEMPT_ID = 'attempt-3';
+const OTHER_BATCH_ID = 'arc000000000000000000000other';
+const ONE_AFFECTED_ROW = 1;
+const NO_AFFECTED_ROWS = 0;
+const STATEMENT_LOG_WIDTH = 60;
+
+const ATTEMPT: ArcgisCommitAttempt = {
+  schema: CLAIM_SCHEMA,
+  importSessionId: IMPORT_SESSION_ID,
+  plotID: PLOT_ID,
+  censusID: CENSUS_ID,
+  batchID: DERIVED_BATCH,
+  uploadMode: UploadMode.CLEAN_REUPLOAD,
+  uploadSessionID: CALLER_SESSION,
+  attemptID: ATTEMPT_ID,
+  changedBy: OWNER
+};
+
+const guardRow = (overrides: Record<string, unknown> = {}) => ({
+  state: ARCGIS_IMPORT_SESSION_STATE.COMMITTING,
+  row_count: ROW_COUNT,
+  staging_next_row_index: UNIT_WINDOW_START,
+  committed_row_count: UNIT_WINDOW_START - 1,
+  census_replacement_completed_at: null,
+  committed_batch_id: DERIVED_BATCH,
+  commit_attempt_id: ATTEMPT_ID,
+  file_id: FILE_NAME,
+  ...overrides
+});
+
+interface UnitScript {
+  guard?: Record<string, unknown> | null;
+  callerSession?: Record<string, unknown>;
+  windowRows?: unknown[];
+  affectedRows?: number;
+}
+
+function scriptedUnitConnection(script: UnitScript) {
+  const statements: Array<{ sql: string; params: unknown[]; transactionID?: string }> = [];
+  const executeQuery = vi.fn(async (sql: string, params: unknown[] = [], transactionID?: string) => {
+    statements.push({ sql, params, transactionID });
+    if (ARCGIS_COMMIT_STATEMENT.IMPORT_ROW_UNIT_LOCK.test(sql)) return script.guard ? [script.guard] : [];
+    if (CENSUS_REPLACEMENT_STATEMENT.SESSION_LOCK.test(sql)) return [script.callerSession ?? ACTIVE_CALLER_SESSION];
+    if (ARCGIS_COMMIT_STATEMENT.ROW_WINDOW_SELECT.test(sql)) return script.windowRows ?? [];
+    if (WRITE_STATEMENT.test(sql)) return { affectedRows: script.affectedRows ?? ONE_AFFECTED_ROW };
+    throw new Error(`scripted unit connection: unexpected statement ${sql}`);
+  });
+  const summary = () => statements.map(({ sql }) => sql.replace(/\s+/g, ' ').slice(0, STATEMENT_LOG_WIDTH));
+  return { manager: { executeQuery } as unknown as ConnectionManager, statements, summary };
+}
+
+const statementKind = (sql: string) =>
+  ARCGIS_COMMIT_STATEMENT.IMPORT_ROW_UNIT_LOCK.test(sql)
+    ? 'import-row-lock'
+    : CENSUS_REPLACEMENT_STATEMENT.SESSION_LOCK.test(sql)
+      ? 'upload-session-lock'
+      : sql;
+
+describe('lockArcgisImportSessionForCommitUnit (spec section 4, AU4, P3)', () => {
+  it('locks the import row, then the upload session, in the caller transaction, and returns the snapshot', async () => {
+    const { manager, statements, summary } = scriptedUnitConnection({ guard: guardRow() });
+
+    const snapshot = await lockArcgisImportSessionForCommitUnit(manager, ATTEMPT, UNIT_TRANSACTION_ID);
+
+    console.log(`[AU4] snapshot=${JSON.stringify(snapshot)} statements=${JSON.stringify(summary())}`);
+    expect(snapshot).toEqual({
+      commitCompleted: false,
+      rowCount: ROW_COUNT,
+      stagingNextRowIndex: UNIT_WINDOW_START,
+      committedRowCount: UNIT_WINDOW_START - 1,
+      censusReplacementCompleted: false,
+      fileName: FILE_NAME
+    });
+    expect(statements.map(({ sql }) => statementKind(sql))).toEqual(['import-row-lock', 'upload-session-lock']);
+    expect(statements.map(({ transactionID }) => transactionID)).toEqual([UNIT_TRANSACTION_ID, UNIT_TRANSACTION_ID]);
+  });
+
+  it('reports a recorded census-replacement marker in the snapshot', async () => {
+    const { manager } = scriptedUnitConnection({ guard: guardRow({ census_replacement_completed_at: new Date() }) });
+    const snapshot = await lockArcgisImportSessionForCommitUnit(manager, ATTEMPT, UNIT_TRANSACTION_ID);
+    expect(snapshot.censusReplacementCompleted).toBe(true);
+  });
+
+  it('reports commitCompleted for a committed row without locking the upload session, even for another attempt (P3, N5)', async () => {
+    const { manager, statements, summary } = scriptedUnitConnection({
+      guard: guardRow({ state: ARCGIS_IMPORT_SESSION_STATE.COMMITTED, commit_attempt_id: 'winning-attempt' }),
+      callerSession: { ...ACTIVE_CALLER_SESSION, state: UploadSessionState.COMPLETED }
+    });
+
+    const snapshot = await lockArcgisImportSessionForCommitUnit(manager, ATTEMPT, UNIT_TRANSACTION_ID);
+
+    console.log(`[AU4] committed row: commitCompleted=${snapshot.commitCompleted} statements=${JSON.stringify(summary())}`);
+    expect(snapshot.commitCompleted).toBe(true);
+    expect(statements).toHaveLength(1);
+  });
+
+  it.each([
+    ['no import row', { guard: null }, ArcgisImportSessionError, HTTPResponses.NOT_FOUND],
+    ['another batch', { guard: guardRow({ committed_batch_id: OTHER_BATCH_ID }) }, ArcgisImportSessionError, HTTPResponses.CONFLICT],
+    ['a newer attempt', { guard: guardRow({ commit_attempt_id: SUPERSEDING_ATTEMPT_ID }) }, ArcgisCommitSupersededError, HTTPResponses.CONFLICT],
+    ['a preflight row', { guard: guardRow({ state: ARCGIS_IMPORT_SESSION_STATE.PREFLIGHT }) }, ArcgisImportSessionError, HTTPResponses.CONFLICT],
+    [
+      'an inactive upload session',
+      { guard: guardRow(), callerSession: { ...ACTIVE_CALLER_SESSION, state: UploadSessionState.ABANDONED } },
+      UploadSessionOwnershipError,
+      undefined
+    ]
+  ])('%s: throws the specific error and issues no write', async (label, script, errorClass, expectedStatus) => {
+    const { manager, statements, summary } = scriptedUnitConnection(script);
+
+    const error = await lockArcgisImportSessionForCommitUnit(manager, ATTEMPT, UNIT_TRANSACTION_ID).catch((thrown: unknown) => thrown);
+
+    console.log(`[AU4] ${label}: error=${(error as Error).name} status=${(error as { status?: number }).status} statements=${JSON.stringify(summary())}`);
+    expect(error).toBeInstanceOf(errorClass);
+    if (expectedStatus !== undefined) expect((error as ArcgisImportSessionError).status).toBe(expectedStatus);
+    expect(statements.filter(({ sql }) => WRITE_STATEMENT.test(sql))).toEqual([]);
+  });
+
+  it('a newer attempt and a non-committing state never reach the upload session lock', async () => {
+    const superseded = scriptedUnitConnection({ guard: guardRow({ commit_attempt_id: SUPERSEDING_ATTEMPT_ID }) });
+    await expect(lockArcgisImportSessionForCommitUnit(superseded.manager, ATTEMPT, UNIT_TRANSACTION_ID)).rejects.toBeInstanceOf(ArcgisCommitSupersededError);
+    const preflight = scriptedUnitConnection({ guard: guardRow({ state: ARCGIS_IMPORT_SESSION_STATE.PREFLIGHT }) });
+    await expect(lockArcgisImportSessionForCommitUnit(preflight.manager, ATTEMPT, UNIT_TRANSACTION_ID)).rejects.toBeInstanceOf(ArcgisImportSessionError);
+    expect(superseded.statements).toHaveLength(1);
+    expect(preflight.statements).toHaveLength(1);
+  });
+});
+
+describe('loadArcgisImportRowWindow (spec section 7 step 2, AU5)', () => {
+  it('returns the window rows parsed from row_json, bounded by the primary-key range', async () => {
+    const windowRows = [0, 1, 2].map(offset => ({ row_index: UNIT_WINDOW_START + offset, row_json: JSON.stringify({ tag: `T${offset}` }) }));
+    const { manager, statements } = scriptedUnitConnection({ windowRows });
+
+    const loaded = await loadArcgisImportRowWindow(manager, CLAIM_SCHEMA, IMPORT_SESSION_ID, UNIT_WINDOW_START, UNIT_WINDOW_SIZE, UNIT_TRANSACTION_ID);
+
+    console.log(`[AU5] loaded=${JSON.stringify(loaded)} params=${JSON.stringify(statements[0].params)}`);
+    expect(loaded.map(row => row.tag)).toEqual(['T0', 'T1', 'T2']);
+    expect(statements[0].params).toEqual([IMPORT_SESSION_ID, UNIT_WINDOW_START, UNIT_WINDOW_END]);
+    expect(statements[0].transactionID).toBe(UNIT_TRANSACTION_ID);
+  });
+
+  it.each([
+    ['short by one', [0, 1]],
+    ['with a gap', [0, 2, 3]],
+    ['starting late', [1, 2, 3]],
+    ['empty', []]
+  ])('refuses a window %s with 422 and issues no further statement', async (label, offsets) => {
+    const windowRows = offsets.map(offset => ({ row_index: UNIT_WINDOW_START + offset, row_json: '{}' }));
+    const { manager, statements } = scriptedUnitConnection({ windowRows });
+
+    const error = await loadArcgisImportRowWindow(manager, CLAIM_SCHEMA, IMPORT_SESSION_ID, UNIT_WINDOW_START, UNIT_WINDOW_SIZE, UNIT_TRANSACTION_ID).catch(
+      (thrown: unknown) => thrown
+    );
+
+    console.log(`[AU5] ${label}: error=${(error as Error).name} status=${(error as { status?: number }).status} statements=${statements.length}`);
+    expect(error).toBeInstanceOf(ArcgisImportSessionError);
+    expect((error as ArcgisImportSessionError).status).toBe(HTTPResponses.UNPROCESSABLE_ENTITY);
+    expect(statements).toHaveLength(1);
+  });
+});
+
+describe('per-unit import-session writes (spec sections 5, 7, 8)', () => {
+  const cursorAdvance = { fromRowIndex: UNIT_WINDOW_START, toRowIndex: CURSOR_ADVANCE_END, insertedRows: CURSOR_INSERTED_ROWS };
+
+  it('the cursor compare-and-set is fenced on the attempt and on the cursor the guard read (AU5)', async () => {
+    const { manager, statements } = scriptedUnitConnection({});
+
+    await advanceArcgisImportStagingCursor(manager, ATTEMPT, cursorAdvance, UNIT_TRANSACTION_ID);
+
+    console.log(`[AU5] cursor CAS sql=${statements[0].sql.replace(/\s+/g, ' ')} params=${JSON.stringify(statements[0].params)}`);
+    expect(statements[0].sql).toMatch(ARCGIS_COMMIT_STATEMENT.CURSOR_CAS);
+    expect(statements[0].sql.replace(/\s+/g, ' ')).toContain('WHERE import_session_id = ? AND commit_attempt_id = ? AND staging_next_row_index = ?');
+    expect(statements[0].params).toEqual([CURSOR_ADVANCE_END, CURSOR_INSERTED_ROWS, IMPORT_SESSION_ID, ATTEMPT_ID, UNIT_WINDOW_START]);
+    expect(statements[0].transactionID).toBe(UNIT_TRANSACTION_ID);
+  });
+
+  it('a cursor compare-and-set that matches no row is an invariant violation', async () => {
+    const { manager } = scriptedUnitConnection({ affectedRows: NO_AFFECTED_ROWS });
+    await expect(advanceArcgisImportStagingCursor(manager, ATTEMPT, cursorAdvance, UNIT_TRANSACTION_ID)).rejects.toBeInstanceOf(
+      ArcgisImportSessionInvariantError
+    );
+  });
+
+  it('the replacement marker is fenced on the attempt and the committing state', async () => {
+    const { manager, statements } = scriptedUnitConnection({});
+
+    await markArcgisImportCensusReplacementCompleted(manager, ATTEMPT, UNIT_TRANSACTION_ID);
+
+    expect(statements[0].sql).toMatch(ARCGIS_COMMIT_STATEMENT.IMPORT_MARKER_UPDATE);
+    expect(statements[0].sql.replace(/\s+/g, ' ')).toContain('WHERE import_session_id = ? AND commit_attempt_id = ? AND state = ?');
+    expect(statements[0].params).toEqual([IMPORT_SESSION_ID, ATTEMPT_ID, ARCGIS_IMPORT_SESSION_STATE.COMMITTING]);
+    expect(statements[0].transactionID).toBe(UNIT_TRANSACTION_ID);
+  });
+
+  it('a replacement marker that matches no row is an invariant violation', async () => {
+    const { manager } = scriptedUnitConnection({ affectedRows: NO_AFFECTED_ROWS });
+    await expect(markArcgisImportCensusReplacementCompleted(manager, ATTEMPT, UNIT_TRANSACTION_ID)).rejects.toBeInstanceOf(ArcgisImportSessionInvariantError);
+  });
+
+  it('the finalize compare-and-set is fenced on the attempt and the committing state', async () => {
+    const { manager, statements } = scriptedUnitConnection({});
+
+    await markArcgisImportCommitCompleted(manager, ATTEMPT, UNIT_TRANSACTION_ID);
+
+    expect(statements[0].sql).toMatch(ARCGIS_COMMIT_STATEMENT.FINALIZE_UPDATE);
+    expect(statements[0].sql.replace(/\s+/g, ' ')).toContain('WHERE import_session_id = ? AND state = ? AND commit_attempt_id = ?');
+    expect(statements[0].params).toEqual([ARCGIS_IMPORT_SESSION_STATE.COMMITTED, IMPORT_SESSION_ID, ARCGIS_IMPORT_SESSION_STATE.COMMITTING, ATTEMPT_ID]);
+    expect(statements[0].transactionID).toBe(UNIT_TRANSACTION_ID);
+  });
+
+  it('a finalize compare-and-set that matches no row is a 409', async () => {
+    const { manager } = scriptedUnitConnection({ affectedRows: NO_AFFECTED_ROWS });
+    await expect(markArcgisImportCommitCompleted(manager, ATTEMPT, UNIT_TRANSACTION_ID)).rejects.toMatchObject({ status: HTTPResponses.CONFLICT });
   });
 });

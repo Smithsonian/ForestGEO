@@ -668,6 +668,186 @@ export async function claimArcgisImportCommitAttempt(
   };
 }
 
+/** Everything a unit after the claim needs to prove it is still the attempt allowed to write (#561). */
+export interface ArcgisCommitAttempt {
+  schema: string;
+  importSessionId: string;
+  plotID: number;
+  censusID: number;
+  batchID: string;
+  uploadMode: UploadMode;
+  uploadSessionID: string;
+  attemptID: string;
+  changedBy: string;
+}
+
+export interface ArcgisCommitUnitSnapshot {
+  commitCompleted: boolean;
+  rowCount: number;
+  stagingNextRowIndex: number;
+  committedRowCount: number;
+  censusReplacementCompleted: boolean;
+  fileName: string;
+}
+
+interface ArcgisCommitGuardRow {
+  state: string;
+  row_count: number | string;
+  staging_next_row_index: number | string;
+  committed_row_count: number | string | null;
+  census_replacement_completed_at: Date | string | null;
+  committed_batch_id: string | null;
+  commit_attempt_id: string | null;
+  file_id: string;
+}
+
+export interface ArcgisStagingCursorAdvance {
+  fromRowIndex: number;
+  toRowIndex: number;
+  insertedRows: number;
+}
+
+function affectedRowCount(result: unknown): number {
+  return Number((result as { affectedRows?: number })?.affectedRows ?? 0);
+}
+
+/**
+ * The first statement of every ArcGIS commit unit after the claim (spec section 4). Locks the import row, then the
+ * attempt's upload session; nothing is written in any refusal. A committed row ends the run before the liveness check,
+ * so an attempt that lost the race to a finished peer reports `alreadyCommitted` rather than an ownership error.
+ */
+export async function lockArcgisImportSessionForCommitUnit(
+  connectionManager: ConnectionManager,
+  attempt: ArcgisCommitAttempt,
+  transactionID: string
+): Promise<ArcgisCommitUnitSnapshot> {
+  const guardSQL = safeFormatQuery(
+    attempt.schema,
+    `SELECT state, row_count, staging_next_row_index, committed_row_count, census_replacement_completed_at, committed_batch_id, commit_attempt_id, file_id
+     FROM ??.arcgis_import_sessions WHERE import_session_id = ? FOR UPDATE`
+  );
+  const guardRows = await connectionManager.executeQuery(guardSQL, [attempt.importSessionId], transactionID);
+  const row = Array.isArray(guardRows) ? (guardRows[0] as ArcgisCommitGuardRow | undefined) : undefined;
+  if (!row) {
+    throw new ArcgisImportSessionError(
+      `ArcGIS import ${attempt.importSessionId} expired or was removed. Re-run the workbook pre-flight step.`,
+      HTTPResponses.NOT_FOUND
+    );
+  }
+  if (row.committed_batch_id !== attempt.batchID) {
+    throw new ArcgisImportSessionError(
+      `ArcGIS import ${attempt.importSessionId} is committed to batch ${row.committed_batch_id ?? 'none'}, not ${attempt.batchID}.`,
+      HTTPResponses.CONFLICT
+    );
+  }
+  const snapshot: ArcgisCommitUnitSnapshot = {
+    commitCompleted: row.state === ARCGIS_IMPORT_SESSION_STATE.COMMITTED,
+    rowCount: Number(row.row_count),
+    stagingNextRowIndex: Number(row.staging_next_row_index),
+    committedRowCount: Number(row.committed_row_count ?? 0),
+    censusReplacementCompleted: row.census_replacement_completed_at !== null,
+    fileName: row.file_id
+  };
+  if (snapshot.commitCompleted) return snapshot;
+  if (row.commit_attempt_id !== attempt.attemptID) {
+    throw new ArcgisCommitSupersededError(attempt.importSessionId, attempt.attemptID, row.commit_attempt_id);
+  }
+  if (row.state !== ARCGIS_IMPORT_SESSION_STATE.COMMITTING) {
+    throw new ArcgisImportSessionError(`ArcGIS import ${attempt.importSessionId} is ${row.state}, not committing.`, HTTPResponses.CONFLICT);
+  }
+  await lockActiveUploadSessionForCensus(
+    connectionManager,
+    { schema: attempt.schema, plotID: attempt.plotID, censusID: attempt.censusID, uploadSessionID: attempt.uploadSessionID },
+    transactionID
+  );
+  return snapshot;
+}
+
+/** One staging window's source rows by primary-key range; a short or gapped window means the import is being deleted (spec section 7 step 2). */
+export async function loadArcgisImportRowWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  importSessionId: string,
+  firstRowIndex: number,
+  rowLimit: number,
+  transactionID: string
+): Promise<FileRow[]> {
+  const windowSQL = safeFormatQuery(
+    schema,
+    `SELECT row_index, row_json FROM ??.arcgis_import_rows WHERE import_session_id = ? AND row_index >= ? AND row_index < ? ORDER BY row_index`
+  );
+  const windowRows = await connectionManager.executeQuery(windowSQL, [importSessionId, firstRowIndex, firstRowIndex + rowLimit], transactionID);
+  const records = (Array.isArray(windowRows) ? windowRows : []) as Array<{ row_index: number | string; row_json: unknown }>;
+  const isContiguousWindow = records.length === rowLimit && records.every((record, offset) => Number(record.row_index) === firstRowIndex + offset);
+  if (!isContiguousWindow) throw new ArcgisImportSessionError(IMPORT_ROWS_MISSING_MESSAGE, HTTPResponses.UNPROCESSABLE_ENTITY);
+  return records.map(record => parseJsonColumn<FileRow>(record.row_json, {} as FileRow));
+}
+
+/** Spec section 7 step 7: the window's cursor move, fenced on the attempt and on the cursor the guard read. */
+export async function advanceArcgisImportStagingCursor(
+  connectionManager: ConnectionManager,
+  attempt: ArcgisCommitAttempt,
+  advance: ArcgisStagingCursorAdvance,
+  transactionID: string
+): Promise<void> {
+  const cursorSQL = safeFormatQuery(
+    attempt.schema,
+    `UPDATE ??.arcgis_import_sessions SET staging_next_row_index = ?, committed_row_count = committed_row_count + ?
+     WHERE import_session_id = ? AND commit_attempt_id = ? AND staging_next_row_index = ?`
+  );
+  const result = await connectionManager.executeQuery(
+    cursorSQL,
+    [advance.toRowIndex, advance.insertedRows, attempt.importSessionId, attempt.attemptID, advance.fromRowIndex],
+    transactionID
+  );
+  if (affectedRowCount(result) !== 1) {
+    throw new ArcgisImportSessionInvariantError(
+      attempt.importSessionId,
+      `staging cursor ${advance.fromRowIndex} -> ${advance.toRowIndex} matched no row under the unit lock`
+    );
+  }
+}
+
+/** The per-import census-replacement marker (spec section 5). */
+export async function markArcgisImportCensusReplacementCompleted(
+  connectionManager: ConnectionManager,
+  attempt: ArcgisCommitAttempt,
+  transactionID: string
+): Promise<void> {
+  const markerSQL = safeFormatQuery(
+    attempt.schema,
+    `UPDATE ??.arcgis_import_sessions SET census_replacement_completed_at = CURRENT_TIMESTAMP WHERE import_session_id = ? AND commit_attempt_id = ? AND state = ?`
+  );
+  const result = await connectionManager.executeQuery(
+    markerSQL,
+    [attempt.importSessionId, attempt.attemptID, ARCGIS_IMPORT_SESSION_STATE.COMMITTING],
+    transactionID
+  );
+  if (affectedRowCount(result) !== 1) {
+    throw new ArcgisImportSessionInvariantError(attempt.importSessionId, 'census-replacement marker matched no row under the unit lock');
+  }
+}
+
+/** Spec section 8 step 5: `committing` to `committed`, fenced on the attempt. */
+export async function markArcgisImportCommitCompleted(
+  connectionManager: ConnectionManager,
+  attempt: ArcgisCommitAttempt,
+  transactionID: string
+): Promise<void> {
+  const committedSQL = safeFormatQuery(
+    attempt.schema,
+    `UPDATE ??.arcgis_import_sessions SET state = ?, committed_at = NOW() WHERE import_session_id = ? AND state = ? AND commit_attempt_id = ?`
+  );
+  const result = await connectionManager.executeQuery(
+    committedSQL,
+    [ARCGIS_IMPORT_SESSION_STATE.COMMITTED, attempt.importSessionId, ARCGIS_IMPORT_SESSION_STATE.COMMITTING, attempt.attemptID],
+    transactionID
+  );
+  if (affectedRowCount(result) !== 1) {
+    throw new ArcgisImportSessionError('ArcGIS import session could not be marked committed.', HTTPResponses.CONFLICT);
+  }
+}
+
 export async function markArcgisImportSessionCommitted(
   input: {
     schema: string;
@@ -696,10 +876,15 @@ export async function cleanupStaleArcgisImportSessions(schema: string, maxAgeSec
   const connectionManager = ConnectionManager.getInstance();
   const deleteSQL = format(
     `DELETE FROM ??.arcgis_import_sessions
-     WHERE state IN ('${ARCGIS_IMPORT_SESSION_STATE.PREFLIGHT}', '${ARCGIS_IMPORT_SESSION_STATE.COMMITTED}')
-       AND updated_at < DATE_SUB(NOW(), INTERVAL ? SECOND)`,
+     WHERE state IN (?, ?, ?) AND updated_at < DATE_SUB(NOW(), INTERVAL ? SECOND)`,
     [schema]
   );
-  const result = await connectionManager.executeQuery(deleteSQL, [maxAgeSeconds]);
+  // committing too (#561): a commit no retry finished within the max age is abandoned; a new pre-flight never deletes one.
+  const result = await connectionManager.executeQuery(deleteSQL, [
+    ARCGIS_IMPORT_SESSION_STATE.PREFLIGHT,
+    ARCGIS_IMPORT_SESSION_STATE.COMMITTING,
+    ARCGIS_IMPORT_SESSION_STATE.COMMITTED,
+    maxAgeSeconds
+  ]);
   return Number((result as { affectedRows?: number })?.affectedRows ?? 0);
 }
