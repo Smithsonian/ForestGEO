@@ -299,15 +299,17 @@ export async function cleanupStaleMeasurementBatchesForFile(
  * secondary index carries the primary key, so a `CoreMeasurementID IN (...)`
  * list builds a range tree on every index of coremeasurements. Past
  * range_optimizer_max_mem_size (8 MiB default) MySQL raises warning 3170 and
- * plans a full table scan. On the canonical 19-index table, 3,315 ids still
- * plan `range PRIMARY` and 3,316 fall back. The limit tracks indexes x ids of
- * about 63,000-67,000 (issue #555 spec, finding F-1).
+ * plans a full table scan. The limit tracks indexes x ids of about
+ * 63,000-67,000 (issue #555 spec, finding F-1): on the canonical 14-index
+ * table, after migration 2026-10-28-01 (#560), 4,601 ids still plan
+ * `range PRIMARY` and 4,602 fall back.
  *
- * Azure, read 2026-10-27: the 8 MiB default; 19 indexes in ten schemas, 21 in
- * forestgeo_harvard, forestgeo_mpala and forestgeo_rabi. The limit there is
- * about 3,000 ids, so 1,000 keeps a 3x margin.
+ * Azure, read 2026-10-28: the 8 MiB default; until that migration runs, 19
+ * indexes in ten schemas and 21 in forestgeo_harvard, forestgeo_mpala and
+ * forestgeo_rabi, where the limit is about 3,000 ids. So 1,000 keeps a 4.6x
+ * margin on the trimmed table and about 3x on an unmigrated 21-index one.
  * tests/integration/census-replacement-statement-plans.integration.test.ts
- * asserts no warning 3170 at this size at both index counts.
+ * asserts no warning 3170 at this size at 14 and at 21 indexes.
  *
  * replaceCensusForCleanReupload commits every window separately. Callers that
  * pass their own transaction (the ArcGIS commit via cleanupPreviousFileUploads,

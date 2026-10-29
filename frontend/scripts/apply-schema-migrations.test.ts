@@ -9,6 +9,7 @@ import {
   selectPendingMigrations,
   assertSiteSchemasDiscovered,
   applyPendingMigrations,
+  loadMigrationSources,
   migrationLockName,
   contractGateFailed,
   parseRunnerArgs,
@@ -458,5 +459,43 @@ describe('gate reporting helpers', () => {
     expect(JSON.parse(fs.readFileSync(target, 'utf-8'))).toEqual(summary);
 
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+/**
+ * U2 (#560). MySQL refuses an ALTER whose ALGORITHM/LOCK clause it cannot honour, so
+ * these clauses plus a passing integration run (I1) prove the index drop was online. A
+ * plain ALTER would also pass I1 while taking a blocking table copy on production.
+ */
+describe('migration 2026-10-28-01: coremeasurements index trim (#560)', () => {
+  const TRIM_MIGRATION_ID = '2026-10-28-01-trim-coremeasurements-redundant-indexes';
+  const ONLINE_DDL_TRAILING_CLAUSE = ', ALGORITHM=INPLACE, LOCK=NONE';
+  const TRIM_ALTER_EXPRESSION = /CONCAT\('ALTER TABLE `coremeasurements` ', @drop_clauses, '([^']*)'\)/g;
+  const CREATED_PROCEDURE = /CREATE PROCEDURE (\w+)\(/g;
+  const BLOCKING_DDL_CLAUSE = /\bALGORITHM\s*=\s*(COPY|DEFAULT)\b|\bLOCK\s*=\s*(SHARED|EXCLUSIVE|DEFAULT)\b/i;
+
+  function trimMigration(): MigrationSource {
+    const source = loadMigrationSources().find(candidate => candidate.id === TRIM_MIGRATION_ID);
+    if (!source) throw new Error(`${TRIM_MIGRATION_ID} is not listed in db/migrations/manifest.ts`);
+    return source;
+  }
+
+  it('builds exactly one coremeasurements ALTER, and it demands an online in-place drop', () => {
+    const source = trimMigration();
+    const trailingClauses = [...source.contents.matchAll(TRIM_ALTER_EXPRESSION)].map(match => match[1]);
+    console.log(`[U2] ${source.file}: ALTER trailing clauses ${JSON.stringify(trailingClauses)}`);
+
+    expect(trailingClauses, 'one ALTER takes the metadata lock once and applies every drop atomically').toHaveLength(1);
+    expect(trailingClauses[0], 'without these clauses MySQL may silently choose a blocking table copy').toBe(ONLINE_DDL_TRAILING_CLAUSE);
+    expect(source.contents).not.toMatch(BLOCKING_DDL_CLAUSE);
+  });
+
+  it('declares a failureCleanup that drops exactly the helper procedure the file creates', () => {
+    const source = trimMigration();
+    const createdProcedures = [...source.contents.matchAll(CREATED_PROCEDURE)].map(match => match[1]);
+    console.log(`[U2] created procedures ${JSON.stringify(createdProcedures)}; failureCleanup ${JSON.stringify(source.failureCleanup)}`);
+
+    expect(createdProcedures).toHaveLength(1);
+    expect(source.failureCleanup).toEqual([`DROP PROCEDURE IF EXISTS ${createdProcedures[0]}`]);
   });
 });

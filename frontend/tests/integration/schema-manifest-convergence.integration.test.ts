@@ -43,6 +43,7 @@ const CANONICAL_DDL_PATH = path.join(process.cwd(), 'db/sql/tablestructures.sql'
 const TAXONOMY_VIEWS = ['alltaxonomiesview', 'stemtaxonomiesview'] as const;
 const BASE_TABLE_TYPE = 'BASE TABLE';
 const VIEW_TYPE = 'VIEW';
+const COREMEASUREMENTS_INDEX_PREFIX = 'coremeasurements.';
 
 interface ObjectSets {
   tables: Set<string>;
@@ -179,6 +180,18 @@ describe('Migration manifest converges an old-release schema to canonical', () =
   it('every canonical index exists after applying the manifest', () => {
     const missing = missingFrom(canonical.indexes, baseline.indexes);
     expect(missing, `Indexes in tablestructures.sql that no manifest migration creates:\n  ${missing.join('\n  ')}`).toEqual([]);
+  });
+
+  it('leaves coremeasurements with exactly the canonical index set, none missing and none extra (#560)', () => {
+    const coremeasurementsSignatures = (signatures: Set<string>) =>
+      [...signatures].filter(signature => signature.startsWith(COREMEASUREMENTS_INDEX_PREFIX)).sort();
+    const expected = coremeasurementsSignatures(canonical.indexes);
+    const actual = coremeasurementsSignatures(baseline.indexes);
+    console.log(
+      `[I5] canonical coremeasurements indexes (${expected.length}):\n  ${expected.join('\n  ')}\n` +
+        `[I5] baseline after the manifest (${actual.length}):\n  ${actual.join('\n  ')}`
+    );
+    expect(actual, 'an extra index means no manifest migration drops what tablestructures.sql no longer defines').toEqual(expected);
   });
 
   it('the taxonomy views are absent from an old-release schema and are created by the deploy script, not the manifest', async () => {

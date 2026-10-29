@@ -6,7 +6,8 @@
  * raises warning 3170 and falls back to a full table scan under row locks. These
  * tests EXPLAIN the exact statements production issues for one window and prove:
  *   - a window of CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE ids stays range-optimizable,
- *     on the canonical table and at Azure's widest index count (21);
+ *     on the canonical 14-index table and at 21 indexes, the width of a
+ *     harvard/mpala/rabi schema that has not yet run migration 2026-10-28-01 (#560);
  *   - the check can see a fallback (positive control);
  *   - the window's cursor SELECT walks CENSUS_REPLACEMENT_SCAN_INDEX.
  *
@@ -37,6 +38,7 @@ for (const host of RESOLVED_HOSTS) {
 const RANGE_OPTIMIZATION_SKIPPED_WARNING_CODE = 3170;
 const RANGE_SEEK_PLAN_TYPE = 'range';
 const RANGE_OPTIMIZER_POSITIVE_CONTROL_IDS = 50_000;
+/** Azure's widest coremeasurements before migration 2026-10-28-01 (#560); still bounds a schema that has not migrated. */
 const AZURE_WIDEST_COREMEASUREMENTS_INDEX_COUNT = 21;
 const INDEX_MARGIN_TABLE = 'coremeasurements_index_margin';
 const COREMEASUREMENTS_TABLE_REFERENCE = /\.coremeasurements\b/g;
@@ -180,7 +182,7 @@ describe('census replacement window statement plans (I1)', () => {
     expect(deleteAudit.warningCodes).not.toContain(RANGE_OPTIMIZATION_SKIPPED_WARNING_CODE);
   });
 
-  it(`...and still at Azure's widest ${AZURE_WIDEST_COREMEASUREMENTS_INDEX_COUNT}-index coremeasurements (catches: an index added past the margin)`, async () => {
+  it(`...and still at the ${AZURE_WIDEST_COREMEASUREMENTS_INDEX_COUNT}-index width of an unmigrated harvard/mpala/rabi coremeasurements (catches: an index added past the margin)`, async () => {
     await connection.query(`DROP TABLE IF EXISTS ${INDEX_MARGIN_TABLE}`);
     try {
       await connection.query(`CREATE TABLE ${INDEX_MARGIN_TABLE} LIKE coremeasurements`);
