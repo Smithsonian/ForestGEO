@@ -67,9 +67,14 @@ async function readSessionLockWaits(session: Connection): Promise<SessionLockWai
 
 async function provisionTrimmedSchema(suffix: string): Promise<{ schema: string; connection: Connection }> {
   const provisioned = await provisionCanonicalSchema(suffix);
-  await addMissingIndexes(provisioned.connection, DROPPED_CANONICAL_INDEXES);
-  const result = await applyPendingMigrations(connectionExecutor(provisioned.connection), provisioned.schema, [requireTrimMigrationSource()]);
-  expect(result.failed, 'fixture: the trim migration must apply before the rollback is tested').toBeNull();
+  try {
+    await addMissingIndexes(provisioned.connection, DROPPED_CANONICAL_INDEXES);
+    const result = await applyPendingMigrations(connectionExecutor(provisioned.connection), provisioned.schema, [requireTrimMigrationSource()]);
+    expect(result.failed, 'fixture: the trim migration must apply before the rollback is tested').toBeNull();
+  } catch (error) {
+    await dropThrowawaySchema(provisioned.connection, provisioned.schema);
+    throw error;
+  }
   return provisioned;
 }
 

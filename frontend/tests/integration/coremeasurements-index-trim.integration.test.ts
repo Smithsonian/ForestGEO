@@ -76,7 +76,12 @@ const trimmedSignatures = sortedSignatures(TRIMMED_COREMEASUREMENTS_INDEXES);
 
 async function provisionPreChangeSchema(suffix: string): Promise<{ schema: string; connection: Connection }> {
   const provisioned = await provisionCanonicalSchema(suffix);
-  await addMissingIndexes(provisioned.connection, DROPPED_CANONICAL_INDEXES);
+  try {
+    await addMissingIndexes(provisioned.connection, DROPPED_CANONICAL_INDEXES);
+  } catch (error) {
+    await dropThrowawaySchema(provisioned.connection, provisioned.schema);
+    throw error;
+  }
   return provisioned;
 }
 
