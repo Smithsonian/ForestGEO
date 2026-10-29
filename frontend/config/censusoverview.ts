@@ -69,14 +69,6 @@ export const BLOCKER_FIX_HINTS: Record<BlockingPreconditionKind, BlockerFixHint>
   }
 };
 
-export const EXPORT_SKIP_REASON_LABELS: Record<ExportSkipReasonKind, string> = {
-  'not-validated': 'not validated',
-  'no-stem-guid': 'failed (no stem)',
-  'inactive-stem-or-tree': 'inactive tree or stem',
-  'missing-link': 'missing quadrat, species, genus or family link',
-  other: 'other reason'
-};
-
 export const EXPORT_SKIP_REASON_ROW_LABELS: Record<ExportSkipReasonKind, string> = {
   'not-validated': 'Not validated',
   'no-stem-guid': 'Failed (no stem)',
@@ -96,19 +88,11 @@ export const TREES_AND_STEMS_ROWS = {
 } as const;
 
 export const CENSUS_OVERVIEW_TEXT = {
-  treesAndStemsTitle: 'Trees & Stems',
-  treesUnit: 'trees',
-  stemsUnit: 'stems',
   stemsPerTreeSuffix: 'stems per tree',
-  errorsBoxTitle: 'Errors & Export Preview',
   blockerCalloutTitle: 'Publishing will fail until these are fixed',
   noUnresolvedErrors: 'No unresolved errors',
   noMeasurementsYet: 'No measurements in this census yet',
-  topErrorTypesHeading: 'Top error types',
-  rowsColumnHeading: 'rows',
   viewAllErrors: 'View all errors →',
-  exportPreviewHeading: 'Export preview',
-  skipReasonsPrefix: 'skipped because (can overlap):',
   listSeparator: ' · ',
   validationErrorsTitle: 'Validation Errors',
   errorTypeColumnHeading: 'Error type',
@@ -154,28 +138,8 @@ export function formatCount(value: number): string {
   return value.toLocaleString();
 }
 
-export function formatAffectedMeasurementsLine(affectedMeasurements: number, totalActiveMeasurements: number): string {
-  const counts = `${formatCount(affectedMeasurements)} of ${formatCount(totalActiveMeasurements)} active measurements have unresolved errors`;
-  const affectedExceedsActive = affectedMeasurements > totalActiveMeasurements;
-  if (affectedExceedsActive) return counts;
-  const percent = ((affectedMeasurements / totalActiveMeasurements) * PERCENT_SCALE).toFixed(AFFECTED_PERCENT_FRACTION_DIGITS);
-  return `${counts} (${percent}%)`;
-}
-
-export function formatRemainingErrorTypes(remainingErrorTypeCount: number): string {
-  return `+ ${formatCount(remainingErrorTypeCount)} more ${remainingErrorTypeCount === SINGLE_ITEM ? 'type' : 'types'}`;
-}
-
 export function formatBlockerRowCount(count: number): string {
   return `${formatCount(count)} ${count === SINGLE_ITEM ? 'row' : 'rows'}`;
-}
-
-export function formatExportPreviewCounts(exportableCount: number, skippedCount: number): string {
-  return `${formatCount(exportableCount)} would be exported${CENSUS_OVERVIEW_TEXT.listSeparator}${formatCount(skippedCount)} skipped`;
-}
-
-export function formatSkipReason(kind: ExportSkipReasonKind, count: number): string {
-  return `${formatCount(count)} ${EXPORT_SKIP_REASON_LABELS[kind]}`;
 }
 
 export function formatExportedWithUnresolvedErrors(count: number): string {

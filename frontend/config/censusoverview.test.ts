@@ -3,19 +3,15 @@ import {
   CENSUS_OVERVIEW_ERROR_CENSUS_IDS_PARAM,
   CENSUS_OVERVIEW_SUMMARY_ENDPOINT,
   EXPORT_SKIP_REASON_ROW_LABELS,
-  formatAffectedMeasurementsLine,
   formatAffectedOfActive,
   formatBlockerRowCount,
   formatCensusDateRange,
   formatErrorTypesFootnote,
   formatExportedOfActive,
   formatExportedWithUnresolvedErrors,
-  formatExportPreviewCounts,
   formatPercentOf,
-  formatRemainingErrorTypes,
   formatShareOfActive,
   formatShareOfActiveHeading,
-  formatSkipReason,
   formatStemsPerTree,
   toBarPercent
 } from './censusoverview';
@@ -33,30 +29,6 @@ describe('CENSUS_OVERVIEW_SUMMARY_ENDPOINT', () => {
 });
 
 describe('census overview formatters', () => {
-  it('states affected rows against the active total with one-decimal percent', () => {
-    expect(formatAffectedMeasurementsLine(1204, 16084)).toBe('1,204 of 16,084 active measurements have unresolved errors (7.5%)');
-  });
-
-  it.each([
-    [5, 3],
-    [3, 0]
-  ])('omits the percent when %i affected exceed %i active (counts come from different sources)', (affected, total) => {
-    const line = formatAffectedMeasurementsLine(affected, total);
-    console.log(`[#547 affected line] ${affected} of ${total}: ${line}`);
-    expect(line).toBe(`${affected} of ${total} active measurements have unresolved errors`);
-  });
-
-  it('still shows 100% when every active measurement is affected', () => {
-    expect(formatAffectedMeasurementsLine(20, 20)).toBe('20 of 20 active measurements have unresolved errors (100.0%)');
-  });
-
-  it.each([
-    [1, '+ 1 more type'],
-    [6, '+ 6 more types']
-  ])('pluralizes the remaining error types (%i)', (remaining, expected) => {
-    expect(formatRemainingErrorTypes(remaining)).toBe(expected);
-  });
-
   it.each([
     [1, '1 row'],
     [12, '12 rows']
@@ -69,11 +41,6 @@ describe('census overview formatters', () => {
     [37, '37 exported rows still have an unresolved error']
   ])('describes exported rows carrying an unresolved error (%i)', (count, expected) => {
     expect(formatExportedWithUnresolvedErrors(count)).toBe(expected);
-  });
-
-  it('formats exported vs skipped and one skip reason with its label', () => {
-    expect(formatExportPreviewCounts(14580, 1504)).toBe('14,580 would be exported · 1,504 skipped');
-    expect(formatSkipReason('missing-link', 2)).toBe('2 missing quadrat, species, genus or family link');
   });
 
   it('formats stems per tree to one decimal and guards an empty census', () => {

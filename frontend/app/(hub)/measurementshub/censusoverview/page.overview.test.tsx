@@ -1,6 +1,6 @@
 /**
- * Census Overview redesign (#547): layout, the summary request, its failure
- * state, the Data Quality refresh refetch and the Census Tools row. The cards
+ * Census Overview at-a-glance layout (#547): section order, the summary request,
+ * its failure state and the Data Quality refresh refetch. The tiles and panels
  * render for real; only widgets with their own fetches are stubbed.
  */
 import { act, render, screen, waitFor, within } from '@testing-library/react';
@@ -25,24 +25,26 @@ vi.mock('@/components/dashboard/dataqualitycard', () => ({
   )
 }));
 vi.mock('@/components/dashboard/publishcensusbutton', () => ({ default: () => <div data-testid="publish-census-button" /> }));
-vi.mock('@/components/dashboard/rebuildviewfulltablebutton', () => ({ default: () => <div data-testid="rebuild-vft-button" /> }));
 
 const URL_BASE = 'http://localhost';
 const METRICS_URL_FRAGMENT = '/api/dashboardmetrics/all/';
 const SUMMARY_URL_FRAGMENT = '/api/censusoverview/summary/';
 const REFRESH_URL_FRAGMENT = '/api/refreshviews/measurementssummary/';
 const CLEAR_CENSUS_URL_FRAGMENT = '/api/clearcensus';
-const ERRORS_EXPORT_PREVIEW_CARD_TEST_ID = 'errors-export-preview-card';
 const DELETE_BUTTON_TEST_ID = 'census-overview-delete-button';
 const DELETE_ERROR_TEST_ID = 'census-overview-delete-error';
 const MODAL_CONFIRM_LABEL = 'Delete Census';
 const CENSUS_LIST_REFRESH_FAILED_MESSAGE = 'Census deleted, but refreshing the census list failed. Reload the page to see the updated list.';
 const CENSUS_NOT_FOUND_MESSAGE = 'Census not found';
 const PERSONNEL_BOX_TITLE = 'Active Personnel';
-const DATA_QUALITY_HEADING = 'Data Quality';
-const CENSUS_TOOLS_HEADING = 'Census Tools';
-const QUADRAT_COVERAGE_HEADING = 'Quadrat Coverage';
 const TREE_COUNT_TEXT = '12,408';
+const EXPORTED_OF_ACTIVE_TEXT = 'of 20 measurements exported';
+const VALIDATION_ERRORS_CARD_TEST_ID = 'validation-errors-card';
+const PUBLISH_PREVIEW_CARD_TEST_ID = 'publish-preview-card';
+const SUMMARY_ERROR_TEST_ID = 'census-overview-summary-error';
+const ERRORS_TILE_TEST_ID = 'census-stat-tile-errors';
+const STAT_TILES_LABEL = CENSUS_OVERVIEW_TEXT.censusTotalsLabel;
+const REMOVED_SECTION_HEADINGS = ['Census Tools', 'Data Quality', 'Errors & Export Preview', 'Trees & Stems', 'Quadrat Coverage'];
 
 const TEST_SITE = { siteID: 1, siteName: 'Test Site', schemaName: 'forestgeo_testsite' };
 const TEST_PLOT = { plotID: 1, plotName: 'Test Plot' };
@@ -97,15 +99,6 @@ const SUMMARY_RESPONSE: CensusOverviewSummary = {
   },
   blockers: []
 };
-const EXPECTED_CENSUS_TOOLS = [
-  { label: 'View Data', href: '/measurementshub/summary', description: 'Browse measurement records' },
-  { label: 'View Errors', href: '/measurementshub/errors', description: 'Review failed measurements' },
-  { label: 'Post-Census Statistics', href: '/measurementshub/postvalidation', description: 'Validation results and quality checks' },
-  { label: 'Recent Changes', href: '/measurementshub/recentchanges', description: 'Changelog and activity history' },
-  { label: 'Uploaded Files', href: '/measurementshub/uploadedfiles', description: 'View uploaded data files' },
-  { label: 'View All Historical Data', href: '/measurementshub/viewfulltable', description: 'Full historical measurement data' },
-  { label: 'Validations', href: '/measurementshub/validations', description: 'Data validation rules and results' }
-];
 
 const REFRESH_OK_RESPONSE = { ok: true, status: HTTPResponses.OK, json: async () => ({}) } as Response;
 
@@ -183,15 +176,17 @@ describe('CensusOverviewPage — census overview redesign (#547)', () => {
     useAppStore.getState().clearSelections();
   });
 
-  it('keeps the stat boxes up and shows the message with Retry when the summary fails', async () => {
+  it('keeps the stat tiles up and shows one message with Retry in place of both panels when the summary fails', async () => {
     const user = userEvent.setup();
     summaryAnswer = () => ({ ok: false, status: HTTPResponses.NOT_FOUND, body: { error: CENSUS_NOT_FOUND_MESSAGE } });
     seedSelection(SINGLE_RANGE_CENSUS);
     render(<CensusOverviewPage />);
 
     expect(await screen.findByText(TREE_COUNT_TEXT)).toBeInTheDocument();
-    expect(await screen.findByText(CENSUS_NOT_FOUND_MESSAGE)).toBeInTheDocument();
-    expect(screen.getByText(QUADRAT_COVERAGE_HEADING)).toBeInTheDocument();
+    expect(await screen.findByTestId(SUMMARY_ERROR_TEST_ID)).toHaveTextContent(CENSUS_NOT_FOUND_MESSAGE);
+    expect(screen.queryByTestId(VALIDATION_ERRORS_CARD_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(PUBLISH_PREVIEW_CARD_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(ERRORS_TILE_TEST_ID), 'a failed summary must not leave a skeleton tile spinning').toBeNull();
 
     await user.click(screen.getByRole('button', { name: CENSUS_OVERVIEW_TEXT.retry }));
     await waitFor(() => expect(fetchedUrls(SUMMARY_URL_FRAGMENT)).toHaveLength(2));
@@ -201,7 +196,7 @@ describe('CensusOverviewPage — census overview redesign (#547)', () => {
     const user = userEvent.setup();
     seedSelection(SINGLE_RANGE_CENSUS);
     render(<CensusOverviewPage />);
-    await screen.findByText(CENSUS_OVERVIEW_TEXT.exportPreviewHeading);
+    await screen.findByText(EXPORTED_OF_ACTIVE_TEXT);
     expect(fetchedUrls(SUMMARY_URL_FRAGMENT)).toHaveLength(1);
 
     await user.click(screen.getByTestId('data-quality-refresh'));
@@ -218,7 +213,7 @@ describe('CensusOverviewPage — census overview redesign (#547)', () => {
     refreshResponse = refreshPost.promise;
     seedSelection(SINGLE_RANGE_CENSUS);
     render(<CensusOverviewPage />);
-    await screen.findByText(CENSUS_OVERVIEW_TEXT.exportPreviewHeading);
+    await screen.findByText(EXPORTED_OF_ACTIVE_TEXT);
 
     await user.click(screen.getByTestId('data-quality-refresh'));
     await waitFor(() => expect(fetchedUrls(REFRESH_URL_FRAGMENT)).toHaveLength(1));
@@ -250,10 +245,11 @@ describe('CensusOverviewPage — census overview redesign (#547)', () => {
     const user = userEvent.setup();
     seedSelection(SINGLE_RANGE_CENSUS);
     render(<CensusOverviewPage />);
-    await screen.findByText(CENSUS_OVERVIEW_TEXT.exportPreviewHeading);
+    await screen.findByText(EXPORTED_OF_ACTIVE_TEXT);
     expect(fetchedUrls(SUMMARY_URL_FRAGMENT)).toHaveLength(1);
 
-    await user.click(screen.getByTestId(DELETE_BUTTON_TEST_ID));
+    await user.click(screen.getByRole('button', { name: CENSUS_OVERVIEW_TEXT.moreActionsLabel }));
+    await user.click(await screen.findByTestId(DELETE_BUTTON_TEST_ID));
     const dialog = await screen.findByRole('alertdialog');
     await user.click(within(dialog).getByRole('button', { name: MODAL_CONFIRM_LABEL }));
 
@@ -267,16 +263,17 @@ describe('CensusOverviewPage — census overview redesign (#547)', () => {
     expect(summaryUrls[1]).toBe(summaryUrls[0]);
   });
 
-  it('renders no Errors & Export Preview card and sends no summary request while the census has no ID yet', async () => {
+  it('renders neither panel nor the errors tile, and sends no summary request, while the census has no ID yet', async () => {
     seedSelection(CENSUS_BEING_CREATED);
     render(<CensusOverviewPage />);
-    await screen.findByText(CENSUS_OVERVIEW_TEXT.treesAndStemsTitle);
+    await screen.findByText(CENSUS_OVERVIEW_TEXT.treesTileLabel);
     await act(async () => {});
 
-    console.log(`[#547 census without ID] summary requests ${JSON.stringify(fetchedUrls(SUMMARY_URL_FRAGMENT))}`);
+    console.log(`[option A census without ID] summary requests ${JSON.stringify(fetchedUrls(SUMMARY_URL_FRAGMENT))}`);
     expect(fetchedUrls(SUMMARY_URL_FRAGMENT)).toHaveLength(0);
-    expect(screen.queryByText(CENSUS_OVERVIEW_TEXT.errorsBoxTitle), 'a card with no scope would show its skeleton forever').toBeNull();
-    expect(screen.queryByTestId(ERRORS_EXPORT_PREVIEW_CARD_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(VALIDATION_ERRORS_CARD_TEST_ID), 'a panel with no scope would show its skeleton forever').toBeNull();
+    expect(screen.queryByTestId(PUBLISH_PREVIEW_CARD_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(ERRORS_TILE_TEST_ID)).toBeNull();
   });
 
   it('no longer shows the Personnel box', async () => {
@@ -298,33 +295,43 @@ describe('CensusOverviewPage — census overview redesign (#547)', () => {
     expect(requested.searchParams.get(CENSUS_OVERVIEW_ERROR_CENSUS_IDS_PARAM)).toBe('202,201');
   });
 
-  it('lays the sections out in the spec order', async () => {
+  it('lays the sections out in the approved order', async () => {
     seedSelection(SINGLE_RANGE_CENSUS);
     render(<CensusOverviewPage />);
-    await screen.findByText(CENSUS_OVERVIEW_TEXT.exportPreviewHeading);
+    await screen.findByText('of 20 measurements exported');
 
     const sections = [
-      screen.getByText(CENSUS_OVERVIEW_TEXT.treesAndStemsTitle),
-      screen.getByText(QUADRAT_COVERAGE_HEADING),
-      screen.getByText(CENSUS_OVERVIEW_TEXT.errorsBoxTitle),
-      screen.getByText(DATA_QUALITY_HEADING),
-      screen.getByText(CENSUS_TOOLS_HEADING)
+      screen.getByRole('heading', { level: 1 }),
+      screen.getByRole('region', { name: STAT_TILES_LABEL }),
+      screen.getByTestId(VALIDATION_ERRORS_CARD_TEST_ID),
+      screen.getByTestId(PUBLISH_PREVIEW_CARD_TEST_ID),
+      screen.getByTestId('data-quality-refresh')
     ];
     for (let index = 1; index < sections.length; index++) {
       expect(isBefore(sections[index - 1], sections[index]), `${sections[index - 1].textContent} before ${sections[index].textContent}`).toBe(true);
     }
   });
 
-  it('renders the Census Tools as links with their descriptions as tooltips', async () => {
-    const user = userEvent.setup();
+  it('no longer shows the Census Tools row or the replaced section headings', async () => {
+    seedSelection(SINGLE_RANGE_CENSUS);
+    render(<CensusOverviewPage />);
+    await screen.findByText('of 20 measurements exported');
+
+    for (const heading of REMOVED_SECTION_HEADINGS) {
+      expect(screen.queryByText(heading), heading).toBeNull();
+    }
+  });
+
+  it('shows the publish blockers above the stat tiles', async () => {
+    summaryAnswer = () => ({
+      ok: true,
+      status: HTTPResponses.OK,
+      body: { ...SUMMARY_RESPONSE, blockers: [{ kind: 'unknown-attribute-code', count: 3 }] }
+    });
     seedSelection(SINGLE_RANGE_CENSUS);
     render(<CensusOverviewPage />);
 
-    for (const tool of EXPECTED_CENSUS_TOOLS) {
-      expect(screen.getByRole('link', { name: tool.label }), tool.label).toHaveAttribute('href', tool.href);
-    }
-    const viewErrors = EXPECTED_CENSUS_TOOLS[1];
-    await user.hover(screen.getByRole('link', { name: viewErrors.label }));
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(viewErrors.description);
+    const callout = await screen.findByTestId('census-overview-blocker-callout');
+    expect(isBefore(callout, screen.getByRole('region', { name: STAT_TILES_LABEL }))).toBe(true);
   });
 });

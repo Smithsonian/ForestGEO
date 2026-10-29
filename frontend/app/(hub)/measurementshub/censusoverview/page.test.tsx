@@ -2,11 +2,11 @@
  * @fileoverview Component tests for the Census Overview page (UX finding F2).
  *
  * Census deletion was moved OFF the sidebar census picker (a destructive affordance
- * a few pixels from a control users click constantly) and onto this page's header.
- * The delete action must:
- * - Render as a danger button in the header.
+ * a few pixels from a control users click constantly) and onto this page's census
+ * actions menu. The delete action must:
+ * - Render as a danger item in the census actions menu.
  * - Be enabled ONLY when the selected census is the highest plotCensusNumber in the
- *   census list (the latest-census-only rule); disabled otherwise, with an explanatory tooltip.
+ *   census list (the latest-census-only rule); disabled otherwise, with the reason shown inline.
  * - Open the shared CensusDeletionModal on click (same confirm-then-delete flow as the dashboard).
  *
  * @see app/(hub)/measurementshub/censusoverview/page.tsx
@@ -19,6 +19,7 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { useAppStore } from '@/config/store/appstore';
 import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE } from '@/config/censusdeletion';
+import { CENSUS_OVERVIEW_TEXT } from '@/config/censusoverview';
 import CensusOverviewPage from './page';
 
 const DELETE_BUTTON_TESTID = 'census-overview-delete-button';
@@ -51,9 +52,6 @@ vi.mock('@/components/dashboard/dataqualitycard', () => ({
 }));
 vi.mock('@/components/dashboard/publishcensusbutton', () => ({
   default: () => <div data-testid="publish-census-button" />
-}));
-vi.mock('@/components/dashboard/rebuildviewfulltablebutton', () => ({
-  default: () => <div data-testid="rebuild-vft-button" />
 }));
 
 const TEST_SITE = { siteID: 1, siteName: 'Test Site', schemaName: 'testschema' };
@@ -91,6 +89,13 @@ function seedSelection(currentCensus: typeof LATEST_CENSUS) {
   useAppStore.getState().setCensus(currentCensus);
 }
 
+async function openDeleteItem(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+  await user.click(screen.getByRole('button', { name: CENSUS_OVERVIEW_TEXT.moreActionsLabel }));
+  const deleteItem = await screen.findByTestId(DELETE_BUTTON_TESTID);
+  console.log(`[option A delete] aria-disabled=${deleteItem.getAttribute('aria-disabled')} text="${deleteItem.textContent}"`);
+  return deleteItem;
+}
+
 describe('CensusOverviewPage - F2 census deletion action', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -108,48 +113,45 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
     useAppStore.getState().clearSelections();
   });
 
-  it('MUST render a danger delete-census action in the header', () => {
+  it('MUST offer a danger Delete census item in the census actions menu', async () => {
+    const user = userEvent.setup();
     seedSelection(LATEST_CENSUS);
     render(<CensusOverviewPage />);
 
-    const deleteButton = screen.getByTestId(DELETE_BUTTON_TESTID);
-    expect(deleteButton).toBeInTheDocument();
-    expect(deleteButton).toHaveTextContent(/delete census/i);
+    expect(screen.queryByTestId(DELETE_BUTTON_TESTID), 'delete must not sit in the header next to Publish').toBeNull();
+    expect(await openDeleteItem(user)).toHaveTextContent(/delete census/i);
   });
 
-  it('MUST enable the delete action when the selected census is the latest', () => {
+  it('MUST enable the delete item when the selected census is the latest', async () => {
+    const user = userEvent.setup();
     seedSelection(LATEST_CENSUS);
     render(<CensusOverviewPage />);
 
-    expect(screen.getByTestId(DELETE_BUTTON_TESTID)).not.toBeDisabled();
+    expect(await openDeleteItem(user)).not.toHaveAttribute('aria-disabled', 'true');
   });
 
-  it('MUST enable the delete action for the latest ACTIVE census even when a higher-numbered inactive census exists (#525)', () => {
+  it('MUST enable the delete item for the latest ACTIVE census even when a higher-numbered inactive census exists (#525)', async () => {
+    const user = userEvent.setup();
     useAppStore.getState().setSite(TEST_SITE);
     useAppStore.getState().setPlot(TEST_PLOT);
     useAppStore.getState().setCensusList([EARLIER_CENSUS, LATEST_CENSUS, INACTIVE_NEWER_CENSUS]);
     useAppStore.getState().setCensus(LATEST_CENSUS);
     render(<CensusOverviewPage />);
 
-    const deleteButton = screen.getByTestId(DELETE_BUTTON_TESTID);
-    console.log(`[#525 items 2+3] Census Hub delete disabled with an inactive census 3 present: ${(deleteButton as HTMLButtonElement).disabled}`);
-    expect(deleteButton).not.toBeDisabled();
+    expect(await openDeleteItem(user)).not.toHaveAttribute('aria-disabled', 'true');
   });
 
-  it('MUST disable the delete action (with explanatory tooltip) for a non-latest census', async () => {
+  it('MUST disable the delete item, and say why, for a non-latest census', async () => {
     const user = userEvent.setup();
     seedSelection(EARLIER_CENSUS);
     render(<CensusOverviewPage />);
 
-    const deleteButton = screen.getByTestId(DELETE_BUTTON_TESTID);
-    expect(deleteButton).toBeDisabled();
-
-    // The wrapping tooltip must explain WHY it is disabled, not leave the user guessing.
-    await user.hover(deleteButton.parentElement as HTMLElement);
-    expect(await screen.findByText(DISABLED_TOOLTIP_MATCHER)).toBeInTheDocument();
+    const deleteItem = await openDeleteItem(user);
+    expect(deleteItem).toHaveAttribute('aria-disabled', 'true');
+    expect(deleteItem).toHaveTextContent(DISABLED_TOOLTIP_MATCHER);
   });
 
-  it('MUST disable the delete action for non-admin users even when the census is latest', async () => {
+  it('MUST disable the delete item for non-admin users even when the census is latest', async () => {
     const user = userEvent.setup();
     (useSession as any).mockReturnValue({
       data: { user: { name: 'Field User', email: 'field@example.com', userStatus: 'field crew' } },
@@ -158,11 +160,9 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
     seedSelection(LATEST_CENSUS);
     render(<CensusOverviewPage />);
 
-    const deleteButton = screen.getByTestId(DELETE_BUTTON_TESTID);
-    expect(deleteButton).toBeDisabled();
-
-    await user.hover(deleteButton.parentElement as HTMLElement);
-    expect(await screen.findByText(UNAUTHORIZED_TOOLTIP_MATCHER)).toBeInTheDocument();
+    const deleteItem = await openDeleteItem(user);
+    expect(deleteItem).toHaveAttribute('aria-disabled', 'true');
+    expect(deleteItem).toHaveTextContent(UNAUTHORIZED_TOOLTIP_MATCHER);
   });
 
   it('MUST open the shared CensusDeletionModal for the selected census on click', async () => {
@@ -172,13 +172,13 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
 
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
 
-    await user.click(screen.getByTestId(DELETE_BUTTON_TESTID));
+    await user.click(await openDeleteItem(user));
 
     const dialog = await screen.findByRole('alertdialog');
     expect(within(dialog).getByText(`Delete Census ${LATEST_CENSUS.plotCensusNumber}?`)).toBeInTheDocument();
   });
 
-  it('MUST render the header census dates using the shared display-date format (F3)', () => {
+  it('MUST render the census title, site / plot scope and display-format dates in the header (F3)', () => {
     // Local-time constructors keep the rendered display date timezone-stable across CI runners.
     const headerCensus = {
       plotID: 1,
@@ -191,15 +191,12 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
     seedSelection(headerCensus as any);
     render(<CensusOverviewPage />);
 
-    const headerLine = screen.getByText((_, el) => {
-      if (el?.tagName.toLowerCase() !== 'p') return false;
-      const text = el.textContent ?? '';
-      return text.includes('Test Plot') && text.includes('Test Site');
-    });
-
-    expect(headerLine.textContent).toContain('— Jan 1, 2025 to Dec 31, 2025');
-    // The old toLocaleDateString output ("1/1/2025") must be gone.
-    expect(headerLine.textContent).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/);
+    expect(screen.getByRole('heading', { level: 1, name: 'Census 2' })).toBeInTheDocument();
+    expect(screen.getByTestId('census-overview-scope')).toHaveTextContent('Test Site / Test Plot');
+    const dates = screen.getByTestId('census-overview-dates');
+    console.log(`[option A header] dates "${dates.textContent}"`);
+    expect(dates).toHaveTextContent('Jan 1, 2025 – Dec 31, 2025');
+    expect(dates.textContent).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/);
   });
 
   it('MUST surface a user-visible error banner when the delete request fails', async () => {
@@ -212,7 +209,7 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
 
     expect(screen.queryByTestId(DELETE_ERROR_TESTID)).not.toBeInTheDocument();
 
-    await user.click(screen.getByTestId(DELETE_BUTTON_TESTID));
+    await user.click(await openDeleteItem(user));
     const dialog = await screen.findByRole('alertdialog');
     await user.click(within(dialog).getByRole('button', { name: MODAL_CONFIRM_LABEL }));
 
@@ -230,7 +227,7 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
     );
     render(<CensusOverviewPage />);
 
-    await user.click(screen.getByTestId(DELETE_BUTTON_TESTID));
+    await user.click(await openDeleteItem(user));
     const dialog = await screen.findByRole('alertdialog');
     await user.click(within(dialog).getByRole('button', { name: MODAL_CONFIRM_LABEL }));
 
@@ -259,7 +256,7 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
         return { ok: false, status: 503, json: async () => ({}) };
       });
       render(<CensusOverviewPage />);
-      await user.click(screen.getByTestId(DELETE_BUTTON_TESTID));
+      await user.click(await openDeleteItem(user));
       const dialog = await screen.findByRole('alertdialog');
       await user.click(within(dialog).getByRole('button', { name: MODAL_CONFIRM_LABEL }));
       return screen.findByTestId(DELETE_ERROR_TESTID);
