@@ -89,7 +89,13 @@ export const REQUIRED_INDEXES_BY_TABLE: Record<string, readonly string[]> = {
   temporarymeasurements: ['idx_tmpm_file_batch_census', 'ingest_temporarymeasurements_FBPC_index', 'idx_tmpm_plot_census_file_batch'],
   // ux_measure_unique and idx_cm_* — the first is the collision check's third
   // STRAIGHT_JOIN lookup, the rest carry batch-scoped upload verification.
-  coremeasurements: ['ux_cm_uploadbatch_rowindex', 'idx_cm_uploadbatch_census', 'idx_cm_uploadfile_batch_census_stem', 'ux_measure_unique'],
+  // idx_censusid is hinted by name by the census-replacement window
+  // (CENSUS_REPLACEMENT_SCAN_INDEX, lib/ingestion/temporary-measurements.ts);
+  // without it the window walks PRIMARY across every other census under
+  // FOR UPDATE (#555 spec F-4). Deploy scripts import this module, so it must
+  // not import temporary-measurements.ts (that pulls in ConnectionManager);
+  // schema-contract.test.ts asserts the two names match instead.
+  coremeasurements: ['ux_cm_uploadbatch_rowindex', 'idx_cm_uploadbatch_census', 'idx_cm_uploadfile_batch_census_stem', 'ux_measure_unique', 'idx_censusid'],
   stems: ['idx_stems_publishedstemid', 'ux_stems_treeid_stemtag_census'],
   // STRAIGHT_JOIN pins the JOIN ORDER of the collision check
   // (existing_tag_stemtag_collision_failures, storedprocedures.sql STAGE 8) but
