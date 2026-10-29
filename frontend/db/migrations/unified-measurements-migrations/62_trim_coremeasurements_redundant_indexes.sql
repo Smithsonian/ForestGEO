@@ -33,7 +33,7 @@ CREATE PROCEDURE mig_62_trim_coremeasurements_redundant_indexes()
 BEGIN
   DECLARE missing_successors TEXT DEFAULT NULL;
   DECLARE drop_clauses TEXT DEFAULT NULL;
-  DECLARE refusal_message VARCHAR(120);
+  DECLARE refusal_message VARCHAR(128);
 
   SELECT GROUP_CONCAT(expected.index_name ORDER BY expected.index_name SEPARATOR ',')
     INTO missing_successors
@@ -53,7 +53,7 @@ BEGIN
   WHERE live.INDEX_NAME IS NULL;
 
   IF missing_successors IS NOT NULL THEN
-    SET refusal_message = LEFT(CONCAT('coremeasurements index trim refused, missing or reshaped: ', missing_successors), 120);
+    SET refusal_message = LEFT(CONCAT('index trim refused, missing or reshaped: ', missing_successors), 128);
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = refusal_message;
   END IF;
 

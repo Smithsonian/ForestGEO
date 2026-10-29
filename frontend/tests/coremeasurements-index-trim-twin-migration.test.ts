@@ -22,7 +22,7 @@ const RUNNER_LISTS = [
   { script: 'unified-measurements-migrations/run-branch-refresh.sh', arrayName: 'POST_STORED_PROCEDURE_MIGRATIONS' }
 ] as const;
 const COREMEASUREMENTS_TABLE = 'coremeasurements';
-const REFUSAL_MESSAGE_PREFIX = "'coremeasurements index trim refused, missing or reshaped: '";
+const REFUSAL_MESSAGE_PREFIX = "'index trim refused, missing or reshaped: '";
 const ONLINE_ALTER_CLAUSE = "', ALGORITHM=INPLACE, LOCK=NONE'";
 /** Plan review C1: a successor only counts when it is visible, has no prefix length, and (ux_measure_unique) is unique. */
 const USABLE_SUCCESSOR_FILTER = "AND IS_VISIBLE = 'YES' AND SUB_PART IS NULL";

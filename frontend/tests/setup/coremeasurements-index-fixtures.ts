@@ -21,7 +21,7 @@ export const MEASUREMENTS_SUMMARY_TABLE = 'measurementssummary';
 export const UNIFIED_CHANGELOG_TABLE = 'unifiedchangelog';
 export const TRIM_MIGRATION_ID = '2026-10-28-01-trim-coremeasurements-redundant-indexes';
 export const TRIM_CONFLICT_HELPER_PROCEDURE = 'mig_2026_10_28_01_raise_contract_conflict';
-export const TRIM_REFUSAL_MESSAGE_PREFIX = 'coremeasurements index trim refused, missing or reshaped:';
+export const TRIM_REFUSAL_MESSAGE_PREFIX = 'index trim refused, missing or reshaped:';
 export const PRE_CHANGE_INDEX_COUNT = 19;
 export const CTFS_DRIFT_INDEX_COUNT = 21;
 const MYSQL_IDENTIFIER_MAX_LENGTH = 64;
@@ -291,6 +291,9 @@ export interface SuccessorRefusalCase {
 /** Not FK-critical (idx_censusid and ix_cm_cid_date_dbh_hom still lead with CensusID), so MySQL lets it go invisible. */
 const INVISIBLE_CASE_SUCCESSOR = 'idx_cm_census_validated_stem';
 const NON_UNIQUE_CASE_SUCCESSOR = 'ux_measure_unique';
+/** In the order the refusal message lists them (GROUP_CONCAT ORDER BY index_name). */
+const ALL_SUCCESSOR_NAMES = TRIM_SUCCESSORS.map(successor => successor.current.name);
+const REFUSAL_NAME_SEPARATOR = ',';
 
 /** Shared by I4 (manifest migration) and I8 (twin 62): 4 successors x removed/reshaped, plus invisible and non-unique. */
 export const SUCCESSOR_REFUSAL_CASES: readonly SuccessorRefusalCase[] = [
@@ -323,5 +326,20 @@ export const SUCCESSOR_REFUSAL_CASES: readonly SuccessorRefusalCase[] = [
     refusedName: NON_UNIQUE_CASE_SUCCESSOR,
     regress: (connection: Connection) => replaceIndex(connection, { ...trimmedIndex(NON_UNIQUE_CASE_SUCCESSOR), unique: false }),
     restore: (connection: Connection) => replaceIndex(connection, trimmedIndex(NON_UNIQUE_CASE_SUCCESSOR))
+  },
+  {
+    label: 'all four successors removed (longest refusal message)',
+    caseTag: 'all',
+    refusedName: ALL_SUCCESSOR_NAMES.join(REFUSAL_NAME_SEPARATOR),
+    regress: async (connection: Connection) => {
+      const dropClauses = ALL_SUCCESSOR_NAMES.map(indexName => `DROP INDEX \`${indexName}\``).join(', ');
+      await connection.query(`ALTER TABLE \`${COREMEASUREMENTS_TABLE}\` ${dropClauses}`);
+    },
+    restore: async (connection: Connection) => {
+      await addMissingIndexes(
+        connection,
+        TRIM_SUCCESSORS.map(successor => successor.current)
+      );
+    }
   }
 ];

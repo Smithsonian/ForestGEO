@@ -43,7 +43,7 @@
 -- MySQL rejects SIGNAL inside a prepared statement, so the conflict branch CALLs a
 -- short-lived helper procedure that performs the SIGNAL natively. This file drops the
 -- helper at the end; when the SIGNAL skips that DROP, the manifest entry failureCleanup
--- drops it. SIGNAL caps MESSAGE_TEXT at 128 characters, so the message is trimmed to 120.
+-- drops it. SIGNAL caps MESSAGE_TEXT at 128 characters, so the message is trimmed to 128.
 --
 -- Rollback (hand-run, per schema; its banner gives the procedure):
 --   db/migrations/schema-contract-repair/rollback/2026-10-28-01-trim-coremeasurements-redundant-indexes.rollback.sql
@@ -55,7 +55,7 @@
 -- applied it: any byte change fails every later deploy with TamperedMigrationError.
 -- A correction must be a new migration.
 DROP PROCEDURE IF EXISTS mig_2026_10_28_01_raise_contract_conflict;
-CREATE PROCEDURE mig_2026_10_28_01_raise_contract_conflict(IN conflict_message VARCHAR(120))
+CREATE PROCEDURE mig_2026_10_28_01_raise_contract_conflict(IN conflict_message VARCHAR(128))
 BEGIN
   SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = conflict_message;
 END;
@@ -90,7 +90,7 @@ SET @drop_clauses := (
 
 SET @sql := CASE
   WHEN @missing_successors IS NOT NULL THEN
-    CONCAT('CALL mig_2026_10_28_01_raise_contract_conflict(', QUOTE(LEFT(CONCAT('coremeasurements index trim refused, missing or reshaped: ', @missing_successors), 120)), ')')
+    CONCAT('CALL mig_2026_10_28_01_raise_contract_conflict(', QUOTE(LEFT(CONCAT('index trim refused, missing or reshaped: ', @missing_successors), 128)), ')')
   WHEN @drop_clauses IS NULL THEN 'DO 0'
   ELSE CONCAT('ALTER TABLE `coremeasurements` ', @drop_clauses, ', ALGORITHM=INPLACE, LOCK=NONE')
 END;
