@@ -35,7 +35,7 @@
 
 import crypto from 'crypto';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
+import { TransactionCallbackTimeoutError, TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus, type FailedInitialCensusRecoveryState } from '@/lib/failedinitialcensusrecovery';
@@ -1020,6 +1020,14 @@ async function processSubBatch(
         }
       }
 
+      // The COMMIT reached the driver and no reply came back, so this sub-batch may have committed. The procedure's
+      // completed-skip check is non-locking, so a replay 100 ms later could ingest it twice, and the give-up path
+      // would move rows the original is deleting. Leave them staged; the outer retry re-checks uploadmetrics (#563).
+      if (e instanceof TransactionCommitOutcomeUnknownError) {
+        ailogger.error(`Sub-batch ${subBatchID} attempt ${attempt}: COMMIT outcome unknown; not retrying and leaving its rows staged`, e);
+        throw e;
+      }
+
       // Typed, not substring-matched. The DB layer's own timeout raises
       // QueryTimeoutError, whose message merely happens to contain "timed out";
       // matching on that text also swallowed unrelated errors and, worse, routed
@@ -1337,6 +1345,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
   // --- Phase 2: Process each sub-batch sequentially ---
   const results: SubBatchResult[] = [];
   const overallStartTime = Date.now();
+  let firstUnknownCommitOutcome: { error: TransactionCommitOutcomeUnknownError; subBatchID: string } | null = null;
 
   for (let i = 0; i < subBatchIDs.length; i++) {
     const subBatchID = subBatchIDs[i];
@@ -1353,6 +1362,18 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       results.push(subResult);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (subError: any) {
+      // An unknown COMMIT outcome (#563) leaves only that sub-batch staged: it may or may not have been ingested, so
+      // the outer retry re-checks uploadmetrics. Each sub-batch runs in its own transaction, so the later ones are
+      // unaffected and keep going; the first such error is rethrown after the loop.
+      if (subError instanceof TransactionCommitOutcomeUnknownError) {
+        ailogger.error(
+          `Unknown COMMIT outcome on sub-batch ${subBatchID}; leaving it staged and continuing with the remaining sub-batches: ${subError.message}`,
+          subError
+        );
+        firstUnknownCommitOutcome ??= { error: subError, subBatchID };
+        continue;
+      }
+
       // An audit/consistency failure propagated from processSubBatch (#507)
       // already rolled its CALL's data back with the failed audit, so this
       // and every later sub-batch's rows stay staged for recovery rather
@@ -1438,6 +1459,13 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       }
       break;
     }
+  }
+
+  if (firstUnknownCommitOutcome) {
+    ailogger.error(
+      `Sub-batch ${firstUnknownCommitOutcome.subBatchID} of ${fileID} has an unknown COMMIT outcome and remains staged; rethrowing for the outer retry`
+    );
+    throw firstUnknownCommitOutcome.error;
   }
 
   const overallDuration = Date.now() - overallStartTime;
