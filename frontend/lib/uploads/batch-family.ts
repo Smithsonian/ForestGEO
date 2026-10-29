@@ -303,3 +303,56 @@ export function selectNewestFamilyPerFile(rows: StagedBatchRow[]): FileBatchFami
       return { fileID, batchID, familyCount: fileFamilies.size };
     });
 }
+
+/**
+ * ArcGIS commit batches are derived from the import session's primary key on the server (#561), so no other upload
+ * can produce or name the family: every other batch generator (`generateShortBatchID`) emits a `-`, and CSV staging
+ * refuses this shape (`ReservedBatchIDError`). 3 + 25 = 28 = MAX_ORIGINAL_BATCH_ID_LENGTH, and 36^25 > 2^128.
+ */
+export const ARCGIS_COMMIT_BATCH_ID_PREFIX = 'arc';
+export const ARCGIS_COMMIT_BATCH_ID_BODY_LENGTH = 25;
+const BASE36_RADIX = 36;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ARCGIS_COMMIT_BATCH_ID_PATTERN = new RegExp(`^${ARCGIS_COMMIT_BATCH_ID_PREFIX}[0-9a-z]{${ARCGIS_COMMIT_BATCH_ID_BODY_LENGTH}}$`);
+
+export class InvalidArcgisImportSessionIDError extends Error {
+  readonly code = 'INVALID_ARCGIS_IMPORT_SESSION_ID';
+  constructor(importSessionId: string) {
+    super(`ArcGIS import session id "${importSessionId}" is not a UUID, so no commit batch can be derived from it`);
+    this.name = 'InvalidArcgisImportSessionIDError';
+  }
+}
+
+/** A caller-chosen batch CSV staging must not use: the ArcGIS shape, or anything that could alias it (#561); refused before any write. */
+export class ReservedBatchIDError extends Error {
+  readonly code = 'RESERVED_BATCH_ID';
+  constructor(batchID: string, reason: string) {
+    super(`Batch ID "${batchID}" ${reason}; generate a new batch ID`);
+    this.name = 'ReservedBatchIDError';
+  }
+}
+
+/**
+ * Every server batch generator emits only these characters: `generateShortBatchID` (config/utils.ts) is base-36 time,
+ * `-`, base-36 random, all lowercase. The batch columns compare under utf8mb4_0900_ai_ci (case- and
+ * accent-insensitive), so any other character could make a caller batch equal an ArcGIS commit batch in SQL.
+ */
+const CALLER_BATCH_ID_ALPHABET = /^[0-9a-z-]+$/;
+const CALLER_BATCH_ID_ALPHABET_REASON = 'contains characters outside 0-9, a-z and "-", which the database could match to an ArcGIS commit batch';
+const ARCGIS_COMMIT_BATCH_SHAPE_REASON = 'has the shape reserved for ArcGIS commit batches';
+
+/** The check CSV staging applies to a caller batch (#561 N1, H2). */
+export function assertCallerBatchIDAllowed(batchID: string): void {
+  if (!CALLER_BATCH_ID_ALPHABET.test(batchID)) throw new ReservedBatchIDError(batchID, CALLER_BATCH_ID_ALPHABET_REASON);
+  if (isArcgisCommitBatchShape(batchID)) throw new ReservedBatchIDError(batchID, ARCGIS_COMMIT_BATCH_SHAPE_REASON);
+}
+
+export function deriveArcgisCommitBatchID(importSessionId: string): string {
+  if (!UUID_PATTERN.test(importSessionId)) throw new InvalidArcgisImportSessionIDError(importSessionId);
+  const sessionBits = BigInt(`0x${importSessionId.replace(/-/g, '')}`);
+  return `${ARCGIS_COMMIT_BATCH_ID_PREFIX}${sessionBits.toString(BASE36_RADIX).padStart(ARCGIS_COMMIT_BATCH_ID_BODY_LENGTH, '0')}`;
+}
+
+export function isArcgisCommitBatchShape(batchID: string): boolean {
+  return ARCGIS_COMMIT_BATCH_ID_PATTERN.test(batchID);
+}
