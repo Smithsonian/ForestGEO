@@ -22,6 +22,12 @@
  *   3 resumedRun          retry of run 2 with the same batch and session; finishes the replacement, no double audit
  *   4 stagingRollbackRun  fresh seed; failure injected at the staging insert after the replacement; staging rolls back,
  *                         the marker stays set, the census stays replaced; the retry runs no replacement transaction
+ *   8 arcgisCommitRun     (#561) fresh seed plus an ArcGIS import session of the profile's replacement row count; commitArcgisImport
+ *                         CLEAN; every transaction within budget, exact kind counts, census replaced, import `committed`
+ *   9 arcgisInterruptedRun fresh seed; failure injected at the finalize transaction's file_upload changelog INSERT; census replaced and
+ *                         audited, all rows staged, import still `committing`
+ *  10 arcgisResumedRun    retry of run 9 under a new upload session; clears the staged rows window by window, restages, deletes nothing
+ *                         more, finalizes; every transaction within budget, no double audit
  *
  * Profiles (env CENSUS_REPLACEMENT_REHEARSAL):
  *   full  — the measured Mpala counts. ONLY a full SUMMARY with "passed":true satisfies acceptance criterion 9
@@ -33,8 +39,8 @@
  *   caffeinate -dimsu env CENSUS_REPLACEMENT_REHEARSAL=full npx vitest run --config vitest.integration.config.mts tests/integration/census-replacement-rehearsal.integration.test.ts
  *   CENSUS_REPLACEMENT_REHEARSAL=smoke npx vitest run --config vitest.integration.config.mts tests/integration/census-replacement-rehearsal.integration.test.ts
  *
- * Pass rule: every count, fingerprint and kind-count check holds in all four runs, every transaction of runs 1 and 3
- * finishes begin-to-end within LOCAL_TRANSACTION_BUDGET_MS, and the SUMMARY line reads "passed":true. Any failure
+ * Pass rule: every count, fingerprint and kind-count check holds in every run, every transaction of the budgeted runs
+ * (1, 3, 8 and 10) finishes begin-to-end within LOCAL_TRANSACTION_BUDGET_MS, and the SUMMARY line reads "passed":true. Any failure
  * triggers the stop rule: escalate before anyone asks for the Mpala re-upload. A local pass is not an Azure guarantee.
  */
 
@@ -68,6 +74,10 @@ import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE, SUB_BATCH_ORDINAL_WIDTH, SUB_
 import { generateShortBatchID } from '@/config/utils';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
+import { ARCGIS_STAGING_WINDOW_ROWS, commitArcgisImport, type CommitArcgisImportResult } from '@/lib/uploads/arcgis-commit';
+import { ARCGIS_IMPORT_SESSION_STATE, ensureArcgisImportTables } from '@/lib/arcgis/import-session';
+import { ARCGIS_COMMIT_STATEMENT } from '../setup/arcgis-commit-statement-patterns';
+import { seedArcgisImport, type ArcgisImportScope, type SeededArcgisImport } from '../setup/arcgis-commit-fixtures';
 
 // ---------------------------------------------------------------------------
 // Profile selection
@@ -144,6 +154,16 @@ const SESSION_ID = {
   STAGING_ROLLBACK_RUN: 'rehearsal-staging-rollback-session'
 } as const;
 
+const ARCGIS_IMPORT_FILE = 'mpala_census3_arcgis.xlsx';
+const ARCGIS_IMPORT_TAG_PREFIX = 'A3T';
+const ARCGIS_SESSION_ID = {
+  COMMIT_RUN: 'rehearsal-arcgis-commit-session',
+  INTERRUPTED_RUN: 'rehearsal-arcgis-interrupted-session',
+  RESUMED_RUN: 'rehearsal-arcgis-resumed-session'
+} as const;
+const UPLOAD_SESSION_STATE_FAILED = 'failed';
+const FIRST_STATEMENT_OCCURRENCE = 1;
+
 const SPECIES_CODE = 'ACERRU';
 const QUADRAT_NAME = 'Q01';
 const STEM_TAG = '1';
@@ -186,19 +206,58 @@ const STATEMENT_PHASE = {
   UPLOADMETRICS_DELETE: 'uploadMetricsDelete',
   MARKER_UPDATE: 'markerUpdate',
   STAGING_INSERT: 'stagingInsert',
+  ARCGIS_CLAIM_UPDATE: 'arcgisClaimUpdate',
+  STAGED_CLEAR_DELETE: 'stagedClearDelete',
+  FAMILY_ID_SELECT: 'familyIdSelect',
+  CURSOR_CAS: 'cursorCas',
+  IMPORT_MARKER_UPDATE: 'importMarkerUpdate',
+  FINALIZE_UPDATE: 'finalizeUpdate',
+  FILE_UPLOAD_CHANGELOG_INSERT: 'fileUploadChangelogInsert',
   OTHER: 'other'
 } as const;
 type StatementPhase = (typeof STATEMENT_PHASE)[keyof typeof STATEMENT_PHASE];
 
-/** Every phase except OTHER must match at least one statement in a run that finishes the replacement and commits its staging. */
-const NAMED_STATEMENT_PHASES: readonly StatementPhase[] = Object.values(STATEMENT_PHASE).filter(phase => phase !== STATEMENT_PHASE.OTHER);
+/** Statements only an ArcGIS commit (#561) issues; the CSV runs never match them. */
+const ARCGIS_STATEMENT_PHASES: readonly StatementPhase[] = [
+  STATEMENT_PHASE.ARCGIS_CLAIM_UPDATE,
+  STATEMENT_PHASE.STAGED_CLEAR_DELETE,
+  STATEMENT_PHASE.FAMILY_ID_SELECT,
+  STATEMENT_PHASE.CURSOR_CAS,
+  STATEMENT_PHASE.IMPORT_MARKER_UPDATE,
+  STATEMENT_PHASE.FINALIZE_UPDATE
+];
+
+/** Every CSV-path phase must match at least one statement in a run that finishes the replacement and commits its staging. */
+const NAMED_STATEMENT_PHASES: readonly StatementPhase[] = Object.values(STATEMENT_PHASE).filter(
+  phase => phase !== STATEMENT_PHASE.OTHER && phase !== STATEMENT_PHASE.FILE_UPLOAD_CHANGELOG_INSERT && !ARCGIS_STATEMENT_PHASES.includes(phase)
+);
+
+/** An ArcGIS commit that deletes a prior census: the CSV replacement phases, minus the upload-session marker (the import row carries it), plus its own. */
+const ARCGIS_COMMIT_REQUIRED_PHASES: readonly StatementPhase[] = [
+  ...NAMED_STATEMENT_PHASES.filter(phase => phase !== STATEMENT_PHASE.MARKER_UPDATE),
+  ...ARCGIS_STATEMENT_PHASES,
+  STATEMENT_PHASE.FILE_UPLOAD_CHANGELOG_INSERT
+];
+
+/** A retry after the census was already emptied: the windows run but find nothing to delete, so no delete, audit or error-link statement. */
+const ARCGIS_RESUME_REQUIRED_PHASES: readonly StatementPhase[] = ARCGIS_COMMIT_REQUIRED_PHASES.filter(
+  phase =>
+    phase !== STATEMENT_PHASE.ERROR_LINK_DELETE && phase !== STATEMENT_PHASE.COREMEASUREMENT_DELETE_AUDIT && phase !== STATEMENT_PHASE.COREMEASUREMENT_DELETE
+);
 
 /** The window's cursor SELECT, with or without the optimizer hint production puts in front of the select list. */
 const COREMEASUREMENT_SELECT_FOR_UPDATE_PATTERN =
   /^\s*SELECT\s+(\/\*\+[^*]*\*\/\s+)?(DISTINCT\s+)?\S*CoreMeasurementID\s+FROM\s+\S+\.coremeasurements[\s\S]*FOR UPDATE\s*$/i;
 const STAGING_INSERT_PATTERN = /^\s*INSERT IGNORE INTO\s+\S+\.temporarymeasurements\b/i;
 
+/** The ArcGIS statements go before the CSV ones: the family-id select would otherwise be taken for a window cursor SELECT. */
 const STATEMENT_PHASE_PATTERNS: ReadonlyArray<{ phase: StatementPhase; pattern: RegExp }> = [
+  { phase: STATEMENT_PHASE.ARCGIS_CLAIM_UPDATE, pattern: ARCGIS_COMMIT_STATEMENT.CLAIM_UPDATE },
+  { phase: STATEMENT_PHASE.STAGED_CLEAR_DELETE, pattern: ARCGIS_COMMIT_STATEMENT.STAGED_CLEAR_DELETE },
+  { phase: STATEMENT_PHASE.FAMILY_ID_SELECT, pattern: ARCGIS_COMMIT_STATEMENT.FAMILY_ID_SELECT },
+  { phase: STATEMENT_PHASE.CURSOR_CAS, pattern: ARCGIS_COMMIT_STATEMENT.CURSOR_CAS },
+  { phase: STATEMENT_PHASE.IMPORT_MARKER_UPDATE, pattern: ARCGIS_COMMIT_STATEMENT.IMPORT_MARKER_UPDATE },
+  { phase: STATEMENT_PHASE.FINALIZE_UPDATE, pattern: ARCGIS_COMMIT_STATEMENT.FINALIZE_UPDATE },
   { phase: STATEMENT_PHASE.SESSION_LOCK, pattern: CENSUS_REPLACEMENT_STATEMENT.SESSION_LOCK },
   { phase: STATEMENT_PHASE.ERROR_LINK_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.ERROR_LINK_DELETE },
   { phase: STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE, pattern: COREMEASUREMENT_SELECT_FOR_UPDATE_PATTERN },
@@ -207,7 +266,8 @@ const STATEMENT_PHASE_PATTERNS: ReadonlyArray<{ phase: StatementPhase; pattern: 
   { phase: STATEMENT_PHASE.LEGACY_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.LEGACY_DELETE },
   { phase: STATEMENT_PHASE.UPLOADMETRICS_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.METRICS_DELETE },
   { phase: STATEMENT_PHASE.MARKER_UPDATE, pattern: CENSUS_REPLACEMENT_STATEMENT.MARKER_UPDATE },
-  { phase: STATEMENT_PHASE.STAGING_INSERT, pattern: STAGING_INSERT_PATTERN }
+  { phase: STATEMENT_PHASE.STAGING_INSERT, pattern: STAGING_INSERT_PATTERN },
+  { phase: STATEMENT_PHASE.FILE_UPLOAD_CHANGELOG_INSERT, pattern: ARCGIS_COMMIT_STATEMENT.FILE_UPLOAD_CHANGELOG_INSERT }
 ];
 
 function classifyStatement(sql: string): StatementPhase {
@@ -288,17 +348,33 @@ const TRANSACTION_KIND = {
   METRICS_WINDOW: 'metrics_window',
   COMPLETION: 'completion',
   STAGING: 'staging',
+  ARCGIS_CLAIM: 'arcgis_claim',
+  CLEAR_STAGED_WINDOW: 'clear_staged_window',
+  CLEAR_FAMILY_WINDOW: 'clear_family_window',
+  STAGING_WINDOW: 'staging_window',
+  ARCGIS_FINALIZE: 'arcgis_finalize',
   UNCLASSIFIED: 'unclassified'
 } as const;
 type TransactionKind = (typeof TRANSACTION_KIND)[keyof typeof TRANSACTION_KIND];
 
-/** What the transaction's statements say it was; the first match wins. */
+/**
+ * What the transaction's statements say it was; the first match wins. The ArcGIS units come first because an ArcGIS staging window also
+ * inserts into temporarymeasurements and a clear-family window also selects coremeasurements ids. The finalize transaction is also
+ * recognised by its file_upload changelog INSERT, last, so a finalize that fails before its closing UPDATE is still a finalize.
+ */
 const TRANSACTION_KIND_BY_PHASE: ReadonlyArray<{ phase: StatementPhase; kind: TransactionKind }> = [
+  { phase: STATEMENT_PHASE.ARCGIS_CLAIM_UPDATE, kind: TRANSACTION_KIND.ARCGIS_CLAIM },
+  { phase: STATEMENT_PHASE.FINALIZE_UPDATE, kind: TRANSACTION_KIND.ARCGIS_FINALIZE },
+  { phase: STATEMENT_PHASE.STAGED_CLEAR_DELETE, kind: TRANSACTION_KIND.CLEAR_STAGED_WINDOW },
+  { phase: STATEMENT_PHASE.FAMILY_ID_SELECT, kind: TRANSACTION_KIND.CLEAR_FAMILY_WINDOW },
+  { phase: STATEMENT_PHASE.CURSOR_CAS, kind: TRANSACTION_KIND.STAGING_WINDOW },
   { phase: STATEMENT_PHASE.STAGING_INSERT, kind: TRANSACTION_KIND.STAGING },
   { phase: STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE, kind: TRANSACTION_KIND.MEASUREMENT_WINDOW },
   { phase: STATEMENT_PHASE.LEGACY_DELETE, kind: TRANSACTION_KIND.LEGACY_PASS },
   { phase: STATEMENT_PHASE.UPLOADMETRICS_DELETE, kind: TRANSACTION_KIND.METRICS_WINDOW },
-  { phase: STATEMENT_PHASE.MARKER_UPDATE, kind: TRANSACTION_KIND.COMPLETION }
+  { phase: STATEMENT_PHASE.MARKER_UPDATE, kind: TRANSACTION_KIND.COMPLETION },
+  { phase: STATEMENT_PHASE.IMPORT_MARKER_UPDATE, kind: TRANSACTION_KIND.COMPLETION },
+  { phase: STATEMENT_PHASE.FILE_UPLOAD_CHANGELOG_INSERT, kind: TRANSACTION_KIND.ARCGIS_FINALIZE }
 ];
 
 function classifyTransaction(statements: TimedStatement[]): TransactionKind {
@@ -434,6 +510,30 @@ function summarizeTransactionDurations(transactions: TransactionRecord[]): Trans
   };
 }
 
+interface KindDurationSummary {
+  transactionCount: number;
+  p50: number;
+  p95: number;
+  max: number;
+}
+
+function summarizeTransactionDurationsByKind(transactions: TransactionRecord[]): Partial<Record<TransactionKind, KindDurationSummary>> {
+  const summaries: Partial<Record<TransactionKind, KindDurationSummary>> = {};
+  for (const kind of Object.values(TRANSACTION_KIND)) {
+    const ofKind = transactions.filter(transaction => transaction.kind === kind);
+    if (ofKind.length === 0) continue;
+    const { transactionCount, transactionMs } = summarizeTransactionDurations(ofKind);
+    summaries[kind] = { transactionCount, ...transactionMs };
+  }
+  return summaries;
+}
+
+/** The slowest finalize transaction (there is one per attempt), or null when the run had none. */
+function finalizeTransactionDurationMs(transactions: TransactionRecord[]): number | null {
+  const durations = transactions.filter(transaction => transaction.kind === TRANSACTION_KIND.ARCGIS_FINALIZE).map(transaction => transaction.durationMs);
+  return durations.length === 0 ? null : Math.round(Math.max(...durations));
+}
+
 // ---------------------------------------------------------------------------
 // Expected shapes of the window sequence
 // ---------------------------------------------------------------------------
@@ -450,6 +550,22 @@ function expectedMeasurementWindowCount(rows: number, windowSize: number): numbe
   const lastDeletingWindowWasFull = rows % windowSize === 0;
   return deletingWindows + (lastDeletingWindowWasFull ? 2 : 1);
 }
+
+/** ArcGIS staging (#561): one transaction per window of `windowSize` import rows. */
+function expectedArcgisStagingWindowCount(importRows: number, windowSize: number): number {
+  return Math.ceil(importRows / windowSize);
+}
+
+/**
+ * A retry's clear-staged loop stops on the first window that deletes fewer than `windowSize` rows, so it runs one window more than the
+ * full ones: the short remainder, or an empty window when the staged rows divide evenly.
+ */
+function expectedArcgisRetryClearStagedWindowCount(stagedRows: number, windowSize: number): number {
+  return Math.floor(stagedRows / windowSize) + SINGLE_TRANSACTION;
+}
+
+/** Unit A against a census with nothing left: the one window that finds no row after the cursor. */
+const EMPTY_CENSUS_MEASUREMENT_WINDOW_COUNT = 1;
 
 /** The middle deleting window (1-based): the one whose DELETE run 2 fails. */
 function interruptedWindowIndex(rows: number, windowSize: number): number {
@@ -476,6 +592,12 @@ interface CensusThreeState {
   failedUploadMetricsRows: number;
   stagedReplacementRows: number;
   sessionMarkerSet: boolean;
+}
+
+/** Census 3 as an ArcGIS commit leaves it: the import session's marker and state replace the upload session's marker, and the staged rows are the import's. */
+interface ArcgisRunState extends CensusThreeState {
+  importSessionState: string;
+  importCommittedRowCount: number;
 }
 
 interface ControlCensusFingerprint {
@@ -533,9 +655,11 @@ function describeMismatches<T extends object>(expected: T, actual: T): string[] 
 // Summary (printed once, in afterAll)
 // ---------------------------------------------------------------------------
 
-type RunOutcome = 'committed' | 'replacement_interrupted' | 'staging_rolled_back' | 'failed';
-type RunKey = 'replacementRun' | 'interruptedRun' | 'resumedRun' | 'stagingRollbackRun';
-const RUN_KEYS: readonly RunKey[] = ['replacementRun', 'interruptedRun', 'resumedRun', 'stagingRollbackRun'];
+type RunOutcome = 'committed' | 'replacement_interrupted' | 'staging_rolled_back' | 'finalize_interrupted' | 'failed';
+type ArcgisRunKey = 'arcgisCommitRun' | 'arcgisInterruptedRun' | 'arcgisResumedRun';
+const ARCGIS_RUN_KEYS: readonly ArcgisRunKey[] = ['arcgisCommitRun', 'arcgisInterruptedRun', 'arcgisResumedRun'];
+type RunKey = 'replacementRun' | 'interruptedRun' | 'resumedRun' | 'stagingRollbackRun' | ArcgisRunKey;
+const RUN_KEYS: readonly RunKey[] = ['replacementRun', 'interruptedRun', 'resumedRun', 'stagingRollbackRun', ...ARCGIS_RUN_KEYS];
 
 /** Filled in after the run's state checks complete; null means verification never finished. */
 interface RunVerification {
@@ -562,8 +686,19 @@ interface RetryAfterRollbackSummary {
   stateMismatches: string[];
 }
 
+/** What only an ArcGIS run knows: the import it committed and what seeding that import cost (reported, not gated). */
+interface ArcgisRunDetails {
+  importRowCount: number;
+  importSessionSeedMs: number;
+  derivedBatchID: string;
+}
+
 interface RunSummary extends TransactionDurationSummary {
   outcome: RunOutcome;
+  perKindTransactionMs: Partial<Record<TransactionKind, KindDurationSummary>>;
+  /** Duration of the ArcGIS finalize transaction, which holds the two aggregate counts that grow with the import (spec F10). */
+  finalizeTransactionMs: number | null;
+  arcgis: ArcgisRunDetails | null;
   endToEndMs: number;
   replacementOutcome: CensusReplacementOutcome | null;
   /** Unit A's transactions: the windows that deleted plus the confirming window. */
@@ -680,6 +815,77 @@ function buildRunExpectations(profile: RehearsalProfile): Record<RunKey, RunExpe
       transactionKindCounts: fullSequenceKindCounts(priorRows),
       rolledBackTransactions: SINGLE_TRANSACTION,
       expectsRetryAfterRollback: true
+    },
+    ...buildArcgisRunExpectations(profile)
+  };
+}
+
+/** Rows in the ArcGIS import: the profile's replacement row count (412,427 at the full profile), equal to the prior census-3 rows it replaces. */
+function arcgisImportRowCount(profile: RehearsalProfile): number {
+  return failedRowTotal(profile);
+}
+
+/** The transactions of an ArcGIS commit that claims fresh and replaces `priorRows` census rows; run 9 issues the same ones before its finalize fails. */
+function arcgisFreshCommitKindCounts(importRows: number, priorRows: number): Record<TransactionKind, number> {
+  return kindCounts({
+    [TRANSACTION_KIND.ARCGIS_CLAIM]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.CLEAR_STAGED_WINDOW]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.CLEAR_FAMILY_WINDOW]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.STAGING_WINDOW]: expectedArcgisStagingWindowCount(importRows, ARCGIS_STAGING_WINDOW_ROWS),
+    [TRANSACTION_KIND.MEASUREMENT_WINDOW]: expectedMeasurementWindowCount(priorRows, CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE),
+    [TRANSACTION_KIND.LEGACY_PASS]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.METRICS_WINDOW]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.COMPLETION]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.ARCGIS_FINALIZE]: SINGLE_TRANSACTION
+  });
+}
+
+/** The retry of run 9: every staged row is cleared window by window and restaged, and the replacement finds the census already empty. */
+function arcgisResumedKindCounts(importRows: number): Record<TransactionKind, number> {
+  return kindCounts({
+    [TRANSACTION_KIND.ARCGIS_CLAIM]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.CLEAR_STAGED_WINDOW]: expectedArcgisRetryClearStagedWindowCount(importRows, ARCGIS_STAGING_WINDOW_ROWS),
+    [TRANSACTION_KIND.CLEAR_FAMILY_WINDOW]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.STAGING_WINDOW]: expectedArcgisStagingWindowCount(importRows, ARCGIS_STAGING_WINDOW_ROWS),
+    [TRANSACTION_KIND.MEASUREMENT_WINDOW]: EMPTY_CENSUS_MEASUREMENT_WINDOW_COUNT,
+    [TRANSACTION_KIND.LEGACY_PASS]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.METRICS_WINDOW]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.COMPLETION]: SINGLE_TRANSACTION,
+    [TRANSACTION_KIND.ARCGIS_FINALIZE]: SINGLE_TRANSACTION
+  });
+}
+
+/** Runs 8-10 (#561). The replacement is the ArcGIS owner's, so no run reports a CensusReplacementResult outcome. */
+function buildArcgisRunExpectations(profile: RehearsalProfile): Record<ArcgisRunKey, RunExpectation> {
+  const importRows = arcgisImportRowCount(profile);
+  const priorRows = failedRowTotal(profile);
+  return {
+    arcgisCommitRun: {
+      outcome: 'committed',
+      replacementOutcome: null,
+      injection: null,
+      budgeted: true,
+      transactionKindCounts: arcgisFreshCommitKindCounts(importRows, priorRows),
+      rolledBackTransactions: 0,
+      expectsRetryAfterRollback: false
+    },
+    arcgisInterruptedRun: {
+      outcome: 'finalize_interrupted',
+      replacementOutcome: null,
+      injection: { phase: STATEMENT_PHASE.FILE_UPLOAD_CHANGELOG_INSERT, occurrence: FIRST_STATEMENT_OCCURRENCE },
+      budgeted: false,
+      transactionKindCounts: arcgisFreshCommitKindCounts(importRows, priorRows),
+      rolledBackTransactions: SINGLE_TRANSACTION,
+      expectsRetryAfterRollback: false
+    },
+    arcgisResumedRun: {
+      outcome: 'committed',
+      replacementOutcome: null,
+      injection: null,
+      budgeted: true,
+      transactionKindCounts: arcgisResumedKindCounts(importRows),
+      rolledBackTransactions: 0,
+      expectsRetryAfterRollback: false
     }
   };
 }
@@ -778,6 +984,8 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   let runExpectations: Record<RunKey, RunExpectation>;
   const interruptedRunBatchID = generateShortBatchID();
   const stagingRollbackRunBatchID = generateShortBatchID();
+  /** Run 9's import, which run 10 retries. */
+  let arcgisInterruptedImport: ArcgisSeededImport | null = null;
 
   async function query(sql: string, params: unknown[] = []): Promise<RowDataPacket[]> {
     const [rows] = await setupConnection!.query<RowDataPacket[]>(sql, params);
@@ -1099,7 +1307,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   }
 
   /** Records a run's timings in the summary immediately, before any verification query can fail. */
-  function recordRun(key: RunKey, result: ReplacementAndFirstChunkResult): RunSummary {
+  function recordRun(key: RunKey, result: ReplacementAndFirstChunkResult, requiredPhases: readonly StatementPhase[] = NAMED_STATEMENT_PHASES): RunSummary {
     const phases = summarizePhases(result.statements);
     const transactionKindCounts = countKinds(result.transactions);
     const run: RunSummary = {
@@ -1108,6 +1316,9 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       replacementOutcome: result.replacement?.outcome ?? null,
       measurementWindowCount: transactionKindCounts[TRANSACTION_KIND.MEASUREMENT_WINDOW],
       ...summarizeTransactionDurations(result.transactions),
+      perKindTransactionMs: summarizeTransactionDurationsByKind(result.transactions),
+      finalizeTransactionMs: finalizeTransactionDurationMs(result.transactions),
+      arcgis: null,
       transactionKindCounts,
       rolledBackTransactions: result.transactions.filter(transaction => transaction.end === 'rolled_back').length,
       overBudgetTransactions: result.transactions
@@ -1119,7 +1330,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       rollbackError: result.rollbackError,
       phases,
       slowestStatement: slowestStatement(result.statements),
-      unmatchedPhases: NAMED_STATEMENT_PHASES.filter(phase => phases[phase].statements === 0),
+      unmatchedPhases: requiredPhases.filter(phase => phases[phase].statements === 0),
       verification: null,
       retryAfterRollback: null
     };
@@ -1354,6 +1565,139 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     return preRunMismatches;
   }
 
+  interface ArcgisCommitRunResult extends ReplacementAndFirstChunkResult {
+    commitResult: CommitArcgisImportResult | null;
+  }
+
+  /** The import session the ArcGIS runs commit, plus what creating it cost. */
+  interface ArcgisSeededImport {
+    imported: SeededArcgisImport;
+    importSessionSeedMs: number;
+  }
+
+  /** Empties census 3 and the ArcGIS import tables, then restores the Mpala-shaped census-3 seed under an active upload session. */
+  async function reseedCensusThreeForArcgis(uploadSessionID: string): Promise<string[]> {
+    await ensureArcgisImportTables(schema);
+    await query(`DELETE FROM arcgis_import_sessions`);
+    return reseedCensusThree(generateShortBatchID(), uploadSessionID);
+  }
+
+  /** Creates the import session through the product function, on the real pool; its duration is reported, not gated. */
+  async function seedTimedArcgisImport(): Promise<ArcgisSeededImport> {
+    const importScope: ArcgisImportScope = { schema, plotID, censusID: censusIDs.three, speciesCode: SPECIES_CODE, quadratName: QUADRAT_NAME };
+    const seedStartedAt = performance.now();
+    const imported = await seedArcgisImport(importScope, ARCGIS_IMPORT_FILE, arcgisImportRowCount(profile), ARCGIS_IMPORT_TAG_PREFIX, SESSION_USER);
+    const importSessionSeedMs = Math.round(performance.now() - seedStartedAt);
+    console.log(`[census-replacement-rehearsal] seeded ArcGIS import ${JSON.stringify({ ...imported, importSessionSeedMs })}`);
+    return { imported, importSessionSeedMs };
+  }
+
+  function arcgisOutcomeOf(failure: unknown): RunOutcome {
+    if (failure === null) return 'committed';
+    return failure instanceof InjectedRehearsalFailureError ? 'finalize_interrupted' : 'failed';
+  }
+
+  /**
+   * One commitArcgisImport attempt on the real ConnectionManager, timed transaction by transaction. Like
+   * runReplacementAndFirstChunk it always returns, recording an unexpected error in `error` for runFailedChecks.
+   */
+  async function runArcgisCommit(imported: SeededArcgisImport, uploadSessionID: string, injection: FailureInjection | null): Promise<ArcgisCommitRunResult> {
+    const statementTimer = installStatementTimer(connectionManager, injection);
+    const transactionTimer = installTransactionTimer(connectionManager);
+    const startedAt = performance.now();
+    let commitResult: CommitArcgisImportResult | null = null;
+    let failure: unknown = null;
+    try {
+      commitResult = await commitArcgisImport(connectionManager, {
+        schema,
+        plotID,
+        censusID: censusIDs.three,
+        importSessionId: imported.importSessionId,
+        fileName: imported.fileName,
+        uploadMode: UploadMode.CLEAN_REUPLOAD,
+        userId: SESSION_USER,
+        uploadSessionID
+      });
+    } catch (error) {
+      failure = error;
+      if (!(error instanceof InjectedRehearsalFailureError)) console.error(`[census-replacement-rehearsal] unexpected error in the ArcGIS commit run`, error);
+    } finally {
+      statementTimer.restore();
+      transactionTimer.restore();
+    }
+    const endToEndMs = performance.now() - startedAt;
+    const outcome = arcgisOutcomeOf(failure);
+    return {
+      outcome,
+      replacement: null,
+      endToEndMs,
+      injection,
+      injectionFired: statementTimer.injectionFired(),
+      error: outcome === 'failed' ? errorMessageOf(failure) : null,
+      rollbackError: null,
+      statements: statementTimer.statements,
+      transactions: transactionTimer.records(statementTimer.statements),
+      commitResult
+    };
+  }
+
+  async function readArcgisRunState(imported: SeededArcgisImport, uploadSessionID: string): Promise<ArcgisRunState> {
+    const censusState = await readCensusThreeState(imported.batchID, uploadSessionID);
+    const importRows = await query(
+      `SELECT state, committed_row_count AS committedRowCount, census_replacement_completed_at IS NOT NULL AS markerSet
+       FROM arcgis_import_sessions WHERE import_session_id = ?`,
+      [imported.importSessionId]
+    );
+    if (importRows.length !== 1) throw new Error(`expected one arcgis_import_sessions row for ${imported.importSessionId}, found ${importRows.length}`);
+    return {
+      ...censusState,
+      stagedReplacementRows: await countOf(
+        `SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ? AND CensusID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`,
+        [imported.fileName, censusIDs.three, imported.batchID, buildSubBatchPattern(imported.batchID)]
+      ),
+      sessionMarkerSet: Number(importRows[0].markerSet) === 1,
+      importSessionState: String(importRows[0].state),
+      importCommittedRowCount: Number(importRows[0].committedRowCount)
+    };
+  }
+
+  /** What census 3, the import session and the staging table hold after an ArcGIS attempt that replaced the census, staged every row and ended in `importSessionState`. */
+  function expectedArcgisRunState(importSessionState: string): ArcgisRunState {
+    const importRows = arcgisImportRowCount(profile);
+    return {
+      ...expectedReplacedState(profile),
+      stagedReplacementRows: importRows,
+      sessionMarkerSet: true,
+      importSessionState,
+      importCommittedRowCount: importRows
+    };
+  }
+
+  function attachArcgisDetails(run: RunSummary, seeded: ArcgisSeededImport): void {
+    run.arcgis = { importRowCount: seeded.imported.rowCount, importSessionSeedMs: seeded.importSessionSeedMs, derivedBatchID: seeded.imported.batchID };
+  }
+
+  /** The ArcGIS twin of verifyRun: reads the import session's state and marker instead of the upload session's. */
+  async function verifyArcgisRun(
+    key: ArcgisRunKey,
+    run: RunSummary,
+    expectedState: ArcgisRunState,
+    imported: SeededArcgisImport,
+    uploadSessionID: string,
+    preRunMismatches: string[]
+  ): Promise<{ state: ArcgisRunState; controls: ControlCensusFingerprint[] }> {
+    const state = await readArcgisRunState(imported, uploadSessionID);
+    const controls = await readControlFingerprints();
+    run.verification = {
+      preRunMismatches,
+      statementPlanMismatches: [],
+      countMismatches: describeMismatches(expectedState, state),
+      controlCensusMismatches: describeMismatches(controlBaseline, controls)
+    };
+    console.log(`[census-replacement-rehearsal] ${key} verification ${JSON.stringify(run.verification)} state=${JSON.stringify(state)}`);
+    return { state, controls };
+  }
+
   it(
     '(1) replacement run: every transaction commits within budget with exact counts (catches: a replacement transaction that grows with the census)',
     async () => {
@@ -1459,6 +1803,97 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       expect(state).toEqual(replacedAndUnstaged);
       expect(controls).toEqual(controlBaseline);
       expect(retryState).toEqual(expectedReplacedState(profile));
+    },
+    RUN_TIMEOUT_MS
+  );
+  it(
+    '(8) ArcGIS commit run: every transaction commits within budget with exact kind counts and the census replaced (catches: an ArcGIS unit that grows with the import)',
+    async () => {
+      const expectation = runExpectations.arcgisCommitRun;
+      const preRunMismatches = await reseedCensusThreeForArcgis(ARCGIS_SESSION_ID.COMMIT_RUN);
+      const seeded = await seedTimedArcgisImport();
+
+      const result = await runArcgisCommit(seeded.imported, ARCGIS_SESSION_ID.COMMIT_RUN, expectation.injection);
+      const run = recordRun('arcgisCommitRun', result, ARCGIS_COMMIT_REQUIRED_PHASES);
+      attachArcgisDetails(run, seeded);
+      const { state, controls } = await verifyArcgisRun(
+        'arcgisCommitRun',
+        run,
+        expectedArcgisRunState(ARCGIS_IMPORT_SESSION_STATE.COMMITTED),
+        seeded.imported,
+        ARCGIS_SESSION_ID.COMMIT_RUN,
+        preRunMismatches
+      );
+
+      expect(runFailedChecks('arcgisCommitRun', run, expectation), 'every ArcGIS-commit-run check (the same list feeds SUMMARY.passed)').toEqual([]);
+      expect(result.commitResult).toEqual({
+        rowCount: seeded.imported.rowCount,
+        fileName: ARCGIS_IMPORT_FILE,
+        alreadyCommitted: false,
+        batchID: seeded.imported.batchID
+      });
+      expect(state).toEqual(expectedArcgisRunState(ARCGIS_IMPORT_SESSION_STATE.COMMITTED));
+      expect(controls).toEqual(controlBaseline);
+    },
+    RUN_TIMEOUT_MS
+  );
+
+  it(
+    '(9) ArcGIS interrupted run: a failure at the finalize changelog INSERT leaves the census replaced and audited, every row staged, the import still committing (catches: a finalize that commits partially or a replacement that rolls back)',
+    async () => {
+      const expectation = runExpectations.arcgisInterruptedRun;
+      const preRunMismatches = await reseedCensusThreeForArcgis(ARCGIS_SESSION_ID.INTERRUPTED_RUN);
+      arcgisInterruptedImport = await seedTimedArcgisImport();
+
+      const result = await runArcgisCommit(arcgisInterruptedImport.imported, ARCGIS_SESSION_ID.INTERRUPTED_RUN, expectation.injection);
+      const run = recordRun('arcgisInterruptedRun', result, ARCGIS_COMMIT_REQUIRED_PHASES);
+      attachArcgisDetails(run, arcgisInterruptedImport);
+      const { state, controls } = await verifyArcgisRun(
+        'arcgisInterruptedRun',
+        run,
+        expectedArcgisRunState(ARCGIS_IMPORT_SESSION_STATE.COMMITTING),
+        arcgisInterruptedImport.imported,
+        ARCGIS_SESSION_ID.INTERRUPTED_RUN,
+        preRunMismatches
+      );
+
+      expect(runFailedChecks('arcgisInterruptedRun', run, expectation), 'every ArcGIS-interrupted-run check (the same list feeds SUMMARY.passed)').toEqual([]);
+      expect(result.commitResult, 'the interrupted commit returns no result').toBeNull();
+      expect(state).toEqual(expectedArcgisRunState(ARCGIS_IMPORT_SESSION_STATE.COMMITTING));
+      expect(controls).toEqual(controlBaseline);
+    },
+    RUN_TIMEOUT_MS
+  );
+
+  it(
+    '(10) ArcGIS resumed run: the retry under a new upload session clears and restages every row, deletes nothing more and finalizes within budget (catches: a retry that double-audits, keeps stale staged rows or skips a window)',
+    async () => {
+      const expectation = runExpectations.arcgisResumedRun;
+      const interrupted = arcgisInterruptedImport!;
+      await query(`UPDATE upload_sessions SET state = ? WHERE session_id = ?`, [UPLOAD_SESSION_STATE_FAILED, ARCGIS_SESSION_ID.INTERRUPTED_RUN]);
+      await seedUploadSession(ARCGIS_SESSION_ID.RESUMED_RUN);
+
+      const result = await runArcgisCommit(interrupted.imported, ARCGIS_SESSION_ID.RESUMED_RUN, expectation.injection);
+      const run = recordRun('arcgisResumedRun', result, ARCGIS_RESUME_REQUIRED_PHASES);
+      attachArcgisDetails(run, interrupted);
+      const { state, controls } = await verifyArcgisRun(
+        'arcgisResumedRun',
+        run,
+        expectedArcgisRunState(ARCGIS_IMPORT_SESSION_STATE.COMMITTED),
+        interrupted.imported,
+        ARCGIS_SESSION_ID.RESUMED_RUN,
+        []
+      );
+
+      expect(runFailedChecks('arcgisResumedRun', run, expectation), 'every ArcGIS-resumed-run check (the same list feeds SUMMARY.passed)').toEqual([]);
+      expect(result.commitResult).toEqual({
+        rowCount: interrupted.imported.rowCount,
+        fileName: ARCGIS_IMPORT_FILE,
+        alreadyCommitted: false,
+        batchID: interrupted.imported.batchID
+      });
+      expect(state, 'DELETE-audit rows equal the prior row count and are all distinct').toEqual(expectedArcgisRunState(ARCGIS_IMPORT_SESSION_STATE.COMMITTED));
+      expect(controls).toEqual(controlBaseline);
     },
     RUN_TIMEOUT_MS
   );
