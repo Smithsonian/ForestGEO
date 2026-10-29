@@ -13,6 +13,7 @@ import { HTTPResponses } from '@/config/macros';
 import {
   createUploadSession,
   getSession,
+  abandonActiveSession,
   updateSessionState,
   updateSessionProgress,
   sendHeartbeat,
@@ -358,7 +359,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     if (ownership instanceof NextResponse) return ownership;
 
     // Mark session as abandoned
-    await updateSessionState(schema, sessionId, UploadSessionState.ABANDONED, 'Session cancelled by user');
+    await abandonActiveSession(schema, sessionId, 'Session cancelled by user');
 
     // Optionally trigger immediate cleanup
     if (cleanup) {

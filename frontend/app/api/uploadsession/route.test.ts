@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { POST } from './route';
+import { DELETE, POST } from './route';
 
 const mocks = vi.hoisted(() => ({
   createUploadSession: vi.fn(),
   getSession: vi.fn(),
   updateSessionState: vi.fn(),
+  abandonActiveSession: vi.fn(),
+  cleanupOrphanedData: vi.fn(),
   updateSessionProgress: vi.fn(),
   sendHeartbeat: vi.fn(),
   runSessionCleanup: vi.fn(),
@@ -26,6 +28,8 @@ vi.mock('@/config/uploadsessiontracker', () => ({
   createUploadSession: mocks.createUploadSession,
   getSession: mocks.getSession,
   updateSessionState: mocks.updateSessionState,
+  abandonActiveSession: mocks.abandonActiveSession,
+  cleanupOrphanedData: mocks.cleanupOrphanedData,
   updateSessionProgress: mocks.updateSessionProgress,
   sendHeartbeat: mocks.sendHeartbeat,
   runSessionCleanup: mocks.runSessionCleanup,
@@ -243,5 +247,47 @@ describe('POST /api/uploadsession', () => {
       error: 'Another measurement operation is in progress for Plot 1, Census 2. Please retry after it completes.'
     });
     expect(mocks.createUploadSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('DELETE /api/uploadsession', () => {
+  const ownedSession = {
+    sessionId: 'session-1',
+    userId: 'mason@example.com',
+    state: 'uploading',
+    plotId: 1,
+    censusId: 2,
+    lastHeartbeat: new Date()
+  };
+
+  function deleteRequest(query: string) {
+    return new Request(`http://localhost/api/uploadsession?schema=forestgeo_testing&sessionId=session-1${query}`, { method: 'DELETE' }) as any;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.auth.mockResolvedValue({
+      user: { email: 'mason@example.com', name: 'Mason', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] }
+    });
+    mocks.getSession.mockResolvedValue(ownedSession);
+  });
+
+  it('abandons only an active session: it never writes abandoned through the unconditional state update', async () => {
+    const response = await DELETE(deleteRequest(''));
+
+    console.log(
+      `[L1] status=${response.status} abandonActiveSession=${JSON.stringify(mocks.abandonActiveSession.mock.calls)} updateSessionState calls=${mocks.updateSessionState.mock.calls.length}`
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.abandonActiveSession).toHaveBeenCalledWith('forestgeo_testing', 'session-1', 'Session cancelled by user');
+    expect(mocks.updateSessionState).not.toHaveBeenCalled();
+    expect(mocks.cleanupOrphanedData).not.toHaveBeenCalled();
+  });
+
+  it('runs the sweep on the re-read session when cleanup=true', async () => {
+    const response = await DELETE(deleteRequest('&cleanup=true'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.cleanupOrphanedData).toHaveBeenCalledWith('forestgeo_testing', ownedSession);
   });
 });

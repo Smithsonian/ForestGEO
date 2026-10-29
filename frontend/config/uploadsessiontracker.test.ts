@@ -41,7 +41,7 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
-import { cleanupOrphanedData, createUploadSession, UploadSessionState } from './uploadsessiontracker';
+import { abandonActiveSession, ACTIVE_UPLOAD_SESSION_STATES, cleanupOrphanedData, createUploadSession, UploadSessionState } from './uploadsessiontracker';
 
 describe('cleanupOrphanedData', () => {
   beforeEach(() => {
@@ -222,6 +222,38 @@ describe('cleanupOrphanedData', () => {
     await expect(cleanupOrphanedData('forestgeo_testing', abandonedSession)).rejects.toThrow('rollback failed');
     console.log(`[L5] rollback calls=${mocks.rollbackTransaction.mock.calls.length}`);
     expect(mocks.rollbackTransaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('abandonActiveSession', () => {
+  const release = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getConn.mockResolvedValue({ release });
+    mocks.runQuery.mockResolvedValue({ affectedRows: 1 });
+  });
+
+  it('writes abandoned only where the session is still in an active state, so a failed or completed session keeps its state', async () => {
+    await abandonActiveSession('forestgeo_testing', 'session-9', 'Session cancelled by user');
+
+    const [, sql, params] = mocks.runQuery.mock.calls[0];
+    const normalizedSql = String(sql).replace(/\s+/g, ' ').trim();
+    console.log(`[L1] sql=${normalizedSql} params=${JSON.stringify(params)}`);
+    expect(normalizedSql).toMatch(/WHERE session_id = \? AND state IN \(/);
+    for (const activeState of ACTIVE_UPLOAD_SESSION_STATES) expect(normalizedSql).toContain(`'${activeState}'`);
+    for (const settledState of [UploadSessionState.FAILED, UploadSessionState.COMPLETED, UploadSessionState.CLEANED_UP, UploadSessionState.ABANDONED]) {
+      expect(normalizedSql).not.toContain(`'${settledState}'`);
+    }
+    expect(params).toEqual([UploadSessionState.ABANDONED, 'Session cancelled by user', 'session-9']);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports whether a row was abandoned', async () => {
+    mocks.runQuery.mockResolvedValueOnce({ affectedRows: 0 });
+    await expect(abandonActiveSession('forestgeo_testing', 'session-9', 'x')).resolves.toBe(false);
+    mocks.runQuery.mockResolvedValueOnce({ affectedRows: 1 });
+    await expect(abandonActiveSession('forestgeo_testing', 'session-9', 'x')).resolves.toBe(true);
   });
 });
 

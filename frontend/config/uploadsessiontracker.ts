@@ -482,6 +482,29 @@ export async function updateSessionState(schema: string, sessionId: string, stat
 }
 
 /**
+ * Move a session to abandoned only while it is still active. A session that has already failed, completed or been
+ * cleaned up keeps its state: updateSessionState would overwrite it. Returns whether a row was abandoned.
+ */
+export async function abandonActiveSession(schema: string, sessionId: string, errorMessage: string): Promise<boolean> {
+  const abandonSQL = `
+    UPDATE ${schema}.upload_sessions
+    SET state = ?, error_message = ?, last_heartbeat = CURRENT_TIMESTAMP
+    WHERE session_id = ? AND state IN (${ACTIVE_UPLOAD_SESSION_STATE_LIST})
+  `;
+
+  let conn: PoolConnection | null = null;
+  try {
+    conn = await getConn();
+    const result = await runQuery(conn, abandonSQL, [UploadSessionState.ABANDONED, errorMessage, sessionId]);
+    const abandoned = result.affectedRows > 0;
+    ailogger.info(`[UploadSessionTracker] ${abandoned ? 'Abandoned' : 'Left unchanged (not active)'} session ${sessionId}`);
+    return abandoned;
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+/**
  * Update session progress (chunk/batch counts)
  */
 export async function updateSessionProgress(
