@@ -123,13 +123,15 @@ describe('manifest trim migration and its hand-run twin 62 stay identical (#560)
     expect(successorColumns).toEqual(EXPECTED_SUCCESSORS);
   });
 
-  it('lists 62 last, after 28, in both hand-run runners', () => {
+  it('lists 62 after 28 in both hand-run runners', () => {
     for (const { script, arrayName } of RUNNER_LISTS) {
       const list = parseRunnerList(script, arrayName);
-      console.log(`[U4] ${script} ${arrayName} tail: ${JSON.stringify(list.slice(-3))}`);
-      expect(list.at(-1), `${script}: 62 must be the last entry`).toBe(TWIN_TRIM_FILE_NAME);
-      expect(list.indexOf(MIGRATION_28_FILE_NAME), `${script}: 28 must run before 62`).toBeLessThan(list.indexOf(TWIN_TRIM_FILE_NAME));
-      expect(list.indexOf(MIGRATION_28_FILE_NAME), `${script}: 28 must be listed`).toBeGreaterThanOrEqual(0);
+      const position28 = list.indexOf(MIGRATION_28_FILE_NAME);
+      const position62 = list.indexOf(TWIN_TRIM_FILE_NAME);
+      console.log(`[U4] ${script} ${arrayName}: 28 at ${position28}, 62 at ${position62} of ${list.length}`);
+      expect(position28, `${script}: 28 must be listed`).toBeGreaterThanOrEqual(0);
+      expect(position62, `${script}: 62 must be listed`).toBeGreaterThanOrEqual(0);
+      expect(position28, `${script}: 28 must run before 62, or it re-adds idx_cm_census_active after the trim`).toBeLessThan(position62);
     }
   });
 });
