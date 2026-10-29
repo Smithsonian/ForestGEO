@@ -50,6 +50,9 @@ import {
   toTemporaryMeasurementInsertValues
 } from '@/lib/ingestion/temporary-measurements';
 import { SourceFormat, type FileRow } from '@/config/macros/formdetails';
+import { ARCGIS_IMPORT_COMMIT_PROGRESS_COLUMNS } from '@/lib/arcgis/import-session-columns';
+import { ensureArcgisImportTables } from '@/lib/arcgis/import-session';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 const REPRESENTATIVE_TEXT_COLUMN = 'Comments';
 const LEGACY_CHARSET = 'utf8mb3';
@@ -719,4 +722,157 @@ describe('Validation 19 identity-conflict preflight', () => {
       await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
     }
   }, 60_000);
+});
+
+const ARCGIS_PROGRESS_MIGRATION_ID = '2026-10-28-02-add-arcgis-import-commit-progress';
+const ARCGIS_STAGING_MIGRATION_FILE = path.join(process.cwd(), 'db', 'migrations', 'unified-measurements-migrations', '59_create_arcgis_import_sessions.sql');
+/** information_schema COLUMN_TYPE / IS_NULLABLE / COLUMN_DEFAULT the contract expects (spec §13). */
+const EXPECTED_PROGRESS_COLUMNS: Record<(typeof ARCGIS_IMPORT_COMMIT_PROGRESS_COLUMNS)[number], { type: string; nullable: string; default: string | null }> = {
+  committed_upload_mode: { type: 'varchar(32)', nullable: 'YES', default: null },
+  commit_attempt_id: { type: 'varchar(64)', nullable: 'YES', default: null },
+  census_replacement_completed_at: { type: 'timestamp', nullable: 'YES', default: null },
+  staging_next_row_index: { type: 'int', nullable: 'NO', default: '0' }
+};
+const PARTIALLY_APPLIED_COLUMNS = ['commit_attempt_id', 'staging_next_row_index'] as const;
+
+describe('AI16: arcgis_import_sessions commit-progress migration (#561)', () => {
+  let connection: Connection;
+  let migrationSQL: string;
+
+  beforeAll(async () => {
+    connection = await mysql.createConnection({
+      host: process.env.TEST_DB_HOST ?? 'localhost',
+      user: process.env.TEST_DB_USER ?? 'root',
+      password: process.env.TEST_DB_PASSWORD ?? 'testpassword',
+      port: Number(process.env.TEST_DB_PORT ?? 3306),
+      multipleStatements: true
+    });
+    const source = loadMigrationSources().find(candidate => candidate.id === ARCGIS_PROGRESS_MIGRATION_ID);
+    if (!source) throw new Error(`Migration ${ARCGIS_PROGRESS_MIGRATION_ID} is not in SCHEMA_MIGRATION_MANIFEST`);
+    migrationSQL = source.contents;
+  }, 60_000);
+
+  afterAll(async () => {
+    if (connection) await connection.end();
+  });
+
+  async function freshSchema(schemaName: string): Promise<void> {
+    await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    await connection.query(`CREATE DATABASE \`${schemaName}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
+    await connection.query(`USE \`${schemaName}\``);
+  }
+
+  async function progressColumns(schemaName: string): Promise<RowDataPacket[]> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'arcgis_import_sessions' AND COLUMN_NAME IN (?) ORDER BY COLUMN_NAME`,
+      [schemaName, [...ARCGIS_IMPORT_COMMIT_PROGRESS_COLUMNS]]
+    );
+    return rows;
+  }
+
+  function expectContractShape(rows: RowDataPacket[], label: string): void {
+    console.log(`[AI16] ${label}: ${JSON.stringify(rows)}`);
+    expect(rows.map(row => row.COLUMN_NAME).sort()).toEqual([...ARCGIS_IMPORT_COMMIT_PROGRESS_COLUMNS].sort());
+    for (const row of rows) {
+      const expected = EXPECTED_PROGRESS_COLUMNS[row.COLUMN_NAME as keyof typeof EXPECTED_PROGRESS_COLUMNS];
+      expect({ type: row.COLUMN_TYPE, nullable: row.IS_NULLABLE, default: row.COLUMN_DEFAULT }, `${row.COLUMN_NAME} after ${label}`).toEqual(expected);
+    }
+  }
+
+  it('adds the four columns on a migration-59 schema, and a second direct run is a no-op', async () => {
+    const schemaName = 'arcgis_progress_from_59';
+    await freshSchema(schemaName);
+    try {
+      await connection.query(fs.readFileSync(ARCGIS_STAGING_MIGRATION_FILE, 'utf-8'));
+      expect(await progressColumns(schemaName), 'migration 59 alone has none of the new columns').toHaveLength(0);
+
+      await connection.query(migrationSQL);
+      const afterFirstRun = await progressColumns(schemaName);
+      expectContractShape(afterFirstRun, 'first run');
+
+      await connection.query(migrationSQL);
+      const afterSecondRun = await progressColumns(schemaName);
+      expect(afterSecondRun, 'the second run must change nothing').toEqual(afterFirstRun);
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
+
+  it('runs without error and creates nothing on a schema without arcgis_import_sessions', async () => {
+    const schemaName = 'arcgis_progress_no_table';
+    await freshSchema(schemaName);
+    try {
+      await connection.query(migrationSQL);
+      const [tables] = await connection.query<RowDataPacket[]>(
+        `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'arcgis_import_sessions'`,
+        [schemaName]
+      );
+      console.log(`[AI16] no-table run left tables: ${JSON.stringify(tables)}`);
+      expect(tables).toHaveLength(0);
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
+
+  it('completes a partially applied state: adds the two missing columns and leaves the existing two untouched', async () => {
+    const schemaName = 'arcgis_progress_partial';
+    await freshSchema(schemaName);
+    try {
+      await connection.query(fs.readFileSync(ARCGIS_STAGING_MIGRATION_FILE, 'utf-8'));
+      await connection.query(
+        'ALTER TABLE `arcgis_import_sessions` ADD COLUMN `commit_attempt_id` VARCHAR(64) NULL DEFAULT NULL, ADD COLUMN `staging_next_row_index` INT NOT NULL DEFAULT 0'
+      );
+      const before = (await progressColumns(schemaName)).filter(row => (PARTIALLY_APPLIED_COLUMNS as readonly string[]).includes(row.COLUMN_NAME));
+
+      await connection.query(migrationSQL);
+
+      const after = await progressColumns(schemaName);
+      expectContractShape(after, 'partial run');
+      expect(after.filter(row => (PARTIALLY_APPLIED_COLUMNS as readonly string[]).includes(row.COLUMN_NAME))).toEqual(before);
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
+});
+
+describe('AI16: ensureArcgisImportTables creates the commit-progress columns (#561)', () => {
+  const schemaName = 'forestgeo_arcgis_progress_runtime';
+  let connection: Connection;
+
+  beforeAll(async () => {
+    const host = process.env.AZURE_SQL_SERVER;
+    if (!host || !['127.0.0.1', 'localhost', '::1'].includes(host)) {
+      throw new Error(`REFUSING TO RUN: ConnectionManager host is '${host}', not local.`);
+    }
+    connection = await mysql.createConnection({
+      host: process.env.TEST_DB_HOST ?? 'localhost',
+      user: process.env.TEST_DB_USER ?? 'root',
+      password: process.env.TEST_DB_PASSWORD ?? 'testpassword',
+      port: Number(process.env.TEST_DB_PORT ?? 3306)
+    });
+    await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    await connection.query(`CREATE DATABASE \`${schemaName}\``);
+  }, 60_000);
+
+  afterAll(async () => {
+    await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    await connection.end();
+    await ConnectionManager.getInstance().closeConnection();
+  });
+
+  it('creates every commit-progress column on an empty schema', async () => {
+    await ensureArcgisImportTables(schemaName);
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'arcgis_import_sessions' AND COLUMN_NAME IN (?)`,
+      [schemaName, [...ARCGIS_IMPORT_COMMIT_PROGRESS_COLUMNS]]
+    );
+    console.log(`[AI16] runtime DDL columns: ${JSON.stringify(rows)}`);
+    expect(rows.map(row => row.COLUMN_NAME).sort()).toEqual([...ARCGIS_IMPORT_COMMIT_PROGRESS_COLUMNS].sort());
+    for (const row of rows) {
+      const expected = EXPECTED_PROGRESS_COLUMNS[row.COLUMN_NAME as keyof typeof EXPECTED_PROGRESS_COLUMNS];
+      expect({ type: row.COLUMN_TYPE, nullable: row.IS_NULLABLE, default: row.COLUMN_DEFAULT }).toEqual(expected);
+    }
+  });
 });

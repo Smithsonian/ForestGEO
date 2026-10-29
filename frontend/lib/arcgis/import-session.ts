@@ -118,6 +118,10 @@ export async function ensureArcgisImportTables(schema: string): Promise<void> {
         committed_at TIMESTAMP NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        committed_upload_mode VARCHAR(32) NULL DEFAULT NULL,
+        commit_attempt_id VARCHAR(64) NULL DEFAULT NULL,
+        census_replacement_completed_at TIMESTAMP NULL DEFAULT NULL,
+        staging_next_row_index INT NOT NULL DEFAULT 0,
         KEY idx_arcgis_import_scope (plot_id, census_id, user_id, state),
         KEY idx_arcgis_import_committed_batch (committed_batch_id),
         KEY idx_arcgis_import_created (created_at)

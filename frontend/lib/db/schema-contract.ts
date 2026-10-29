@@ -19,6 +19,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { ARCGIS_IMPORT_COMMIT_PROGRESS_COLUMNS } from '../arcgis/import-session-columns';
 
 export const TARGET_TEXT_COLLATION = 'utf8mb4_0900_ai_ci';
 
@@ -73,9 +74,14 @@ export const CRITICAL_TABLES = [
  * `reference_replacement_completed_at` is its reference-table twin: without it a
  * clean re-upload of species/attributes/personnel deletes the whole table once
  * per file, so the second file erases what the first one wrote (#472).
+ *
+ * `arcgis_import_sessions` carries an ArcGIS commit's progress (#561): its upload mode, the fencing token of the one
+ * attempt allowed to run, the census-replacement marker and the staging cursor. Without them a retried commit cannot
+ * tell a fresh claim from a half-done one. The table itself is optional (created by pre-flight on first use).
  */
 export const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
-  upload_sessions: ['census_replacement_completed_at', 'reference_replacement_completed_at']
+  upload_sessions: ['census_replacement_completed_at', 'reference_replacement_completed_at'],
+  arcgis_import_sessions: ARCGIS_IMPORT_COMMIT_PROGRESS_COLUMNS
 };
 
 /**
