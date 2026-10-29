@@ -317,6 +317,37 @@ export async function deleteStagedRowsForFileWindow(
   return requireAffectedRows(await connectionManager.executeQuery(deleteSQL, [plotID, censusID, fileName], transactionID), deleteSQL);
 }
 
+/** Rows one abandoned-session sweep window deletes from staging, so no sweep transaction holds more row locks than a census-replacement window. */
+export const SESSION_STAGED_ROW_DELETE_WINDOW_ROWS = 1000;
+
+/**
+ * One bounded window of the abandoned-session sweep for an ArcGIS import (#561): the session's own staged rows in one
+ * batch family. Scoped by SessionID, so rows a later attempt staged under another session are never touched. The
+ * caller loops until a window deletes fewer than `rowLimit`.
+ */
+export async function deleteStagedBatchFamilyOfSessionWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  sessionID: string,
+  fileName: string,
+  rootBatchID: string,
+  rowLimit: number,
+  transactionID: string
+): Promise<number> {
+  if (!Number.isSafeInteger(rowLimit) || rowLimit <= 0) {
+    throw new RangeError(`Staged-row window limit must be a positive integer; received ${rowLimit}`);
+  }
+  const deleteSQL = safeFormatQuery(
+    schema,
+    `DELETE FROM ??.temporarymeasurements
+     WHERE SessionID = ? AND FileID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}) LIMIT ${rowLimit}`
+  );
+  return requireAffectedRows(
+    await connectionManager.executeQuery(deleteSQL, [sessionID, fileName, rootBatchID, buildSubBatchPattern(rootBatchID)], transactionID),
+    deleteSQL
+  );
+}
+
 /**
  * Rows a census-replacement statement touches per window, and the longest id
  * list an audited coremeasurements DELETE builds.

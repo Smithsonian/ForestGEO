@@ -4,10 +4,12 @@ import {
   BATCH_FAMILY_SCAN_INDEX,
   CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   deleteBatchFamilyRowsWindow,
+  deleteStagedBatchFamilyOfSessionWindow,
   deleteStagedRowsForFileWindow,
+  SESSION_STAGED_ROW_DELETE_WINDOW_ROWS,
   STALE_BATCH_SCAN_INDEX
 } from './temporary-measurements';
-import { buildSubBatchPattern } from '@/lib/uploads/batch-family';
+import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
@@ -56,6 +58,37 @@ describe('deleteStagedRowsForFileWindow (S0)', () => {
     const { manager, statements } = recorder(() => ({ affectedRows: 0 }));
     await expect(deleteStagedRowsForFileWindow(manager, SCHEMA, FILE_NAME, PLOT_ID, CENSUS_ID, rowLimit, TX)).rejects.toBeInstanceOf(RangeError);
     console.log(`[S0] row limit ${rowLimit} refused with ${statements.length} statement(s) issued`);
+    expect(statements).toHaveLength(0);
+  });
+});
+
+describe('deleteStagedBatchFamilyOfSessionWindow (abandoned-session sweep)', () => {
+  const SESSION_ID = 'abandoned-session-561';
+
+  it('deletes one bounded window of the session’s rows in the batch family, never another session’s', async () => {
+    const { manager, statements } = recorder(() => ({ affectedRows: STAGED_ROWS_DELETED }));
+    const deleted = await deleteStagedBatchFamilyOfSessionWindow(
+      manager,
+      SCHEMA,
+      SESSION_ID,
+      FILE_NAME,
+      FAMILY_BATCH,
+      SESSION_STAGED_ROW_DELETE_WINDOW_ROWS,
+      TX
+    );
+    console.log(`[sweep window] deleted=${deleted} statement=${collapseWhitespace(statements[0].sql)} params=${JSON.stringify(statements[0].params)}`);
+    expect(deleted).toBe(STAGED_ROWS_DELETED);
+    expect(statements).toHaveLength(1);
+    expect(collapseWhitespace(statements[0].sql)).toContain(
+      `WHERE SessionID = ? AND FileID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}) LIMIT ${SESSION_STAGED_ROW_DELETE_WINDOW_ROWS}`
+    );
+    expect(statements[0].params).toEqual([SESSION_ID, FILE_NAME, FAMILY_BATCH, buildSubBatchPattern(FAMILY_BATCH)]);
+    expect(statements[0].transactionID).toBe(TX);
+  });
+
+  it.each(INVALID_ROW_LIMITS)('refuses row limit %s before any statement', async rowLimit => {
+    const { manager, statements } = recorder(() => ({ affectedRows: 0 }));
+    await expect(deleteStagedBatchFamilyOfSessionWindow(manager, SCHEMA, SESSION_ID, FILE_NAME, FAMILY_BATCH, rowLimit, TX)).rejects.toBeInstanceOf(RangeError);
     expect(statements).toHaveLength(0);
   });
 });

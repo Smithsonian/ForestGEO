@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   executeQuery: vi.fn(),
   commitTransaction: vi.fn(),
   rollbackTransaction: vi.fn(),
+  withTransaction: vi.fn(),
   moveTemporaryBatchToFailedMeasurements: vi.fn(),
   getConn: vi.fn(),
   runQuery: vi.fn(),
@@ -19,7 +20,8 @@ vi.mock('@/lib/db/connectionmanager', () => ({
       beginTransaction: mocks.beginTransaction,
       executeQuery: mocks.executeQuery,
       commitTransaction: mocks.commitTransaction,
-      rollbackTransaction: mocks.rollbackTransaction
+      rollbackTransaction: mocks.rollbackTransaction,
+      withTransaction: mocks.withTransaction
     })
   }
 }));
@@ -41,7 +43,11 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
+import { SESSION_STAGED_ROW_DELETE_WINDOW_ROWS } from '@/lib/ingestion/temporary-measurements';
+import { deriveArcgisCommitBatchID, buildSubBatchID } from '@/lib/uploads/batch-family';
 import { abandonActiveSession, ACTIVE_UPLOAD_SESSION_STATES, cleanupOrphanedData, createUploadSession, UploadSessionState } from './uploadsessiontracker';
+
+const WINDOW_TRANSACTION_ID = 'tx-window';
 
 describe('cleanupOrphanedData', () => {
   beforeEach(() => {
@@ -49,6 +55,7 @@ describe('cleanupOrphanedData', () => {
     mocks.beginTransaction.mockResolvedValue('tx-cleanup');
     mocks.commitTransaction.mockResolvedValue(undefined);
     mocks.rollbackTransaction.mockResolvedValue(undefined);
+    mocks.withTransaction.mockImplementation(async (fn: (tx: { id: string }) => Promise<unknown>) => fn({ id: WINDOW_TRANSACTION_ID }));
   });
 
   it('keeps the full cleanup flow inside one transaction', async () => {
@@ -199,6 +206,85 @@ describe('cleanupOrphanedData', () => {
     expect(lockIndex).toBe(0);
     expect(firstStagedIndex).toBeGreaterThan(lockIndex);
     expect(result).toEqual({ temporaryDeleted: 4, failedDeleted: 4 });
+  });
+
+  describe('ArcGIS staged rows (the import row restages them, so the sweep deletes instead of moving)', () => {
+    const IMPORT_SESSION_ID = '6f1c2d3e-4a5b-4c6d-8e7f-901234567890';
+    const ARCGIS_ROOT_BATCH = deriveArcgisCommitBatchID(IMPORT_SESSION_ID);
+    const CSV_BATCH = 'lq1k2m3n-abc';
+    const LAST_WINDOW_ROWS = 3;
+
+    it('deletes every ArcGIS family window by window, each in its own transaction, and moves nothing', async () => {
+      mocks.executeQuery
+        .mockResolvedValueOnce([{ state: UploadSessionState.ABANDONED }])
+        .mockResolvedValueOnce([
+          { FileID: 'arcgis.xlsx', BatchID: buildSubBatchID(ARCGIS_ROOT_BATCH, 1) },
+          { FileID: 'arcgis.xlsx', BatchID: buildSubBatchID(ARCGIS_ROOT_BATCH, 2) }
+        ])
+        .mockResolvedValueOnce({ affectedRows: SESSION_STAGED_ROW_DELETE_WINDOW_ROWS })
+        .mockResolvedValueOnce({ affectedRows: LAST_WINDOW_ROWS })
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({ affectedRows: 1 });
+
+      const result = await cleanupOrphanedData('forestgeo_testing', abandonedSession);
+
+      const statements = mocks.executeQuery.mock.calls.map(([sql, params, transactionID]) => ({
+        sql: String(sql).replace(/\s+/g, ' ').trim(),
+        params,
+        transactionID
+      }));
+      console.log(
+        `[M1] result=${JSON.stringify(result)} statements=${JSON.stringify(statements.map(({ sql, transactionID }) => ({ sql: sql.slice(0, 90), transactionID })))}`
+      );
+      const windowDeletes = statements.filter(({ sql }) => sql.startsWith('DELETE'));
+      expect(windowDeletes).toHaveLength(2);
+      expect(windowDeletes.every(({ transactionID }) => transactionID === WINDOW_TRANSACTION_ID)).toBe(true);
+      expect(windowDeletes[0].params).toEqual(['sweep-session', 'arcgis.xlsx', ARCGIS_ROOT_BATCH, expect.stringContaining(ARCGIS_ROOT_BATCH)]);
+      expect(mocks.withTransaction).toHaveBeenCalledTimes(2);
+      expect(mocks.moveTemporaryBatchToFailedMeasurements).not.toHaveBeenCalled();
+      expect(result).toEqual({ temporaryDeleted: SESSION_STAGED_ROW_DELETE_WINDOW_ROWS + LAST_WINDOW_ROWS, failedDeleted: 0 });
+    });
+
+    it('runs the deletes only after the session was re-checked as abandoned under its lock', async () => {
+      mocks.executeQuery.mockResolvedValueOnce([{ state: UploadSessionState.FAILED }]);
+      await cleanupOrphanedData('forestgeo_testing', abandonedSession);
+      expect(mocks.withTransaction).not.toHaveBeenCalled();
+      expect(mocks.executeQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('moves CSV batches as before while deleting the ArcGIS family in the same session', async () => {
+      mocks.executeQuery
+        .mockResolvedValueOnce([{ state: UploadSessionState.ABANDONED }])
+        .mockResolvedValueOnce([
+          { FileID: 'arcgis.xlsx', BatchID: ARCGIS_ROOT_BATCH },
+          { FileID: 'upload.csv', BatchID: CSV_BATCH }
+        ])
+        .mockResolvedValueOnce({ affectedRows: LAST_WINDOW_ROWS })
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({ affectedRows: 1 });
+      mocks.moveTemporaryBatchToFailedMeasurements.mockResolvedValue(2);
+
+      const result = await cleanupOrphanedData('forestgeo_testing', abandonedSession);
+
+      console.log(
+        `[M1] mixed result=${JSON.stringify(result)} moves=${JSON.stringify(mocks.moveTemporaryBatchToFailedMeasurements.mock.calls.map(call => call.slice(2, 4)))}`
+      );
+      expect(mocks.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledTimes(1);
+      expect(mocks.moveTemporaryBatchToFailedMeasurements.mock.calls[0].slice(2, 4)).toEqual(['upload.csv', CSV_BATCH]);
+      expect(result).toEqual({ temporaryDeleted: LAST_WINDOW_ROWS + 2, failedDeleted: 2 });
+    });
+
+    it('rolls back the session lock and leaves the session abandoned when a window delete fails', async () => {
+      mocks.executeQuery
+        .mockResolvedValueOnce([{ state: UploadSessionState.ABANDONED }])
+        .mockResolvedValueOnce([{ FileID: 'arcgis.xlsx', BatchID: ARCGIS_ROOT_BATCH }])
+        .mockRejectedValueOnce(new Error('window delete failed'));
+
+      await expect(cleanupOrphanedData('forestgeo_testing', abandonedSession)).rejects.toThrow('window delete failed');
+
+      expect(mocks.rollbackTransaction).toHaveBeenCalledWith('tx-cleanup');
+      expect(mocks.commitTransaction).not.toHaveBeenCalled();
+    });
   });
 
   it('formats the session lock through safeFormatQuery: the schema is escaped as an identifier', async () => {

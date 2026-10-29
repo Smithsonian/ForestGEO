@@ -18,6 +18,8 @@ import ailogger from '@/ailogger';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
+import { deleteStagedBatchFamilyOfSessionWindow, SESSION_STAGED_ROW_DELETE_WINDOW_ROWS } from '@/lib/ingestion/temporary-measurements';
+import { familyRootOf, isArcgisCommitBatchShape } from '@/lib/uploads/batch-family';
 
 /**
  * Upload session states
@@ -692,6 +694,24 @@ export async function findAbandonedSessionsNeedingCleanup(schema: string): Promi
   }
 }
 
+async function deleteArcgisFamilyInWindows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  sessionId: string,
+  fileId: string,
+  rootBatchId: string
+): Promise<number> {
+  let deletedRows = 0;
+  let windowRows: number;
+  do {
+    windowRows = await connectionManager.withTransaction(tx =>
+      deleteStagedBatchFamilyOfSessionWindow(connectionManager, schema, sessionId, fileId, rootBatchId, SESSION_STAGED_ROW_DELETE_WINDOW_ROWS, tx.id)
+    );
+    deletedRows += windowRows;
+  } while (windowRows === SESSION_STAGED_ROW_DELETE_WINDOW_ROWS);
+  return deletedRows;
+}
+
 /**
  * Clean up orphaned data for a session
  */
@@ -745,7 +765,21 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
             .filter((row): row is { fileId: string; batchId: string } => Boolean(row.fileId) && Boolean(row.batchId))
         : [];
 
-      for (const { fileId, batchId } of sessionBatches) {
+      const arcgisFamilies = new Map<string, { fileId: string; rootBatchId: string }>();
+      const csvBatches: typeof sessionBatches = [];
+      for (const batch of sessionBatches) {
+        const rootBatchId = familyRootOf(batch.batchId);
+        if (isArcgisCommitBatchShape(rootBatchId)) arcgisFamilies.set(`${batch.fileId}\u0000${rootBatchId}`, { fileId: batch.fileId, rootBatchId });
+        else csvBatches.push(batch);
+      }
+
+      // An ArcGIS import keeps its durable source in arcgis_import_rows and the next commit restages from it, so moving
+      // these rows into the census would only leave failure rows no later commit removes.
+      for (const { fileId, rootBatchId } of arcgisFamilies.values()) {
+        temporaryDeleted += await deleteArcgisFamilyInWindows(connectionManager, schema, session.sessionId, fileId, rootBatchId);
+      }
+
+      for (const { fileId, batchId } of csvBatches) {
         const movedRows = await moveTemporaryBatchToFailedMeasurements(
           connectionManager,
           schema,
@@ -817,7 +851,11 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
         }
       }
 
-      cleanupNote = failedDeleted > 0 ? `Cleanup: moved ${failedDeleted} temp rows to unresolved failures` : `Cleanup: deleted ${temporaryDeleted} temp rows`;
+      const deletedWithoutFailureRows = temporaryDeleted - failedDeleted;
+      cleanupNote =
+        failedDeleted > 0
+          ? `Cleanup: moved ${failedDeleted} temp rows to unresolved failures${deletedWithoutFailureRows > 0 ? `, deleted ${deletedWithoutFailureRows} restageable ArcGIS temp rows` : ''}`
+          : `Cleanup: deleted ${temporaryDeleted} temp rows`;
     }
 
     // Mark session as cleaned up

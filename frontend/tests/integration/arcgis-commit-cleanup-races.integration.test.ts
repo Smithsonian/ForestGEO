@@ -39,6 +39,7 @@ import {
   deleteAuditRows,
   readImportRow,
   seedArcgisImport,
+  seedPriorCensusRows,
   setUploadSessionState,
   startActiveUploadSession,
   type ArcgisImportScope,
@@ -62,8 +63,10 @@ import { ArcgisCommitVerificationError } from '@/lib/uploads/arcgis-commit-final
 import { ARCGIS_IMPORT_SESSION_STATE } from '@/lib/arcgis/import-session';
 import { UploadMode } from '@/config/uploadmodes';
 import {
+  abandonActiveSession,
   cleanupOrphanedData,
   findAbandonedSessionsNeedingCleanup,
+  getSession,
   SESSION_TIMEOUTS,
   UploadSessionState,
   type UploadSession
@@ -98,12 +101,19 @@ const ORPHAN_SOURCE_FORMAT = 'csv';
 const WORKER_JOB_FILE_ID = 'async-job-561';
 const NO_ROWS = 0;
 const INTERRUPTED_UPLOAD_FAILURE_KIND = 'interrupted_upload';
+const PRIOR_CENSUS_ROW_COUNT = 6;
+const CSV_ROW_COUNT = 5;
+const CSV_BATCH_ID = 'csvbatch-m1';
+const ROUTE_CANCEL_MESSAGE = 'Session cancelled by user';
 const OLD_SWEEP_REASON = 'Upload session cleaned up after abandonment (old sweep replay)';
 const INJECTED_STAGING_FAILURE_MESSAGE = 'injected failure while staging window 2 (#561 cleanup races)';
 
 const AI11A = { FILE: 'ai11a.xlsx', TAG_PREFIX: 'ai11a-', SESSION_FIRST: 'ai11a-first', SESSION_TAKEOVER: 'ai11a-takeover' } as const;
 const AI11A_CONTROL = { FILE: 'ai11a-ctl.xlsx', TAG_PREFIX: 'ai11c-', SESSION_FIRST: 'ai11c-first' } as const;
 const AI11B = { FILE: 'ai11b.xlsx', TAG_PREFIX: 'ai11b-', SESSION_FIRST: 'ai11b-first', SESSION_TAKEOVER: 'ai11b-takeover' } as const;
+const M1_ARCGIS = { FILE: 'm1.xlsx', TAG_PREFIX: 'm1-', SESSION_FIRST: 'm1-first', SESSION_RETRY: 'm1-retry' } as const;
+const M1_CSV = { FILE: 'm1-csv.csv', SESSION: 'm1-csv-session' } as const;
+const L1_SESSIONS = { FAILED: 'l1-failed', ACTIVE: 'l1-active' } as const;
 const AI18_DURING_F = {
   FILE: 'ai18f.xlsx',
   TAG_PREFIX: 'ai18f-',
@@ -302,7 +312,7 @@ describe('ArcGIS resumable commit against the cleanup paths, on the real Connect
   );
 
   it(
-    'AI11(a) positive control: with no takeover the sweep moves the first attempt’s staged rows into interrupted_upload failures and writes `cleaned_up`',
+    'AI11(a) positive control: with no takeover the sweep deletes the first attempt’s staged ArcGIS rows (no failure rows) and writes `cleaned_up`',
     async () => {
       await startSessionWithFileId(AI11A_CONTROL.SESSION_FIRST, AI11A_CONTROL.SESSION_FIRST);
       const seeded = await seedArcgisImport(scope, AI11A_CONTROL.FILE, LARGE_IMPORT_ROW_COUNT, AI11A_CONTROL.TAG_PREFIX);
@@ -319,17 +329,17 @@ describe('ArcGIS resumable commit against the cleanup paths, on the real Connect
         console.log(
           `[AI11a control] sweep result=${JSON.stringify(sweep)}; first session reads ${firstStateAfterSweep}; staged=${stagedAfterSweep} familyFailureRows=${failureRowsAfterSweep}`
         );
-        expect(sweep).toEqual({ temporaryDeleted: ROWS_STAGED_BY_FIRST_WINDOW, failedDeleted: ROWS_STAGED_BY_FIRST_WINDOW });
+        expect(sweep).toEqual({ temporaryDeleted: ROWS_STAGED_BY_FIRST_WINDOW, failedDeleted: NO_ROWS });
         expect(firstStateAfterSweep).toBe(UploadSessionState.CLEANED_UP);
         expect(stagedAfterSweep).toBe(NO_ROWS);
-        expect(failureRowsAfterSweep).toBe(ROWS_STAGED_BY_FIRST_WINDOW);
+        expect(failureRowsAfterSweep).toBe(NO_ROWS);
       });
     },
     BARRIER_TEST_TIMEOUT_MS
   );
 
   it(
-    'AI11(b): a sweep that locks the session row first makes the takeover wait; the sweep moves its rows and writes `cleaned_up`, and F0 then deletes the moved rows with their audits',
+    'AI11(b): a sweep that locks the session row first makes the takeover wait; the sweep deletes its staged rows and writes `cleaned_up`, and the takeover then stages the whole import',
     async () => {
       await startSessionWithFileId(AI11B.SESSION_FIRST, AI11B.SESSION_FIRST);
       const seeded = await seedArcgisImport(scope, AI11B.FILE, LARGE_IMPORT_ROW_COUNT, AI11B.TAG_PREFIX);
@@ -360,7 +370,7 @@ describe('ArcGIS resumable commit against the cleanup paths, on the real Connect
         const sweepResult = await withinDeadline(sweep, 'sweep to finish', harness.renderStatementLog);
         const takeoverResult = await withinDeadline(takeover, 'takeover to finish', harness.renderStatementLog);
         console.log(`[AI11b] sweep=${JSON.stringify(sweepResult)} takeover=${JSON.stringify(takeoverResult)}`);
-        expect(sweepResult).toEqual({ temporaryDeleted: ROWS_STAGED_BY_FIRST_WINDOW, failedDeleted: ROWS_STAGED_BY_FIRST_WINDOW });
+        expect(sweepResult).toEqual({ temporaryDeleted: ROWS_STAGED_BY_FIRST_WINDOW, failedDeleted: NO_ROWS });
         expect(takeoverResult).toEqual({ rowCount: LARGE_IMPORT_ROW_COUNT, fileName: seeded.fileName, alreadyCommitted: false, batchID: seeded.batchID });
 
         const firstStateAfter = await readSessionState(AI11B.SESSION_FIRST);
@@ -369,10 +379,7 @@ describe('ArcGIS resumable commit against the cleanup paths, on the real Connect
         const failureRows = await countFamilyFailureRows(connection, seeded.fileName, seeded.batchID, scope.censusID);
         console.log(`[AI11b] first session=${firstStateAfter} deleteAudit=${JSON.stringify(deleteAudit)} staged=${staged} familyFailureRows=${failureRows}`);
         expect(firstStateAfter, 'the sweep wrote cleaned_up first; the takeover found nothing abandoned to flip').toBe(UploadSessionState.CLEANED_UP);
-        expect(deleteAudit, 'F0 deletes exactly the rows the sweep moved, each with one audit').toEqual({
-          total: ROWS_STAGED_BY_FIRST_WINDOW,
-          distinctRecordIDs: ROWS_STAGED_BY_FIRST_WINDOW
-        });
+        expect(deleteAudit, 'the sweep wrote no failure rows, so F0 has nothing to delete or audit').toEqual({ total: NO_ROWS, distinctRecordIDs: NO_ROWS });
         expect(staged).toBe(LARGE_IMPORT_ROW_COUNT);
         expect(failureRows).toBe(NO_ROWS);
         expect((await readImportRow(connection, seeded.importSessionId)).state).toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTED);
@@ -503,6 +510,107 @@ describe('ArcGIS resumable commit against the cleanup paths, on the real Connect
     },
     BARRIER_TEST_TIMEOUT_MS
   );
+
+  async function seedStagedRows(importScope: ArcgisImportScope, fileName: string, batchID: string, sessionID: string, rowCount: number): Promise<void> {
+    for (let ordinal = 0; ordinal < rowCount; ordinal += 1) {
+      await connection.query(
+        `INSERT INTO temporarymeasurements (FileID, BatchID, SessionID, SourceFormat, PlotID, CensusID, TreeTag) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [fileName, batchID, sessionID, ORPHAN_SOURCE_FORMAT, importScope.plotID, importScope.censusID, `${batchID}-${ordinal}`]
+      );
+    }
+  }
+
+  async function countCensusRows(censusID: number): Promise<number> {
+    const [rows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ?`, [censusID]);
+    return Number(rows[0].total);
+  }
+
+  async function sweepAsTheDeleteRouteDoes(sessionID: string): Promise<{ abandoned: boolean; sweep: { temporaryDeleted: number; failedDeleted: number } }> {
+    const abandoned = await abandonActiveSession(scope.schema, sessionID, ROUTE_CANCEL_MESSAGE);
+    const uploadSession = await getSession(scope.schema, sessionID);
+    if (!uploadSession) throw new Error(`upload session ${sessionID} vanished after the DELETE route abandoned it`);
+    const sweep = await cleanupOrphanedData(scope.schema, uploadSession);
+    return { abandoned, sweep };
+  }
+
+  it(
+    'M1: the DELETE route’s sweep after a failed sync commit deletes the staged ArcGIS rows and leaves the census unchanged, the import `committing`, and a retry completes cleanly',
+    async () => {
+      await seedPriorCensusRows(connection, scope, PRIOR_CENSUS_ROW_COUNT);
+      const censusRowsBefore = await countCensusRows(scope.censusID);
+      expect(censusRowsBefore).toBe(PRIOR_CENSUS_ROW_COUNT);
+      await startSessionWithFileId(M1_ARCGIS.SESSION_FIRST, M1_ARCGIS.SESSION_FIRST);
+      const seeded = await seedArcgisImport(scope, M1_ARCGIS.FILE, LARGE_IMPORT_ROW_COUNT, M1_ARCGIS.TAG_PREFIX);
+      const harness = installBarrierHarness(realManager);
+      await runBarrierScenario(harness, async () => {
+        await failFirstAttemptAfterWindowOne(harness, seeded, M1_ARCGIS.SESSION_FIRST);
+
+        const { abandoned, sweep } = await sweepAsTheDeleteRouteDoes(M1_ARCGIS.SESSION_FIRST);
+
+        const censusRowsAfter = await countCensusRows(scope.censusID);
+        const familyFailureRows = await countFamilyFailureRows(connection, seeded.fileName, seeded.batchID, scope.censusID);
+        const stagedForSession = await countStagedRowsOfSession(M1_ARCGIS.SESSION_FIRST);
+        const importRow = await readImportRow(connection, seeded.importSessionId);
+        const sessionState = await readSessionState(M1_ARCGIS.SESSION_FIRST);
+        console.log(
+          `[M1] abandoned=${abandoned} sweep=${JSON.stringify(sweep)} censusRows ${censusRowsBefore}->${censusRowsAfter} familyFailureRows=${familyFailureRows} ` +
+            `stagedForSession=${stagedForSession} import state=${importRow.state} session=${sessionState}`
+        );
+        expect(abandoned).toBe(true);
+        expect(sweep).toEqual({ temporaryDeleted: ROWS_STAGED_BY_FIRST_WINDOW, failedDeleted: NO_ROWS });
+        expect(familyFailureRows, 'no spurious interrupted_upload failure rows for the import’s family').toBe(NO_ROWS);
+        expect(censusRowsAfter, 'the census is exactly what it was before the commit').toBe(censusRowsBefore);
+        expect(stagedForSession).toBe(NO_ROWS);
+        expect(importRow.state, 'the import stays committing: its durable source restages on the next commit').toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTING);
+        expect(sessionState).toBe(UploadSessionState.CLEANED_UP);
+
+        await startSessionWithFileId(M1_ARCGIS.SESSION_RETRY, M1_ARCGIS.SESSION_RETRY);
+        const retryResult = await withinDeadline(commitImport(seeded, M1_ARCGIS.SESSION_RETRY), 'retry after the sweep', harness.renderStatementLog);
+        const stagedAfterRetry = await countStagedFamilyRows(connection, seeded.fileName, seeded.batchID);
+        console.log(`[M1] retry=${JSON.stringify(retryResult)} staged=${stagedAfterRetry}`);
+        expect(retryResult).toEqual({ rowCount: LARGE_IMPORT_ROW_COUNT, fileName: seeded.fileName, alreadyCommitted: false, batchID: seeded.batchID });
+        expect(stagedAfterRetry).toBe(LARGE_IMPORT_ROW_COUNT);
+        expect(await countFamilyFailureRows(connection, seeded.fileName, seeded.batchID, scope.censusID)).toBe(NO_ROWS);
+        expect((await readImportRow(connection, seeded.importSessionId)).state).toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTED);
+      });
+    },
+    BARRIER_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'M1 control: the same sweep still moves a CSV session’s staged rows into interrupted_upload failures',
+    async () => {
+      await startSessionWithFileId(M1_CSV.SESSION, M1_CSV.FILE);
+      await seedStagedRows(scope, M1_CSV.FILE, CSV_BATCH_ID, M1_CSV.SESSION, CSV_ROW_COUNT);
+
+      const { sweep } = await sweepAsTheDeleteRouteDoes(M1_CSV.SESSION);
+
+      const staged = await countStagedRowsOfSession(M1_CSV.SESSION);
+      const movedFailureRows = await countFamilyFailureRows(connection, M1_CSV.FILE, CSV_BATCH_ID, scope.censusID);
+      console.log(`[M1 control] sweep=${JSON.stringify(sweep)} staged=${staged} movedFailureRows=${movedFailureRows}`);
+      expect(sweep).toEqual({ temporaryDeleted: CSV_ROW_COUNT, failedDeleted: CSV_ROW_COUNT });
+      expect(staged).toBe(NO_ROWS);
+      expect(movedFailureRows).toBe(CSV_ROW_COUNT);
+      expect(await readSessionState(M1_CSV.SESSION)).toBe(UploadSessionState.CLEANED_UP);
+    },
+    BARRIER_TEST_TIMEOUT_MS
+  );
+
+  it('L1: the DELETE route’s abandon leaves a `failed` session `failed` and abandons an active one', async () => {
+    await insertFailedSession(L1_SESSIONS.FAILED);
+    const failedPredecessorAbandoned = await abandonActiveSession(scope.schema, L1_SESSIONS.FAILED, ROUTE_CANCEL_MESSAGE);
+    await startSessionWithFileId(L1_SESSIONS.ACTIVE, L1_SESSIONS.ACTIVE);
+    const activeAbandoned = await abandonActiveSession(scope.schema, L1_SESSIONS.ACTIVE, ROUTE_CANCEL_MESSAGE);
+    const failedState = await readSessionState(L1_SESSIONS.FAILED);
+    const activeState = await readSessionState(L1_SESSIONS.ACTIVE);
+    console.log(
+      `[L1] failed predecessor: abandoned=${failedPredecessorAbandoned} state=${failedState}; active: abandoned=${activeAbandoned} state=${activeState}`
+    );
+    expect(failedPredecessorAbandoned).toBe(false);
+    expect(failedState).toBe(UploadSessionState.FAILED);
+    expect(activeAbandoned).toBe(true);
+    expect(activeState).toBe(UploadSessionState.ABANDONED);
+  });
 
   async function replayOldSweepPairSelect(sessionID: string): Promise<Array<{ fileId: string; batchId: string }>> {
     const pairs = await realManager.executeQuery(
