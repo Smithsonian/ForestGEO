@@ -21,10 +21,13 @@ import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { createAdditionalCensus, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 import {
   captureCensusReplacementWindowStatements,
+  captureCoreMeasurementWindowLockStatement,
   type CapturedStatement,
   type CensusReplacementWindowScope
 } from '../setup/census-replacement-statement-capture';
-import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE, CENSUS_REPLACEMENT_SCAN_INDEX } from '@/lib/ingestion/temporary-measurements';
+import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE, CENSUS_REPLACEMENT_SCAN_INDEX, type CoreMeasurementDeleteScope } from '@/lib/ingestion/temporary-measurements';
+import { crossFileUnresolvedFailureScope, failedCensusRecoveryScope, sameFileUnresolvedFailureScope } from '@/lib/uploads/ingest-batch';
+import { batchFamilyUnresolvedScope } from '@/lib/uploads/record-invalid-rows';
 
 const LOCAL_HOSTS = ['127.0.0.1', 'localhost', '::1'];
 const RESOLVED_HOSTS = [process.env.AZURE_SQL_SERVER, process.env.TEST_DB_HOST || 'localhost'];
@@ -233,5 +236,85 @@ describe('census replacement window statement plans (I1)', () => {
     expect(coreMeasurementsPlan!.key).toBe(CENSUS_REPLACEMENT_SCAN_INDEX);
     // Without the hint the optimizer still picks this index but scans all of it (type=index) instead of seeking the census.
     expect(coreMeasurementsPlan!.type).toBe(RANGE_SEEK_PLAN_TYPE);
+  });
+
+  describe('#562 window lock statements seek by PRIMARY for every caller (I1)', () => {
+    const LOCK_INCOMING_FILE = 'plan-lock-incoming.csv';
+    const LOCK_INCOMING_BATCH = 'plan-lock-incoming-batch';
+    const PRIMARY_KEY_NAME = 'PRIMARY';
+    const COREMEASUREMENTS_PLAN_TABLES = ['coremeasurements', 'cm'];
+    const SQL_EXCEPTION = { source: 'ingestion', code: 'SQL_EXCEPTION' } as const;
+    let scopes: Array<[string, CoreMeasurementDeleteScope]>;
+
+    beforeAll(async () => {
+      const [errors] = await connection.query<RowDataPacket[]>('SELECT ErrorID FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?', [
+        SQL_EXCEPTION.source,
+        SQL_EXCEPTION.code
+      ]);
+      await connection.query(
+        'INSERT INTO measurement_error_log (MeasurementID, ErrorID) SELECT CoreMeasurementID, ? FROM coremeasurements WHERE CensusID = ?',
+        [errors[0].ErrorID, scope.censusID]
+      );
+      await connection.query(
+        `INSERT INTO temporarymeasurements (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+         SELECT ?, ?, ?, CensusID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, MeasuredDBH, MeasuredHOM, MeasurementDate, RawCodes, RawComments
+         FROM coremeasurements WHERE CensusID = ?`,
+        [LOCK_INCOMING_FILE, LOCK_INCOMING_BATCH, scope.plotID, scope.censusID]
+      );
+      await connection.query('ANALYZE TABLE coremeasurements, measurement_error_log, temporarymeasurements');
+      const seededBatch = `${SEEDED_PRIOR_BATCH_PREFIX}-${scope.censusID}`;
+      scopes = [
+        ['C1 recovery', failedCensusRecoveryScope(scope.censusID)],
+        ['C2 same-file cleanup', sameFileUnresolvedFailureScope(SEEDED_PRIOR_FILE, LOCK_INCOMING_BATCH, scope.censusID)],
+        ['C3 cross-file cleanup', crossFileUnresolvedFailureScope(LOCK_INCOMING_FILE, LOCK_INCOMING_BATCH, scope.censusID)],
+        ['C4 batch-family cleanup', batchFamilyUnresolvedScope(SEEDED_PRIOR_FILE, seededBatch, scope.censusID, [])]
+      ];
+    }, 120_000);
+
+    afterAll(async () => {
+      await connection.query(
+        'DELETE mel FROM measurement_error_log mel JOIN coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID WHERE cm.CensusID = ?',
+        [scope.censusID]
+      );
+      await connection.query('DELETE FROM temporarymeasurements WHERE FileID = ?', [LOCK_INCOMING_FILE]);
+    });
+
+    function lockPlanMismatches(label: string, outcome: ExplainOutcome): string[] {
+      const first = outcome.planRows[0];
+      const mismatches: string[] = [];
+      if (!COREMEASUREMENTS_PLAN_TABLES.includes(String(first?.table))) mismatches.push(`${label}: first table ${first?.table}, expected coremeasurements/cm`);
+      if (String(first?.key) !== PRIMARY_KEY_NAME) mismatches.push(`${label}: key ${first?.key}, expected ${PRIMARY_KEY_NAME}`);
+      if (String(first?.type) !== RANGE_SEEK_PLAN_TYPE) mismatches.push(`${label}: type ${first?.type}, expected ${RANGE_SEEK_PLAN_TYPE}`);
+      if (outcome.warningCodes.includes(RANGE_OPTIMIZATION_SKIPPED_WARNING_CODE))
+        mismatches.push(`${label}: warning ${RANGE_OPTIMIZATION_SKIPPED_WARNING_CODE}`);
+      return mismatches;
+    }
+
+    it('on fresh statistics, and after all but one window was deleted in the same open transaction, every caller\u2019s window lock plans a PRIMARY range on coremeasurements first (catches: a lock that does not seek by primary key; C3 driven from another table; a window past the limit)', async () => {
+      const firstWindow = targetCensusIDs.slice(0, CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
+      const lastWindow = targetCensusIDs.slice(-CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
+      const mismatches: string[] = [];
+      for (const [label, callerScope] of scopes) {
+        const fresh = await explainWithWarnings(
+          await captureCoreMeasurementWindowLockStatement(scope.schema, callerScope, firstWindow, scope.plotID, scope.censusID)
+        );
+        logOutcome(`${label} fresh`, fresh);
+        mismatches.push(...lockPlanMismatches(`${label} fresh`, fresh));
+      }
+      await connection.beginTransaction();
+      try {
+        await connection.query('DELETE FROM coremeasurements WHERE CensusID = ? AND CoreMeasurementID NOT IN (?)', [scope.censusID, lastWindow]);
+        for (const [label, callerScope] of scopes) {
+          const afterMassDelete = await explainWithWarnings(
+            await captureCoreMeasurementWindowLockStatement(scope.schema, callerScope, lastWindow, scope.plotID, scope.censusID)
+          );
+          logOutcome(`${label} after mass delete`, afterMassDelete);
+          mismatches.push(...lockPlanMismatches(`${label} after mass delete`, afterMassDelete));
+        }
+      } finally {
+        await connection.rollback();
+      }
+      expect(mismatches).toEqual([]);
+    }, 120_000);
   });
 });
