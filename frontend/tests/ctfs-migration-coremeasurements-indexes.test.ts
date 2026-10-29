@@ -17,6 +17,7 @@ const CTFS_MIGRATIONS_DIR = path.join(process.cwd(), 'db', 'migrations', 'ctfs-m
 const SQL_EXTENSION = '.sql';
 const COREMEASUREMENTS_TABLE = 'coremeasurements';
 const SQL_LINE_COMMENT_PREFIXES = ['--', '#'] as const;
+const STATEMENT_TERMINATOR = ';';
 
 /** Every way a script can create an index: the add_index_if_not_exists helper, CREATE INDEX, ALTER TABLE ... ADD INDEX/KEY. */
 const INDEX_CREATION_PATTERNS: readonly RegExp[] = [
@@ -32,18 +33,48 @@ interface IndexCreation {
   index: string;
 }
 
-function findIndexCreations(file: string, contents: string): IndexCreation[] {
-  const creations: IndexCreation[] = [];
+function isLineComment(trimmedLine: string): boolean {
+  return SQL_LINE_COMMENT_PREFIXES.some(prefix => trimmedLine.startsWith(prefix));
+}
+
+interface SqlStatement {
+  text: string;
+  startLine: number;
+}
+
+/** Statements end at ';', so one that spans several lines is matched as a whole. Full-line comments are dropped. */
+function splitIntoStatements(contents: string): SqlStatement[] {
+  const statements: SqlStatement[] = [];
+  let pendingText = '';
+  let pendingStartLine = 0;
   contents.split('\n').forEach((rawLine, lineIndex) => {
     const line = rawLine.trim();
-    if (SQL_LINE_COMMENT_PREFIXES.some(prefix => line.startsWith(prefix))) return;
-    for (const pattern of INDEX_CREATION_PATTERNS) {
-      for (const match of line.matchAll(pattern)) {
-        creations.push({ file, line: lineIndex + 1, table: match.groups!.table.toLowerCase(), index: match.groups!.index });
-      }
+    if (isLineComment(line)) return;
+    if (pendingText.trim() === '') pendingStartLine = lineIndex + 1;
+    pendingText += ` ${line}`;
+    let terminatorAt = pendingText.indexOf(STATEMENT_TERMINATOR);
+    while (terminatorAt !== -1) {
+      statements.push({ text: pendingText.slice(0, terminatorAt), startLine: pendingStartLine });
+      pendingText = pendingText.slice(terminatorAt + 1);
+      pendingStartLine = lineIndex + 1;
+      terminatorAt = pendingText.indexOf(STATEMENT_TERMINATOR);
     }
   });
-  return creations;
+  if (pendingText.trim() !== '') statements.push({ text: pendingText, startLine: pendingStartLine });
+  return statements;
+}
+
+function findIndexCreations(file: string, contents: string): IndexCreation[] {
+  return splitIntoStatements(contents).flatMap(statement =>
+    INDEX_CREATION_PATTERNS.flatMap(pattern =>
+      [...statement.text.matchAll(pattern)].map(match => ({
+        file,
+        line: statement.startLine,
+        table: match.groups!.table.toLowerCase(),
+        index: match.groups!.index
+      }))
+    )
+  );
 }
 
 const POSITIVE_CONTROL_SQL = [
@@ -51,9 +82,22 @@ const POSITIVE_CONTROL_SQL = [
   'CREATE INDEX idx_fixture_create ON coremeasurements (CensusID);',
   'ALTER TABLE `coremeasurements` ADD INDEX `idx_fixture_alter` (CensusID);',
   "-- CALL add_index_if_not_exists('coremeasurements', 'idx_fixture_commented_out', 'CensusID');",
-  "CALL add_index_if_not_exists('stems', 'idx_fixture_other_table', 'CensusID');"
+  "CALL add_index_if_not_exists('stems', 'idx_fixture_other_table', 'CensusID');",
+  'CREATE INDEX idx_fixture_create_two_lines',
+  '  ON coremeasurements (CensusID);',
+  'ALTER TABLE `coremeasurements`',
+  '  ADD UNIQUE KEY `idx_fixture_alter_two_lines` (CensusID);',
+  'CALL add_index_if_not_exists(',
+  "  'coremeasurements', 'idx_fixture_call_two_lines', 'CensusID');"
 ].join('\n');
-const POSITIVE_CONTROL_EXPECTED = ['idx_fixture_call', 'idx_fixture_create', 'idx_fixture_alter'];
+const POSITIVE_CONTROL_EXPECTED = [
+  'idx_fixture_call',
+  'idx_fixture_create',
+  'idx_fixture_alter',
+  'idx_fixture_create_two_lines',
+  'idx_fixture_alter_two_lines',
+  'idx_fixture_call_two_lines'
+];
 
 describe('CTFS import scripts and the canonical coremeasurements index set (#560)', () => {
   it('positive control: recognises every index-creation form on coremeasurements, and skips comments and other tables', () => {
