@@ -23,10 +23,23 @@ import {
   type TestDatabaseConfig
 } from '../setup/local-db-setup';
 import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
-import { recoverFailedInitialCensusInBoundedTransactions, type FailedCensusRecoveryResult } from '@/lib/uploads/ingest-batch';
-import { WINDOW_WALK_STATEMENT } from '../setup/core-measurement-window-statements';
-import { createStatementHarness, matching, runBarrierScenario, waitForLockWait, withinDeadline } from '../setup/core-measurement-window-harness';
 import {
+  ingestBatch,
+  recoverFailedInitialCensusInBoundedTransactions,
+  type FailedCensusRecoveryResult,
+  type IngestBatchResult
+} from '@/lib/uploads/ingest-batch';
+import { WINDOW_WALK_STATEMENT } from '../setup/core-measurement-window-statements';
+import {
+  createStatementHarness,
+  deadlockShapedError,
+  matching,
+  runBarrierScenario,
+  waitForLockWait,
+  withinDeadline
+} from '../setup/core-measurement-window-harness';
+import {
+  CLEAN_FIXTURE_ROW_COUNT,
   countOf,
   deleteAuditCounts,
   fixtureUploadID,
@@ -34,6 +47,7 @@ import {
   seedIntegrityAlert,
   seedUnresolvedMeasurements,
   seedUploadMetric,
+  stageCleanFixtureRows,
   stageIncomingRows,
   UPLOAD_STATUS
 } from '../setup/unresolved-measurement-fixtures';
@@ -75,6 +89,13 @@ const WRITER_LOCK_WAIT_SECONDS = 30;
 const CONCURRENCY_TEST_TIMEOUT_MS = 180_000;
 const FIRST_GUARD_OCCURRENCE = 1;
 const CONTROL_CENSUS = { plotCensusNumber: 95, startDate: '2023-01-01', endDate: '2023-12-31' };
+const CLEAN_FILE = 'concurrency-clean.csv';
+const CLEAN_BATCH = 'concurrency-clean-batch';
+const COMPLETED_FILE = 'concurrency-completed.csv';
+const COMPLETED_BATCH = 'concurrency-completed-batch';
+const COREMEASUREMENTS_TABLE = 'coremeasurements';
+const INSERT_OPERATION = 'INSERT';
+const NO_BACKOFF_JITTER = 0;
 const SEED_SPECIES_CODE = 'ACERRU';
 const SEED_QUADRAT_NAME = 'Q01';
 
@@ -176,6 +197,12 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
       censusID,
       changedBy: CHANGED_BY
     });
+  }
+
+  /** The shared clean rows (tests/setup/unresolved-measurement-fixtures.ts) staged as one family through the production path. */
+  async function stageCleanFamily(): Promise<void> {
+    const inserted = await stageCleanFixtureRows(realManager, { schema, fileName: CLEAN_FILE, batchID: CLEAN_BATCH, plotID, censusID, changedBy: CHANGED_BY });
+    expect(inserted).toBe(CLEAN_FIXTURE_ROW_COUNT);
   }
 
   /** A real writer of the census: tree, stem, resolved measurement and a completed upload metric, in one transaction it commits. */
@@ -305,6 +332,86 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
         'every deleted row has exactly one DELETE audit'
       ).toBe(true);
       expect(evidence).toEqual({ remaining: 0, incomplete: 0, alerts: 0, staleStaged: 0, control: CONTROL_CENSUS_ROWS });
+    },
+    CONCURRENCY_TEST_TIMEOUT_MS
+  );
+
+  it.each([
+    ['window 1, after its DELETE-audit insert', WINDOW_WALK_STATEMENT.DELETE_AUDIT, 2 * WINDOW + HELD_BACK_ROWS],
+    ['the final transaction, after its stems DELETE', WINDOW_WALK_STATEMENT.STEMS_DELETE, 2 * WINDOW + HELD_BACK_ROWS]
+  ] as const)(
+    'I13(a) recovery is the victim at %s: that whole transaction re-runs from the census lock and the census ends recovered with one audit per row (catches: no recovery retry; replay inside the rolled-back transaction; double audit)',
+    async (label, injectedAfter, seededRows) => {
+      const dirtyIDs = await seedDueCensus(seededRows);
+      const harness = createStatementHarness(realManager);
+      let result: FailedCensusRecoveryResult | undefined;
+      let injection!: { fired(): boolean };
+      await runBarrierScenario(harness, async () => {
+        injection = harness.injectAfter(matching(injectedAfter), 1, deadlockShapedError);
+        result = await withinDeadline(harness.track(recover()), `recovery with a deadlock at ${label}`, harness.renderStatementLog);
+      });
+      const victimTransaction = harness.transactionsRunning(matching(injectedAfter))[0];
+      const audits = await deleteAuditCounts(connection, censusID);
+      console.log(
+        `[I13a ${label}] result=${JSON.stringify(result)} fired=${injection.fired()} victim=${victimTransaction} rollbacks=${JSON.stringify(harness.rollbackOrder)}\n${harness.renderStatementLog()}`
+      );
+      expect(injection.fired(), 'the injection fired on the named statement').toBe(true);
+      expect(harness.rollbackOrder, 'the victim transaction was rolled back').toContain(victimTransaction);
+      expect(result, `recovery result: ${JSON.stringify(result)}`).toMatchObject({ outcome: 'recovered', deletedRows: dirtyIDs.length, deadlockRetries: 1 });
+      expect(
+        dirtyIDs.every(id => audits.get(id)?.count === 1),
+        'every dirty row is audited exactly once'
+      ).toBe(true);
+      expect(audits.size, 'DELETE audits exist only for the dirty rows').toBe(dirtyIDs.length);
+      expect(
+        await countOf(connection, "SELECT COUNT(*) AS total FROM uploadmetrics WHERE censusID = ? AND status IN ('failed', 'processing')", [censusID]),
+        'incomplete upload metrics are gone'
+      ).toBe(0);
+    },
+    CONCURRENCY_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'I13(b) ingestion is the victim after its CALL returned: processSubBatch rolls the attempt back and retries, the sub-batch is ingested once, staging consumed once, audits unique (catches: lost staging; double audit; a retry path regression)',
+    async () => {
+      await seedUploadMetric(connection, { schema, plotID, censusID, fileID: COMPLETED_FILE, batchID: COMPLETED_BATCH, status: UPLOAD_STATUS.COMPLETED });
+      await stageCleanFamily();
+      const harness = createStatementHarness(realManager);
+      let result: IngestBatchResult | undefined;
+      let injection!: { fired(): boolean };
+      vi.spyOn(Math, 'random').mockReturnValue(NO_BACKOFF_JITTER);
+      await runBarrierScenario(harness, async () => {
+        injection = harness.injectAfter(matching(WINDOW_WALK_STATEMENT.BULK_INGESTION_CALL), 1, deadlockShapedError);
+        result = await withinDeadline(
+          harness.track(
+            ingestBatch(realManager, { schema, fileID: CLEAN_FILE, batchID: CLEAN_BATCH, expectedScope: { plotID, censusID }, changedBy: CHANGED_BY })
+          ),
+          'ingestBatch with a deadlock after its CALL',
+          harness.renderStatementLog
+        );
+      });
+      const resolved = await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE UploadFileID = ? AND StemGUID IS NOT NULL', [
+        CLEAN_FILE
+      ]);
+      const unresolved = await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE UploadFileID = ? AND StemGUID IS NULL', [CLEAN_FILE]);
+      const staged = await countOf(connection, 'SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ?', [CLEAN_FILE]);
+      const [insertAudits] = await connection.query<RowDataPacket[]>(
+        `SELECT RecordID, COUNT(*) AS auditRows FROM unifiedchangelog WHERE TableName = ? AND Operation = ? AND CensusID = ? GROUP BY RecordID`,
+        [COREMEASUREMENTS_TABLE, INSERT_OPERATION, censusID]
+      );
+      console.log(
+        `[I13b] fired=${injection.fired()} subBatches=${JSON.stringify(result?.subBatchResults)} resolved=${resolved} unresolved=${unresolved} staged=${staged} insertAudits=${JSON.stringify(insertAudits)}\n${harness.renderStatementLog()}`
+      );
+      expect(injection.fired(), 'the injection fired after the CALL returned').toBe(true);
+      expect(result!.subBatchResults[0].attemptsNeeded, 'the first attempt was rolled back and the second succeeded').toBe(2);
+      expect(resolved, 'rows resolved for the file').toBe(CLEAN_FIXTURE_ROW_COUNT);
+      expect(unresolved, 'no row moved to unresolved').toBe(0);
+      expect(staged, 'staged rows consumed').toBe(0);
+      expect(insertAudits, `INSERT audit RecordIDs: ${JSON.stringify(insertAudits)}`).toHaveLength(CLEAN_FIXTURE_ROW_COUNT);
+      expect(
+        insertAudits.every(row => Number(row.auditRows) === 1),
+        'each INSERT audit RecordID appears once'
+      ).toBe(true);
     },
     CONCURRENCY_TEST_TIMEOUT_MS
   );
