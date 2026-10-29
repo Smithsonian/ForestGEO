@@ -36,7 +36,21 @@ export async function withinBound<T>(promise: Promise<T>, boundMs: number, descr
   }
 }
 
-/** Polls `condition` until true; returns the elapsed ms, or throws naming the bound. */
+const DEADLINE_PASSED = Symbol('deadline passed');
+
+async function evaluateBeforeDeadline(condition: () => Promise<boolean> | boolean, remainingMs: number): Promise<boolean | typeof DEADLINE_PASSED> {
+  let handle: NodeJS.Timeout | undefined;
+  const deadline = new Promise<typeof DEADLINE_PASSED>(resolve => {
+    handle = setTimeout(() => resolve(DEADLINE_PASSED), remainingMs);
+  });
+  try {
+    return await Promise.race([Promise.resolve().then(condition), deadline]);
+  } finally {
+    clearTimeout(handle);
+  }
+}
+
+/** Polls `condition` until true; the bound also covers each evaluation, so a late or never-settling condition fails. Returns the elapsed ms, or throws naming the bound. */
 export async function waitFor(
   condition: () => Promise<boolean> | boolean,
   boundMs: number,
@@ -44,8 +58,11 @@ export async function waitFor(
   pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS
 ): Promise<number> {
   const startedAt = Date.now();
-  while (Date.now() - startedAt < boundMs) {
-    if (await condition()) return Date.now() - startedAt;
+  const deadlineAt = startedAt + boundMs;
+  while (Date.now() < deadlineAt) {
+    const satisfied = await evaluateBeforeDeadline(condition, deadlineAt - Date.now());
+    if (satisfied === true && Date.now() <= deadlineAt) return Date.now() - startedAt;
+    if (satisfied === DEADLINE_PASSED) break;
     await delay(pollIntervalMs);
   }
   throw new Error(`Condition not met within ${boundMs}ms: ${description}`);
