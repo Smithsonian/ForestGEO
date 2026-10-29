@@ -28,7 +28,7 @@
  *   npx vitest run --config vitest.integration.config.mts tests/integration/ingest-batch.test.ts
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { cleanupTestMeasurements, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
@@ -141,6 +141,21 @@ import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/
 import { BatchFamilyScopeError } from '@/lib/uploads/batch-family';
 import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { auditCoreMeasurementsScopeDiff, snapshotCoreMeasurementsScope } from '@/lib/changelog/ingestion-audit';
+import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
+import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
+import { isDeadlockError } from '@/lib/db/deadlock-retry';
+import { WINDOW_WALK_STATEMENT, WALK_SCOPE_MARKER } from '../setup/core-measurement-window-statements';
+import { deadlockShapedError } from '../setup/core-measurement-window-harness';
+import {
+  seedUnresolvedMeasurements,
+  seedUploadMetric,
+  seedIntegrityAlert,
+  stageIncomingRows,
+  seedResidualTreesAndStems,
+  deleteAuditCounts,
+  countOf,
+  UPLOAD_STATUS
+} from '../setup/unresolved-measurement-fixtures';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -322,6 +337,126 @@ describe('ingestBatch — integration', () => {
       BATCH_ID
     ]);
     return Number(rows[0].count);
+  }
+
+  const WINDOW = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE;
+  const HELD_BACK_ROWS = 5;
+  const RESIDUAL_TREES = 50;
+  const RESIDUAL_EXTRA_FAILURE_ROWS = 7;
+  const STALE_STAGED_ROWS = 2;
+  const FAILED_FIRST_LOAD_FILE = 'ingest-batch-failed-first-load.csv';
+  const FAILED_FIRST_LOAD_BATCH = 'ingest-batch-failed__sub001';
+  const RESIDUAL_TAG_PREFIX = 'RES';
+  const RESIDUAL_SPECIES_CODE = 'ACERRU';
+  const RESIDUAL_QUADRAT_NAME = 'Q01';
+
+  interface RecordedCall {
+    sql: string;
+    transactionID: string | undefined;
+  }
+
+  /** Spies the shared mock's executeQuery: records every statement and throws `makeError()` instead of running the `occurrence`-th match. */
+  function recordAndFailAt(pattern: RegExp | null, occurrence: number, makeError: () => Error) {
+    const calls: RecordedCall[] = [];
+    const realExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
+    let seen = 0;
+    const spy = vi.spyOn(connectionManager, 'executeQuery').mockImplementation(async (query: string, params?: unknown[], transactionId?: string) => {
+      calls.push({ sql: query, transactionID: transactionId });
+      if (pattern && pattern.test(query)) {
+        seen += 1;
+        if (seen === occurrence) throw makeError();
+      }
+      return realExecuteQuery(query, params, transactionId);
+    });
+    return { calls, restore: () => spy.mockRestore() };
+  }
+
+  /** Stages the 5 fixture rows WITHOUT a census replacement (REVISIONS, worker-style null session), so a dirty census stays dirty. */
+  async function stageFixtureRowsWithoutReplacement(fileName: string = FILE_NAME): Promise<void> {
+    const transactionID = await connectionManager.beginTransaction();
+    const result = await stageMeasurementChunk(connectionManager, {
+      schema,
+      fileName,
+      batchID: BATCH_ID,
+      plotID,
+      censusID,
+      uploadMode: UploadMode.REVISIONS,
+      sourceFormat: SourceFormat.csv,
+      rawRows: buildFixtureRows(),
+      csvHeaders: CSV_HEADERS,
+      delimiter: CSV_DELIMITER,
+      uploadSessionID: null,
+      firstRowOrdinal: null,
+      changedBy: CHANGED_BY,
+      transactionID
+    });
+    await connectionManager.commitTransaction(transactionID);
+    expect(result.insertedCount).toBe(EXPECTED_ROW_COUNT);
+  }
+
+  /** A failed first load: `rows` unresolved failure rows with links, a failed metric, an alert, and stale staged rows of the failed family. */
+  async function seedDirtyFirstLoadCensus(rows: number): Promise<number[]> {
+    const ids = await seedUnresolvedMeasurements(connection, {
+      censusID,
+      fileID: FAILED_FIRST_LOAD_FILE,
+      batchID: FAILED_FIRST_LOAD_BATCH,
+      count: rows,
+      tagPrefix: 'DIRTY'
+    });
+    await seedUploadMetric(connection, {
+      schema,
+      plotID,
+      censusID,
+      fileID: FAILED_FIRST_LOAD_FILE,
+      batchID: FAILED_FIRST_LOAD_BATCH,
+      status: UPLOAD_STATUS.FAILED
+    });
+    await seedIntegrityAlert(connection, { plotID, censusID, fileID: FAILED_FIRST_LOAD_FILE, batchID: FAILED_FIRST_LOAD_BATCH });
+    await stageIncomingRows(connection, {
+      fileID: FAILED_FIRST_LOAD_FILE,
+      batchID: FAILED_FIRST_LOAD_BATCH,
+      plotID,
+      censusID,
+      count: STALE_STAGED_ROWS,
+      tagPrefix: 'STALE'
+    });
+    return ids;
+  }
+
+  async function readRecoveryEvidence() {
+    const [stateRows] = await connection.query<RowDataPacket[]>(
+      `SELECT
+         (SELECT COUNT(*) FROM uploadmetrics WHERE plotID = ? AND censusID = ? AND status = 'completed') AS completedUploads,
+         (SELECT COUNT(*) FROM uploadmetrics WHERE plotID = ? AND censusID = ? AND status IN ('failed', 'processing')) AS incompleteUploads,
+         (SELECT COUNT(*) FROM trees WHERE CensusID = ?) AS treeCount,
+         (SELECT COUNT(*) FROM stems WHERE CensusID = ?) AS stemCount,
+         (SELECT COUNT(*) FROM coremeasurements WHERE CensusID = ?) AS coreMeasurementCount,
+         (SELECT COUNT(*) FROM uploadintegrityalerts WHERE plotID = ? AND censusID = ?) AS alerts,
+         (SELECT COUNT(*) FROM temporarymeasurements WHERE FileID = ?) AS staleStaged,
+         (SELECT COUNT(*) FROM temporarymeasurements WHERE FileID = ? AND BatchID = ?) AS incomingStaged`,
+      [plotID, censusID, plotID, censusID, censusID, censusID, censusID, plotID, censusID, FAILED_FIRST_LOAD_FILE, FILE_NAME, BATCH_ID]
+    );
+    const row = stateRows[0];
+    const recoveryState = {
+      completedUploads: Number(row.completedUploads),
+      incompleteUploads: Number(row.incompleteUploads),
+      treeCount: Number(row.treeCount),
+      stemCount: Number(row.stemCount),
+      coreMeasurementCount: Number(row.coreMeasurementCount)
+    };
+    const evidence = {
+      ...recoveryState,
+      alerts: Number(row.alerts),
+      staleStaged: Number(row.staleStaged),
+      incomingStaged: Number(row.incomingStaged),
+      stillDue: shouldRecoverFailedInitialCensus(recoveryState)
+    };
+    console.log(`[recovery evidence] ${JSON.stringify(evidence)}`);
+    return evidence;
+  }
+
+  function setupTransactionOf(calls: RecordedCall[]): string | undefined {
+    return calls.find(call => WINDOW_WALK_STATEMENT.SETUP_FAMILY_DISCOVERY.test(call.sql))?.transactionID;
   }
 
   it('rejects a caller scope that differs from the staged family before changing staging or metrics', async () => {
@@ -1656,4 +1791,199 @@ describe('ingestBatch — integration', () => {
     console.log(`[negative-coord] errorCodes=${JSON.stringify(errorCodes)}`);
     expect(errorCodes).not.toContain('INVALID_COORDINATE');
   }, 60000);
+
+  describe('failed-first-census recovery in bounded transactions (#562)', () => {
+    const INTERRUPTION_FAILURE = 'injected recovery interruption (#562 I4)';
+
+    it.each([
+      ['(a) at window 2’s DELETE', WINDOW_WALK_STATEMENT.MEASUREMENT_DELETE, 2, WINDOW],
+      ['(b) right after the last window, at the final census lock', WINDOW_WALK_STATEMENT.CENSUS_LOCK, 3, 2 * WINDOW],
+      ['(c) inside the final transaction, at its stems DELETE', WINDOW_WALK_STATEMENT.STEMS_DELETE, 1, 2 * WINDOW]
+    ] as const)(
+      'I4 %s: the interrupted recovery leaves a census that is still due, and the retry finishes it with exact audits (catches: recovery in one transaction; a final cleanup unreachable after the last window; double audit on resume)',
+      async (label, failurePattern, occurrence, expectedDeletedBeforeRetry) => {
+        const dirtyIDs = await seedDirtyFirstLoadCensus(2 * WINDOW + HELD_BACK_ROWS);
+        await stageFixtureRowsWithoutReplacement();
+        const interrupted = recordAndFailAt(failurePattern, occurrence, () => new Error(INTERRUPTION_FAILURE));
+        try {
+          await expect(runIngestBatch(FILE_NAME, CHANGED_BY)).rejects.toThrow(INTERRUPTION_FAILURE);
+        } finally {
+          interrupted.restore();
+        }
+        const audits = await deleteAuditCounts(connection, censusID);
+        const evidence = await readRecoveryEvidence();
+        const remainingDirty = await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [dirtyIDs]);
+        const remainingLinks = await countOf(connection, 'SELECT COUNT(*) AS total FROM measurement_error_log WHERE MeasurementID IN (?)', [dirtyIDs]);
+        console.log(
+          `[I4 ${label}] remainingDirty=${remainingDirty} remainingLinks=${remainingLinks} audited=${audits.size}\n${interrupted.calls.map(call => `${call.transactionID ?? 'no-tx'} ${call.sql.replace(/\s+/g, ' ').slice(0, 120)}`).join('\n')}`
+        );
+
+        expect(setupTransactionOf(interrupted.calls), 'setup never began').toBeUndefined();
+        expect(remainingDirty).toBe(dirtyIDs.length - expectedDeletedBeforeRetry);
+        expect(
+          dirtyIDs.slice(0, expectedDeletedBeforeRetry).every(id => audits.get(id)?.count === 1),
+          'the lowest ids are the deleted ones, each audited once'
+        ).toBe(true);
+        expect(
+          dirtyIDs.slice(expectedDeletedBeforeRetry).some(id => audits.has(id)),
+          'no surviving row is audited'
+        ).toBe(false);
+        expect(remainingLinks, 'links of deleted rows are gone with them').toBe(dirtyIDs.length - expectedDeletedBeforeRetry);
+        expect(evidence).toMatchObject({ incompleteUploads: 1, alerts: 1, staleStaged: STALE_STAGED_ROWS, incomingStaged: EXPECTED_ROW_COUNT, stillDue: true });
+
+        const retry = await runIngestBatch(FILE_NAME, CHANGED_BY);
+        const retryAudits = await deleteAuditCounts(connection, censusID);
+        const afterRetry = await readRecoveryEvidence();
+        expect(retry.recovered).toBe(true);
+        expect(
+          dirtyIDs.every(id => retryAudits.get(id)?.count === 1),
+          'every dirty row audited exactly once across both runs'
+        ).toBe(true);
+        expect(await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [dirtyIDs])).toBe(0);
+        expect(afterRetry).toMatchObject({ incompleteUploads: 0, alerts: 0, staleStaged: 0, incomingStaged: 0, completedUploads: 1 });
+        expect((await fetchBatchMeasurements()).filter(row => row.StemGUID !== null)).toHaveLength(EXPECTED_ROW_COUNT);
+      },
+      120_000
+    );
+
+    it('I6: a recovering ingestBatch whose file has no cleanup candidates leaves no recovery statement in the setup transaction (catches: recovery left inside setup)', async () => {
+      await seedDirtyFirstLoadCensus(WINDOW + HELD_BACK_ROWS);
+      await stageFixtureRowsWithoutReplacement();
+      const recorder = recordAndFailAt(null, 0, () => new Error('never thrown'));
+      let result: IngestBatchResult;
+      try {
+        result = await runIngestBatch(FILE_NAME, CHANGED_BY);
+      } finally {
+        recorder.restore();
+      }
+      const setupTransactionID = setupTransactionOf(recorder.calls);
+      const setupStatements = recorder.calls.filter(call => call.transactionID === setupTransactionID).map(call => call.sql);
+      console.log(`[I6] setupTx=${setupTransactionID}\n${setupStatements.map(sql => sql.replace(/\s+/g, ' ').slice(0, 120)).join('\n')}`);
+      expect(result!.recovered).toBe(true);
+      expect(setupTransactionID).toBeDefined();
+      expect(setupStatements.filter(sql => WINDOW_WALK_STATEMENT.MEASUREMENT_DELETE.test(sql))).toEqual([]);
+      expect(setupStatements.filter(sql => WINDOW_WALK_STATEMENT.DELETE_AUDIT.test(sql))).toEqual([]);
+      expect(setupStatements.filter(sql => WINDOW_WALK_STATEMENT.RECOVERY_STATE_READ.test(sql))).toEqual([]);
+    }, 120_000);
+
+    it('I10: a census due through the trees/stems branch recovers, and a failure at window 1 resumes correctly (catches: the trees/stems branch untested; evidence lost before the final transaction)', async () => {
+      const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [RESIDUAL_SPECIES_CODE]);
+      const [quadratRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [
+        RESIDUAL_QUADRAT_NAME,
+        plotID
+      ]);
+      const dirtyIDs = await seedDirtyFirstLoadCensus(WINDOW + RESIDUAL_EXTRA_FAILURE_ROWS);
+      await seedResidualTreesAndStems(connection, {
+        censusID,
+        speciesID: Number(speciesRows[0].SpeciesID),
+        quadratID: Number(quadratRows[0].QuadratID),
+        count: RESIDUAL_TREES,
+        tagPrefix: RESIDUAL_TAG_PREFIX
+      });
+      await stageFixtureRowsWithoutReplacement();
+      const residualTrees = () =>
+        countOf(connection, `SELECT COUNT(*) AS total FROM trees WHERE CensusID = ? AND TreeTag LIKE CONCAT(?, '%')`, [censusID, RESIDUAL_TAG_PREFIX]);
+      const [residualStemRows] = await connection.query<RowDataPacket[]>(
+        `SELECT s.StemGUID FROM stems s JOIN trees t ON t.TreeID = s.TreeID WHERE t.CensusID = ? AND t.TreeTag LIKE CONCAT(?, '%')`,
+        [censusID, RESIDUAL_TAG_PREFIX]
+      );
+      const residualStemIDs = residualStemRows.map(row => Number(row.StemGUID));
+      expect(residualStemIDs).toHaveLength(RESIDUAL_TREES);
+      const residualStems = () => countOf(connection, 'SELECT COUNT(*) AS total FROM stems WHERE StemGUID IN (?)', [residualStemIDs]);
+
+      const interrupted = recordAndFailAt(WINDOW_WALK_STATEMENT.MEASUREMENT_DELETE, 1, () => new Error('injected failure at window 1 (#562 I10)'));
+      try {
+        await expect(runIngestBatch(FILE_NAME, CHANGED_BY)).rejects.toThrow('#562 I10');
+      } finally {
+        interrupted.restore();
+      }
+      const afterFailure = await readRecoveryEvidence();
+      expect(afterFailure.stillDue).toBe(true);
+      expect(await residualTrees()).toBe(RESIDUAL_TREES);
+      expect(await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [dirtyIDs])).toBe(dirtyIDs.length);
+
+      const retry = await runIngestBatch(FILE_NAME, CHANGED_BY);
+      const afterRetry = await readRecoveryEvidence();
+      const audits = await deleteAuditCounts(connection, censusID);
+      console.log(`[I10] recovered=${retry.recovered} residualTrees=${await residualTrees()} residualStems=${await residualStems()} audited=${audits.size}`);
+      expect(retry.recovered).toBe(true);
+      expect(await residualTrees()).toBe(0);
+      expect(await residualStems()).toBe(0);
+      expect(afterRetry).toMatchObject({ incompleteUploads: 0, alerts: 0, staleStaged: 0, completedUploads: 1 });
+      expect(dirtyIDs.every(id => audits.get(id)?.count === 1)).toBe(true);
+    }, 120_000);
+
+    it('I15: a deadlock at the cross-file cleanup’s lock statement rolls the same-file cleanup’s deletes and audits back with the setup transaction; the next ingestBatch completes (catches: partial cleanup surviving a setup deadlock). Split rollback is not covered: the split runs after C3.', async () => {
+      const PRIOR_FAMILY = 'ingest-batch-prior-family';
+      const RENAMED_FILE = 'ingest-batch-renamed.csv';
+      await seedUploadMetric(connection, {
+        schema,
+        plotID,
+        censusID,
+        fileID: 'ingest-batch-completed.csv',
+        batchID: 'completed-batch',
+        status: UPLOAD_STATUS.COMPLETED
+      });
+      const sameFileStaleIDs = await seedUnresolvedMeasurements(connection, {
+        censusID,
+        fileID: FILE_NAME,
+        batchID: PRIOR_FAMILY,
+        count: 3,
+        tagPrefix: 'PRIOR'
+      });
+      await stageFixtureRowsWithoutReplacement();
+      const [crossFileInsert] = await connection.query<ResultSetHeader>(
+        `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, UploadFileID, UploadBatchID,
+                                       RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawComments, IsActive)
+         SELECT CensusID, NULL, FALSE, MeasurementDate, DBH, HOM, ?, 'renamed-batch', TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, Codes, Comments, 1
+         FROM temporarymeasurements WHERE FileID = ? AND BatchID = ? ORDER BY id LIMIT 1`,
+        [RENAMED_FILE, FILE_NAME, BATCH_ID]
+      );
+      const crossFileID = Number(crossFileInsert.insertId);
+      await connection.query(
+        `INSERT INTO measurement_error_log (MeasurementID, ErrorID) SELECT ?, ErrorID FROM measurement_errors WHERE ErrorSource = 'ingestion' AND ErrorCode = 'SQL_EXCEPTION'`,
+        [crossFileID]
+      );
+
+      const realExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
+      let injected = 0;
+      const spy = vi.spyOn(connectionManager, 'executeQuery').mockImplementation(async (query: string, params?: unknown[], transactionId?: string) => {
+        const result = await realExecuteQuery(query, params, transactionId);
+        if (injected === 0 && WINDOW_WALK_STATEMENT.WINDOW_LOCK.test(query) && WALK_SCOPE_MARKER.C3.test(query)) {
+          injected += 1;
+          throw deadlockShapedError();
+        }
+        return result;
+      });
+      let firstRunError: unknown;
+      try {
+        firstRunError = await runIngestBatch(FILE_NAME, CHANGED_BY).then(
+          () => null,
+          (error: unknown) => error
+        );
+      } finally {
+        spy.mockRestore();
+      }
+      const auditsAfterRollback = await deleteAuditCounts(connection, censusID);
+      const sameFileSurvivors = await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [sameFileStaleIDs]);
+      console.log(
+        `[I15] injected=${injected} firstRunError=${String(firstRunError)} sameFileSurvivors=${sameFileSurvivors} audited=${JSON.stringify([...auditsAfterRollback])}`
+      );
+      expect(injected).toBe(1);
+      expect(isDeadlockError(firstRunError), 'the setup deadlock propagates; setup has no retry of its own').toBe(true);
+      expect(sameFileSurvivors, "C2's deletes rolled back with the setup transaction").toBe(sameFileStaleIDs.length);
+      expect(
+        sameFileStaleIDs.some(id => auditsAfterRollback.has(id)),
+        "C2's audits rolled back too"
+      ).toBe(false);
+
+      const second = await runIngestBatch(FILE_NAME, CHANGED_BY);
+      const finalAudits = await deleteAuditCounts(connection, censusID);
+      expect(second.noDataFound).toBe(false);
+      expect([...sameFileStaleIDs, crossFileID].every(id => finalAudits.get(id)?.count === 1)).toBe(true);
+      expect(
+        await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [[...sameFileStaleIDs, crossFileID]])
+      ).toBe(0);
+    }, 120_000);
+  });
 });
