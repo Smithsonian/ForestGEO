@@ -539,3 +539,38 @@ describe('ingestBatch runs the recovery before setup (#562)', () => {
     expect(harness.statements.some(statement => DESTRUCTIVE_KINDS.has(statement.kind))).toBe(false);
   });
 });
+
+describe('processSubBatch deadlock classification (#562, refactor pin)', () => {
+  const PRE_CALL_SNAPSHOT = /FROM \S+\.coremeasurements\s+WHERE UploadFileID = \? AND UploadBatchID = \?\s*$/;
+
+  beforeEach(() => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+  });
+
+  it('retries a sub-batch whose audit snapshot failed with a deadlock wrapped in ChangelogWriteError (catches: a classifier that misses the cause and fails the batch as a non-transient audit failure)', async () => {
+    const harness = createRecoveryHarness({ recoveryState: NOT_DUE });
+    const scriptedExecuteQuery = harness.raw.executeQuery.getMockImplementation()!;
+    let snapshotFailures = 0;
+    harness.raw.executeQuery.mockImplementation(async (sql: string, params: unknown[] = [], transactionID?: string) => {
+      if (PRE_CALL_SNAPSHOT.test(String(sql)) && snapshotFailures === 0) {
+        snapshotFailures += 1;
+        throw deadlockShapedError();
+      }
+      return scriptedExecuteQuery(sql, params, transactionID);
+    });
+    state.manager = harness.raw;
+
+    const result = await ingestBatch(harness.manager, {
+      schema: SCHEMA,
+      fileID: FILE_ID,
+      batchID: BATCH_ID,
+      expectedScope: { plotID: PLOT_ID, censusID: CENSUS_ID },
+      changedBy: CHANGED_BY
+    });
+    console.log(`[U14 processSubBatch] snapshotFailures=${snapshotFailures} subBatches=${JSON.stringify(result.subBatchResults)}\n${harness.render()}`);
+
+    expect(snapshotFailures).toBe(1);
+    expect(result.subBatchResults[0]).toMatchObject({ attemptsNeeded: 2, batchFailedButHandled: false });
+    expect(harness.raw.rollbackTransaction).toHaveBeenCalledTimes(1);
+  });
+});

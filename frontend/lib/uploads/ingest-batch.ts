@@ -74,7 +74,7 @@ import {
   type CoreMeasurementDeleteScope,
   type CoreMeasurementLockAlias
 } from '@/lib/ingestion/temporary-measurements';
-import { retryWholeTransactionOnDeadlock } from '@/lib/db/deadlock-retry';
+import { isDeadlockError, retryWholeTransactionOnDeadlock } from '@/lib/db/deadlock-retry';
 import { CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS } from '@/lib/uploads/stage-measurements';
 
 const MAX_ATTEMPTS_PER_SUBBATCH = 5;
@@ -101,7 +101,6 @@ const RETRY_JITTER_MAX_MS = 1_000;
 
 // MySQL error numbers for connection-loss and deadlock conditions
 const MYSQL_ERRNO_TCP_LOST = 2013; // CR_SERVER_LOST — TCP connection lost during query
-const MYSQL_ERRNO_DEADLOCK = 1213; // ER_LOCK_DEADLOCK
 
 /**
  * mysql2's code when the SERVER closed the connection underneath a running
@@ -1002,7 +1001,7 @@ async function processSubBatch(
       // underneath an audit failure still gets the SAME bounded backoff.
       const classificationSource: any = e instanceof ChangelogWriteError ? e.cause : e;
       const isConnectionError = classificationSource?.code === 'ECONNRESET' || classificationSource?.errno === MYSQL_ERRNO_TCP_LOST;
-      const isDeadlock = classificationSource?.code === 'ER_LOCK_DEADLOCK' || classificationSource?.errno === MYSQL_ERRNO_DEADLOCK;
+      const isDeadlock = isDeadlockError(e);
       const isLockContention = e.message?.includes('Failed to acquire application lock') || e.message?.includes('Another upload is in progress');
       // Any other audit/consistency failure is non-transient: the same CALL
       // would fail identically on replay, so retrying wastes the budget (#507).
