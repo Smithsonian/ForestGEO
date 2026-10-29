@@ -2,8 +2,9 @@
  * ingestBatch — unknown COMMIT outcome (#563 §5.2, C1)
  *
  * A COMMIT whose reply is lost leaves the caller unable to tell "committed" from "rolled back". ingestBatch must
- * neither replay the sub-batch in-loop nor move its valid staged rows to unresolved coremeasurements; it propagates
- * TransactionCommitOutcomeUnknownError and leaves the rows staged so the outer retry can re-check uploadmetrics.
+ * neither replay the sub-batch in-loop nor move its valid staged rows to unresolved coremeasurements. It leaves that
+ * sub-batch staged, keeps ingesting the later sub-batches (each is its own transaction), and rethrows the first
+ * TransactionCommitOutcomeUnknownError after the loop so the outer retry can re-check uploadmetrics.
  *
  * The ConnectionManager mock below commits (or rolls back) for real and THEN throws the unknown-outcome error, which
  * reproduces both worlds a caller cannot distinguish after a lost COMMIT reply.
@@ -13,7 +14,7 @@
  * Run in isolation:
  *   npx vitest run --config vitest.integration.config.mts tests/integration/ingest-batch-commit-outcome-unknown.test.ts
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { cleanupTestMeasurements, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 import { SourceFormat } from '@/config/macros/formdetails';
@@ -148,6 +149,11 @@ const CSV_HEADERS = ['tag', 'stemtag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', '
 const MEASUREMENT_DATE = '2024-03-15';
 
 const EXPECTED_ROW_COUNT = 5;
+const SUB_BATCH_ROW_LIMIT = '2';
+const SUB_BATCH_ROW_LIMIT_ENV = 'INGESTION_SUB_BATCH_ROWS';
+const SUB_BATCH_COUNT = 3;
+const FIRST_SUB_BATCH_ROW_COUNT = 2;
+const FIRST_SUB_BATCH_TREE_TAGS = ['IC001', 'IC002'];
 const UPLOADMETRICS_STATUS_COMPLETED = 'completed';
 const TEST_TIMEOUT_MS = 120_000;
 const SETUP_TIMEOUT_MS = 120_000;
@@ -276,6 +282,11 @@ describe('ingestBatch — unknown COMMIT outcome (#563 C1)', () => {
     return counts;
   }
 
+  async function fetchStagedTreeTags(): Promise<string[]> {
+    const [rows] = await connection.query<RowDataPacket[]>('SELECT TreeTag FROM temporarymeasurements WHERE FileID = ? ORDER BY id', [FILE_NAME]);
+    return rows.map(row => String(row.TreeTag));
+  }
+
   async function countRowsForFile(stemGUIDCondition: 'IS NULL' | 'IS NOT NULL'): Promise<number> {
     const [rows] = await connection.query<RowDataPacket[]>(
       `SELECT COUNT(*) AS count FROM coremeasurements WHERE UploadFileID = ? AND StemGUID ${stemGUIDCondition}`,
@@ -337,4 +348,55 @@ describe('ingestBatch — unknown COMMIT outcome (#563 C1)', () => {
     },
     TEST_TIMEOUT_MS
   );
+
+  describe('with three sub-batches and the unknown outcome on the first', () => {
+    let originalSubBatchRows: string | undefined;
+
+    beforeEach(() => {
+      originalSubBatchRows = process.env[SUB_BATCH_ROW_LIMIT_ENV];
+      process.env[SUB_BATCH_ROW_LIMIT_ENV] = SUB_BATCH_ROW_LIMIT;
+    });
+
+    afterEach(() => {
+      if (originalSubBatchRows === undefined) delete process.env[SUB_BATCH_ROW_LIMIT_ENV];
+      else process.env[SUB_BATCH_ROW_LIMIT_ENV] = originalSubBatchRows;
+    });
+
+    it.each(['rolled_back_then_lost', 'committed_then_lost'] as const)(
+      '%s: later sub-batches are still ingested, only the uncertain one stays staged, the same error is rethrown, and a retry ingests everything once',
+      async fault => {
+        await stageFixtureRows();
+        sharedState.commitFault = fault;
+
+        const outcome = await runIngestBatch().then(
+          () => 'resolved',
+          (error: unknown) => error
+        );
+        const afterFault = await snapshot(`multi ${fault} after first run`);
+        const stagedTags = await fetchStagedTreeTags();
+        console.log(`[C1 multi ${fault}] outcome:`, outcome, 'bulkingestion calls:', sharedState.bulkIngestionCalls, 'staged tags:', stagedTags);
+
+        expect(outcome, 'the unknown outcome must be rethrown after the loop, not absorbed').toBeInstanceOf(TransactionCommitOutcomeUnknownError);
+        expect(sharedState.commitFaultsInjected).toBe(1);
+        expect(sharedState.bulkIngestionCalls, 'one CALL per sub-batch: no in-loop replay and no abort before sub-batches 2 and 3').toBe(SUB_BATCH_COUNT);
+        expect(afterFault.unresolved, 'valid staged rows must never be moved to unresolved after an unknown outcome').toBe(0);
+        if (fault === 'rolled_back_then_lost') {
+          expect(stagedTags, 'only the uncertain sub-batch stays staged').toEqual(FIRST_SUB_BATCH_TREE_TAGS);
+          expect(afterFault.ingested, 'sub-batches 2 and 3 are ingested').toBe(EXPECTED_ROW_COUNT - FIRST_SUB_BATCH_ROW_COUNT);
+        } else {
+          expect(stagedTags).toEqual([]);
+          expect(afterFault.ingested, 'sub-batch 1 committed for real and sub-batches 2 and 3 followed').toBe(EXPECTED_ROW_COUNT);
+          await stageFixtureRows();
+        }
+
+        await runIngestBatch();
+        const afterRetry = await snapshot(`multi ${fault} after retry`);
+        expect(afterRetry.ingested).toBe(EXPECTED_ROW_COUNT);
+        expect(afterRetry.unresolved).toBe(0);
+        expect(afterRetry.staged).toBe(0);
+        expect(afterRetry.audits.INSERT, 'exactly one INSERT audit per measurement').toBe(EXPECTED_ROW_COUNT);
+      },
+      TEST_TIMEOUT_MS
+    );
+  });
 });
