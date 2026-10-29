@@ -183,10 +183,10 @@ Unlike a real publish, a Dry run does **not** require a finished census. If the 
 
 ## Rebuilding ViewFullTable
 
-Publishing a census no longer rebuilds the `ViewFullTable` reporting view automatically. The rebuild is slow on large plots, and operators usually want to confirm the load committed before refreshing the reporting view. Use the **Rebuild ViewFullTable** button (next to **Publish census** on the Census Overview header) when you are ready.
+Publishing a census no longer rebuilds the `ViewFullTable` reporting view automatically. The rebuild is slow on large plots, and operators usually want to confirm the load committed before refreshing the reporting view. Use **Rebuild ViewFullTable** in the **⋯** menu next to **Publish census** on the Census Overview page when you are ready.
 
 1. Confirm the publish artifact ran successfully against the destination.
-2. Click **Rebuild ViewFullTable**, then **Download rebuild artifact**.
+2. Open the **⋯** menu, choose **Rebuild ViewFullTable**, then click **Download rebuild artifact**.
 3. Run the downloaded `.sql` against the destination database.
 
 The rebuild artifact first checks that `ctfsweb_webuser.CreateFullView` is installed and aborts with an install hint if it is missing — source `creating_ViewFullTable.sql` into the destination's `ctfsweb_webuser` first. It then calls `CreateFullView(DATABASE(), 'ViewFullTable')` against whichever destination database you run it on.
