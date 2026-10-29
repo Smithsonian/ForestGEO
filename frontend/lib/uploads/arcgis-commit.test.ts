@@ -362,6 +362,30 @@ describe('commitArcgisImport — failure context (AU9, AC 18)', () => {
       batchID: DERIVED_BATCH
     });
   });
+
+  it('names the replacement transaction that failed, so a later window is distinguishable from the first, and rethrows the same object', async () => {
+    const harness = createUnitHarness(REFERENCE_ROW_COUNT);
+    const dbError = Object.assign(new Error('Deadlock found when trying to get lock'), { code: 'ER_LOCK_DEADLOCK' });
+    const SECOND_REPLACEMENT_TRANSACTION = 2;
+    const measurementThrough = mocks.measurementWindow.getMockImplementation()!;
+    let measurementWindowsSeen = 0;
+    mocks.measurementWindow.mockImplementation(async (...args: unknown[]) => {
+      measurementWindowsSeen += 1;
+      if (measurementWindowsSeen === SECOND_REPLACEMENT_TRANSACTION) throw dbError;
+      return measurementThrough(...args);
+    });
+    await expect(commitArcgisImport(harness.manager as never, params())).rejects.toBe(dbError);
+    const failed = mocks.logger.error.mock.calls.filter(([event]) => event === ARCGIS_COMMIT_FAILED_EVENT);
+    console.log(`[AU9] failed events=${JSON.stringify(failed.map(([, , context]) => context))}\n${harness.render()}`);
+    expect(failed).toHaveLength(1);
+    expect(failed[0][1]).toBe(dbError);
+    expect(failed[0][2]).toMatchObject({
+      unit: 'replacement',
+      phase: `replacement transaction ${SECOND_REPLACEMENT_TRANSACTION}`,
+      errorName: 'Error',
+      errorMessage: dbError.message
+    });
+  });
 });
 
 const TEST_SCHEMA = 'forestgeo_testing';

@@ -213,9 +213,16 @@ async function stageImportRows(
 }
 
 /** The census replacement's owner for an ArcGIS commit: the unit guard as the lock, the per-import marker as the completion. */
-function arcgisCensusReplacementOwner(connectionManager: ConnectionManager, attempt: ArcgisCommitAttempt): CensusReplacementOwner {
+function arcgisCensusReplacementOwner(
+  connectionManager: ConnectionManager,
+  attempt: ArcgisCommitAttempt,
+  progress: ArcgisCommitProgress
+): CensusReplacementOwner {
+  let replacementTransactionOrdinal = 0;
   return {
     lockForUnit: async transactionID => {
+      replacementTransactionOrdinal += 1;
+      progress.phase = `replacement transaction ${replacementTransactionOrdinal}`;
       const snapshot = await lockArcgisImportSessionForCommitUnit(connectionManager, attempt, transactionID);
       return snapshot.commitCompleted || snapshot.censusReplacementCompleted ? 'marker_already_set' : 'proceed';
     },
@@ -239,7 +246,7 @@ async function replaceCensus(connectionManager: ConnectionManager, attempt: Arcg
   const run = await runCensusReplacementUnits(
     connectionManager,
     { schema: attempt.schema, plotID: attempt.plotID, censusID: attempt.censusID, incomingBatchID: attempt.batchID, changedBy: attempt.changedBy },
-    arcgisCensusReplacementOwner(connectionManager, attempt)
+    arcgisCensusReplacementOwner(connectionManager, attempt, progress)
   );
   progress.slowestTransactionMs = Math.max(progress.slowestTransactionMs, run.slowestWindowMs);
   ailogger.info(CENSUS_REPLACEMENT_COMPLETED_EVENT, { ...logKeys, ...run, elapsedMs: Date.now() - startedAt });
