@@ -1,4 +1,5 @@
 import type { BlockingPreconditionKind, PublishBlockerCount } from '@/lib/ctfs-export/precondition';
+import { formatDisplayDate } from '@/config/dateformats';
 
 export const TOP_ERROR_TYPE_LIMIT = 5;
 export const CENSUS_OVERVIEW_ERROR_CENSUS_IDS_PARAM = 'errorCensusIDs';
@@ -76,6 +77,14 @@ export const EXPORT_SKIP_REASON_LABELS: Record<ExportSkipReasonKind, string> = {
   other: 'other reason'
 };
 
+export const EXPORT_SKIP_REASON_ROW_LABELS: Record<ExportSkipReasonKind, string> = {
+  'not-validated': 'Not validated',
+  'no-stem-guid': 'Failed (no stem)',
+  'inactive-stem-or-tree': 'Inactive tree or stem',
+  'missing-link': 'Missing quadrat, species, genus or family link',
+  other: 'Other reason'
+};
+
 /** Stem rows labelled by their true unit; each description is the row's tooltip. */
 export const TREES_AND_STEMS_ROWS = {
   previouslyMeasuredStems: {
@@ -101,6 +110,33 @@ export const CENSUS_OVERVIEW_TEXT = {
   exportPreviewHeading: 'Export preview',
   skipReasonsPrefix: 'skipped because (can overlap):',
   listSeparator: ' · ',
+  validationErrorsTitle: 'Validation Errors',
+  errorTypeColumnHeading: 'Error type',
+  errorRowsColumnHeading: 'Rows',
+  multipleErrorsNote: 'One measurement can carry several errors.',
+  publishPreviewTitle: 'If you publish now',
+  publishPreviewSubtitle: 'What would reach the Smithsonian database',
+  exportedLegend: 'exported',
+  skippedLegend: 'skipped',
+  skipReasonsHeading: 'Why rows are skipped (a row can have several reasons)',
+  censusTotalsLabel: 'Census totals',
+  treesTileLabel: 'Trees',
+  stemsTileLabel: 'Stems',
+  quadratsTileLabel: 'Quadrats with data',
+  errorsTileLabel: 'Measurements with errors',
+  ofTotalPrefix: 'of',
+  multiStemSuffix: 'multi-stem',
+  previouslyMeasuredSuffix: 'previously measured',
+  newRecruitsSuffix: 'new recruits',
+  noPreviousCensus: 'no previous census',
+  notYetMeasuredSuffix: 'not yet measured',
+  ofActiveMeasurementsSuffix: 'of active measurements',
+  noQuadrats: 'No quadrats in this plot',
+  moreActionsLabel: 'More census actions',
+  rebuildViewFullTableAction: 'Rebuild ViewFullTable',
+  deleteCensusAction: 'Delete census…',
+  censusTitlePrefix: 'Census',
+  scopeSeparator: ' / ',
   retry: 'Retry',
   summaryLoadFailed: 'Failed to load the census summary'
 } as const;
@@ -110,6 +146,9 @@ const AFFECTED_PERCENT_FRACTION_DIGITS = 1;
 const STEMS_PER_TREE_FRACTION_DIGITS = 1;
 const SINGLE_ITEM = 1;
 const EMPTY_RATIO_DISPLAY = '0';
+const UNAVAILABLE_PERCENT_DISPLAY = '—';
+const DATE_RANGE_SEPARATOR = ' – ';
+const OPEN_ENDED_DATE_PREFIX = 'From';
 
 export function formatCount(value: number): string {
   return value.toLocaleString();
@@ -147,4 +186,45 @@ export function formatExportedWithUnresolvedErrors(count: number): string {
 
 export function formatStemsPerTree(countTrees: number, countStems: number): string {
   return countTrees > 0 ? (countStems / countTrees).toFixed(STEMS_PER_TREE_FRACTION_DIGITS) : EMPTY_RATIO_DISPLAY;
+}
+
+/** null when the share cannot be stated honestly: nothing to divide by, or more affected than exist. */
+export function formatPercentOf(part: number, whole: number): string | null {
+  if (whole <= 0 || part > whole) return null;
+  return `${((part / whole) * PERCENT_SCALE).toFixed(AFFECTED_PERCENT_FRACTION_DIGITS)}%`;
+}
+
+export function toBarPercent(part: number, whole: number): number {
+  if (whole <= 0) return 0;
+  return Math.min((part / whole) * PERCENT_SCALE, PERCENT_SCALE);
+}
+
+export function formatAffectedOfActive(affectedMeasurements: number, totalActiveMeasurements: number): string {
+  const ofActive = `${CENSUS_OVERVIEW_TEXT.ofTotalPrefix} ${formatCount(totalActiveMeasurements)} measurements`;
+  const percent = formatPercentOf(affectedMeasurements, totalActiveMeasurements);
+  return percent === null ? ofActive : `${ofActive}${CENSUS_OVERVIEW_TEXT.listSeparator}${percent}`;
+}
+
+export function formatShareOfActiveHeading(totalActiveMeasurements: number): string {
+  return `Share of ${formatCount(totalActiveMeasurements)} active`;
+}
+
+export function formatShareOfActive(count: number, totalActiveMeasurements: number): string {
+  return formatPercentOf(count, totalActiveMeasurements) ?? UNAVAILABLE_PERCENT_DISPLAY;
+}
+
+export function formatErrorTypesFootnote(remainingErrorTypeCount: number): string {
+  if (remainingErrorTypeCount <= 0) return CENSUS_OVERVIEW_TEXT.multipleErrorsNote;
+  const noun = remainingErrorTypeCount === SINGLE_ITEM ? 'type' : 'types';
+  return `Plus ${formatCount(remainingErrorTypeCount)} more error ${noun}. ${CENSUS_OVERVIEW_TEXT.multipleErrorsNote}`;
+}
+
+export function formatExportedOfActive(totalActiveMeasurements: number): string {
+  return `${CENSUS_OVERVIEW_TEXT.ofTotalPrefix} ${formatCount(totalActiveMeasurements)} measurements exported`;
+}
+
+export function formatCensusDateRange(startDate: Date | string | undefined, endDate: Date | string | undefined): string {
+  if (!startDate) return '';
+  if (!endDate) return `${OPEN_ENDED_DATE_PREFIX} ${formatDisplayDate(startDate)}`;
+  return `${formatDisplayDate(startDate)}${DATE_RANGE_SEPARATOR}${formatDisplayDate(endDate)}`;
 }
