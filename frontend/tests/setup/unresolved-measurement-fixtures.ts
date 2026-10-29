@@ -230,8 +230,13 @@ export async function openSideConnection(database: string, lockWaitTimeoutSecond
   if (!Number.isInteger(lockWaitTimeoutSeconds) || lockWaitTimeoutSeconds <= 0) throw new InvalidLockWaitTimeoutError(lockWaitTimeoutSeconds);
   const { host, port, user, password } = DEFAULT_TEST_CONFIG;
   const side = await mysql.createConnection({ host, port, user, password, database });
-  await side.query(`SET SESSION TRANSACTION ISOLATION LEVEL ${SIDE_CONNECTION_ISOLATION}`);
-  await side.query(`SET SESSION innodb_lock_wait_timeout = ${lockWaitTimeoutSeconds}`);
+  try {
+    await side.query(`SET SESSION TRANSACTION ISOLATION LEVEL ${SIDE_CONNECTION_ISOLATION}`);
+    await side.query(`SET SESSION innodb_lock_wait_timeout = ${lockWaitTimeoutSeconds}`);
+  } catch (sessionSetupError: unknown) {
+    await side.end();
+    throw sessionSetupError;
+  }
   return side;
 }
 

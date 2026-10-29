@@ -374,23 +374,29 @@ describe('ingestBatch — integration', () => {
   /** Stages the 5 fixture rows WITHOUT a census replacement (REVISIONS, worker-style null session), so a dirty census stays dirty. */
   async function stageFixtureRowsWithoutReplacement(fileName: string = FILE_NAME): Promise<void> {
     const transactionID = await connectionManager.beginTransaction();
-    const result = await stageMeasurementChunk(connectionManager, {
-      schema,
-      fileName,
-      batchID: BATCH_ID,
-      plotID,
-      censusID,
-      uploadMode: UploadMode.REVISIONS,
-      sourceFormat: SourceFormat.csv,
-      rawRows: buildFixtureRows(),
-      csvHeaders: CSV_HEADERS,
-      delimiter: CSV_DELIMITER,
-      uploadSessionID: null,
-      firstRowOrdinal: null,
-      changedBy: CHANGED_BY,
-      transactionID
-    });
-    await connectionManager.commitTransaction(transactionID);
+    let result: Awaited<ReturnType<typeof stageMeasurementChunk>>;
+    try {
+      result = await stageMeasurementChunk(connectionManager, {
+        schema,
+        fileName,
+        batchID: BATCH_ID,
+        plotID,
+        censusID,
+        uploadMode: UploadMode.REVISIONS,
+        sourceFormat: SourceFormat.csv,
+        rawRows: buildFixtureRows(),
+        csvHeaders: CSV_HEADERS,
+        delimiter: CSV_DELIMITER,
+        uploadSessionID: null,
+        firstRowOrdinal: null,
+        changedBy: CHANGED_BY,
+        transactionID
+      });
+      await connectionManager.commitTransaction(transactionID);
+    } catch (stagingError: unknown) {
+      await connectionManager.rollbackTransaction(transactionID);
+      throw stagingError;
+    }
     expect(result.insertedCount).toBe(EXPECTED_ROW_COUNT);
   }
 
