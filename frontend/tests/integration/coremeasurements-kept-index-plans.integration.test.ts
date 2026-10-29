@@ -141,7 +141,7 @@ describe('(I7) plans that justify the indexes #560 keeps', () => {
   it.each([
     { column: 'MeasuredDBH', expectedIndex: 'idx_measureddbh' },
     { column: 'MeasuredHOM', expectedIndex: 'idx_measuredhom' }
-  ])('(D3) the collapser zero-$column UPDATE reads coremeasurements through $expectedIndex', async ({ column, expectedIndex }) => {
+  ])('(D3) pins the access path of a stand-in for the collapser zero-$column UPDATE: $expectedIndex', async ({ column, expectedIndex }) => {
     const access = await coremeasurementsAccess(`UPDATE ${COREMEASUREMENTS_TABLE} SET ${column} = NULL WHERE ${column} = 0 AND CensusID = ?`, [
       TARGET_CENSUS_ID
     ]);
@@ -149,7 +149,7 @@ describe('(I7) plans that justify the indexes #560 keeps', () => {
     expect(keysUsedBy(access)).toContain(expectedIndex);
   });
 
-  it('(D2) the plot-wide pending-row read is a ref on idx_isvalidated', async () => {
+  it('(D2) pins the access path of a stand-in for the plot-wide pending-row read: a ref on idx_isvalidated', async () => {
     const access = await coremeasurementsAccess(
       `SELECT CoreMeasurementID, StemGUID, MeasuredDBH FROM ${COREMEASUREMENTS_TABLE} WHERE IsValidated IS NULL AND IsActive = 1`,
       []
