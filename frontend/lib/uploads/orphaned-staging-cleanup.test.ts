@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type ConnectionManager from '@/lib/db/connectionmanager';
 import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
-import { deleteOrphanedTemporaryMeasurements, findOrphanedTemporaryMeasurements } from './orphaned-staging-cleanup';
+import { deleteOrphanedTemporaryMeasurements, findOrphanedTemporaryMeasurements, ORPHAN_DELETE_WINDOW_ROWS } from './orphaned-staging-cleanup';
 
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
@@ -34,10 +34,44 @@ describe('orphaned staged-row ownership (#561 N2, AU14)', () => {
     const deleted = await deleteOrphanedTemporaryMeasurements(manager, SCHEMA, ['old.csv', 'older.csv']);
     console.log(`[AU14] delete: ${calls[0].sql.replace(/\s+/g, ' ')} ${JSON.stringify(calls[0].params)}`);
     expect(deleted).toBe(2);
-    expect(calls[0].sql.replace(/\s+/g, ' ')).toMatch(/^DELETE tm FROM\s+\S+\.temporarymeasurements tm WHERE tm\.FileID IN \(\?, \?\) AND /);
+    expect(calls[0].sql.replace(/\s+/g, ' ')).toMatch(/^DELETE FROM\s+\S+\.temporarymeasurements AS tm WHERE tm\.FileID IN \(\?, \?\) AND /);
     expect(calls[0].sql.replace(/\s+/g, ' ')).toMatch(OWNERSHIP_PREDICATE);
+    expect(calls[0].sql.replace(/\s+/g, ' ')).toMatch(new RegExp(`LIMIT ${ORPHAN_DELETE_WINDOW_ROWS}$`));
     expect(calls[0].params).toEqual(['old.csv', 'older.csv', ...ACTIVE_UPLOAD_SESSION_STATES]);
     expect(calls[0].transactionID, 'the DELETE runs in its own READ COMMITTED transaction (P23)').toBe(DELETE_TRANSACTION_ID);
+  });
+
+  it('deletes window by window, each window in its own transaction, until a window comes back short', async () => {
+    const windowRows = 4;
+    const windowAnswers = [{ affectedRows: windowRows }, { affectedRows: windowRows }, { affectedRows: 1 }];
+    const { manager, calls, withTransaction } = recorder(undefined);
+    (manager.executeQuery as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (sql: string, params: unknown[] = [], transactionID?: string) => {
+      calls.push({ sql, params, transactionID });
+      return windowAnswers[calls.length - 1];
+    });
+
+    const deleted = await deleteOrphanedTemporaryMeasurements(manager, SCHEMA, ['old.csv'], windowRows);
+
+    console.log(`[N-a] deleted=${deleted} windows=${calls.length} transactions=${withTransaction.mock.calls.length}`);
+    expect(deleted).toBe(2 * windowRows + 1);
+    expect(calls).toHaveLength(windowAnswers.length);
+    expect(withTransaction, 'a window per transaction keeps each under the transaction deadline').toHaveBeenCalledTimes(windowAnswers.length);
+    for (const call of calls) {
+      expect(call.sql.replace(/\s+/g, ' ')).toMatch(new RegExp(`LIMIT ${windowRows}$`));
+      expect(call.sql.replace(/\s+/g, ' ')).toMatch(OWNERSHIP_PREDICATE);
+    }
+  });
+
+  it('stops after one window when the first window deletes nothing', async () => {
+    const { manager, calls } = recorder({ affectedRows: 0 });
+    expect(await deleteOrphanedTemporaryMeasurements(manager, SCHEMA, ['old.csv'])).toBe(0);
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])('refuses window size %s before any statement', async windowRows => {
+    const { manager, calls } = recorder({ affectedRows: 0 });
+    await expect(deleteOrphanedTemporaryMeasurements(manager, SCHEMA, ['old.csv'], windowRows)).rejects.toBeInstanceOf(RangeError);
+    expect(calls).toHaveLength(0);
   });
 
   it('deletes nothing and issues no statement for an empty file list', async () => {

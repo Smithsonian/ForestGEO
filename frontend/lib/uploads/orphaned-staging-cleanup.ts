@@ -4,8 +4,8 @@
  * file_id-only rule deleted a running worker job's staging. The DELETE evaluates ownership itself, against committed
  * session state, so nothing listed by the finder can be deleted after it gained an owner.
  *
- * Locking: the DELETE runs in its own ConnectionManager transaction (READ COMMITTED). InnoDB reads a subquery's
- * tables without locks at that level only for INSERT/REPLACE/CREATE ... SELECT and UPDATE; this multi-table DELETE takes
+ * Locking: the DELETE runs in bounded windows, each in its own ConnectionManager transaction (READ COMMITTED). InnoDB reads a
+ * subquery's tables without locks at that level only for INSERT/REPLACE/CREATE ... SELECT and UPDATE; this DELETE takes
  * shared locks on the upload_sessions rows its NOT EXISTS reads. That is what makes the ownership check atomic, and it
  * means the statement can wait behind an ArcGIS commit unit holding a session row FOR UPDATE (it proceeds when the
  * unit commits), and can deadlock with a retried commit's S0, which holds the session row and wants the earlier
@@ -16,6 +16,9 @@ import type ConnectionManager from '@/lib/db/connectionmanager';
 import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { isMissingTableError } from '@/lib/errorhelpers';
 import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
+
+/** Rows one orphan-delete transaction removes, so a large backlog never outlives the transaction deadline or holds its row locks. */
+export const ORPHAN_DELETE_WINDOW_ROWS = 5000;
 
 export interface OrphanedStagedFile {
   fileId: string;
@@ -48,16 +51,31 @@ export async function findOrphanedTemporaryMeasurements(connectionManager: Conne
   }
 }
 
-export async function deleteOrphanedTemporaryMeasurements(connectionManager: ConnectionManager, schema: string, fileIds: string[]): Promise<number> {
+export async function deleteOrphanedTemporaryMeasurements(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileIds: string[],
+  windowRows: number = ORPHAN_DELETE_WINDOW_ROWS
+): Promise<number> {
+  if (!Number.isSafeInteger(windowRows) || windowRows <= 0) {
+    throw new RangeError(`Orphan delete window must be a positive integer; received ${windowRows}`);
+  }
   if (fileIds.length === 0) return 0;
-  const deleteSQL = safeFormatQuery(
+  const deleteWindowSQL = safeFormatQuery(
     schema,
-    `DELETE tm FROM ??.temporarymeasurements tm
+    `DELETE FROM ??.temporarymeasurements AS tm
       WHERE tm.FileID IN (${buildInPlaceholders(fileIds.length)})
-        AND ${UNOWNED_STAGED_ROW_PREDICATE}`
+        AND ${UNOWNED_STAGED_ROW_PREDICATE}
+      LIMIT ${windowRows}`
   );
-  return connectionManager.withTransaction(async tx => {
-    const result = await connectionManager.executeQuery(deleteSQL, [...fileIds, ...ACTIVE_UPLOAD_SESSION_STATES], tx.id);
-    return Number((result as { affectedRows?: number })?.affectedRows ?? 0);
-  });
+  let deletedRows = 0;
+  let windowDeletedRows: number;
+  do {
+    windowDeletedRows = await connectionManager.withTransaction(async tx => {
+      const result = await connectionManager.executeQuery(deleteWindowSQL, [...fileIds, ...ACTIVE_UPLOAD_SESSION_STATES], tx.id);
+      return Number((result as { affectedRows?: number })?.affectedRows ?? 0);
+    });
+    deletedRows += windowDeletedRows;
+  } while (windowDeletedRows === windowRows);
+  return deletedRows;
 }

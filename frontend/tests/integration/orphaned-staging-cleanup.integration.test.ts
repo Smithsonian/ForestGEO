@@ -236,6 +236,34 @@ describe('orphaned staged-row ownership against a real upload_sessions table (#5
     expect(await survivingRows()).toEqual([{ FileID: CSV_WORKER_STAGED_FILE, SessionID: CSV_WORKER_SESSION, rows: chunkRows }]);
   });
 
+  it('N-a: more orphan rows than one window are deleted over several transactions, and rows an active session owns survive every window', async () => {
+    const windowRows = 3;
+    const orphanRows = 3 * windowRows + 2;
+    const ownedRows = 4;
+    await seedSession(OLD_FAILED_SESSION, UploadSessionState.FAILED, SHARED_FILE);
+    await seedSession(WORKER_SESSION, UploadSessionState.UPLOADING, WORKER_JOB_FILE_ID);
+    await seedStagedRows(SHARED_FILE, OLD_FAILED_SESSION, orphanRows);
+    await seedStagedRows(SHARED_FILE, WORKER_SESSION, ownedRows);
+    const manager = ConnectionManager.getInstance();
+    const found = await findOrphanedTemporaryMeasurements(manager, schema);
+    const transactionsBefore = sharedState.counter;
+
+    const deleted = await deleteOrphanedTemporaryMeasurements(
+      manager,
+      schema,
+      found.map(file => file.fileId),
+      windowRows
+    );
+
+    const transactionsUsed = sharedState.counter - transactionsBefore;
+    console.log(`[N-a] found=${JSON.stringify(found)} deleted=${deleted} transactions=${transactionsUsed}`);
+    console.table(await survivingRows());
+    expect(found).toEqual([{ fileId: SHARED_FILE, rowCount: orphanRows }]);
+    expect(deleted).toBe(orphanRows);
+    expect(transactionsUsed, 'ceil(orphans / window) full or partial windows: 3 full, 1 partial').toBe(Math.floor(orphanRows / windowRows) + 1);
+    expect(await survivingRows()).toEqual([{ FileID: SHARED_FILE, SessionID: WORKER_SESSION, rows: ownedRows }]);
+  });
+
   it('the DELETE re-checks ownership itself: a file listed as orphaned that gains an owner before the DELETE survives', async () => {
     const stagedRows = 4;
     await seedSession(OLD_FAILED_SESSION, UploadSessionState.FAILED, OLD_FILE);
