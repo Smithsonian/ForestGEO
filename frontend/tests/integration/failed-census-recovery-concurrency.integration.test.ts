@@ -7,6 +7,7 @@
  * real ConnectionManager (one pooled connection per transaction) against local MySQL.
  *   I5  a census writer started between a recovery transaction's guard and its commit waits, and none of its rows is deleted or cascaded
  *   I8  two unbarriered runners of one census finish without a lock error and every row is audited exactly once
+ *   I12 ingestion's CALL waits on a recovery transaction's census lock before it writes anything, then completes once
  *
  * Prerequisites: docker compose up -d mysql. Run only through the relay's integration lock script.
  */
@@ -98,6 +99,17 @@ const INSERT_OPERATION = 'INSERT';
 const NO_BACKOFF_JITTER = 0;
 const SEED_SPECIES_CODE = 'ACERRU';
 const SEED_QUADRAT_NAME = 'Q01';
+const I12_OTHER_FAILED_FILE = 'concurrency-i12-failed.csv';
+const I12_OTHER_FAILED_BATCH = 'concurrency-i12-failed__sub001';
+const RECENT_STATEMENT_COUNT = 4;
+const STATEMENT_PREVIEW_LENGTH = 120;
+const TABLE_LOCK_TYPE = 'TABLE';
+const RECORD_LOCK_TYPE = 'RECORD';
+const INTENTION_SHARED_LOCK_MODE = 'IS';
+const SHARED_RECORD_LOCK_MODE = 'S,REC_NOT_GAP';
+const GRANTED_LOCK_STATUS = 'GRANTED';
+const WAITING_LOCK_STATUS = 'WAITING';
+const PRIMARY_INDEX = 'PRIMARY';
 
 describe('failed-first-census recovery under concurrent census writers (#562)', () => {
   let connection: Connection;
@@ -203,6 +215,36 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
   async function stageCleanFamily(): Promise<void> {
     const inserted = await stageCleanFixtureRows(realManager, { schema, fileName: CLEAN_FILE, batchID: CLEAN_BATCH, plotID, censusID, changedBy: CHANGED_BY });
     expect(inserted).toBe(CLEAN_FIXTURE_ROW_COUNT);
+  }
+
+  /** Every lock (granted and waiting) the transaction holds or requests, from performance_schema.data_locks. */
+  async function locksOf(
+    trxID: string
+  ): Promise<Array<{ table: string; index: string | null; type: string; mode: string; status: string; data: string | null }>> {
+    const [locks] = await connection.query<RowDataPacket[]>(
+      `SELECT OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE, LOCK_STATUS, LOCK_DATA FROM performance_schema.data_locks
+       WHERE ENGINE_TRANSACTION_ID = ? AND OBJECT_SCHEMA = ? ORDER BY LOCK_TYPE, OBJECT_NAME, INDEX_NAME`,
+      [trxID, schema]
+    );
+    return locks.map(lock => ({
+      table: String(lock.OBJECT_NAME),
+      index: lock.INDEX_NAME === null ? null : String(lock.INDEX_NAME),
+      type: String(lock.LOCK_TYPE),
+      mode: String(lock.LOCK_MODE),
+      status: String(lock.LOCK_STATUS),
+      data: lock.LOCK_DATA === null ? null : String(lock.LOCK_DATA)
+    }));
+  }
+
+  /** The last statements the session's procedure completed (performance_schema history), newest first: names the statement it is blocked in front of. */
+  async function recentCompletedStatements(threadID: number): Promise<string[]> {
+    const [statements] = await connection.query<RowDataPacket[]>(
+      `SELECT es.SQL_TEXT FROM performance_schema.events_statements_history es
+       JOIN performance_schema.threads th ON th.THREAD_ID = es.THREAD_ID
+       WHERE th.PROCESSLIST_ID = ? AND es.SQL_TEXT IS NOT NULL ORDER BY es.EVENT_ID DESC LIMIT ?`,
+      [threadID, RECENT_STATEMENT_COUNT]
+    );
+    return statements.map(row => String(row.SQL_TEXT).replace(/\s+/g, ' ').trim().slice(0, STATEMENT_PREVIEW_LENGTH));
   }
 
   /** A real writer of the census: tree, stem, resolved measurement and a completed upload metric, in one transaction it commits. */
@@ -412,6 +454,137 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
         insertAudits.every(row => Number(row.auditRows) === 1),
         'each INSERT audit RecordID appears once'
       ).toBe(true);
+    },
+    CONCURRENCY_TEST_TIMEOUT_MS
+  );
+
+  it.each([
+    ['a', 'window 1', 'superseded', WINDOW],
+    ['b', 'the final transaction', 'recovered', HELD_BACK_ROWS]
+  ] as const)(
+    'I12(%s) serialization: ingestion inside its CALL waits on the census row while a recovery transaction in %s holds it, holding no prelude lock yet; after the commit it completes once (catches: a CALL that writes before it reaches the census lock; a lost or doubly-ingested family; double audit)',
+    async (variant, label, expectedOutcome, expectedDeleted) => {
+      await stageCleanFamily();
+      await seedUploadMetric(connection, { schema, plotID, censusID, fileID: CLEAN_FILE, batchID: CLEAN_BATCH, status: UPLOAD_STATUS.FAILED });
+      const harness = createStatementHarness(realManager);
+      let ingestion!: Promise<IngestBatchResult>;
+      let recovery!: Promise<FailedCensusRecoveryResult>;
+      const residueIDs: number[] = [];
+      await runBarrierScenario(harness, async () => {
+        const beforeSnapshot = harness.placeBarrier(matching(WINDOW_WALK_STATEMENT.PRE_CALL_SNAPSHOT), FIRST_GUARD_OCCURRENCE, 'before');
+        ingestion = harness.track(
+          ingestBatch(realManager, { schema, fileID: CLEAN_FILE, batchID: CLEAN_BATCH, expectedScope: { plotID, censusID }, changedBy: CHANGED_BY })
+        );
+        await withinDeadline(beforeSnapshot.reached, 'ingestion parked before its pre-call snapshot', harness.renderStatementLog);
+        const ingestionTransactionID = harness.statements.at(-1)!.transactionID!;
+        const [threadRow] = (await realManager.executeQuery('SELECT CONNECTION_ID() AS threadID', [], ingestionTransactionID)) as Array<{ threadID: number }>;
+        const ingestionThreadID = Number(threadRow.threadID);
+
+        residueIDs.push(
+          ...(await seedUnresolvedMeasurements(connection, {
+            censusID,
+            fileID: I12_OTHER_FAILED_FILE,
+            batchID: I12_OTHER_FAILED_BATCH,
+            count: variant === 'a' ? WINDOW + HELD_BACK_ROWS : HELD_BACK_ROWS,
+            tagPrefix: 'I12F'
+          }))
+        );
+
+        const afterGuard = harness.placeBarrier(matching(WINDOW_WALK_STATEMENT.COMPLETED_UPLOADS_GUARD), FIRST_GUARD_OCCURRENCE, 'after');
+        recovery = harness.track(
+          recoverFailedInitialCensusInBoundedTransactions(realManager, {
+            schema,
+            fileID: CLEAN_FILE,
+            batchID: CLEAN_BATCH,
+            plotID,
+            censusID,
+            changedBy: CHANGED_BY
+          })
+        );
+        await withinDeadline(afterGuard.reached, `recovery past its guard in ${label}`, harness.renderStatementLog);
+
+        beforeSnapshot.release();
+        const waiting = await waitForLockWait(
+          connection,
+          { schema, table: 'census', lockData: String(censusID), threadID: ingestionThreadID },
+          harness,
+          'ingestion waiting on census.PRIMARY'
+        );
+        const ingestionCall = harness.statements.find(
+          statement => statement.transactionID === ingestionTransactionID && WINDOW_WALK_STATEMENT.BULK_INGESTION_CALL.test(statement.sql)
+        );
+        expect(ingestionCall, 'ingestion issued its CALL').toBeDefined();
+        expect(ingestionCall!.settled, 'and the CALL has not returned: the wait is inside the procedure').toBe(false);
+        const locksHeldWhileWaiting = await locksOf(String(waiting.trx_id));
+        const lastCompleted = await recentCompletedStatements(ingestionThreadID);
+        console.log(
+          `[I12 ${variant}] ingestionTx=${ingestionTransactionID} thread=${ingestionThreadID} waiting=${JSON.stringify(waiting)}\n` +
+            `locks=${JSON.stringify(locksHeldWhileWaiting)}\nlast completed procedure statements (newest first)=${JSON.stringify(lastCompleted)}`
+        );
+        expect(waiting.LOCK_MODE, 'ingestion requests a shared record lock on the census row').toBe(SHARED_RECORD_LOCK_MODE);
+        expect(locksHeldWhileWaiting, 'ingestion holds no row lock and no write lock yet: only the census intention lock and its waiting request').toEqual([
+          { table: 'census', index: PRIMARY_INDEX, type: RECORD_LOCK_TYPE, mode: SHARED_RECORD_LOCK_MODE, status: WAITING_LOCK_STATUS, data: String(censusID) },
+          { table: 'census', index: null, type: TABLE_LOCK_TYPE, mode: INTENTION_SHARED_LOCK_MODE, status: GRANTED_LOCK_STATUS, data: null }
+        ]);
+
+        afterGuard.release();
+        await withinDeadline(Promise.allSettled([ingestion, recovery]), 'both sides to settle', harness.renderStatementLog);
+      });
+
+      const [ingestionSettled, recoverySettled] = await Promise.allSettled([ingestion, recovery]);
+      console.log(`[I12 ${variant}] settled ingestion=${ingestionSettled.status} recovery=${recoverySettled.status}`);
+      expect([ingestionSettled.status, recoverySettled.status], 'neither side failed (no 1213 or other error)').toEqual(['fulfilled', 'fulfilled']);
+      const ingestionResult = (ingestionSettled as PromiseFulfilledResult<IngestBatchResult>).value;
+      const recoveryResult = (recoverySettled as PromiseFulfilledResult<FailedCensusRecoveryResult>).value;
+      const deleteAudits = await deleteAuditCounts(connection, censusID);
+      const [insertAudits] = await connection.query<RowDataPacket[]>(
+        `SELECT RecordID, COUNT(*) AS auditRows FROM unifiedchangelog WHERE TableName = ? AND Operation = ? AND CensusID = ? GROUP BY RecordID`,
+        [COREMEASUREMENTS_TABLE, INSERT_OPERATION, censusID]
+      );
+      console.log(
+        `[I12 ${variant}] recovery=${JSON.stringify(recoveryResult)} ingestionAttempts=${ingestionResult.subBatchResults[0].attemptsNeeded} ` +
+          `deleteAudits=${JSON.stringify([...deleteAudits])}\n${harness.renderStatementLog()}`
+      );
+      expect(ingestionResult.subBatchResults[0].attemptsNeeded, 'ingestion needed no retry').toBe(1);
+      expect(recoveryResult.deadlockRetries, 'recovery met no deadlock').toBe(0);
+      expect(
+        { outcome: recoveryResult.outcome, deletedRows: recoveryResult.deletedRows },
+        `recovery result in ${label}: ${JSON.stringify(recoveryResult)}`
+      ).toEqual({
+        outcome: expectedOutcome,
+        deletedRows: expectedDeleted
+      });
+      expect(
+        await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE UploadFileID = ? AND StemGUID IS NOT NULL', [CLEAN_FILE]),
+        'G ingested once'
+      ).toBe(CLEAN_FIXTURE_ROW_COUNT);
+      expect(
+        await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE UploadFileID = ? AND StemGUID IS NULL', [CLEAN_FILE]),
+        'no unresolved row left for G'
+      ).toBe(0);
+      expect(await countOf(connection, 'SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ?', [CLEAN_FILE]), 'G staging consumed').toBe(0);
+      expect(
+        [...deleteAudits.values()].every(audit => audit.count === 1),
+        `DELETE-audit RecordIDs unique: ${JSON.stringify([...deleteAudits])}`
+      ).toBe(true);
+      expect(insertAudits, `INSERT audit RecordIDs: ${JSON.stringify(insertAudits)}`).toHaveLength(CLEAN_FIXTURE_ROW_COUNT);
+      expect(
+        insertAudits.every(row => Number(row.auditRows) === 1),
+        'INSERT-audit RecordIDs unique'
+      ).toBe(true);
+      const recoveredResidueIDs = residueIDs.slice(0, expectedDeleted);
+      const survivingResidueIDs = residueIDs.slice(expectedDeleted);
+      for (const id of recoveredResidueIDs) {
+        expect(
+          await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID = ?', [id]),
+          `recovered residue ${id} is gone`
+        ).toBe(0);
+        expect(deleteAudits.get(id)?.count, `recovered residue ${id} has exactly one DELETE audit`).toBe(1);
+      }
+      for (const id of survivingResidueIDs) {
+        expect(await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID = ?', [id]), `residue ${id} survives`).toBe(1);
+        expect(deleteAudits.has(id), `residue ${id} was never audited as deleted`).toBe(false);
+      }
     },
     CONCURRENCY_TEST_TIMEOUT_MS
   );
