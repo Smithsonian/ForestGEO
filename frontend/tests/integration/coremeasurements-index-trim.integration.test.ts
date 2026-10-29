@@ -27,6 +27,7 @@ import {
   CTFS_DRIFT_INDEX_COUNT,
   CTFS_DRIFT_SHAPES,
   dropThrowawaySchema,
+  dropThrowawaySchemaAfterSetupFailure,
   DROPPED_CANONICAL_INDEXES,
   LOCAL_DB_HOSTS,
   MEASUREMENTS_SUMMARY_TABLE,
@@ -79,8 +80,7 @@ async function provisionPreChangeSchema(suffix: string): Promise<{ schema: strin
   try {
     await addMissingIndexes(provisioned.connection, DROPPED_CANONICAL_INDEXES);
   } catch (error) {
-    await dropThrowawaySchema(provisioned.connection, provisioned.schema);
-    throw error;
+    await dropThrowawaySchemaAfterSetupFailure(provisioned.connection, provisioned.schema, error);
   }
   return provisioned;
 }

@@ -245,6 +245,16 @@ export async function dropThrowawaySchema(connection: Connection, schema: string
   }
 }
 
+/** Drops a schema whose setup threw, rethrowing the setup error; a cleanup failure is attached, never substituted. */
+export async function dropThrowawaySchemaAfterSetupFailure(connection: Connection, schema: string, setupError: unknown): Promise<never> {
+  try {
+    await dropThrowawaySchema(connection, schema);
+  } catch (cleanupError) {
+    throw new AggregateError([setupError, cleanupError], `setup of ${schema} failed, and so did dropping it; the setup error is first`);
+  }
+  throw setupError;
+}
+
 /**
  * A fresh schema holding only the canonical DDL (no procedures, no seed), named from this
  * checkout's harness schema so worktrees never collide. If loadSchema fails, the half-built
@@ -257,8 +267,7 @@ export async function provisionCanonicalSchema(suffix: string): Promise<{ schema
   try {
     await loadSchema(connection);
   } catch (error) {
-    await dropThrowawaySchema(connection, schema);
-    throw error;
+    await dropThrowawaySchemaAfterSetupFailure(connection, schema, error);
   }
   return { schema, connection };
 }

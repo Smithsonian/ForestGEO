@@ -21,6 +21,7 @@ import {
   connectionExecutor,
   COREMEASUREMENTS_TABLE,
   dropThrowawaySchema,
+  dropThrowawaySchemaAfterSetupFailure,
   DROPPED_CANONICAL_INDEXES,
   LOCAL_DB_HOSTS,
   mysqlErrno,
@@ -72,8 +73,7 @@ async function provisionTrimmedSchema(suffix: string): Promise<{ schema: string;
     const result = await applyPendingMigrations(connectionExecutor(provisioned.connection), provisioned.schema, [requireTrimMigrationSource()]);
     expect(result.failed, 'fixture: the trim migration must apply before the rollback is tested').toBeNull();
   } catch (error) {
-    await dropThrowawaySchema(provisioned.connection, provisioned.schema);
-    throw error;
+    await dropThrowawaySchemaAfterSetupFailure(provisioned.connection, provisioned.schema, error);
   }
   return provisioned;
 }
