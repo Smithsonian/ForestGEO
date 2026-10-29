@@ -342,6 +342,20 @@ describe('abandonActiveSession', () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
+  it('formats the statement through safeFormatQuery: the schema is escaped as an identifier', async () => {
+    await abandonActiveSession('forestgeo_testing', 'session-9', 'x');
+    const [, sql] = mocks.runQuery.mock.calls[0];
+    console.log(`[abandon] statement=${String(sql).replace(/\s+/g, ' ').trim()}`);
+    expect(String(sql)).toContain('`forestgeo_testing`.upload_sessions');
+  });
+
+  it('refuses a schema outside the allow-list before taking a connection or running a statement', async () => {
+    await expect(abandonActiveSession('forestgeo_testing; DROP TABLE x', 'session-9', 'x')).rejects.toThrow();
+    console.log(`[abandon] getConn calls=${mocks.getConn.mock.calls.length} runQuery calls=${mocks.runQuery.mock.calls.length}`);
+    expect(mocks.getConn).not.toHaveBeenCalled();
+    expect(mocks.runQuery).not.toHaveBeenCalled();
+  });
+
   it('reports whether a row was abandoned', async () => {
     mocks.runQuery.mockResolvedValueOnce({ affectedRows: 0 });
     await expect(abandonActiveSession('forestgeo_testing', 'session-9', 'x')).resolves.toBe(false);
