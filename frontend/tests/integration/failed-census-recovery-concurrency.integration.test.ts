@@ -9,6 +9,7 @@
  *   I8  two overlapping unbarriered runners of one census finish without a lock error and every row is audited exactly once
  *   I12 ingestion's CALL waits on a recovery transaction's census lock before it writes anything, then completes once
  *   I14 the failure transfer (give-up, mid-batch cleanup) waits on a recovery transaction's census lock before its snapshot and audits once
+ *   I15 a recovery runner whose final transaction starts after another runner recovered the census and a non-upload writer filled it deletes nothing
  *
  * Prerequisites: docker compose up -d mysql. Run only through the relay's integration lock script.
  */
@@ -241,8 +242,12 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
     }));
   }
 
-  /** A real writer of the census: tree, stem, resolved measurement and a completed upload metric, in one transaction it commits. */
-  async function writeCompletedUpload(writer: Connection, treeInsertStarted: () => void): Promise<{ treeID: number; stemGUID: number; measurementID: number }> {
+  /** A real writer of the census: tree, stem, resolved measurement and, unless told otherwise, a completed upload metric, in one transaction it commits. */
+  async function writeCensusRows(
+    writer: Connection,
+    treeInsertStarted: () => void,
+    recordCompletedUpload: boolean = true
+  ): Promise<{ treeID: number; stemGUID: number; measurementID: number }> {
     await writer.beginTransaction();
     const treeInsert = writer.query<ResultSetHeader>('INSERT INTO trees (TreeTag, SpeciesID, CensusID) VALUES (?, ?, ?)', [
       WRITER_TREE_TAG,
@@ -262,10 +267,12 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
        VALUES (?, ?, TRUE, ?, ?, ?, ?, ?, 1)`,
       [censusID, stem.insertId, WRITER_MEASUREMENT_DATE, WRITER_MEASURED_DBH, WRITER_MEASURED_HOM, WRITER_FILE, WRITER_BATCH]
     );
-    await writer.query(
-      'INSERT INTO uploadmetrics (uploadId, fileID, batchID, schema_name, plotID, censusID, status, startTime) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
-      [fixtureUploadID('writer', WRITER_FILE, WRITER_BATCH), WRITER_FILE, WRITER_BATCH, schema, plotID, censusID, UPLOAD_STATUS.COMPLETED]
-    );
+    if (recordCompletedUpload) {
+      await writer.query(
+        'INSERT INTO uploadmetrics (uploadId, fileID, batchID, schema_name, plotID, censusID, status, startTime) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
+        [fixtureUploadID('writer', WRITER_FILE, WRITER_BATCH), WRITER_FILE, WRITER_BATCH, schema, plotID, censusID, UPLOAD_STATUS.COMPLETED]
+      );
+    }
     await writer.commit();
     return { treeID: Number(tree.insertId), stemGUID: Number(stem.insertId), measurementID: Number(measurement.insertId) };
   }
@@ -286,7 +293,7 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
           await withinDeadline(afterGuard.reached, `recovery past its first guard in ${label}`, harness.renderStatementLog);
           let writerStarted = false;
           const writing = harness.track(
-            writeCompletedUpload(writer, () => {
+            writeCensusRows(writer, () => {
               writerStarted = true;
             })
           );
@@ -354,6 +361,10 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
         results.every(result => result.outcome !== 'not_due' && result.windowCount > 0),
         `both runners entered the recovery and committed window transactions, so they overlapped (a runner that read the census after the other finished is not_due with no window): ${JSON.stringify(results)}`
       ).toBe(true);
+      expect(
+        results.map(result => result.outcome).sort(),
+        'the runner whose final transaction ran first recovered the census; the other found it no longer due under the lock'
+      ).toEqual(['recovered', 'superseded']);
       expect(
         results.reduce((sum, result) => sum + result.deletedRows, 0),
         'rows deleted, summed over both runners'
@@ -725,6 +736,50 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
         await countOf(connection, 'SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ?', [CLEAN_FILE]),
         'the transfer consumed the staged rows'
       ).toBe(0);
+    },
+    CONCURRENCY_TEST_TIMEOUT_MS
+  );
+
+  it(
+    "I15: a runner that read the census as due, whose final transaction starts after another runner recovered it and a writer that is not an upload filled it, deletes nothing (catches: a final transaction that trusts a stale due-read and deletes the writer's trees, stems and measurements)",
+    async () => {
+      const dirtyIDs = await seedDueCensus(HELD_BACK_ROWS);
+      const writer = await openSideConnection(schema, WRITER_LOCK_WAIT_SECONDS);
+      const harness = createStatementHarness(realManager);
+      try {
+        await runBarrierScenario(harness, async () => {
+          const beforeStaleRunnerCensusLock = harness.placeBarrier(matching(WINDOW_WALK_STATEMENT.CENSUS_LOCK), FIRST_GUARD_OCCURRENCE, 'before');
+          const staleRunner = harness.track(recover());
+          await withinDeadline(
+            beforeStaleRunnerCensusLock.reached,
+            'the stale runner parked before its final transaction takes the census lock',
+            harness.renderStatementLog
+          );
+          const recoveringRunnerResult = await withinDeadline(recover(), 'the other runner to recover the census', harness.renderStatementLog);
+          const written = await writeCensusRows(writer, () => undefined, false);
+          beforeStaleRunnerCensusLock.release();
+          const staleRunnerResult = await withinDeadline(staleRunner, 'the stale runner to finish', harness.renderStatementLog);
+          const audits = await deleteAuditCounts(connection, censusID);
+          const survivors = {
+            tree: await countOf(connection, 'SELECT COUNT(*) AS total FROM trees WHERE TreeID = ?', [written.treeID]),
+            stem: await countOf(connection, 'SELECT COUNT(*) AS total FROM stems WHERE StemGUID = ?', [written.stemGUID]),
+            measurement: await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID = ?', [written.measurementID])
+          };
+          console.log(
+            `[I15] recovering=${JSON.stringify(recoveringRunnerResult)} stale=${JSON.stringify(staleRunnerResult)} written=${JSON.stringify(written)} survivors=${JSON.stringify(survivors)}\n${harness.renderStatementLog()}`
+          );
+          expect(recoveringRunnerResult, 'the unparked runner recovered the census').toMatchObject({ outcome: 'recovered', deletedRows: dirtyIDs.length });
+          expect(staleRunnerResult, 'the stale runner found the census no longer due and deleted nothing').toMatchObject({
+            outcome: 'superseded',
+            deletedRows: 0
+          });
+          expect(survivors, "the writer's tree, stem and measurement survive the stale runner").toEqual({ tree: 1, stem: 1, measurement: 1 });
+          expect(audits.has(written.measurementID), "the writer's measurement is never audited as deleted").toBe(false);
+          expect(audits.size, 'DELETE audits exist only for the rows the recovering runner deleted').toBe(dirtyIDs.length);
+        });
+      } finally {
+        await writer.end();
+      }
     },
     CONCURRENCY_TEST_TIMEOUT_MS
   );

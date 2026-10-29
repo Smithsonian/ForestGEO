@@ -127,6 +127,7 @@ const FINAL_RESIDUE_KINDS: RecoveryStatementKind[] = ['summary_delete', 'stems_d
 const FINAL_TRANSACTION_KINDS: RecoveryStatementKind[] = [
   'census_lock',
   'guard',
+  'state_read',
   'final_read',
   'recovery_window_lock',
   'delete_audit',
@@ -151,6 +152,8 @@ interface RecordedTransaction {
 }
 interface RecoveryScript {
   recoveryState: Record<string, number>;
+  /** What the state read returns inside the final transaction, under the census lock; defaults to `recoveryState`. */
+  recoveryStateUnderCensusLock?: Record<string, number>;
   familyRows?: Array<Record<string, unknown>>;
   scopeReads?: number[][];
   finalReads?: number[][];
@@ -197,10 +200,10 @@ function createRecoveryHarness(script: RecoveryScript) {
     return next;
   };
 
-  const respond = (kind: RecoveryStatementKind, sql: string, params: unknown[]): unknown => {
+  const respond = (kind: RecoveryStatementKind, sql: string, params: unknown[], transactionID: string | undefined): unknown => {
     switch (kind) {
       case 'state_read':
-        return [script.recoveryState];
+        return [transactionID !== undefined ? (script.recoveryStateUnderCensusLock ?? script.recoveryState) : script.recoveryState];
       case 'family_discovery':
         return script.familyRows ?? INCOMING_FAMILY;
       case 'recovery_scope_read':
@@ -228,7 +231,7 @@ function createRecoveryHarness(script: RecoveryScript) {
     seenByKind.set(kind, occurrence);
     statements.push({ kind, sql: String(sql), params, transactionID });
     if (script.failure && script.failure.kind === kind && script.failure.occurrence === occurrence) throw script.failure.makeError();
-    return respond(kind, String(sql), params);
+    return respond(kind, String(sql), params, transactionID);
   });
 
   const withTransaction = vi.fn(
@@ -380,11 +383,37 @@ describe('recoverFailedInitialCensusInBoundedTransactions (#562)', () => {
     });
     const result = await recoverFailedInitialCensusInBoundedTransactions(harness.manager, RECOVERY_PARAMS);
     console.log(`[U11 rows arrived] ${JSON.stringify(result)}\n${harness.render()}`);
-    expect(harness.kindsIn('tx-1')).toEqual(['census_lock', 'guard', 'final_read']);
+    expect(harness.kindsIn('tx-1')).toEqual(['census_lock', 'guard', 'state_read', 'final_read']);
     expect(harness.kindsIn('tx-2')).toEqual(WINDOW_TRANSACTION_KINDS);
     expect(harness.kindsIn('tx-3')).toEqual(FINAL_TRANSACTION_KINDS);
     expect(harness.statements.filter(statement => statement.kind === 'recovery_scope_read')).toHaveLength(2);
     expect(result).toMatchObject({ outcome: 'recovered', deletedRows: WINDOW + 1, windowCount: 1 });
+  });
+
+  it('U12: a census that stopped being due while the final transaction waited for the census lock ends there with nothing deleted (catches: deleting what another writer added after the recovery read it as due)', async () => {
+    const writerAddedTreesStemsAndMeasurements = {
+      completedUploads: 0,
+      incompleteUploads: 0,
+      treeCount: 3,
+      stemCount: 3,
+      coreMeasurementCount: 3
+    };
+    const scopeIDs = sequentialIDs(HELD_BACK_ROWS);
+    const harness = createRecoveryHarness({
+      recoveryState: DUE_WITH_ONLY_RESIDUAL_MEASUREMENTS,
+      recoveryStateUnderCensusLock: writerAddedTreesStemsAndMeasurements,
+      scopeReads: [scopeIDs]
+    });
+    const result = await recoverFailedInitialCensusInBoundedTransactions(harness.manager, RECOVERY_PARAMS);
+    console.log(`[U12 no longer due] ${JSON.stringify(result)}\n${harness.render()}`);
+    expect(result).toMatchObject({ outcome: 'superseded', deletedRows: 0, windowCount: 0 });
+    expect(harness.kindsIn('tx-1'), 'the final transaction stops right after re-reading the state under the census lock').toEqual([
+      'census_lock',
+      'guard',
+      'state_read'
+    ]);
+    expect(harness.statements.some(statement => DESTRUCTIVE_KINDS.has(statement.kind))).toBe(false);
+    expect(harness.transactions.map(transaction => transaction.end)).toEqual(['committed']);
   });
 
   it('U14a: a deadlock on a window re-runs that whole transaction from the census lock; a guard that now sees a completed upload stops it (catches: resuming inside a rolled-back transaction; a retry that skips the census lock or the guard)', async () => {

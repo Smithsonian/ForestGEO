@@ -397,7 +397,7 @@ export const FAILED_CENSUS_RECOVERY_FINAL_READ_LIMIT = CENSUS_REPLACEMENT_DELETE
 
 type FailedCensusRecoveryProgress = Omit<FailedCensusRecoveryResult, 'outcome'>;
 type RecoveryTransactionResult<T> = { superseded: true } | { superseded: false; value: T };
-type FinalRecoveryStep = { rowsArrived: true } | { rowsArrived: false; deletedRows: number };
+type FinalRecoveryStep = { step: 'no_longer_due' } | { step: 'rows_arrived' } | { step: 'deleted'; deletedRows: number };
 
 const NOT_DUE_RECOVERY: FailedCensusRecoveryResult = { outcome: 'not_due', deletedRows: 0, windowCount: 0, slowestWindowMs: 0, deadlockRetries: 0 };
 
@@ -410,7 +410,8 @@ async function readFailedInitialCensusRecoveryState(
   connectionManager: ConnectionManager,
   schema: string,
   plotID: number,
-  censusID: number
+  censusID: number,
+  transactionID?: string
 ): Promise<FailedInitialCensusRecoveryState> {
   const recoveryStateSQL = safeFormatQuery(
     schema,
@@ -421,7 +422,11 @@ async function readFailedInitialCensusRecoveryState(
        (SELECT COUNT(*) FROM ??.stems WHERE CensusID = ?) AS stemCount,
        (SELECT COUNT(*) FROM ??.coremeasurements WHERE CensusID = ?) AS coreMeasurementCount`
   );
-  const recoveryStateRows = await connectionManager.executeQuery(recoveryStateSQL, [plotID, censusID, plotID, censusID, censusID, censusID, censusID]);
+  const recoveryStateRows = await connectionManager.executeQuery(
+    recoveryStateSQL,
+    [plotID, censusID, plotID, censusID, censusID, censusID, censusID],
+    transactionID
+  );
   const recoveryStateRow = recoveryStateRows[0] ?? {};
   return {
     completedUploads: toCount(recoveryStateRow.completedUploads),
@@ -522,6 +527,10 @@ function failedCensusResidueStatements(params: FailedCensusRecoveryParams): Arra
  * The final transaction: under the census lock no uncommitted insert into the census can exist or start, so this
  * read is complete. The held-back slice goes in the same transaction as the metrics, alerts, staged rows, stems
  * and trees, so the census keeps the predicate's evidence until everything commits (spec #562 D4, G5).
+ *
+ * The pre-check read "due" before any lock was taken, and the guard only rules out a completed upload. The whole
+ * predicate is therefore evaluated again here, under the lock: another runner may have recovered the census and a
+ * writer that is not an upload may have added trees, stems and measurements since, and none of that may be deleted.
  */
 async function finishFailedCensusRecovery(
   connectionManager: ConnectionManager,
@@ -529,6 +538,8 @@ async function finishFailedCensusRecovery(
   scope: CoreMeasurementDeleteScope,
   transactionID: string
 ): Promise<FinalRecoveryStep> {
+  const stateUnderCensusLock = await readFailedInitialCensusRecoveryState(connectionManager, params.schema, params.plotID, params.censusID, transactionID);
+  if (!shouldRecoverFailedInitialCensus(stateUnderCensusLock)) return { step: 'no_longer_due' };
   const remainingRows = await connectionManager.executeQuery(
     safeFormatQuery(
       params.schema,
@@ -538,7 +549,7 @@ async function finishFailedCensusRecovery(
     transactionID
   );
   const remainingIDs = (Array.isArray(remainingRows) ? remainingRows : []).map((row: { CoreMeasurementID: unknown }) => Number(row.CoreMeasurementID));
-  if (remainingIDs.length > CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return { rowsArrived: true };
+  if (remainingIDs.length > CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return { step: 'rows_arrived' };
   const deletedRows = await lockAuditAndDeleteCoreMeasurementWindow(
     connectionManager,
     params.schema,
@@ -552,7 +563,7 @@ async function finishFailedCensusRecovery(
   for (const statement of failedCensusResidueStatements(params)) {
     await connectionManager.executeQuery(statement.sql, statement.params, transactionID);
   }
-  return { rowsArrived: false, deletedRows };
+  return { step: 'deleted', deletedRows };
 }
 
 /**
@@ -602,8 +613,8 @@ async function runFailedCensusRecovery(
       SETUP_PHASE_TIMEOUT_MS,
       transactionID => finishFailedCensusRecovery(connectionManager, params, scope, transactionID)
     );
-    if (final.superseded) return 'superseded';
-    if (!final.value.rowsArrived) {
+    if (final.superseded || final.value.step === 'no_longer_due') return 'superseded';
+    if (final.value.step === 'deleted') {
       progress.deletedRows += final.value.deletedRows;
       return 'recovered';
     }
