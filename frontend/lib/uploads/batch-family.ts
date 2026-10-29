@@ -341,7 +341,7 @@ const CALLER_BATCH_ID_ALPHABET = /^[0-9a-z-]+$/;
 const CALLER_BATCH_ID_ALPHABET_REASON = 'contains characters outside 0-9, a-z and "-", which the database could match to an ArcGIS commit batch';
 const ARCGIS_COMMIT_BATCH_SHAPE_REASON = 'has the shape reserved for ArcGIS commit batches';
 
-/** The check CSV staging applies to a caller batch (#561 N1, H2). */
+/** The check CSV staging applies to a caller batch. */
 export function assertCallerBatchIDAllowed(batchID: string): void {
   if (!CALLER_BATCH_ID_ALPHABET.test(batchID)) throw new ReservedBatchIDError(batchID, CALLER_BATCH_ID_ALPHABET_REASON);
   if (isArcgisCommitBatchShape(batchID)) throw new ReservedBatchIDError(batchID, ARCGIS_COMMIT_BATCH_SHAPE_REASON);

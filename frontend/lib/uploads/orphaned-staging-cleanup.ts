@@ -1,5 +1,5 @@
 /**
- * `/api/cleanup`'s orphaned staged-row step (#561, N2). A staged row is owned while its SessionID is an active upload
+ * `/api/cleanup`'s orphaned staged-row step. A staged row is owned while its SessionID is an active upload
  * session or its FileID is an active session's file_id. Worker sessions carry file_id = async-job-<id>, so the old
  * file_id-only rule deleted a running worker job's staging. The DELETE evaluates ownership itself, against committed
  * session state, so nothing listed by the finder can be deleted after it gained an owner.

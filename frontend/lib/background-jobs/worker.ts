@@ -475,7 +475,7 @@ async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<
     // Another owner exists (sweeper reclaim, re-claim, or a newer ArcGIS commit
     // attempt). Abandon silently — any write we attempt now would stomp the new
     // owner's state — and mark the lease lost so the finally block does not
-    // release an upload session the new owner may have reused (#561 N3).
+    // release an upload session the new owner may have reused.
     ctx.leaseLost = true;
     ailogger.info(`[UploadWorker] Lease lost for job ${job.jobID} (worker ${workerID}); abandoning silently`);
     return;
@@ -1202,7 +1202,7 @@ async function runArcgisPipeline(ctx: WorkerRunContext): Promise<void> {
     } catch (error) {
       if (error instanceof ArcgisCommitSupersededError) {
         // A newer attempt holds this import, so another owner holds this job: relinquish like a lost lease, so the
-        // finally block leaves the (possibly reused) upload session to the winner (#561 N3).
+        // finally block leaves the (possibly reused) upload session to the winner.
         ailogger.info(`[UploadWorker] ${error.message}; relinquishing job ${job.jobID}`);
         ctx.leaseLost = true;
         throw new WorkerLeaseLostError(job.jobID, ctx.workerID);

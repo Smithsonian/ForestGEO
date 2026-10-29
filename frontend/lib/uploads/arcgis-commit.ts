@@ -54,7 +54,7 @@ import { finalizeArcgisCommit } from '@/lib/uploads/arcgis-commit-finalize';
 
 export { ArcgisCensusReplacementIncompleteError, ArcgisCommitVerificationError } from '@/lib/uploads/arcgis-commit-finalize';
 
-/** Source rows per staging window (spec D4: the worker's chunk size; measured p95 ≤ 0.6 s at 150k rows). */
+/** Source rows per staging window: the worker's chunk size, measured at p95 ≤ 0.6 s at 150k rows. */
 export const ARCGIS_STAGING_WINDOW_ROWS = 5_000;
 export const ARCGIS_COMMIT_COMPLETED_EVENT = 'upload.arcgis_commit.completed';
 export const ARCGIS_COMMIT_FAILED_EVENT = 'upload.arcgis_commit.failed';
@@ -74,7 +74,7 @@ export interface CommitArcgisImportParams {
   censusID: number;
   importSessionId: string;
   fileName: string;
-  /** Ignored except to replay a session committed before #561 (D28); shape-checked when present. */
+  /** Ignored except to replay a session committed before #561; shape-checked when present. */
   batchID?: string;
   uploadMode: UploadMode;
   userId: string;
@@ -124,7 +124,7 @@ async function timed<T>(progress: ArcgisCommitProgress, run: () => Promise<T>): 
   }
 }
 
-/** Every transaction after the claim: the guard first (spec §4), then the unit's work only if this attempt still owns the import. */
+/** Every transaction after the claim: the guard first, then the unit's work only if this attempt still owns the import. */
 function runGuardedUnit<T>(
   connectionManager: ConnectionManager,
   attempt: ArcgisCommitAttempt,
@@ -212,7 +212,7 @@ async function stageImportRows(
   return null;
 }
 
-/** R's owner for an ArcGIS commit (spec §5): the unit guard as the lock, the per-import marker as the completion. */
+/** The census replacement's owner for an ArcGIS commit: the unit guard as the lock, the per-import marker as the completion. */
 function arcgisCensusReplacementOwner(connectionManager: ConnectionManager, attempt: ArcgisCommitAttempt): CensusReplacementOwner {
   return {
     lockForUnit: async transactionID => {
@@ -358,7 +358,7 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
     if (finalUnit.commitCompleted) return complete(finalUnit.snapshot.committedRowCount, true);
     return complete(finalUnit.value.committedRowCount, false);
   } catch (error: unknown) {
-    // A logging boundary, not a handler: the original error object is rethrown unchanged (spec §14, F9).
+    // A logging boundary, not a handler: the original error object is rethrown unchanged.
     ailogger.error(ARCGIS_COMMIT_FAILED_EVENT, error instanceof Error ? error : undefined, {
       ...identity(),
       unit: progress.unit,

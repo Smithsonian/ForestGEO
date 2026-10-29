@@ -726,7 +726,7 @@ describe('Validation 19 identity-conflict preflight', () => {
 
 const ARCGIS_PROGRESS_MIGRATION_ID = '2026-10-28-02-add-arcgis-import-commit-progress';
 const ARCGIS_STAGING_MIGRATION_FILE = path.join(process.cwd(), 'db', 'migrations', 'unified-measurements-migrations', '59_create_arcgis_import_sessions.sql');
-/** information_schema COLUMN_TYPE / IS_NULLABLE / COLUMN_DEFAULT the contract expects (spec §13). */
+/** information_schema COLUMN_TYPE / IS_NULLABLE / COLUMN_DEFAULT the contract expects. */
 const EXPECTED_PROGRESS_COLUMNS: Record<(typeof ARCGIS_IMPORT_COMMIT_PROGRESS_COLUMNS)[number], { type: string; nullable: string; default: string | null }> = {
   committed_upload_mode: { type: 'varchar(32)', nullable: 'YES', default: null },
   commit_attempt_id: { type: 'varchar(64)', nullable: 'YES', default: null },

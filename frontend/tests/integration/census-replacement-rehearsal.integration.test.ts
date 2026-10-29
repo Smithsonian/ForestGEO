@@ -696,7 +696,7 @@ interface ArcgisRunDetails {
 interface RunSummary extends TransactionDurationSummary {
   outcome: RunOutcome;
   perKindTransactionMs: Partial<Record<TransactionKind, KindDurationSummary>>;
-  /** Duration of the ArcGIS finalize transaction, which holds the two aggregate counts that grow with the import (spec F10). */
+  /** Duration of the ArcGIS finalize transaction, which holds the two aggregate counts that grow with the import. */
   finalizeTransactionMs: number | null;
   arcgis: ArcgisRunDetails | null;
   endToEndMs: number;

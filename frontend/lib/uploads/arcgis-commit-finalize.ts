@@ -2,7 +2,7 @@
  * Unit F of an ArcGIS commit (#561): one transaction that verifies every source row of the import is accounted for,
  * writes the `file_upload` changelog row and flips the import session to `committed`. The counts are plain reads:
  * after the cleanup-path fixes no path removes an active upload session's staged rows, and this unit's guard holds the
- * session row until it commits (spec §8, §9). A mismatch writes nothing and is retryable: the retry rebuilds.
+ * session row until it commits. A mismatch writes nothing and is retryable: the retry rebuilds.
  */
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
@@ -45,7 +45,7 @@ export class ArcgisCensusReplacementIncompleteError extends Error {
   }
 }
 
-/** F found rows of this import removed or added since staging (#561, D8). Not an ArcgisImportSessionError: it is retryable. */
+/** F found rows of this import removed or added since staging. Not an ArcgisImportSessionError: it is retryable. */
 export class ArcgisCommitVerificationError extends Error {
   readonly detail: ArcgisCommitVerificationDetail;
 

@@ -99,7 +99,7 @@ export interface ArcgisCommitClaimInput {
   censusID: number;
   userId: string;
   fileName: string;
-  /** Consulted only to replay a session committed before #561 (NULL mode); ignored otherwise (D28). */
+  /** Consulted only to replay a session committed before #561 (NULL mode); ignored otherwise. */
   requestBatchID: string | null;
   uploadMode: UploadMode;
   uploadSessionID: string;
@@ -540,7 +540,7 @@ async function writeCommitClaim(
  * Unit C of an ArcGIS commit (#561), in its own transaction. Locks the import row, then (on a takeover) the previous
  * upload session's row, then the caller's; checks everything before writing anything, so a rejected claim leaves the
  * census, the staging table and the session exactly as they were (#504). The claim COMMITS on its own: from here the
- * import is `committing`, owned by `attemptID`, and every retry restarts from row 0 (spec §3).
+ * import is `committing`, owned by `attemptID`, and every retry restarts from row 0.
  */
 export async function claimArcgisImportCommitAttempt(
   connectionManager: ConnectionManager,
@@ -588,7 +588,7 @@ export async function claimArcgisImportCommitAttempt(
   };
 }
 
-/** A page sent a commit batch the server no longer uses: a browser holding the pre-#561 bundle (P21). */
+/** A page sent a commit batch the server no longer uses: a browser holding the pre-#561 bundle. */
 export class StaleArcgisClientBatchError extends ArcgisImportSessionError {
   constructor(importSessionId: string) {
     super(
@@ -600,7 +600,7 @@ export class StaleArcgisClientBatchError extends ArcgisImportSessionError {
 }
 
 /**
- * The route's guard on a caller-sent batch (#561 M4). Since #561 the batch is derived from the import session and the
+ * The route's guard on a caller-sent batch. Since #561 the batch is derived from the import session and the
  * UI sends none, so a sent batch must be the derived id, or the stored batch of a session committed before #561
  * (NULL mode), which still replays by its old rule. Anything else comes from a stale page and is refused before the
  * claim and before any write. A plain read: the legacy row it looks for is committed and never changes. The worker
@@ -677,7 +677,7 @@ function affectedRowCount(result: unknown): number {
 }
 
 /**
- * The first statement of every ArcGIS commit unit after the claim (spec section 4). Locks the import row, then the
+ * The first statement of every ArcGIS commit unit after the claim. Locks the import row, then the
  * attempt's upload session; nothing is written in any refusal. A committed row ends the run before the liveness check,
  * so an attempt that lost the race to a finished peer reports `alreadyCommitted` rather than an ownership error.
  */
@@ -728,7 +728,7 @@ export async function lockArcgisImportSessionForCommitUnit(
   return snapshot;
 }
 
-/** One staging window's source rows by primary-key range; a short or gapped window means the import is being deleted (spec section 7 step 2). */
+/** One staging window's source rows by primary-key range; a short or gapped window means the import is being deleted. */
 export async function loadArcgisImportRowWindow(
   connectionManager: ConnectionManager,
   schema: string,
@@ -748,7 +748,7 @@ export async function loadArcgisImportRowWindow(
   return records.map(record => parseJsonColumn<FileRow>(record.row_json, {} as FileRow));
 }
 
-/** Spec section 7 step 7: the window's cursor move, fenced on the attempt and on the cursor the guard read. */
+/** The window's cursor move, fenced on the attempt and on the cursor the guard read. */
 export async function advanceArcgisImportStagingCursor(
   connectionManager: ConnectionManager,
   attempt: ArcgisCommitAttempt,
@@ -773,7 +773,7 @@ export async function advanceArcgisImportStagingCursor(
   }
 }
 
-/** The per-import census-replacement marker (spec section 5). */
+/** The per-import census-replacement marker. */
 export async function markArcgisImportCensusReplacementCompleted(
   connectionManager: ConnectionManager,
   attempt: ArcgisCommitAttempt,
@@ -793,7 +793,7 @@ export async function markArcgisImportCensusReplacementCompleted(
   }
 }
 
-/** Spec section 8 step 5: `committing` to `committed`, fenced on the attempt. */
+/** `committing` to `committed`, fenced on the attempt. */
 export async function markArcgisImportCommitCompleted(
   connectionManager: ConnectionManager,
   attempt: ArcgisCommitAttempt,
