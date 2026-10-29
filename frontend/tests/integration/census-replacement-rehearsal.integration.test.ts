@@ -98,8 +98,8 @@ interface RehearsalProfile {
 const MPALA_SUB_BATCH_ROWS = 10_000;
 const MPALA_PARSE_REJECT_ROWS = 6;
 const MPALA_FAILED_SUB_BATCH_COUNT = 42;
-/** Spec #562 Goal 3: the supported legacy residue per census, gated by run 7 at the full profile. */
-const SUPPORTED_RESIDUAL_ROWS = 100_000;
+/** Spec #562 Goal 3: the supported legacy residue per census (trees, stems and stale staged rows each), lowered from 100,000 after run 7 measured 0.138 ms per residual row at that size. */
+const SUPPORTED_RESIDUAL_ROWS = 30_000;
 const SMOKE_RESIDUAL_ROWS = 5_000;
 
 const REHEARSAL_PROFILES: Record<RehearsalProfile['name'], RehearsalProfile> = {
