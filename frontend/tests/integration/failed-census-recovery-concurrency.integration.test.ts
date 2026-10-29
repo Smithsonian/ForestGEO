@@ -99,6 +99,8 @@ const INSERT_OPERATION = 'INSERT';
 const NO_BACKOFF_JITTER = 0;
 const SEED_SPECIES_CODE = 'ACERRU';
 const SEED_QUADRAT_NAME = 'Q01';
+const G_STALE_ROWS = 3;
+const NO_STALE_ROWS = 0;
 const I12_OTHER_FAILED_FILE = 'concurrency-i12-failed.csv';
 const I12_OTHER_FAILED_BATCH = 'concurrency-i12-failed__sub001';
 const RECENT_STATEMENT_COUNT = 4;
@@ -459,11 +461,12 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
   );
 
   it.each([
-    ['a', 'window 1', 'superseded', WINDOW],
-    ['b', 'the final transaction', 'recovered', HELD_BACK_ROWS]
+    ['a', 'window 1', 'superseded', WINDOW, NO_STALE_ROWS],
+    ['b', 'the final transaction', 'recovered', HELD_BACK_ROWS, NO_STALE_ROWS],
+    ['c', "window 1, which also holds the ingesting family's own stale rows", 'superseded', WINDOW, G_STALE_ROWS]
   ] as const)(
     'I12(%s) serialization: ingestion inside its CALL waits on the census row while a recovery transaction in %s holds it, holding no prelude lock yet; after the commit it completes once (catches: a CALL that writes before it reaches the census lock; a lost or doubly-ingested family; double audit)',
-    async (variant, label, expectedOutcome, expectedDeleted) => {
+    async (variant, label, expectedOutcome, expectedDeleted, ingestingFamilyStaleRows) => {
       await stageCleanFamily();
       await seedUploadMetric(connection, { schema, plotID, censusID, fileID: CLEAN_FILE, batchID: CLEAN_BATCH, status: UPLOAD_STATUS.FAILED });
       const harness = createStatementHarness(realManager);
@@ -480,12 +483,23 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
         const [threadRow] = (await realManager.executeQuery('SELECT CONNECTION_ID() AS threadID', [], ingestionTransactionID)) as Array<{ threadID: number }>;
         const ingestionThreadID = Number(threadRow.threadID);
 
+        if (ingestingFamilyStaleRows > NO_STALE_ROWS) {
+          residueIDs.push(
+            ...(await seedUnresolvedMeasurements(connection, {
+              censusID,
+              fileID: CLEAN_FILE,
+              batchID: CLEAN_BATCH,
+              count: ingestingFamilyStaleRows,
+              tagPrefix: 'GSTALE'
+            }))
+          );
+        }
         residueIDs.push(
           ...(await seedUnresolvedMeasurements(connection, {
             censusID,
             fileID: I12_OTHER_FAILED_FILE,
             batchID: I12_OTHER_FAILED_BATCH,
-            count: variant === 'a' ? WINDOW + HELD_BACK_ROWS : HELD_BACK_ROWS,
+            count: (variant === 'b' ? HELD_BACK_ROWS : WINDOW + HELD_BACK_ROWS) - ingestingFamilyStaleRows,
             tagPrefix: 'I12F'
           }))
         );
