@@ -24,8 +24,14 @@ const RUNNER_LISTS = [
 const COREMEASUREMENTS_TABLE = 'coremeasurements';
 const REFUSAL_MESSAGE_PREFIX = "'index trim refused, missing or reshaped: '";
 const ONLINE_ALTER_CLAUSE = "', ALGORITHM=INPLACE, LOCK=NONE'";
-/** Plan review C1: a successor only counts when it is visible, has no prefix length, and (ux_measure_unique) is unique. */
-const USABLE_SUCCESSOR_FILTER = "AND IS_VISIBLE = 'YES' AND SUB_PART IS NULL";
+/**
+ * Plan review C1 and Astra P2: a successor only counts when it is visible, none of its key parts has a prefix length or is
+ * functional, and (ux_measure_unique) it is unique. The key-part rule must run after the aggregation (HAVING): filtering
+ * SUB_PART in the WHERE drops the prefixed part from GROUP_CONCAT, so a reshaped index would still look like its plain columns.
+ */
+const VISIBLE_SUCCESSOR_FILTER = "AND IS_VISIBLE = 'YES'";
+const WHOLE_INDEX_KEY_PART_CLAUSE = 'HAVING COUNT(SUB_PART) = 0 AND COUNT(COLUMN_NAME) = COUNT(*) AND COUNT(EXPRESSION) = 0';
+const PER_ROW_PREFIX_FILTER = 'SUB_PART IS NULL';
 const UNIQUE_SUCCESSOR_CLAUSE = 'AND (expected.unique_required = 0 OR live.non_unique = 0)';
 
 /** Oracle, from section 4 of the #560 design: the eight names the trim drops. */
@@ -100,11 +106,13 @@ describe('manifest trim migration and its hand-run twin 62 stay identical (#560)
     expect(successors).toEqual(EXPECTED_SUCCESSORS);
   });
 
-  it('both files raise the same refusal message, ignore unusable successors, and demand the same online ALTER', () => {
+  it('both files raise the same refusal message, reject unusable successors whole, and demand the same online ALTER', () => {
     for (const file of [MANIFEST_TRIM_FILE, TWIN_TRIM_FILE]) {
       const contents = readMigrationFile(file);
       expect(contents, `${file} refusal message`).toContain(REFUSAL_MESSAGE_PREFIX);
-      expect(contents, `${file} must not count an invisible or prefix-length successor`).toContain(USABLE_SUCCESSOR_FILTER);
+      expect(contents, `${file} must not count an invisible successor`).toContain(VISIBLE_SUCCESSOR_FILTER);
+      expect(contents, `${file} must reject a successor with any prefixed or functional key part`).toContain(WHOLE_INDEX_KEY_PART_CLAUSE);
+      expect(contents, `${file} must not filter prefixed parts row by row before GROUP_CONCAT`).not.toContain(PER_ROW_PREFIX_FILTER);
       expect(contents, `${file} must not count a non-unique ux_measure_unique`).toContain(UNIQUE_SUCCESSOR_CLAUSE);
       expect(contents, `${file} online ALTER clause`).toContain(ONLINE_ALTER_CLAUSE);
     }

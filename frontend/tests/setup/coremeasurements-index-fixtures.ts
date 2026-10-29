@@ -32,6 +32,8 @@ export interface IndexDefinition {
   name: string;
   columns: readonly string[];
   unique: boolean;
+  /** Key parts appended after `columns`, verbatim: a prefixed column such as `Description`(10) or a functional part such as (`CensusID` + 0). */
+  trailingKeyPartsSql?: readonly string[];
 }
 
 /** The 14 coremeasurements indexes the #560 design keeps (section 4). */
@@ -115,13 +117,15 @@ export function sortedSignatures(indexes: readonly IndexDefinition[]): string[] 
 }
 
 function addIndexClause(index: IndexDefinition): string {
-  const columns = index.columns.map(column => `\`${column}\``).join(', ');
+  const columns = [...index.columns.map(column => `\`${column}\``), ...(index.trailingKeyPartsSql ?? [])].join(', ');
   return `ADD ${index.unique ? 'UNIQUE ' : ''}INDEX \`${index.name}\` (${columns})`;
 }
 
 export async function readIndexSignatures(connection: Connection, schema: string, table: string = COREMEASUREMENTS_TABLE): Promise<string[]> {
   const [rows] = await connection.query<RowDataPacket[]>(
-    `SELECT INDEX_NAME AS indexName, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') AS columnList,
+    `SELECT INDEX_NAME AS indexName,
+            GROUP_CONCAT(COALESCE(CONCAT(COLUMN_NAME, IF(SUB_PART IS NULL, '', CONCAT('[prefix ', SUB_PART, ']'))), CONCAT('[functional ', EXPRESSION, ']'))
+                         ORDER BY SEQ_IN_INDEX SEPARATOR ',') AS columnList,
             MAX(NON_UNIQUE) AS nonUnique, MIN(IS_VISIBLE) AS visible
      FROM information_schema.STATISTICS
      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
@@ -288,6 +292,11 @@ export interface SuccessorRefusalCase {
   restore: (connection: Connection) => Promise<void>;
 }
 
+const DRIFT_PREFIX_COLUMN = 'Description';
+const DRIFT_PREFIX_LENGTH = 10;
+const DRIFT_PREFIX_KEY_PART_SQL = `\`${DRIFT_PREFIX_COLUMN}\`(${DRIFT_PREFIX_LENGTH})`;
+const DRIFT_FUNCTIONAL_KEY_PART_SQL = '(`CensusID` + 0)';
+
 /** Not FK-critical (idx_censusid and ix_cm_cid_date_dbh_hom still lead with CensusID), so MySQL lets it go invisible. */
 const INVISIBLE_CASE_SUCCESSOR = 'idx_cm_census_validated_stem';
 const NON_UNIQUE_CASE_SUCCESSOR = 'ux_measure_unique';
@@ -295,7 +304,7 @@ const NON_UNIQUE_CASE_SUCCESSOR = 'ux_measure_unique';
 const ALL_SUCCESSOR_NAMES = TRIM_SUCCESSORS.map(successor => successor.current.name);
 const REFUSAL_NAME_SEPARATOR = ',';
 
-/** Shared by I4 (manifest migration) and I8 (twin 62): 4 successors x removed/reshaped, plus invisible and non-unique. */
+/** Shared by I4 (manifest migration) and I8 (twin 62): 4 successors x removed/reshaped/trailing prefix/trailing functional part, plus invisible, non-unique and all removed. */
 export const SUCCESSOR_REFUSAL_CASES: readonly SuccessorRefusalCase[] = [
   ...TRIM_SUCCESSORS.flatMap((successor, successorIndex) => [
     {
@@ -310,6 +319,22 @@ export const SUCCESSOR_REFUSAL_CASES: readonly SuccessorRefusalCase[] = [
       caseTag: `${successorIndex}s`,
       refusedName: successor.current.name,
       regress: (connection: Connection) => replaceIndex(connection, successor.reshaped),
+      restore: (connection: Connection) => replaceIndex(connection, successor.current)
+    }
+  ]),
+  ...TRIM_SUCCESSORS.flatMap((successor, successorIndex) => [
+    {
+      label: `${successor.current.name} rebuilt with a trailing ${DRIFT_PREFIX_KEY_PART_SQL} prefix part`,
+      caseTag: `${successorIndex}p`,
+      refusedName: successor.current.name,
+      regress: (connection: Connection) => replaceIndex(connection, { ...successor.current, trailingKeyPartsSql: [DRIFT_PREFIX_KEY_PART_SQL] }),
+      restore: (connection: Connection) => replaceIndex(connection, successor.current)
+    },
+    {
+      label: `${successor.current.name} rebuilt with a trailing functional part ${DRIFT_FUNCTIONAL_KEY_PART_SQL}`,
+      caseTag: `${successorIndex}f`,
+      refusedName: successor.current.name,
+      regress: (connection: Connection) => replaceIndex(connection, { ...successor.current, trailingKeyPartsSql: [DRIFT_FUNCTIONAL_KEY_PART_SQL] }),
       restore: (connection: Connection) => replaceIndex(connection, successor.current)
     }
   ]),

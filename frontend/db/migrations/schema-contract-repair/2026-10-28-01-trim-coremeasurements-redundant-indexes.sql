@@ -23,7 +23,7 @@
 --   idx_coremeasurements_census_validation       (CensusID, IsValidated): prefix of idx_cm_census_validated_stem
 --
 -- Successor check. Nothing is dropped unless the four indexes that replace the dropped
--- ones exist, visible, with no prefix length, ux_measure_unique still unique, and with
+-- ones exist, visible, with no key part prefixed or functional, ux_measure_unique still unique, and with
 -- exactly these ordered columns:
 --   idx_censusid                  (CensusID), also hinted by name by the census-replacement cursor
 --   idx_cm_census_validated_stem  (CensusID, IsValidated, IsActive, StemGUID)
@@ -71,8 +71,9 @@ SET @missing_successors := (
   LEFT JOIN (
     SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') AS columns_csv, MAX(NON_UNIQUE) AS non_unique
     FROM information_schema.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'coremeasurements' AND IS_VISIBLE = 'YES' AND SUB_PART IS NULL
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'coremeasurements' AND IS_VISIBLE = 'YES'
     GROUP BY INDEX_NAME
+    HAVING COUNT(SUB_PART) = 0 AND COUNT(COLUMN_NAME) = COUNT(*) AND COUNT(EXPRESSION) = 0
   ) live ON live.INDEX_NAME = expected.index_name AND live.columns_csv = expected.columns_csv
          AND (expected.unique_required = 0 OR live.non_unique = 0)
   WHERE live.INDEX_NAME IS NULL

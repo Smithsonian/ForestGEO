@@ -11,7 +11,7 @@
 -- dropped unless idx_censusid (CensusID), idx_cm_census_validated_stem (CensusID,
 -- IsValidated, IsActive, StemGUID), idx_cm_stemguid_active (StemGUID, IsActive) and
 -- ux_measure_unique (StemGUID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM)
--- exist, visible, without a prefix length, ux_measure_unique still unique, with exactly
+-- exist, visible, with no key part prefixed or functional, ux_measure_unique still unique, with exactly
 -- those ordered columns. These runners do not load
 -- tablestructures.sql, applied migrations can be skipped, and the foreign keys only
 -- guarantee some leading-column index, so nothing else guarantees the successors.
@@ -46,8 +46,9 @@ BEGIN
   LEFT JOIN (
     SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') AS columns_csv, MAX(NON_UNIQUE) AS non_unique
     FROM information_schema.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'coremeasurements' AND IS_VISIBLE = 'YES' AND SUB_PART IS NULL
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'coremeasurements' AND IS_VISIBLE = 'YES'
     GROUP BY INDEX_NAME
+    HAVING COUNT(SUB_PART) = 0 AND COUNT(COLUMN_NAME) = COUNT(*) AND COUNT(EXPRESSION) = 0
   ) live ON live.INDEX_NAME = expected.index_name AND live.columns_csv = expected.columns_csv
          AND (expected.unique_required = 0 OR live.non_unique = 0)
   WHERE live.INDEX_NAME IS NULL;
