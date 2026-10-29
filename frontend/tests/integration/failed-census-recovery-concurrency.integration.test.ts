@@ -6,7 +6,7 @@
  * finishes first and is seen by the guard, or waits until the recovery transaction commits. These tests run the
  * real ConnectionManager (one pooled connection per transaction) against local MySQL.
  *   I5  a census writer started between a recovery transaction's guard and its commit waits, and none of its rows is deleted or cascaded
- *   I8  two overlapping unbarriered runners of one census finish without a lock error and every row is audited exactly once
+ *   I8  two runners of one census, released together after their scope reads, finish without a lock error and every row is audited exactly once
  *   I12 ingestion's CALL waits on a recovery transaction's census lock before it writes anything, then completes once
  *   I14 the failure transfer (give-up, mid-batch cleanup) waits on a recovery transaction's census lock before its snapshot and audits once
  *   I15 a recovery runner whose final transaction starts after another runner recovered the census and a non-upload writer filled it deletes nothing
@@ -91,6 +91,9 @@ const CHANGED_BY = 'recovery-concurrency-test';
 const WRITER_LOCK_WAIT_SECONDS = 30;
 const CONCURRENCY_TEST_TIMEOUT_MS = 180_000;
 const FIRST_GUARD_OCCURRENCE = 1;
+const FIRST_RUNNER_OCCURRENCE = 1;
+const SECOND_RUNNER_OCCURRENCE = 2;
+const RECOVERY_FAMILY_DISCOVERY = /GROUP BY BatchID\s+ORDER BY BatchID\s*$/;
 const CONTROL_CENSUS = { plotCensusNumber: 95, startDate: '2023-01-01', endDate: '2023-12-31' };
 const CLEAN_FILE = 'concurrency-clean.csv';
 const CLEAN_BATCH = 'concurrency-clean-batch';
@@ -340,41 +343,58 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
   );
 
   it(
-    'I8: two unbarriered recovery runners of one census both finish without a lock error and every row is audited once (catches: double audit; a runner deleting outside its lock)',
+    'I8: two recovery runners of one census, both parked after their scope reads and then released together, both finish without a lock error and every row is audited once (catches: double audit; a runner deleting outside its lock)',
     async () => {
       const dirtyIDs = await seedDueCensus(2 * WINDOW + ROWS_PAST_TWO_WINDOWS);
-      const [first, second] = await Promise.allSettled([recover(), recover()]);
-      const audits = await deleteAuditCounts(connection, censusID);
-      const evidence = {
-        remaining: await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ?', [censusID]),
-        incomplete: await countOf(connection, "SELECT COUNT(*) AS total FROM uploadmetrics WHERE censusID = ? AND status IN ('failed', 'processing')", [
-          censusID
-        ]),
-        alerts: await countOf(connection, 'SELECT COUNT(*) AS total FROM uploadintegrityalerts WHERE censusID = ?', [censusID]),
-        staleStaged: await countOf(connection, 'SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ?', [FAILED_FIRST_LOAD_FILE]),
-        control: await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ?', [controlCensusID])
-      };
-      console.log(`[I8] first=${JSON.stringify(first)} second=${JSON.stringify(second)} evidence=${JSON.stringify(evidence)} audited=${audits.size}`);
-      expect([first.status, second.status], `runner outcomes: ${JSON.stringify([first, second])}`).toEqual(['fulfilled', 'fulfilled']);
-      const results = [first, second].map(settled => (settled as PromiseFulfilledResult<FailedCensusRecoveryResult>).value);
-      expect(
-        results.every(result => result.outcome !== 'not_due' && result.windowCount > 0),
-        `both runners entered the recovery and committed window transactions, so they overlapped (a runner that read the census after the other finished is not_due with no window): ${JSON.stringify(results)}`
-      ).toBe(true);
-      expect(
-        results.map(result => result.outcome).sort(),
-        'the runner whose final transaction ran first recovered the census; the other found it no longer due under the lock'
-      ).toEqual(['recovered', 'superseded']);
-      expect(
-        results.reduce((sum, result) => sum + result.deletedRows, 0),
-        'rows deleted, summed over both runners'
-      ).toBe(dirtyIDs.length);
-      expect(audits.size, 'distinct audited RecordIDs').toBe(dirtyIDs.length);
-      expect(
-        dirtyIDs.every(id => audits.get(id)?.count === 1),
-        'every deleted row has exactly one DELETE audit'
-      ).toBe(true);
-      expect(evidence).toEqual({ remaining: 0, incomplete: 0, alerts: 0, staleStaged: 0, control: CONTROL_CENSUS_ROWS });
+      const harness = createStatementHarness(realManager);
+      await runBarrierScenario(harness, async () => {
+        // The harness checks barriers in placement order and a parked statement stops the check, so the later occurrence is placed first:
+        // otherwise the first runner's park hides its discovery from the second barrier, which then waits for a third discovery.
+        const secondRunnerAfterScopeReads = harness.placeBarrier(matching(RECOVERY_FAMILY_DISCOVERY), SECOND_RUNNER_OCCURRENCE, 'after');
+        const firstRunnerAfterScopeReads = harness.placeBarrier(matching(RECOVERY_FAMILY_DISCOVERY), FIRST_RUNNER_OCCURRENCE, 'after');
+        const runners = [harness.track(recover()), harness.track(recover())];
+        await withinDeadline(
+          Promise.all([firstRunnerAfterScopeReads.reached, secondRunnerAfterScopeReads.reached]),
+          'both runners parked after their state read and family discovery, before either deletes',
+          harness.renderStatementLog
+        );
+        firstRunnerAfterScopeReads.release();
+        secondRunnerAfterScopeReads.release();
+        const [first, second] = await withinDeadline(Promise.allSettled(runners), 'both recovery runners to settle', harness.renderStatementLog);
+        const audits = await deleteAuditCounts(connection, censusID);
+        const evidence = {
+          remaining: await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ?', [censusID]),
+          incomplete: await countOf(connection, "SELECT COUNT(*) AS total FROM uploadmetrics WHERE censusID = ? AND status IN ('failed', 'processing')", [
+            censusID
+          ]),
+          alerts: await countOf(connection, 'SELECT COUNT(*) AS total FROM uploadintegrityalerts WHERE censusID = ?', [censusID]),
+          staleStaged: await countOf(connection, 'SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ?', [FAILED_FIRST_LOAD_FILE]),
+          control: await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ?', [controlCensusID])
+        };
+        console.log(
+          `[I8] first=${JSON.stringify(first)} second=${JSON.stringify(second)} evidence=${JSON.stringify(evidence)} audited=${audits.size} commitOrder=${JSON.stringify(harness.commitOrder)}\n${harness.renderStatementLog()}`
+        );
+        expect([first.status, second.status], `runner outcomes: ${JSON.stringify([first, second])}`).toEqual(['fulfilled', 'fulfilled']);
+        const results = [first, second].map(settled => (settled as PromiseFulfilledResult<FailedCensusRecoveryResult>).value);
+        expect(
+          results.every(result => result.outcome !== 'not_due' && result.windowCount > 0),
+          `both runners read the census as due before either deleted, then committed window transactions, so they overlapped: ${JSON.stringify(results)}`
+        ).toBe(true);
+        expect(
+          results.map(result => result.outcome).sort(),
+          'the runner whose final transaction ran first recovered the census; the other found it no longer due under the lock'
+        ).toEqual(['recovered', 'superseded']);
+        expect(
+          results.reduce((sum, result) => sum + result.deletedRows, 0),
+          'rows deleted, summed over both runners'
+        ).toBe(dirtyIDs.length);
+        expect(audits.size, 'distinct audited RecordIDs').toBe(dirtyIDs.length);
+        expect(
+          dirtyIDs.every(id => audits.get(id)?.count === 1),
+          'every deleted row has exactly one DELETE audit'
+        ).toBe(true);
+        expect(evidence).toEqual({ remaining: 0, incomplete: 0, alerts: 0, staleStaged: 0, control: CONTROL_CENSUS_ROWS });
+      });
     },
     CONCURRENCY_TEST_TIMEOUT_MS
   );
