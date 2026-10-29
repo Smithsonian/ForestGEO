@@ -14,12 +14,14 @@ import {
   ArcgisCommitSupersededError,
   ArcgisImportSessionError,
   ArcgisImportSessionInvariantError,
+  assertCallerBatchAcceptedForImport,
   assertUploadableArcgisSession,
   claimArcgisImportCommitAttempt,
   loadArcgisImportRowWindow,
   lockArcgisImportSessionForCommitUnit,
   markArcgisImportCensusReplacementCompleted,
   markArcgisImportCommitCompleted,
+  StaleArcgisClientBatchError,
   type ArcgisCommitAttempt,
   type ArcgisCommitClaimInput
 } from './import-session';
@@ -657,5 +659,63 @@ describe('per-unit import-session writes (spec sections 5, 7, 8)', () => {
   it('a finalize compare-and-set that matches no row is a 409', async () => {
     const { manager } = scriptedUnitConnection({ affectedRows: NO_AFFECTED_ROWS });
     await expect(markArcgisImportCommitCompleted(manager, ATTEMPT, UNIT_TRANSACTION_ID)).rejects.toMatchObject({ status: HTTPResponses.CONFLICT });
+  });
+});
+
+describe('assertCallerBatchAcceptedForImport (#561 M4)', () => {
+  function replayConnection(row: Record<string, unknown> | null) {
+    const statements: string[] = [];
+    const executeQuery = vi.fn(async (sql: string) => (statements.push(sql), row ? [row] : []));
+    return { manager: { executeQuery } as unknown as ConnectionManager, statements };
+  }
+  const input = (batchID: string, importSessionId = IMPORT_SESSION_ID) => ({ schema: CLAIM_SCHEMA, importSessionId, batchID });
+
+  it('accepts the derived id without reading anything', async () => {
+    const { manager, statements } = replayConnection(null);
+
+    await assertCallerBatchAcceptedForImport(manager, input(DERIVED_BATCH));
+
+    expect(statements).toEqual([]);
+  });
+
+  it('accepts the stored batch of a legacy (NULL-mode) committed row, with one plain read', async () => {
+    const { manager, statements } = replayConnection(committedRow({ committed_upload_mode: null, committed_batch_id: LEGACY_CLIENT_BATCH }));
+
+    await assertCallerBatchAcceptedForImport(manager, input(LEGACY_CLIENT_BATCH));
+
+    console.log(`[M4] legacy replay read: ${statements[0]}`);
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).not.toMatch(/FOR UPDATE|FOR SHARE/);
+  });
+
+  it.each([
+    ['a preflight row', importRow()],
+    ['a committing row', committingRow()],
+    ['a committed row with a stored mode', committedRow()],
+    ['a legacy committed row under another batch', committedRow({ committed_upload_mode: null, committed_batch_id: LEGACY_CLIENT_BATCH })],
+    ['no row', null]
+  ])('refuses a stale page batch on %s with 409 and writes nothing', async (_label, row) => {
+    const { manager, statements } = replayConnection(row);
+
+    const attempt = assertCallerBatchAcceptedForImport(manager, input(CALLER_BATCH));
+
+    await expect(attempt).rejects.toBeInstanceOf(StaleArcgisClientBatchError);
+    await expect(assertCallerBatchAcceptedForImport(manager, input(CALLER_BATCH))).rejects.toMatchObject({ status: HTTPResponses.CONFLICT });
+    console.log(`[M4] ${_label}: ${statements.length} statements`);
+    expect(statements.filter(sql => WRITE_STATEMENT.test(sql))).toEqual([]);
+  });
+
+  it('tells the user to reload the page', async () => {
+    const { manager } = replayConnection(null);
+
+    await expect(assertCallerBatchAcceptedForImport(manager, input(CALLER_BATCH))).rejects.toThrow(/reload the page/i);
+  });
+
+  it('answers 404 for an import session id that is not a UUID', async () => {
+    const { manager } = replayConnection(null);
+
+    await expect(assertCallerBatchAcceptedForImport(manager, input(CALLER_BATCH, 'import-session-1'))).rejects.toMatchObject({
+      status: HTTPResponses.NOT_FOUND
+    });
   });
 });

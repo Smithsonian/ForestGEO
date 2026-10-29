@@ -8,8 +8,9 @@ import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editpl
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
-import { ArcgisImportSessionError } from '@/lib/arcgis/import-session';
-import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
+import { ArcgisImportSessionError, assertCallerBatchAcceptedForImport } from '@/lib/arcgis/import-session';
+import { ArcgisCommitVerificationError, commitArcgisImport } from '@/lib/uploads/arcgis-commit';
+import { CensusReplacementIncompleteError } from '@/lib/uploads/stage-measurements';
 
 export const runtime = 'nodejs';
 
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const plotID = Number(body.plotID);
   const censusID = Number(body.censusID);
   const importSessionId = typeof body.importSessionId === 'string' ? body.importSessionId.trim() : '';
-  const batchID = typeof body.batchID === 'string' ? body.batchID.trim() : '';
+  const batchID = typeof body.batchID === 'string' && body.batchID.trim() !== '' ? body.batchID.trim() : undefined;
   const requestedFileName = typeof body.fileName === 'string' ? body.fileName.trim() : '';
   const uploadMode: UploadMode = body.uploadMode === UploadMode.CLEAN_REUPLOAD ? UploadMode.CLEAN_REUPLOAD : UploadMode.REVISIONS;
   const sessionId = request.headers.get('x-upload-session-id') ?? '';
@@ -47,11 +48,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     !Number.isSafeInteger(censusID) ||
     censusID <= 0 ||
     !importSessionId ||
-    !batchID ||
     !requestedFileName
   ) {
     return NextResponse.json(
-      { error: 'Missing or invalid parameters: schema, plotID, censusID, importSessionId, batchID, fileName' },
+      { error: 'Missing or invalid parameters: schema, plotID, censusID, importSessionId, fileName' },
       { status: HTTPResponses.INVALID_REQUEST }
     );
   }
@@ -69,6 +69,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       contextLabel: `arcgis commit for session ${importSessionId}`
     });
     const uploadSessionID = uploadSession.sessionId ?? sessionId;
+    if (batchID !== undefined) await assertCallerBatchAcceptedForImport(connectionManager, { schema, importSessionId, batchID });
 
     const result = await commitArcgisImport(connectionManager, {
       schema,
@@ -92,6 +93,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (error instanceof UploadSessionOwnershipError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof ArcgisCommitVerificationError || error instanceof CensusReplacementIncompleteError) {
+      ailogger.warn(`ArcGIS commit for ${importSessionId} is not finished and can be retried: ${error.message}`);
+      return NextResponse.json({ error: `${error.message} Re-run the import to finish it.` }, { status: HTTPResponses.CONFLICT });
     }
     const errorObj = error instanceof Error ? error : new Error(String(error));
     ailogger.error('ArcGIS commit failed:', errorObj);

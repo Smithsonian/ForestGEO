@@ -6,7 +6,12 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { UploadMode } from '@/config/uploadmodes';
 import { UploadSessionState } from '@/config/uploadsessiontracker';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
-import { deriveArcgisCommitBatchID, SubBatchOrdinalOverflowError, subBatchIDForRowOrdinal } from '@/lib/uploads/batch-family';
+import {
+  deriveArcgisCommitBatchID,
+  InvalidArcgisImportSessionIDError,
+  SubBatchOrdinalOverflowError,
+  subBatchIDForRowOrdinal
+} from '@/lib/uploads/batch-family';
 import { lockActiveUploadSessionForCensus } from '@/lib/uploads/upload-session-replacement-marker';
 import type { FileRow } from '@/config/macros/formdetails';
 import type { ArcgisImportReference, TransformResult, TransformSummary, TransformWarning } from './types';
@@ -581,6 +586,51 @@ export async function claimArcgisImportCommitAttempt(
     fileName: session.file_id,
     rowCount
   };
+}
+
+/** A page sent a commit batch the server no longer uses: a browser holding the pre-#561 bundle (P21). */
+export class StaleArcgisClientBatchError extends ArcgisImportSessionError {
+  constructor(importSessionId: string) {
+    super(
+      `This page sent a commit batch the server no longer uses for ArcGIS import ${importSessionId}. Reload the page and run the import again.`,
+      HTTPResponses.CONFLICT
+    );
+    this.name = 'StaleArcgisClientBatchError';
+  }
+}
+
+/**
+ * The route's guard on a caller-sent batch (#561 M4). Since #561 the batch is derived from the import session and the
+ * UI sends none, so a sent batch must be the derived id, or the stored batch of a session committed before #561
+ * (NULL mode), which still replays by its old rule. Anything else comes from a stale page and is refused before the
+ * claim and before any write. A plain read: the legacy row it looks for is committed and never changes. The worker
+ * calls commitArcgisImport directly and does not pass through this guard.
+ */
+export async function assertCallerBatchAcceptedForImport(
+  connectionManager: ConnectionManager,
+  input: { schema: string; importSessionId: string; batchID: string }
+): Promise<void> {
+  let derivedBatchID: string;
+  try {
+    derivedBatchID = deriveArcgisCommitBatchID(input.importSessionId);
+  } catch (error: unknown) {
+    if (error instanceof InvalidArcgisImportSessionIDError) {
+      throw new ArcgisImportSessionError('ArcGIS import session was not found. Re-run the workbook pre-flight step.', HTTPResponses.NOT_FOUND);
+    }
+    throw error;
+  }
+  if (input.batchID === derivedBatchID) return;
+
+  const replaySQL = safeFormatQuery(
+    input.schema,
+    `SELECT state, committed_upload_mode, committed_batch_id FROM ??.arcgis_import_sessions WHERE import_session_id = ? LIMIT 1`
+  );
+  const rows = await connectionManager.executeQuery(replaySQL, [input.importSessionId]);
+  const row = Array.isArray(rows)
+    ? (rows[0] as { state: string; committed_upload_mode: string | null; committed_batch_id: string | null } | undefined)
+    : undefined;
+  const isLegacyReplay = row?.state === ARCGIS_IMPORT_SESSION_STATE.COMMITTED && row.committed_upload_mode === null && row.committed_batch_id === input.batchID;
+  if (!isLegacyReplay) throw new StaleArcgisClientBatchError(input.importSessionId);
 }
 
 /** Everything a unit after the claim needs to prove it is still the attempt allowed to write (#561). */
