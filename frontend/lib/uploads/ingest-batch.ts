@@ -37,7 +37,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
-import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
+import { shouldRecoverFailedInitialCensus, type FailedInitialCensusRecoveryState } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import type { SystemFailureKind } from '@/config/measurementerrors';
 import {
@@ -62,16 +62,22 @@ import { auditCoreMeasurementsScopeDiff, snapshotCoreMeasurementsScope } from '@
 import { ChangelogOperation, ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
 import {
+  CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   COREMEASUREMENTS_JOIN_ALIAS,
   deleteCoreMeasurementsInBoundedChunksWithAudit,
+  lockAuditAndDeleteCoreMeasurementWindow,
   MEASUREMENT_ERROR_LOG_JOIN_ALIAS,
   PLAIN_COREMEASUREMENTS_FROM_SQL,
+  selectCoreMeasurementIDsInScope,
+  sliceIntoDeleteWindows,
   type CoreMeasurementDeleteScope,
   type CoreMeasurementLockAlias
 } from '@/lib/ingestion/temporary-measurements';
+import { retryWholeTransactionOnDeadlock } from '@/lib/db/deadlock-retry';
+import { CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS } from '@/lib/uploads/stage-measurements';
 
 const MAX_ATTEMPTS_PER_SUBBATCH = 5;
-const SETUP_PHASE_TIMEOUT_MS = 2 * 60 * 1000;
+export const SETUP_PHASE_TIMEOUT_MS = 2 * 60 * 1000;
 
 // Retry / backoff constants for processSubBatch
 const INITIAL_RETRY_DELAY_MS = 100;
@@ -341,6 +347,292 @@ function extractProcedureRow(procedureResult: ProcedureCallResult | null | undef
 /** Narrows an unknown procedure-row field to a string for SubBatchResult.message. */
 function toOptionalMessage(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+export type FailedCensusRecoveryOutcome = 'not_due' | 'recovered' | 'superseded';
+
+export interface FailedCensusRecoveryParams {
+  schema: string;
+  fileID: string;
+  batchID: string;
+  plotID: number;
+  censusID: number;
+  changedBy: string | null;
+}
+
+export interface FailedCensusRecoveryResult {
+  outcome: FailedCensusRecoveryOutcome;
+  /** coremeasurements rows deleted, each with its DELETE-audit row. */
+  deletedRows: number;
+  /** Committed measurement-window transactions; the final transaction is not counted. */
+  windowCount: number;
+  /** The longest single window attempt, BEGIN to COMMIT/ROLLBACK; deadlock backoff waits are not included. */
+  slowestWindowMs: number;
+  deadlockRetries: number;
+}
+
+export const FAILED_CENSUS_RECOVERY_STARTED_EVENT = 'upload.failed_census_recovery.started';
+export const FAILED_CENSUS_RECOVERY_COMPLETED_EVENT = 'upload.failed_census_recovery.completed';
+export const FAILED_CENSUS_RECOVERY_FAILED_EVENT = 'upload.failed_census_recovery.failed';
+export const FAILED_CENSUS_RECOVERY_WINDOW_TRANSACTION = 'failed_census_recovery_window';
+export const FAILED_CENSUS_RECOVERY_FINAL_TRANSACTION = 'failed_census_recovery_final';
+/** One more than a window: a final read that returns this many ids means rows arrived after the scope read. */
+export const FAILED_CENSUS_RECOVERY_FINAL_READ_LIMIT = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE + 1;
+
+type FailedCensusRecoveryProgress = Omit<FailedCensusRecoveryResult, 'outcome'>;
+type RecoveryTransactionResult<T> = { superseded: true } | { superseded: false; value: T };
+type FinalRecoveryStep = { rowsArrived: true } | { rowsArrived: false; deletedRows: number };
+
+const NOT_DUE_RECOVERY: FailedCensusRecoveryResult = { outcome: 'not_due', deletedRows: 0, windowCount: 0, slowestWindowMs: 0, deadlockRetries: 0 };
+
+/** C1: the whole census. */
+export function failedCensusRecoveryScope(censusID: number): CoreMeasurementDeleteScope {
+  return { whereSQL: 'CensusID = ?', whereParams: [censusID], fromSQL: PLAIN_COREMEASUREMENTS_FROM_SQL };
+}
+
+async function readFailedInitialCensusRecoveryState(
+  connectionManager: ConnectionManager,
+  schema: string,
+  plotID: number,
+  censusID: number
+): Promise<FailedInitialCensusRecoveryState> {
+  const recoveryStateSQL = safeFormatQuery(
+    schema,
+    `SELECT
+       (SELECT COUNT(*) FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status = 'completed') AS completedUploads,
+       (SELECT COUNT(*) FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status IN ('failed', 'processing')) AS incompleteUploads,
+       (SELECT COUNT(*) FROM ??.trees WHERE CensusID = ?) AS treeCount,
+       (SELECT COUNT(*) FROM ??.stems WHERE CensusID = ?) AS stemCount,
+       (SELECT COUNT(*) FROM ??.coremeasurements WHERE CensusID = ?) AS coreMeasurementCount`
+  );
+  const recoveryStateRows = await connectionManager.executeQuery(recoveryStateSQL, [plotID, censusID, plotID, censusID, censusID, censusID, censusID]);
+  const recoveryStateRow = recoveryStateRows[0] ?? {};
+  return {
+    completedUploads: toCount(recoveryStateRow.completedUploads),
+    incompleteUploads: toCount(recoveryStateRow.incompleteUploads),
+    treeCount: toCount(recoveryStateRow.treeCount),
+    stemCount: toCount(recoveryStateRow.stemCount),
+    coreMeasurementCount: toCount(recoveryStateRow.coreMeasurementCount)
+  };
+}
+
+/**
+ * The first two statements of every recovery transaction. Every writer of the census's trees, stems or
+ * measurement rows holds a shared lock on the census row through its foreign key until it commits, so this
+ * FOR UPDATE waits for any such writer in flight and keeps new ones out until this transaction commits; the
+ * guard then reads the census's completed uploads under that lock (spec #562 §3, D3, D10, E-6).
+ */
+async function recoveryIsSupersededUnderCensusLock(
+  connectionManager: ConnectionManager,
+  params: FailedCensusRecoveryParams,
+  transactionID: string
+): Promise<boolean> {
+  const censusRows = await connectionManager.executeQuery(
+    safeFormatQuery(params.schema, 'SELECT CensusID FROM ??.census WHERE CensusID = ? FOR UPDATE'),
+    [params.censusID],
+    transactionID
+  );
+  if (!Array.isArray(censusRows) || censusRows.length === 0) return true;
+  const guardRows = await connectionManager.executeQuery(
+    safeFormatQuery(params.schema, "SELECT COUNT(*) AS completedUploads FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status = 'completed'"),
+    [params.plotID, params.censusID],
+    transactionID
+  );
+  return toCount(guardRows?.[0]?.completedUploads) > 0;
+}
+
+async function runRecoveryTransaction<T>(
+  connectionManager: ConnectionManager,
+  params: FailedCensusRecoveryParams,
+  progress: FailedCensusRecoveryProgress,
+  transactionKind: string,
+  timeoutMs: number,
+  work: (transactionID: string) => Promise<T>
+): Promise<RecoveryTransactionResult<T>> {
+  const attemptTransaction = async (): Promise<RecoveryTransactionResult<T>> => {
+    const attemptStartedAt = Date.now();
+    try {
+      return await connectionManager.withTransaction<RecoveryTransactionResult<T>>(
+        async tx =>
+          (await recoveryIsSupersededUnderCensusLock(connectionManager, params, tx.id))
+            ? { superseded: true }
+            : { superseded: false, value: await work(tx.id) },
+        { timeoutMs }
+      );
+    } finally {
+      if (transactionKind === FAILED_CENSUS_RECOVERY_WINDOW_TRANSACTION)
+        progress.slowestWindowMs = Math.max(progress.slowestWindowMs, Date.now() - attemptStartedAt);
+    }
+  };
+  return retryWholeTransactionOnDeadlock(transactionKind, attemptTransaction, () => {
+    progress.deadlockRetries += 1;
+  });
+}
+
+/** Today's residue statements, in today's order. */
+function failedCensusResidueStatements(params: FailedCensusRecoveryParams): Array<{ sql: string; params: unknown[] }> {
+  const { schema, fileID, batchID, plotID, censusID } = params;
+  return [
+    // measurementssummary is derived and reconstructable, not a primary audit trail: deleted unaudited.
+    { sql: safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CensusID = ?'), params: [censusID] },
+    { sql: safeFormatQuery(schema, 'DELETE FROM ??.stems WHERE CensusID = ?'), params: [censusID] },
+    { sql: safeFormatQuery(schema, 'DELETE FROM ??.trees WHERE CensusID = ?'), params: [censusID] },
+    {
+      sql: safeFormatQuery(
+        schema,
+        `DELETE tm
+         FROM ??.temporarymeasurements tm
+         INNER JOIN ??.uploadmetrics um
+           ON um.fileID = tm.FileID
+          AND um.batchID = tm.BatchID
+          AND um.plotID = tm.PlotID
+          AND um.censusID = tm.CensusID
+         WHERE tm.PlotID = ?
+           AND tm.CensusID = ?
+           AND um.status IN ('failed', 'processing')
+           AND NOT (tm.FileID = ? AND (tm.BatchID = ? OR tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`
+      ),
+      params: [plotID, censusID, fileID, batchID, buildSubBatchPattern(batchID)]
+    },
+    { sql: safeFormatQuery(schema, 'DELETE FROM ??.uploadintegrityalerts WHERE PlotID = ? AND CensusID = ?'), params: [plotID, censusID] },
+    {
+      sql: safeFormatQuery(schema, "DELETE FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status IN ('failed', 'processing')"),
+      params: [plotID, censusID]
+    }
+  ];
+}
+
+/**
+ * The final transaction: under the census lock no uncommitted insert into the census can exist or start, so this
+ * read is complete. The held-back slice goes in the same transaction as the metrics, alerts, staged rows, stems
+ * and trees, so the census keeps the predicate's evidence until everything commits (spec #562 D4, G5).
+ */
+async function finishFailedCensusRecovery(
+  connectionManager: ConnectionManager,
+  params: FailedCensusRecoveryParams,
+  scope: CoreMeasurementDeleteScope,
+  transactionID: string
+): Promise<FinalRecoveryStep> {
+  const remainingRows = await connectionManager.executeQuery(
+    safeFormatQuery(
+      params.schema,
+      `SELECT CoreMeasurementID FROM ??.coremeasurements WHERE CensusID = ? ORDER BY CoreMeasurementID LIMIT ${FAILED_CENSUS_RECOVERY_FINAL_READ_LIMIT}`
+    ),
+    [params.censusID],
+    transactionID
+  );
+  const remainingIDs = (Array.isArray(remainingRows) ? remainingRows : []).map((row: { CoreMeasurementID: unknown }) => Number(row.CoreMeasurementID));
+  if (remainingIDs.length > CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return { rowsArrived: true };
+  const deletedRows = await lockAuditAndDeleteCoreMeasurementWindow(
+    connectionManager,
+    params.schema,
+    scope,
+    remainingIDs,
+    params.changedBy,
+    params.plotID,
+    params.censusID,
+    transactionID
+  );
+  for (const statement of failedCensusResidueStatements(params)) {
+    await connectionManager.executeQuery(statement.sql, statement.params, transactionID);
+  }
+  return { rowsArrived: false, deletedRows };
+}
+
+/**
+ * Each pass reads the census once and deletes what it read. A pass ends early ("rows arrived") only when more than
+ * a window of rows exists under the final transaction's census lock, i.e. other writers added failure rows after the
+ * read; those writers are failed attempts (a completed upload makes the guard stop the recovery), and every pass
+ * deletes everything it read, so the loop only continues while new failed attempts keep landing in this census.
+ * Deliberately not capped: a cap would leave a census half-recovered for a reason the next ingestBatch repeats.
+ */
+async function runFailedCensusRecovery(
+  connectionManager: ConnectionManager,
+  params: FailedCensusRecoveryParams,
+  progress: FailedCensusRecoveryProgress
+): Promise<Exclude<FailedCensusRecoveryOutcome, 'not_due'>> {
+  const scope = failedCensusRecoveryScope(params.censusID);
+  for (;;) {
+    const windows = sliceIntoDeleteWindows(await selectCoreMeasurementIDsInScope(connectionManager, params.schema, scope));
+    const heldBackWindowIndex = windows.length - 1;
+    for (const windowIDs of windows.slice(0, heldBackWindowIndex)) {
+      const window = await runRecoveryTransaction(
+        connectionManager,
+        params,
+        progress,
+        FAILED_CENSUS_RECOVERY_WINDOW_TRANSACTION,
+        CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS,
+        transactionID =>
+          lockAuditAndDeleteCoreMeasurementWindow(
+            connectionManager,
+            params.schema,
+            scope,
+            windowIDs,
+            params.changedBy,
+            params.plotID,
+            params.censusID,
+            transactionID
+          )
+      );
+      if (window.superseded) return 'superseded';
+      progress.windowCount += 1;
+      progress.deletedRows += window.value;
+    }
+    const final = await runRecoveryTransaction(
+      connectionManager,
+      params,
+      progress,
+      FAILED_CENSUS_RECOVERY_FINAL_TRANSACTION,
+      SETUP_PHASE_TIMEOUT_MS,
+      transactionID => finishFailedCensusRecovery(connectionManager, params, scope, transactionID)
+    );
+    if (final.superseded) return 'superseded';
+    if (!final.value.rowsArrived) {
+      progress.deletedRows += final.value.deletedRows;
+      return 'recovered';
+    }
+  }
+}
+
+/**
+ * Recovers a census whose first load failed (shouldRecoverFailedInitialCensus) BEFORE ingestBatch's setup
+ * transaction opens, in separately committed transactions of at most CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE
+ * measurement rows each (#562). Every transaction takes the census row FOR UPDATE, re-checks for a completed
+ * upload, and is re-run whole on a deadlock. An interruption anywhere leaves a census that is still due, or one
+ * that is fully recovered, so the next ingestBatch resumes (spec #562 §3).
+ */
+export async function recoverFailedInitialCensusInBoundedTransactions(
+  connectionManager: ConnectionManager,
+  params: FailedCensusRecoveryParams
+): Promise<FailedCensusRecoveryResult> {
+  const { schema, fileID, batchID, plotID, censusID } = params;
+  const recoveryState = await readFailedInitialCensusRecoveryState(connectionManager, schema, plotID, censusID);
+  if (!shouldRecoverFailedInitialCensus(recoveryState)) return { ...NOT_DUE_RECOVERY };
+
+  const family = await discoverBatchFamily((sql, sqlParams) => connectionManager.executeQuery(sql, sqlParams), schema, fileID, batchID);
+  if (!family) return { ...NOT_DUE_RECOVERY };
+  assertExpectedScope(family, plotID, censusID, fileID, batchID);
+  assertMembersWithinBatchSize(family, fileID, batchID, getIngestionBatchSize());
+
+  const logKeys = { schema, plotID, censusID, fileID, batchID, recoveryState };
+  ailogger.info(FAILED_CENSUS_RECOVERY_STARTED_EVENT, logKeys);
+  const startedAt = Date.now();
+  const progress: FailedCensusRecoveryProgress = { deletedRows: 0, windowCount: 0, slowestWindowMs: 0, deadlockRetries: 0 };
+  let outcome: Exclude<FailedCensusRecoveryOutcome, 'not_due'>;
+  try {
+    outcome = await runFailedCensusRecovery(connectionManager, params, progress);
+  } catch (recoveryError: unknown) {
+    // Committed windows stay deleted and the next ingestBatch resumes; this line says how far this attempt got.
+    ailogger.error(FAILED_CENSUS_RECOVERY_FAILED_EVENT, recoveryError instanceof Error ? recoveryError : undefined, {
+      ...logKeys,
+      ...progress,
+      elapsedMs: Date.now() - startedAt,
+      errorMessage: recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
+    });
+    throw recoveryError;
+  }
+  ailogger.info(FAILED_CENSUS_RECOVERY_COMPLETED_EVENT, { ...logKeys, outcome, ...progress, elapsedMs: Date.now() - startedAt });
+  return { outcome, ...progress };
 }
 
 async function recoverFailedInitialCensusIfNeeded(
