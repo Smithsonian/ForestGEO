@@ -14,7 +14,7 @@
  * Prerequisites: docker compose up -d mysql. Run only through the relay's integration lock script.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Connection } from 'mysql2/promise';
+import type { Connection, ResultSetHeader } from 'mysql2/promise';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import {
@@ -46,6 +46,7 @@ import { WALK_SCOPE_MARKER, WINDOW_WALK_STATEMENT } from '../setup/core-measurem
 import {
   createStatementHarness,
   matching,
+  MYSQL_LOCK_WAIT_TIMEOUT_ERRNO,
   runBarrierScenario,
   waitForLockWait,
   withinDeadline,
@@ -59,6 +60,7 @@ import {
   openSideConnection,
   seedUnresolvedMeasurements,
   seedUploadMetric,
+  sqlExceptionErrorID,
   stageIncomingRows,
   stageRowsMirroringMeasurements,
   UPLOAD_STATUS
@@ -102,6 +104,15 @@ const CONTROL_CENSUS = { plotCensusNumber: 92, startDate: '2021-01-01', endDate:
 const WALK_TEST_TIMEOUT_MS = 180_000;
 const SIDE_LOCK_WAIT_SECONDS = 30;
 const SINGLE_TRANSACTION = 1;
+const CONTROL_WRITE_LOCK_WAIT_SECONDS = 2;
+const FEW_CANDIDATES = 3;
+const HELD_BACK_ROWS = 5;
+const SECONDS_TO_MS = 1000;
+const LATE_ROW_TAG = 'LATE';
+const CONTROL_UNLINKED_BATCH = 'walk-control-unlinked';
+const CONTROL_LINKABLE_BATCH = 'walk-control-linkable';
+/** INNODB_TRX.trx_query holds only the first 1024 characters, so a C3 window statement is recognised by its hint, not its FOR UPDATE tail. */
+const C3_WINDOW_LOCK_STATEMENT_HEAD = /^SELECT \/\*\+ JOIN_PREFIX\(cm\)/;
 
 describe('bounded window walks (#562)', () => {
   let connection: Connection;
@@ -536,6 +547,374 @@ describe('bounded window walks (#562)', () => {
       }
       for (const id of firstSlice) {
         expect(audits.get(id)).toEqual({ count: 1, changedBy: CHANGED_BY });
+      }
+    },
+    WALK_TEST_TIMEOUT_MS
+  );
+  async function runInSideTransaction(side: Connection, write: (side: Connection) => Promise<unknown>): Promise<void> {
+    await side.beginTransaction();
+    try {
+      await write(side);
+      await side.commit();
+    } catch (writeError: unknown) {
+      await side.rollback();
+      throw writeError;
+    }
+  }
+
+  interface SideWriteOutcome {
+    label: string;
+    elapsedMs: number;
+    errno?: number;
+    message?: string;
+  }
+
+  /** Runs one write in its own transaction; a MySQL error becomes part of the outcome, anything else propagates. */
+  async function timeSideWrite(label: string, side: Connection, write: (side: Connection) => Promise<unknown>): Promise<SideWriteOutcome> {
+    const startedAt = Date.now();
+    try {
+      await runInSideTransaction(side, write);
+      return { label, elapsedMs: Date.now() - startedAt };
+    } catch (writeError: unknown) {
+      if (typeof writeError !== 'object' || writeError === null || !('errno' in writeError)) throw writeError;
+      const mysqlError = writeError as { errno: number; message: string };
+      return { label, elapsedMs: Date.now() - startedAt, errno: mysqlError.errno, message: mysqlError.message };
+    }
+  }
+
+  /** A failed first load of the target census: unresolved rows, the failed metric that makes the recovery due, and the incoming family's staged rows. */
+  async function seedFailedFirstLoad(rowCount: number): Promise<number[]> {
+    const ids = await seedUnresolvedMeasurements(connection, {
+      censusID: targetCensusID,
+      fileID: FAILED_FIRST_LOAD_FILE,
+      batchID: FAILED_FIRST_LOAD_BATCH,
+      count: rowCount,
+      tagPrefix: 'FFL'
+    });
+    await seedUploadMetric(connection, {
+      schema,
+      plotID,
+      censusID: targetCensusID,
+      fileID: FAILED_FIRST_LOAD_FILE,
+      batchID: FAILED_FIRST_LOAD_BATCH,
+      status: UPLOAD_STATUS.FAILED
+    });
+    await stageIncomingRows(connection, {
+      fileID: INCOMING_FILE,
+      batchID: INCOMING_BATCH,
+      plotID,
+      censusID: targetCensusID,
+      count: INCOMING_STAGED_ROWS,
+      tagPrefix: 'IN'
+    });
+    return ids;
+  }
+
+  const recoverTargetCensus = () =>
+    recoverFailedInitialCensusInBoundedTransactions(realManager, {
+      schema,
+      fileID: INCOMING_FILE,
+      batchID: INCOMING_BATCH,
+      plotID,
+      censusID: targetCensusID,
+      changedBy: CHANGED_BY
+    });
+
+  const insertLateUnresolvedRow = (side: Connection, censusID: number, fileID: string, batchID: string, tag: string) =>
+    side.query<ResultSetHeader>(
+      `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, UploadFileID, UploadBatchID, RawTreeTag, IsActive)
+       VALUES (?, NULL, FALSE, '2024-03-15', 1.0, 1.0, ?, ?, ?, 1)`,
+      [censusID, fileID, batchID, tag]
+    );
+
+  it.each([
+    ['C2', () => runScopeInOwnTransaction(sameFileUnresolvedFailureScope(INCOMING_FILE, INCOMING_BATCH, targetCensusID)), STALE_FAMILY_BATCH],
+    [
+      'C4',
+      () => deleteUnresolvedRowsForBatchFamily(realManager, schema, INCOMING_FILE, INCOMING_BATCH, targetCensusID, undefined, [], CHANGED_BY, plotID),
+      `${INCOMING_BATCH}__sub001`
+    ]
+  ] as const)(
+    'I7(a) %s: a matching row still open when the confirmation runs is waited for and deleted, audited, before the walk returns (catches: a non-locking confirmation)',
+    async (label, runWalk, batchID) => {
+      await seedUnresolvedMeasurements(connection, {
+        censusID: targetCensusID,
+        fileID: INCOMING_FILE,
+        batchID,
+        count: FEW_CANDIDATES,
+        tagPrefix: `${label}O`
+      });
+      const writer = await openSideConnection(schema, SIDE_LOCK_WAIT_SECONDS);
+      const harness = createStatementHarness(realManager);
+      try {
+        await runBarrierScenario(harness, async () => {
+          const beforeConfirmation = harness.placeBarrier(matching(WINDOW_WALK_STATEMENT.CONFIRMATION), 1, 'before');
+          const walk = harness.track(Promise.resolve(runWalk()));
+          await withinDeadline(beforeConfirmation.reached, `${label} at its confirmation`, harness.renderStatementLog);
+          await writer.beginTransaction();
+          const [inserted] = await insertLateUnresolvedRow(writer, targetCensusID, INCOMING_FILE, batchID, `${label}${LATE_ROW_TAG}`);
+          const lateID = Number(inserted.insertId);
+          beforeConfirmation.release();
+          await waitForLockWait(
+            connection,
+            { schema, table: 'coremeasurements', waitingStatement: /LIMIT \d+\s+FOR UPDATE/ },
+            harness,
+            `${label} confirmation waiting on the open insert`
+          );
+          await writer.commit();
+          await withinDeadline(walk, `${label} walk to finish`, harness.renderStatementLog);
+          const audits = await deleteAuditCounts(connection, targetCensusID);
+          const lateSurvives = await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID = ?', [lateID]);
+          console.log(
+            `[I7a ${label}] lateID=${lateID} lateSurvives=${lateSurvives} audit=${JSON.stringify(audits.get(lateID))}\n${harness.renderStatementLog()}`
+          );
+          expect(lateSurvives, `${label}: the late row is deleted before the walk returns`).toBe(0);
+          expect(audits.get(lateID), `${label}: exactly one DELETE-audit row for the late row`).toEqual({ count: 1, changedBy: CHANGED_BY });
+        });
+      } finally {
+        await writer.end();
+      }
+    },
+    WALK_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'I7(b) C1: the final transaction waits on its census lock for an open census insert and deletes that row, audited (catches: a final read outside the census lock)',
+    async () => {
+      const seededIDs = await seedFailedFirstLoad(WINDOW + HELD_BACK_ROWS);
+      const writer = await openSideConnection(schema, SIDE_LOCK_WAIT_SECONDS);
+      const harness = createStatementHarness(realManager);
+      try {
+        await runBarrierScenario(harness, async () => {
+          const beforeFinalCensusLock = harness.placeBarrier(matching(WINDOW_WALK_STATEMENT.CENSUS_LOCK), 2, 'before');
+          const recovery = harness.track(recoverTargetCensus());
+          await withinDeadline(beforeFinalCensusLock.reached, 'recovery at the final transaction’s census lock', harness.renderStatementLog);
+          await writer.beginTransaction();
+          const [inserted] = await insertLateUnresolvedRow(writer, targetCensusID, FAILED_FIRST_LOAD_FILE, FAILED_FIRST_LOAD_BATCH, `C1${LATE_ROW_TAG}`);
+          const lateID = Number(inserted.insertId);
+          beforeFinalCensusLock.release();
+          await waitForLockWait(
+            connection,
+            { schema, table: 'census', lockData: String(targetCensusID) },
+            harness,
+            'final transaction’s census FOR UPDATE waiting on the open insert'
+          );
+          await writer.commit();
+          const result = await withinDeadline(recovery, 'recovery to finish', harness.renderStatementLog);
+          const audits = await deleteAuditCounts(connection, targetCensusID);
+          const remaining = await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ?', [targetCensusID]);
+          console.log(
+            `[I7b C1] result=${JSON.stringify(result)} lateID=${lateID} remaining=${remaining} audit=${JSON.stringify(audits.get(lateID))}\n${harness.renderStatementLog()}`
+          );
+          expect(result.outcome).toBe('recovered');
+          expect(result.deletedRows, 'the seeded rows plus the writer’s late row').toBe(seededIDs.length + 1);
+          expect(remaining, 'the census holds no measurement rows').toBe(0);
+          expect(audits.get(lateID), 'exactly one DELETE-audit row for the late row').toEqual({ count: 1, changedBy: CHANGED_BY });
+        });
+      } finally {
+        await writer.end();
+      }
+    },
+    WALK_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'I9(a): a held recovery window lets other censuses, their error links and staging proceed and makes only this census’s measurement inserts wait (catches: locking the catalog or the control census)',
+    async () => {
+      const seededIDs = await seedFailedFirstLoad(WINDOW + HELD_BACK_ROWS);
+      await seedUnresolvedMeasurements(connection, {
+        censusID: controlCensusID,
+        fileID: INCOMING_FILE,
+        batchID: CONTROL_CENSUS_BATCH,
+        count: NON_CANDIDATE_ROWS,
+        tagPrefix: 'CTRL'
+      });
+      const [controlUnlinkedID] = await seedUnresolvedMeasurements(connection, {
+        censusID: controlCensusID,
+        fileID: INCOMING_FILE,
+        batchID: CONTROL_UNLINKED_BATCH,
+        count: 1,
+        tagPrefix: 'CTRU',
+        withErrorLink: false
+      });
+      const errorID = await sqlExceptionErrorID(connection);
+      const controlSide = await openSideConnection(schema, CONTROL_WRITE_LOCK_WAIT_SECONDS);
+      const blockedSide = await openSideConnection(schema, CONTROL_WRITE_LOCK_WAIT_SECONDS);
+      const harness = createStatementHarness(realManager);
+      const controlWrites: Array<[string, (side: Connection) => Promise<unknown>]> = [
+        [
+          'insert a control-census measurement',
+          side =>
+            side.query(
+              `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, RawTreeTag, IsActive)
+               VALUES (?, NULL, FALSE, '2024-03-15', 1.0, 1.0, 'I9CTRL', 1)`,
+              [controlCensusID]
+            )
+        ],
+        [
+          'update a control-census measurement',
+          side => side.query(`UPDATE coremeasurements SET Description = 'I9 control touch' WHERE CoreMeasurementID = ?`, [controlUnlinkedID])
+        ],
+        [
+          'link a control row to the error code the target census uses',
+          side => side.query('INSERT INTO measurement_error_log (MeasurementID, ErrorID) VALUES (?, ?)', [controlUnlinkedID, errorID])
+        ],
+        [
+          'stage a row for the target census',
+          side =>
+            side.query(`INSERT INTO temporarymeasurements (FileID, BatchID, PlotID, CensusID, TreeTag) VALUES ('i9-staging.csv', 'i9-batch', ?, ?, 'I9STG')`, [
+              plotID,
+              targetCensusID
+            ])
+        ]
+      ];
+      try {
+        await runBarrierScenario(harness, async () => {
+          const windowHeld = harness.placeBarrier(matching(WINDOW_WALK_STATEMENT.WINDOW_LOCK), 1, 'after');
+          const recovery = harness.track(recoverTargetCensus());
+          await withinDeadline(windowHeld.reached, 'recovery holding its first window', harness.renderStatementLog);
+
+          const controlOutcomes: SideWriteOutcome[] = [];
+          for (const [label, write] of controlWrites) controlOutcomes.push(await timeSideWrite(label, controlSide, write));
+
+          await blockedSide.beginTransaction();
+          const blockedInsert = timeSideWrite('insert a target-census measurement', blockedSide, side =>
+            insertLateUnresolvedRow(side, targetCensusID, FAILED_FIRST_LOAD_FILE, FAILED_FIRST_LOAD_BATCH, 'I9TARGET')
+          );
+          await waitForLockWait(
+            connection,
+            { schema, table: 'census', lockData: String(targetCensusID) },
+            harness,
+            'target-census measurement insert waiting on the census lock'
+          );
+          const blockedOutcome = await withinDeadline(blockedInsert, 'blocked insert to time out', harness.renderStatementLog);
+
+          windowHeld.release();
+          const result = await withinDeadline(recovery, 'recovery to finish', harness.renderStatementLog);
+          console.log(
+            `[I9a] controlOutcomes=${JSON.stringify(controlOutcomes)} blockedOutcome=${JSON.stringify(blockedOutcome)} result=${JSON.stringify(result)}\n${harness.renderStatementLog()}`
+          );
+          expect(
+            controlOutcomes.filter(outcome => outcome.errno !== undefined),
+            `every control write succeeds within the ${CONTROL_WRITE_LOCK_WAIT_SECONDS} s lock wait`
+          ).toEqual([]);
+          controlOutcomes.forEach(outcome =>
+            expect(outcome.elapsedMs, `${outcome.label} is not queued behind the window`).toBeLessThan(CONTROL_WRITE_LOCK_WAIT_SECONDS * SECONDS_TO_MS)
+          );
+          expect(blockedOutcome.errno, 'the target-census measurement insert waited and then hit the lock wait timeout').toBe(MYSQL_LOCK_WAIT_TIMEOUT_ERRNO);
+          expect(result.outcome).toBe('recovered');
+          expect(result.deletedRows).toBe(seededIDs.length);
+        });
+      } finally {
+        await controlSide.end();
+        await blockedSide.end();
+      }
+    },
+    WALK_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'I9(b1): a held C3 window does not block an error-link insert for another census with the same error code (catches: C3 locking the measurement_errors catalog)',
+    async () => {
+      const candidateIDs = await seedUnresolvedMeasurements(connection, {
+        censusID: targetCensusID,
+        fileID: RENAMED_FILE,
+        batchID: RENAMED_BATCH,
+        count: FEW_CANDIDATES,
+        tagPrefix: 'B1R'
+      });
+      await stageRowsMirroringMeasurements(connection, { fileID: INCOMING_FILE, batchID: INCOMING_BATCH, plotID, measurementIDs: candidateIDs });
+      const [controlUnlinkedID] = await seedUnresolvedMeasurements(connection, {
+        censusID: controlCensusID,
+        fileID: INCOMING_FILE,
+        batchID: CONTROL_LINKABLE_BATCH,
+        count: 1,
+        tagPrefix: 'B1C',
+        withErrorLink: false
+      });
+      const errorID = await sqlExceptionErrorID(connection);
+      const controlSide = await openSideConnection(schema, CONTROL_WRITE_LOCK_WAIT_SECONDS);
+      const harness = createStatementHarness(realManager);
+      try {
+        await runBarrierScenario(harness, async () => {
+          const windowHeld = harness.placeBarrier(
+            matching(WINDOW_WALK_STATEMENT.WINDOW_LOCK, statement => statement.sql.includes('JOIN_PREFIX(cm)')),
+            1,
+            'after'
+          );
+          const walk = harness.track(runScopeInOwnTransaction(crossFileUnresolvedFailureScope(INCOMING_FILE, INCOMING_BATCH, targetCensusID)));
+          await withinDeadline(windowHeld.reached, 'C3 holding its window lock', harness.renderStatementLog);
+
+          const linkOutcome = await timeSideWrite('link a control-census row to the same error code', controlSide, side =>
+            side.query('INSERT INTO measurement_error_log (MeasurementID, ErrorID) VALUES (?, ?)', [controlUnlinkedID, errorID])
+          );
+
+          windowHeld.release();
+          const deletedRows = await withinDeadline(walk, 'C3 walk to finish', harness.renderStatementLog);
+          console.log(`[I9b1] linkOutcome=${JSON.stringify(linkOutcome)} deletedRows=${deletedRows}\n${harness.renderStatementLog()}`);
+          expect(
+            linkOutcome,
+            `the error-link insert is not blocked by the held window (a lock wait timeout is errno ${MYSQL_LOCK_WAIT_TIMEOUT_ERRNO})`
+          ).toEqual({
+            label: linkOutcome.label,
+            elapsedMs: linkOutcome.elapsedMs
+          });
+          expect(deletedRows).toBe(FEW_CANDIDATES);
+        });
+      } finally {
+        await controlSide.end();
+      }
+    },
+    WALK_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'I9(b2): a C3 window waits for a concurrent resolution of a candidate’s link and then excludes that candidate (catches: a C3 lock clause without mel)',
+    async () => {
+      const candidateIDs = await seedUnresolvedMeasurements(connection, {
+        censusID: targetCensusID,
+        fileID: RENAMED_FILE,
+        batchID: RENAMED_BATCH,
+        count: FEW_CANDIDATES,
+        tagPrefix: 'B2R'
+      });
+      await stageRowsMirroringMeasurements(connection, { fileID: INCOMING_FILE, batchID: INCOMING_BATCH, plotID, measurementIDs: candidateIDs });
+      const [resolvedCandidateID, ...deletedCandidateIDs] = candidateIDs;
+      const resolver = await openSideConnection(schema, SIDE_LOCK_WAIT_SECONDS);
+      const harness = createStatementHarness(realManager);
+      try {
+        await resolver.beginTransaction();
+        await resolver.query('UPDATE measurement_error_log SET IsResolved = TRUE WHERE MeasurementID = ?', [resolvedCandidateID]);
+        await runBarrierScenario(harness, async () => {
+          const walk = harness.track(runScopeInOwnTransaction(crossFileUnresolvedFailureScope(INCOMING_FILE, INCOMING_BATCH, targetCensusID)));
+          await waitForLockWait(
+            connection,
+            { schema, table: 'measurement_error_log', waitingStatement: C3_WINDOW_LOCK_STATEMENT_HEAD },
+            harness,
+            'C3 window waiting on the resolver’s uncommitted link update'
+          );
+          await resolver.commit();
+          const deletedRows = await withinDeadline(walk, 'C3 walk to finish', harness.renderStatementLog);
+          const audits = await deleteAuditCounts(connection, targetCensusID);
+          const resolvedSurvives = await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID = ?', [
+            resolvedCandidateID
+          ]);
+          const othersSurvive = await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [
+            deletedCandidateIDs
+          ]);
+          console.log(
+            `[I9b2] deletedRows=${deletedRows} resolvedCandidate=${resolvedCandidateID} resolvedSurvives=${resolvedSurvives} othersSurvive=${othersSurvive} audited=${JSON.stringify([...audits])}\n${harness.renderStatementLog()}`
+          );
+          expect(deletedRows, 'the walk deletes every candidate except the one resolved concurrently').toBe(FEW_CANDIDATES - 1);
+          expect(resolvedSurvives, 'the candidate resolved under the window survives').toBe(1);
+          expect(audits.has(resolvedCandidateID), 'no DELETE-audit row for the surviving candidate').toBe(false);
+          expect(othersSurvive).toBe(0);
+          for (const id of deletedCandidateIDs) {
+            expect(audits.get(id), `candidate ${id}: deleted with exactly one audit row`).toEqual({ count: 1, changedBy: CHANGED_BY });
+          }
+        });
+      } finally {
+        await resolver.end();
       }
     },
     WALK_TEST_TIMEOUT_MS
