@@ -137,15 +137,16 @@ export class CensusReplacementMarkerColumnMissingError extends Error {
 
 /**
  * Locks this session's row for the rest of the caller's transaction and checks,
- * under that lock, that the session may still replace `scope`. Every census-
- * replacement transaction starts here, so two runners of one session take turns
- * window by window, and no window runs after the marker is set.
+ * under that lock, that the session is still active and still owns `scope`'s
+ * census. Every census-replacement transaction (#555) and every ArcGIS commit
+ * unit (#561) starts here, so a session that lost its census can no longer
+ * delete or stage anything.
  */
-export async function lockUploadSessionForCensusReplacement(
+export async function lockActiveUploadSessionForCensus(
   connectionManager: ConnectionManager,
   scope: CensusReplacementSessionScope,
   transactionID: string
-): Promise<CensusReplacementSessionLock> {
+): Promise<{ state: string; plot_id: number; census_id: number } & Record<string, unknown>> {
   const { schema, uploadSessionID } = scope;
   const lockSQL = safeFormatQuery(
     schema,
@@ -174,6 +175,20 @@ export async function lockUploadSessionForCensusReplacement(
       `Upload session ${uploadSessionID} belongs to plot ${session.plot_id} census ${session.census_id}, not plot ${scope.plotID} census ${scope.censusID}. Nothing was deleted.`
     );
   }
+  return session;
+}
+
+/**
+ * Takes the session lock and reads the census marker under it, so two runners of
+ * one session take turns window by window, and no window runs after the marker
+ * is set.
+ */
+export async function lockUploadSessionForCensusReplacement(
+  connectionManager: ConnectionManager,
+  scope: CensusReplacementSessionScope,
+  transactionID: string
+): Promise<CensusReplacementSessionLock> {
+  const session = await lockActiveUploadSessionForCensus(connectionManager, scope, transactionID);
   if (!(CENSUS_REPLACEMENT_MARKER_COLUMN in session)) throw new CensusReplacementMarkerColumnMissingError(scope);
   return session[CENSUS_REPLACEMENT_MARKER_COLUMN] === null ? 'proceed' : 'marker_already_set';
 }
