@@ -396,26 +396,168 @@ async function auditAndDeleteCoreMeasurements(
   return deletedRows;
 }
 
+/** The scope's plain form: `whereSQL` reads coremeasurements alone. */
+export const PLAIN_COREMEASUREMENTS_FROM_SQL = '??.coremeasurements';
+/** The clustered key. Window lock statements seek by it only, so no window depends on a secondary index name (#560). */
+export const COREMEASUREMENTS_PRIMARY_INDEX = 'PRIMARY';
+/** The alias a joined scope gives coremeasurements; the window hint makes the join start from it. */
+export const COREMEASUREMENTS_JOIN_ALIAS = 'cm';
+/** The alias the cross-file cleanup gives measurement_error_log; its `IsResolved` flag is part of that predicate. */
+export const MEASUREMENT_ERROR_LOG_JOIN_ALIAS = 'mel';
+/** The only tables a window may lock beside the measurement itself (spec #562 D11). */
+export type CoreMeasurementLockAlias = typeof COREMEASUREMENTS_JOIN_ALIAS | typeof MEASUREMENT_ERROR_LOG_JOIN_ALIAS;
+
+export interface CoreMeasurementDeleteScope {
+  /** The caller's predicate, unchanged. */
+  whereSQL: string;
+  /** Its params in textual order: a joined scope's FROM params come first. */
+  whereParams: unknown[];
+  /** PLAIN_COREMEASUREMENTS_FROM_SQL, or a join that aliases coremeasurements as COREMEASUREMENTS_JOIN_ALIAS. */
+  fromSQL: string;
+  /** Joined scopes only: the aliases whose rows the predicate reads and a window must lock (FOR UPDATE OF). */
+  lockedAliases?: readonly CoreMeasurementLockAlias[];
+}
+
+export class CoreMeasurementWindowTooLargeError extends Error {
+  constructor(windowSize: number) {
+    super(
+      `A coremeasurements delete window holds ${windowSize} ids; the limit is ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE} ` +
+        `(the range-optimizer bound documented on CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE).`
+    );
+    this.name = 'CoreMeasurementWindowTooLargeError';
+  }
+}
+
+interface ScopeStatementParts {
+  selectList: string;
+  idColumn: string;
+  primaryKeyHint: string;
+  lockClause: string;
+}
+
+function scopeStatementParts(scope: CoreMeasurementDeleteScope): ScopeStatementParts {
+  if (scope.fromSQL === PLAIN_COREMEASUREMENTS_FROM_SQL) {
+    return {
+      selectList: 'CoreMeasurementID',
+      idColumn: 'CoreMeasurementID',
+      primaryKeyHint: `/*+ INDEX(coremeasurements ${COREMEASUREMENTS_PRIMARY_INDEX}) */`,
+      lockClause: 'FOR UPDATE'
+    };
+  }
+  const idColumn = `${COREMEASUREMENTS_JOIN_ALIAS}.CoreMeasurementID`;
+  const lockedAliases = scope.lockedAliases ?? [];
+  return {
+    selectList: `DISTINCT ${idColumn}`,
+    idColumn,
+    primaryKeyHint: `/*+ JOIN_PREFIX(${COREMEASUREMENTS_JOIN_ALIAS}) INDEX(${COREMEASUREMENTS_JOIN_ALIAS} ${COREMEASUREMENTS_PRIMARY_INDEX}) */`,
+    lockClause: lockedAliases.length > 0 ? `FOR UPDATE OF ${lockedAliases.join(', ')}` : 'FOR UPDATE'
+  };
+}
+
+function toCoreMeasurementIDs(rows: unknown): number[] {
+  return (Array.isArray(rows) ? rows : []).map((row: { CoreMeasurementID: unknown }) => Number(row.CoreMeasurementID));
+}
+
+/** Consecutive ascending slices of at most CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE ids. */
+export function sliceIntoDeleteWindows(ids: number[]): number[][] {
+  const windows: number[][] = [];
+  for (let start = 0; start < ids.length; start += CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) {
+    windows.push(ids.slice(start, start + CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE));
+  }
+  return windows;
+}
+
+/** The walk's one read: every id of the scope, ascending, with no lock and no LIMIT (spec #562 D1, D9). */
+export async function selectCoreMeasurementIDsInScope(
+  connectionManager: ConnectionManager,
+  schema: string,
+  scope: CoreMeasurementDeleteScope,
+  transactionID?: string
+): Promise<number[]> {
+  const { selectList, idColumn } = scopeStatementParts(scope);
+  const readSQL = safeFormatQuery(
+    schema,
+    `SELECT ${selectList} FROM ${scope.fromSQL}
+     WHERE ${scope.whereSQL}
+     ORDER BY ${idColumn}`
+  );
+  return toCoreMeasurementIDs(await connectionManager.executeQuery(readSQL, scope.whereParams, transactionID));
+}
+
 /**
- * Bounded like every census-replacement statement, but for coremeasurements
- * only, with a `unifiedchangelog` DELETE-audit row per row removed (#507).
- * Exported so lib/uploads/ingest-batch.ts's stale-failure cleanup can reuse
- * this select-lock-audit-delete sequence instead of duplicating it.
+ * One window: lock `windowIDs` by primary key with the caller's predicate re-checked under the row locks, then
+ * audit and delete exactly the ids that still match. Ids that stopped matching, or that a peer already deleted,
+ * are neither audited nor deleted; a window whose ids all went returns 0 without another statement.
+ */
+export async function lockAuditAndDeleteCoreMeasurementWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  scope: CoreMeasurementDeleteScope,
+  windowIDs: number[],
+  changedBy: string | null,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  if (windowIDs.length > CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) throw new CoreMeasurementWindowTooLargeError(windowIDs.length);
+  if (windowIDs.length === 0) return 0;
+  const { selectList, idColumn, primaryKeyHint, lockClause } = scopeStatementParts(scope);
+  const lockSQL = safeFormatQuery(
+    schema,
+    `SELECT ${primaryKeyHint} ${selectList} FROM ${scope.fromSQL}
+     WHERE (${scope.whereSQL}) AND ${idColumn} IN (${buildInPlaceholders(windowIDs.length)})
+     ORDER BY ${idColumn}
+     ${lockClause}`
+  );
+  const lockedIDs = toCoreMeasurementIDs(await connectionManager.executeQuery(lockSQL, [...scope.whereParams, ...windowIDs], transactionID));
+  if (lockedIDs.length === 0) return 0;
+  return auditAndDeleteCoreMeasurements(connectionManager, schema, lockedIDs, changedBy, plotID, censusID, transactionID);
+}
+
+/**
+ * The walk's locking confirmation: today's window statement, run once per walk. It waits on any uncommitted
+ * matching row it reaches and then returns it, which a non-locking read would miss (spec #562 G2).
+ */
+export async function lockCoreMeasurementConfirmationWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  scope: CoreMeasurementDeleteScope,
+  transactionID: string
+): Promise<number[]> {
+  const { selectList, idColumn, lockClause } = scopeStatementParts(scope);
+  const confirmationSQL = safeFormatQuery(
+    schema,
+    `SELECT ${selectList} FROM ${scope.fromSQL}
+     WHERE ${scope.whereSQL}
+     ORDER BY ${idColumn}
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}
+     ${lockClause}`
+  );
+  return toCoreMeasurementIDs(await connectionManager.executeQuery(confirmationSQL, scope.whereParams, transactionID));
+}
+
+/**
+ * Deletes every coremeasurements row of one scope in the caller's transaction, with a `unifiedchangelog`
+ * DELETE-audit row per row removed (#507).
  *
- * Each chunk: SELECT ... FOR UPDATE the chunk's ids (stable ORDER BY, so a
- * reissued `LIMIT n` can't pick a different n rows; FOR UPDATE locks them for
- * the audit read but does not stop a concurrent INSERT matching a LATER
- * chunk), audit via recordDeletedCoreMeasurementsAudit, then DELETE by id —
- * all in the same transaction, so a rollback discards both together.
+ * Each walk reads the scope's ids once without locks, then locks, audits and deletes them in ascending
+ * windows of at most CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE ids, and ends only after a locking confirmation of
+ * the whole scope returns fewer than a window of rows. Inside one transaction, the old
+ * `ORDER BY ... LIMIT ... FOR UPDATE` per window re-walked every entry earlier windows had delete-marked (the
+ * census-wide recovery) or scanned an index from its first entry every window (the filtered callers), and
+ * collapsed statistics could switch its plan mid-walk (#562, E-1 to E-4).
  *
- * Deliberately does NOT audit the measurement_error_log/failedmeasurements/
- * uploadmetrics deletes elsewhere in cleanupPreviousFileUploads — derivative
- * bookkeeping, reconstructed by the replacement ingestion that follows.
+ * A walk can lock a lower id after a higher one (a row that commits mid-walk), so two overlapping walks can
+ * deadlock. A caller that owns its transaction retries it whole (lib/db/deadlock-retry.ts); the others roll
+ * back with their caller.
  *
- * `fromSQL` defaults to the plain table (unchanged SQL for the common
- * single-table caller); pass a `??.coremeasurements cm INNER JOIN ...`
- * fragment when `whereSQL` needs other tables — the SELECT then adds
- * `DISTINCT` so a join can't select (and audit) one id twice.
+ * Callers (#562): the setup cleanups in lib/uploads/ingest-batch.ts and deleteUnresolvedRowsForBatchFamily run
+ * a walk inside their transaction and hold its row locks until it ends; the failed-first-census recovery uses the
+ * window primitives above directly and commits every window separately.
+ *
+ * `fromSQL` defaults to the plain table. A joined scope aliases coremeasurements as `cm` (ids are selected
+ * `DISTINCT`) and names in `lockedAliases` the tables whose rows its predicate reads and a window must lock.
+ * Deliberately does NOT audit the measurement_error_log/uploadmetrics deletes callers run around it.
  */
 export async function deleteCoreMeasurementsInBoundedChunksWithAudit(
   connectionManager: ConnectionManager,
@@ -426,26 +568,19 @@ export async function deleteCoreMeasurementsInBoundedChunksWithAudit(
   plotID: number,
   censusID: number,
   transactionID: string,
-  fromSQL: string = '??.coremeasurements'
+  fromSQL: string = PLAIN_COREMEASUREMENTS_FROM_SQL,
+  lockedAliases?: readonly CoreMeasurementLockAlias[]
 ): Promise<number> {
-  const isJoinedSource = fromSQL !== '??.coremeasurements';
-  const idColumnSQL = isJoinedSource ? 'DISTINCT cm.CoreMeasurementID' : 'CoreMeasurementID';
-  const orderBySQL = isJoinedSource ? 'cm.CoreMeasurementID' : 'CoreMeasurementID';
-  const selectIdsSQL = safeFormatQuery(
-    schema,
-    `SELECT ${idColumnSQL} FROM ${fromSQL}
-     WHERE ${whereSQL}
-     ORDER BY ${orderBySQL}
-     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}
-     FOR UPDATE`
-  );
+  const scope: CoreMeasurementDeleteScope = { whereSQL, whereParams, fromSQL, lockedAliases };
   let totalDeleted = 0;
-
   for (;;) {
-    const ids = await selectCoreMeasurementWindowIDs(connectionManager, selectIdsSQL, whereParams, transactionID);
-    if (ids.length === 0) return totalDeleted;
-    totalDeleted += await auditAndDeleteCoreMeasurements(connectionManager, schema, ids, changedBy, plotID, censusID, transactionID);
-    if (ids.length < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return totalDeleted;
+    const scopeIDs = await selectCoreMeasurementIDsInScope(connectionManager, schema, scope, transactionID);
+    for (const windowIDs of sliceIntoDeleteWindows(scopeIDs)) {
+      totalDeleted += await lockAuditAndDeleteCoreMeasurementWindow(connectionManager, schema, scope, windowIDs, changedBy, plotID, censusID, transactionID);
+    }
+    const confirmedIDs = await lockCoreMeasurementConfirmationWindow(connectionManager, schema, scope, transactionID);
+    totalDeleted += await lockAuditAndDeleteCoreMeasurementWindow(connectionManager, schema, scope, confirmedIDs, changedBy, plotID, censusID, transactionID);
+    if (confirmedIDs.length < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return totalDeleted;
   }
 }
 
