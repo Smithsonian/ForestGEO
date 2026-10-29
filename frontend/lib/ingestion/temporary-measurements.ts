@@ -455,7 +455,7 @@ function scopeStatementParts(scope: CoreMeasurementDeleteScope): ScopeStatementP
   };
 }
 
-function toCoreMeasurementIDs(rows: unknown): number[] {
+export function toCoreMeasurementIDs(rows: unknown): number[] {
   return (Array.isArray(rows) ? rows : []).map((row: { CoreMeasurementID: unknown }) => Number(row.CoreMeasurementID));
 }
 

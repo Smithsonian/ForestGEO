@@ -71,10 +71,11 @@ import {
   PLAIN_COREMEASUREMENTS_FROM_SQL,
   selectCoreMeasurementIDsInScope,
   sliceIntoDeleteWindows,
+  toCoreMeasurementIDs,
   type CoreMeasurementDeleteScope,
   type CoreMeasurementLockAlias
 } from '@/lib/ingestion/temporary-measurements';
-import { isDeadlockError, retryWholeTransactionOnDeadlock } from '@/lib/db/deadlock-retry';
+import { DEADLOCK_RETRY_BACKOFF_CAP_MS, DEADLOCK_RETRY_BACKOFF_MULTIPLIER, isDeadlockError, retryWholeTransactionOnDeadlock } from '@/lib/db/deadlock-retry';
 import { CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS } from '@/lib/uploads/stage-measurements';
 
 const MAX_ATTEMPTS_PER_SUBBATCH = 5;
@@ -93,8 +94,6 @@ const LOCK_GIVE_UP_AFTER_ATTEMPTS = 2;
 const LOCK_CONTENTION_BACKOFF_MS = 15_000; // flat delay — don't escalate; just back off and retry once
 const CONNECTION_BACKOFF_MULTIPLIER = 3;
 const CONNECTION_BACKOFF_CAP_MS = 15_000;
-const DEADLOCK_BACKOFF_MULTIPLIER = 1.5;
-const DEADLOCK_BACKOFF_CAP_MS = 3_000;
 const DEFAULT_BACKOFF_MULTIPLIER = 2;
 const DEFAULT_BACKOFF_CAP_MS = 5_000;
 const RETRY_JITTER_MAX_MS = 1_000;
@@ -548,7 +547,7 @@ async function finishFailedCensusRecovery(
     [params.censusID],
     transactionID
   );
-  const remainingIDs = (Array.isArray(remainingRows) ? remainingRows : []).map((row: { CoreMeasurementID: unknown }) => Number(row.CoreMeasurementID));
+  const remainingIDs = toCoreMeasurementIDs(remainingRows);
   if (remainingIDs.length > CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return { step: 'rows_arrived' };
   const deletedRows = await lockAuditAndDeleteCoreMeasurementWindow(
     connectionManager,
@@ -1094,7 +1093,7 @@ async function processSubBatch(
       } else if (isConnectionError) {
         delay = Math.min(delay * CONNECTION_BACKOFF_MULTIPLIER, CONNECTION_BACKOFF_CAP_MS);
       } else if (isDeadlock) {
-        delay = Math.min(delay * DEADLOCK_BACKOFF_MULTIPLIER, DEADLOCK_BACKOFF_CAP_MS);
+        delay = Math.min(delay * DEADLOCK_RETRY_BACKOFF_MULTIPLIER, DEADLOCK_RETRY_BACKOFF_CAP_MS);
       } else {
         delay = Math.min(delay * DEFAULT_BACKOFF_MULTIPLIER, DEFAULT_BACKOFF_CAP_MS);
       }
