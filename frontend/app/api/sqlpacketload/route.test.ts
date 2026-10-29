@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
@@ -18,10 +19,12 @@ import {
   BatchIDContainsSubBatchSeparatorError,
   buildSubBatchID,
   buildSubBatchPattern,
+  deriveArcgisCommitBatchID,
   getIngestionBatchSize,
   MAX_ORIGINAL_BATCH_ID_LENGTH,
   MAX_SUB_BATCH_ORDINAL,
   OriginalBatchIDTooLongError,
+  ReservedBatchIDError,
   SUB_BATCH_SEPARATOR,
   SubBatchOrdinalOverflowError
 } from '@/lib/uploads/batch-family';
@@ -543,6 +546,31 @@ describe('sqlpacketload measurement scope validation', () => {
       expect(body.code).toBe(expectedCode);
       expect(mockConnectionManager.executeQuery, 'the batch ID is rejected before any query').not.toHaveBeenCalled();
       expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('client batch ID in the ArcGIS commit shape or one of its collation aliases (#561 AU17)', () => {
+    const derivedArcgisBatchID = deriveArcgisCommitBatchID(crypto.randomUUID());
+    const WRITE_STATEMENT_PATTERN = /^\s*(INSERT|DELETE)\b/i;
+
+    it.each([
+      ['the derived id', derivedArcgisBatchID],
+      ['uppercase', derivedArcgisBatchID.toUpperCase()]
+    ])('is rejected with RESERVED_BATCH_ID for %s and writes nothing', async (_label, arcgisShapedBatchID) => {
+      const expectedCode = new ReservedBatchIDError(arcgisShapedBatchID, 'test').code;
+      primeMeasurementQueries(mockConnectionManager);
+
+      const res = (await POST(makeMeasurementRequest({ batchID: arcgisShapedBatchID, firstRowOrdinal: 0 })))!;
+      const body = await res.json();
+      const writeStatements = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) => WRITE_STATEMENT_PATTERN.test(String(call[0])));
+      console.log(
+        `[AU17 sqlpacketload] batchID=${arcgisShapedBatchID} status=${res.status} body=${JSON.stringify(body)} writeStatements=${writeStatements.length}`
+      );
+
+      expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+      expect(body.code).toBe(expectedCode);
+      expect(expectedCode).toBe('RESERVED_BATCH_ID');
+      expect(writeStatements).toHaveLength(0);
     });
   });
 

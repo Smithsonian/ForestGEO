@@ -48,6 +48,7 @@ import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-fai
 import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
 import {
+  assertCallerBatchIDAllowed,
   buildSubBatchPattern,
   getIngestionBatchSize,
   LIKE_ESCAPE_CLAUSE,
@@ -292,6 +293,11 @@ export interface PreparedMeasurementChunk {
 
 /** Every input check staging makes, with no database access, so a bad file is rejected before anything is deleted (#504). */
 export function prepareMeasurementChunkForStaging(params: CensusReplacementParams): PreparedMeasurementChunk {
+  // ArcGIS commit batches are derived on the server from the import session (#561); a CSV upload must never write
+  // into one, or into anything the case- and accent-insensitive batch columns would treat as one, or an ArcGIS
+  // commit's F0 would take its rows for the import's own leftovers.
+  assertCallerBatchIDAllowed(params.batchID);
+
   const fileIDError = measurementFileIDValidationError(params.fileName);
   if (fileIDError) {
     throw new Error(fileIDError);

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ailogger from '@/ailogger';
 import { SourceFormat } from '@/config/macros/formdetails';
@@ -7,10 +8,12 @@ import type ConnectionManager from '@/lib/db/connectionmanager';
 import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
 import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
 import {
+  deriveArcgisCommitBatchID,
   getIngestionBatchSize,
   MAX_ORIGINAL_BATCH_ID_LENGTH,
   MAX_SUB_BATCH_ORDINAL,
   OriginalBatchIDTooLongError,
+  ReservedBatchIDError,
   SubBatchOrdinalOverflowError
 } from '@/lib/uploads/batch-family';
 import {
@@ -24,6 +27,7 @@ import {
   InvalidFirstRowOrdinalError,
   MeasurementChunkResolutionError,
   parseFirstRowOrdinal,
+  prepareMeasurementChunkForStaging,
   replaceCensusForCleanReupload,
   runCensusReplacementUnits,
   stageMeasurementChunk,
@@ -815,5 +819,30 @@ describe('CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS', () => {
     expect(CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS * CENSUS_REPLACEMENT_REAPER_HEADROOM_FACTOR).toBe(
       RealConnectionManager.DEFAULT_STALE_TRANSACTION_THRESHOLD_MS
     );
+  });
+});
+
+describe('CSV staging refuses the ArcGIS commit batch shape and its collation aliases (#561 N1, H2, AU17)', () => {
+  const derivedArcgisBatchID = deriveArcgisCommitBatchID(crypto.randomUUID());
+  const derivedBatchTail = derivedArcgisBatchID.slice('arc'.length);
+
+  it.each([
+    ['the derived id', derivedArcgisBatchID],
+    ['uppercase', derivedArcgisBatchID.toUpperCase()],
+    ['mixed case', `Arc${derivedBatchTail}`],
+    ['accented', `\u00e0rc${derivedBatchTail}`],
+    ['full width', `\uff41\uff52\uff43${derivedBatchTail}`]
+  ])('throws ReservedBatchIDError for %s before resolving or touching the database', async (_label, arcgisShapedBatchID) => {
+    const params = replacementParams({ batchID: arcgisShapedBatchID });
+
+    expect(() => prepareMeasurementChunkForStaging(params)).toThrow(ReservedBatchIDError);
+    expect(resolveMeasurementChunk).not.toHaveBeenCalled();
+
+    const executeQuery = vi.fn();
+    await expect(
+      stageMeasurementChunk({ executeQuery } as unknown as ConnectionManager, { ...params, transactionID: 'reserved-batch-tx' })
+    ).rejects.toBeInstanceOf(ReservedBatchIDError);
+    console.log(`[AU17] ${arcgisShapedBatchID} refused; statements=${executeQuery.mock.calls.length}`);
+    expect(executeQuery).not.toHaveBeenCalled();
   });
 });
