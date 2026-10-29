@@ -52,7 +52,7 @@ import { CENSUS_REPLACEMENT_MARKER_COLUMN, ensureUploadSessionReplacementMarkerC
 import { stageArcgisImportWindow } from '@/lib/uploads/arcgis-commit-staging';
 import { finalizeArcgisCommit } from '@/lib/uploads/arcgis-commit-finalize';
 
-export { ArcgisCommitVerificationError } from '@/lib/uploads/arcgis-commit-finalize';
+export { ArcgisCensusReplacementIncompleteError, ArcgisCommitVerificationError } from '@/lib/uploads/arcgis-commit-finalize';
 
 /** Source rows per staging window (spec D4: the worker's chunk size; measured p95 ≤ 0.6 s at 150k rows). */
 export const ARCGIS_STAGING_WINDOW_ROWS = 5_000;

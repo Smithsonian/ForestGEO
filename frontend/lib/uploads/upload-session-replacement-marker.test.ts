@@ -113,6 +113,10 @@ describe('lockActiveUploadSessionForCensus (#561 extraction)', () => {
     const error = await lockActiveUploadSessionForCensus(connectionManager, LIVENESS_SCOPE, 'tx-1').catch((thrown: unknown) => thrown);
     console.log(`[AU11] ${label}: ${(error as Error).message}`);
     expect((error as Error).message).toMatch(message);
+    expect((error as Error).message, 'earlier units may have committed deletes, so a refusal must not claim nothing was deleted').not.toMatch(
+      /Nothing was deleted/
+    );
+    expect((error as Error).message).toMatch(/already committed/);
   });
 
   it('lockUploadSessionForCensusReplacement still issues the same single statement and reads the marker (regression)', async () => {

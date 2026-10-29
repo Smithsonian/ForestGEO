@@ -7,7 +7,6 @@ import {
   type ArcgisCommitAttempt,
   type ArcgisCommitUnitSnapshot
 } from '@/lib/arcgis/import-session';
-import { CensusReplacementIncompleteError } from '@/lib/uploads/stage-measurements';
 import { deriveArcgisCommitBatchID } from '@/lib/uploads/batch-family';
 import { ARCGIS_COMMIT_STATEMENT, WRITE_STATEMENT } from '@/tests/setup/arcgis-commit-statement-patterns';
 
@@ -22,7 +21,7 @@ vi.mock('@/lib/arcgis/import-session', async importOriginal => ({
   markArcgisImportCommitCompleted: mocks.markCommitted
 }));
 
-import { ArcgisCommitVerificationError, finalizeArcgisCommit } from './arcgis-commit-finalize';
+import { ArcgisCensusReplacementIncompleteError, ArcgisCommitVerificationError, finalizeArcgisCommit } from './arcgis-commit-finalize';
 
 const IMPORT_SESSION_ID = '6f1c2d3e-4a5b-4c6d-8e7f-901234567890';
 const ROW_COUNT = 10_007;
@@ -107,9 +106,14 @@ describe('finalizeArcgisCommit', () => {
 
   it('refuses a CLEAN finalize without the replacement marker, and a cursor short of the row count', async () => {
     const { manager, statements } = finalizeConnection(1);
-    await expect(finalizeArcgisCommit(manager, ATTEMPT, { ...SNAPSHOT, censusReplacementCompleted: false }, TX)).rejects.toBeInstanceOf(
-      CensusReplacementIncompleteError
+    const refusal = await finalizeArcgisCommit(manager, ATTEMPT, { ...SNAPSHOT, censusReplacementCompleted: false }, TX).catch((thrown: unknown) => thrown);
+    console.log(`[finalize] unreplaced CLEAN refusal: ${(refusal as Error).name}: ${(refusal as Error).message}`);
+    expect(refusal).toBeInstanceOf(ArcgisCensusReplacementIncompleteError);
+    expect((refusal as Error).message).toContain(IMPORT_SESSION_ID);
+    expect((refusal as Error).message, 'the CSV error tells the user to call a function an ArcGIS import cannot run').not.toMatch(
+      /replaceCensusForCleanReupload/
     );
+    expect((refusal as Error).message).toMatch(/re-run the import/i);
     await expect(finalizeArcgisCommit(manager, ATTEMPT, { ...SNAPSHOT, stagingNextRowIndex: ROW_COUNT - 7 }, TX)).rejects.toBeInstanceOf(
       ArcgisImportSessionInvariantError
     );

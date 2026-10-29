@@ -9,8 +9,7 @@ import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import { ArcgisImportSessionError, assertCallerBatchAcceptedForImport } from '@/lib/arcgis/import-session';
-import { ArcgisCommitVerificationError, commitArcgisImport } from '@/lib/uploads/arcgis-commit';
-import { CensusReplacementIncompleteError } from '@/lib/uploads/stage-measurements';
+import { ArcgisCensusReplacementIncompleteError, ArcgisCommitVerificationError, commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 
 export const runtime = 'nodejs';
 
@@ -94,7 +93,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (error instanceof UploadSessionOwnershipError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    if (error instanceof ArcgisCommitVerificationError || error instanceof CensusReplacementIncompleteError) {
+    if (error instanceof ArcgisCommitVerificationError || error instanceof ArcgisCensusReplacementIncompleteError) {
       ailogger.warn(`ArcGIS commit for ${importSessionId} is not finished and can be retried: ${error.message}`);
       return NextResponse.json({ error: `${error.message} Re-run the import to finish it.` }, { status: HTTPResponses.CONFLICT });
     }

@@ -24,8 +24,7 @@ vi.mock('@/lib/arcgis/import-session', async importOriginal => ({
 
 import { POST } from './route';
 import { ArcgisCommitSupersededError, StaleArcgisClientBatchError } from '@/lib/arcgis/import-session';
-import { ArcgisCommitVerificationError } from '@/lib/uploads/arcgis-commit';
-import { CensusReplacementIncompleteError } from '@/lib/uploads/stage-measurements';
+import { ArcgisCensusReplacementIncompleteError, ArcgisCommitVerificationError } from '@/lib/uploads/arcgis-commit';
 
 const DERIVED_BATCH = 'arc0000000000000000000000561';
 const LEGACY_CLIENT_BATCH = 'lg1k2a-legacyclient0';
@@ -125,8 +124,8 @@ describe('POST /api/arcgis/commit (#561)', () => {
       /re-run the import/i
     ],
     [
-      'CensusReplacementIncompleteError',
-      new CensusReplacementIncompleteError('arcgis.xlsx', DERIVED_BATCH, UPLOAD_SESSION_ID),
+      'ArcgisCensusReplacementIncompleteError',
+      new ArcgisCensusReplacementIncompleteError(BODY.importSessionId, UPLOAD_SESSION_ID),
       HTTPResponses.CONFLICT,
       /re-run the import/i
     ],

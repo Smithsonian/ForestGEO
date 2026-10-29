@@ -114,6 +114,9 @@ export async function uploadSessionHasCompletedReplacement(
   }
 }
 
+/** Every unit commits on its own, so a refusal part-way through leaves the earlier units' deletes and staged rows in place. */
+const COMMITTED_UNITS_REMAIN_NOTE = 'Units this attempt already committed remain; nothing further was changed.';
+
 export type CensusReplacementSessionLock = 'proceed' | 'marker_already_set';
 
 /** The one census a session's replacement may touch. Shared by the lock and by stage-measurements.ts's units. */
@@ -129,7 +132,7 @@ export class CensusReplacementMarkerColumnMissingError extends Error {
   constructor(scope: CensusReplacementSessionScope) {
     super(
       `The session-lock row for ${scope.uploadSessionID} in ${scope.schema} has no ${CENSUS_REPLACEMENT_MARKER_COLUMN} column; ` +
-        `refusing to replace census ${scope.censusID} without it. Nothing was deleted.`
+        `refusing to replace census ${scope.censusID} without it. ${COMMITTED_UNITS_REMAIN_NOTE}`
     );
     this.name = 'CensusReplacementMarkerColumnMissingError';
   }
@@ -158,21 +161,23 @@ export async function lockActiveUploadSessionForCensus(
   } catch (error: unknown) {
     if (!isMissingTableError(error, UPLOAD_SESSIONS_TABLE)) throw error;
     throw new UploadSessionOwnershipError(
-      `${schema} has no upload_sessions table, so census ${scope.censusID} cannot be replaced for upload session ${uploadSessionID}. Nothing was deleted.`
+      `${schema} has no upload_sessions table, so census ${scope.censusID} cannot be replaced for upload session ${uploadSessionID}. ${COMMITTED_UNITS_REMAIN_NOTE}`
     );
   }
   if (!Array.isArray(rows) || rows.length !== 1) {
-    throw new UploadSessionOwnershipError(`Upload session ${uploadSessionID} was not found in ${schema}; census ${scope.censusID} was not replaced.`);
+    throw new UploadSessionOwnershipError(
+      `Upload session ${uploadSessionID} was not found in ${schema}; census ${scope.censusID} was not replaced. ${COMMITTED_UNITS_REMAIN_NOTE}`
+    );
   }
   const session = rows[0] as { state: string; plot_id: number; census_id: number } & Record<string, unknown>;
   if (!(ACTIVE_UPLOAD_SESSION_STATES as readonly string[]).includes(String(session.state))) {
     throw new UploadSessionOwnershipError(
-      `Upload session ${uploadSessionID} is ${session.state}, no longer active; another session may own census ${scope.censusID} now. Nothing was deleted.`
+      `Upload session ${uploadSessionID} is ${session.state}, no longer active; another session may own census ${scope.censusID} now. ${COMMITTED_UNITS_REMAIN_NOTE}`
     );
   }
   if (Number(session.plot_id) !== scope.plotID || Number(session.census_id) !== scope.censusID) {
     throw new UploadSessionOwnershipError(
-      `Upload session ${uploadSessionID} belongs to plot ${session.plot_id} census ${session.census_id}, not plot ${scope.plotID} census ${scope.censusID}. Nothing was deleted.`
+      `Upload session ${uploadSessionID} belongs to plot ${session.plot_id} census ${session.census_id}, not plot ${scope.plotID} census ${scope.censusID}. ${COMMITTED_UNITS_REMAIN_NOTE}`
     );
   }
   return session;

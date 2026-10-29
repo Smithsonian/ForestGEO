@@ -16,7 +16,7 @@ import {
 } from '@/lib/arcgis/import-session';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { buildFileUploadChangelogRecordID, mergeFileUploadChunkIntoMetadata } from '@/lib/uploads/file-names';
-import { CensusReplacementIncompleteError, countStagedRows } from '@/lib/uploads/stage-measurements';
+import { countStagedRows } from '@/lib/uploads/stage-measurements';
 
 const CHANGELOG_TABLE_NAME = 'file_upload';
 const CHANGELOG_INSERT_OPERATION = 'INSERT';
@@ -27,6 +27,22 @@ export interface ArcgisCommitVerificationDetail {
   foundStagedRows: number;
   expectedFailureRows: number;
   foundFailureRows: number;
+}
+
+/** A CLEAN_REUPLOAD import reached finalize before its upload session recorded the census replacement. Retryable: the next attempt replaces first. */
+export class ArcgisCensusReplacementIncompleteError extends Error {
+  readonly importSessionId: string;
+  readonly uploadSessionID: string;
+
+  constructor(importSessionId: string, uploadSessionID: string) {
+    super(
+      `ArcGIS import ${importSessionId} could not be finalized: upload session ${uploadSessionID} has not recorded the completed census replacement. ` +
+        `Re-run the import; the retry replaces the census before staging.`
+    );
+    this.name = 'ArcgisCensusReplacementIncompleteError';
+    this.importSessionId = importSessionId;
+    this.uploadSessionID = uploadSessionID;
+  }
 }
 
 /** F found rows of this import removed or added since staging (#561, D8). Not an ArcgisImportSessionError: it is retryable. */
@@ -170,7 +186,7 @@ export async function finalizeArcgisCommit(
     );
   }
   if (attempt.uploadMode === UploadMode.CLEAN_REUPLOAD && !snapshot.censusReplacementCompleted) {
-    throw new CensusReplacementIncompleteError(snapshot.fileName, attempt.batchID, attempt.uploadSessionID);
+    throw new ArcgisCensusReplacementIncompleteError(attempt.importSessionId, attempt.uploadSessionID);
   }
   await verifyImportAccounting(connectionManager, attempt, snapshot, transactionID);
   const counts = { rowCount: snapshot.committedRowCount, droppedCount: snapshot.rowCount - snapshot.committedRowCount };
