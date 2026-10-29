@@ -35,11 +35,18 @@
 --    Wait for it to finish (never kill an application session without the agreement of
 --    its owner) and re-run. After a partial multi-schema pass a re-run only touches the
 --    schemas still missing an index.
--- 4. Revert the issue #560 changes to tablestructures.sql, lib/db/schema-contract.ts and
---    unified-measurements-migrations/62_trim_coremeasurements_redundant_indexes.sql in a
---    PR, so new sites provision the old set and the hand-run runners stop re-trimming.
--- 5. Leave the schema_migrations row 2026-10-28-01 as applied: the migration never
---    re-runs. Trimming again later needs a new migration id.
+-- 4. This file is only the per-schema emergency stopgap. It does not make the trim go away:
+--    provisioning never writes the schema_migrations ledger, so the frozen 2026-10-28-01
+--    still trims every newly provisioned site, and the hand-run runners still re-run twin 62.
+--    A full rollback is a forward fix, in one PR: a NEW manifest migration that re-adds the
+--    five indexes with the NOT EXISTS logic of this file, plus reverts of the issue #560
+--    changes to tablestructures.sql and to unified-measurements-migrations/62_trim_
+--    coremeasurements_redundant_indexes.sql, plus updates to tests I5 and U4, which turn red
+--    once the DDL carries the five indexes again.
+-- 5. Do NOT revert lib/db/schema-contract.ts: its idx_censusid requirement guards the #555
+--    cursor hint, and the trim migration's successor check relies on it. Leave the
+--    schema_migrations row 2026-10-28-01 as applied; the migration never re-runs on a
+--    schema that has it, so re-adding the indexes needs the new migration id above.
 SET SESSION lock_wait_timeout = CAST(LEAST(@@SESSION.lock_wait_timeout, 60) AS UNSIGNED);
 SET SESSION innodb_lock_wait_timeout = CAST(LEAST(@@SESSION.innodb_lock_wait_timeout, 60) AS UNSIGNED);
 SET @create_clauses := (
