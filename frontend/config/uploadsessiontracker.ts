@@ -681,6 +681,26 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
   try {
     transactionID = await connectionManager.beginTransaction();
 
+    // Lock the session row before reading any staged row, and re-check it under the lock: the caller listed this
+    // session outside the transaction, and since then a takeover may have flipped it to failed (#561) or another
+    // sweep may have cleaned it. Lock order — session row, then data rows — matches the ArcGIS commit units.
+    const lockedSessionRows = await connectionManager.executeQuery(
+      `SELECT state FROM ${schema}.upload_sessions WHERE session_id = ? FOR UPDATE`,
+      [session.sessionId],
+      transactionID
+    );
+    const lockedState = Array.isArray(lockedSessionRows) && lockedSessionRows.length === 1 ? String(lockedSessionRows[0].state) : null;
+    if (lockedState !== UploadSessionState.ABANDONED) {
+      const lockingTransactionID = transactionID;
+      // Cleared before the rollback, so a rollback failure reaching the catch below is not rolled back twice.
+      transactionID = null;
+      await connectionManager.rollbackTransaction(lockingTransactionID);
+      ailogger.info(
+        `[UploadSessionTracker] Skipping cleanup of session ${session.sessionId}: it is ${lockedState ?? 'no longer present'}, not abandoned, under the lock`
+      );
+      return { temporaryDeleted: 0, failedDeleted: 0 };
+    }
+
     // Move orphaned temporarymeasurements that belong to THIS session.
     // Scoping by SessionID (rather than PlotID/CensusID) avoids a TOCTOU race
     // where a newer session's rows could be swept up between the overlap check

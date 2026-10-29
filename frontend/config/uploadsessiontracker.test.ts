@@ -53,6 +53,7 @@ describe('cleanupOrphanedData', () => {
 
   it('keeps the full cleanup flow inside one transaction', async () => {
     mocks.executeQuery
+      .mockResolvedValueOnce([{ state: UploadSessionState.ABANDONED }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ FileID: 'file.csv', BatchID: 'batch-1' }])
       .mockResolvedValueOnce({ affectedRows: 1 });
@@ -92,6 +93,7 @@ describe('cleanupOrphanedData', () => {
 
   it('marks a session-owned batch move as interrupted_upload (not just the pre-migration fallback)', async () => {
     mocks.executeQuery
+      .mockResolvedValueOnce([{ state: UploadSessionState.ABANDONED }]) // session row locked and re-checked
       .mockResolvedValueOnce([{ FileID: 'file.csv', BatchID: 'batch-2' }]) // session-owned batches (SessionID = ?)
       .mockResolvedValueOnce([]) // no pre-migration (NULL SessionID) rows in this scope
       .mockResolvedValueOnce({ affectedRows: 1 }); // mark session cleaned up
@@ -127,7 +129,10 @@ describe('cleanupOrphanedData', () => {
   });
 
   it('rolls back the outer transaction when a batch move fails', async () => {
-    mocks.executeQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([{ FileID: 'file.csv', BatchID: 'batch-1' }]);
+    mocks.executeQuery
+      .mockResolvedValueOnce([{ state: UploadSessionState.ABANDONED }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ FileID: 'file.csv', BatchID: 'batch-1' }]);
     mocks.moveTemporaryBatchToFailedMeasurements.mockRejectedValue(new Error('cleanup failed'));
 
     await expect(
@@ -151,6 +156,57 @@ describe('cleanupOrphanedData', () => {
 
     expect(mocks.rollbackTransaction).toHaveBeenCalledWith('tx-cleanup');
     expect(mocks.commitTransaction).not.toHaveBeenCalled();
+  });
+
+  const SESSION_LOCK_SQL = /^\s*SELECT state FROM\s+\S+\.upload_sessions\s+WHERE session_id = \? FOR UPDATE/;
+  const abandonedSession = {
+    sessionId: 'sweep-session',
+    plotId: 1,
+    censusId: 2,
+    fileId: 'arcgis.xlsx',
+    state: UploadSessionState.ABANDONED
+  } as never;
+
+  it.each([
+    ['failed (a takeover flipped it)', [{ state: UploadSessionState.FAILED }]],
+    ['cleaned_up (another sweep finished it)', [{ state: UploadSessionState.CLEANED_UP }]],
+    ['gone', []]
+  ])('moves nothing when the locked session is %s (catches: acting on a listing taken outside the transaction)', async (_label, lockedRows) => {
+    mocks.executeQuery.mockResolvedValueOnce(lockedRows);
+    const result = await cleanupOrphanedData('forestgeo_testing', abandonedSession);
+    const statements = mocks.executeQuery.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' ').trim());
+    console.log(`[AU12] result=${JSON.stringify(result)} statements=${JSON.stringify(statements)}`);
+    expect(result).toEqual({ temporaryDeleted: 0, failedDeleted: 0 });
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toMatch(SESSION_LOCK_SQL);
+    expect(mocks.moveTemporaryBatchToFailedMeasurements).not.toHaveBeenCalled();
+    expect(mocks.commitTransaction).not.toHaveBeenCalled();
+    expect(mocks.rollbackTransaction).toHaveBeenCalledWith('tx-cleanup');
+  });
+
+  it('locks the session row before the first temporarymeasurements statement when it is still abandoned', async () => {
+    mocks.executeQuery
+      .mockResolvedValueOnce([{ state: UploadSessionState.ABANDONED }])
+      .mockResolvedValueOnce([{ FileID: 'arcgis.xlsx', BatchID: 'batch-1' }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 1 });
+    mocks.moveTemporaryBatchToFailedMeasurements.mockResolvedValue(4);
+    const result = await cleanupOrphanedData('forestgeo_testing', abandonedSession);
+    const statements = mocks.executeQuery.mock.calls.map(([sql]) => String(sql));
+    const lockIndex = statements.findIndex(sql => SESSION_LOCK_SQL.test(sql));
+    const firstStagedIndex = statements.findIndex(sql => sql.includes('temporarymeasurements'));
+    console.log(`[AU12] lock at ${lockIndex}, first staged-row statement at ${firstStagedIndex}, result=${JSON.stringify(result)}`);
+    expect(lockIndex).toBe(0);
+    expect(firstStagedIndex).toBeGreaterThan(lockIndex);
+    expect(result).toEqual({ temporaryDeleted: 4, failedDeleted: 4 });
+  });
+
+  it('does not roll back a second time when the rollback of a skipped sweep itself fails (L5)', async () => {
+    mocks.executeQuery.mockResolvedValueOnce([{ state: UploadSessionState.FAILED }]);
+    mocks.rollbackTransaction.mockRejectedValueOnce(new Error('rollback failed'));
+    await expect(cleanupOrphanedData('forestgeo_testing', abandonedSession)).rejects.toThrow('rollback failed');
+    console.log(`[L5] rollback calls=${mocks.rollbackTransaction.mock.calls.length}`);
+    expect(mocks.rollbackTransaction).toHaveBeenCalledTimes(1);
   });
 });
 
