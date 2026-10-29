@@ -39,16 +39,16 @@ import {
   UploadSessionOwnershipError,
   UploadSessionState
 } from '@/config/uploadsessiontracker';
-import { ArcgisImportSessionError } from '@/lib/arcgis/import-session';
+import { ArcgisCommitSupersededError, ArcgisImportSessionError } from '@/lib/arcgis/import-session';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
-import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
+import { commitArcgisImport, type CommitArcgisImportResult } from '@/lib/uploads/arcgis-commit';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { detectDelimiter } from '@/lib/uploads/detect-delimiter';
 import { sanitizeUploadFileName } from '@/lib/uploads/file-names';
 import { ingestBatch, IngestBatchAbortedError, OversizedSubBatchError, type IngestBatchResult, type SetupDiagnostic } from '@/lib/uploads/ingest-batch';
 import { setupFailureSummary } from '@/lib/uploads/setup-failure';
 import { deleteUnresolvedRowsForBatchFamily, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
-import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
+import { buildSubBatchPattern, deriveArcgisCommitBatchID, InvalidArcgisImportSessionIDError, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { isBlankMeasurementRow, isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
 import {
   countStagedRows,
@@ -472,8 +472,11 @@ async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<
     return;
   }
   if (error instanceof WorkerLeaseLostError) {
-    // Another owner exists (sweeper reclaim or re-claim). Abandon silently —
-    // any write we attempt now would stomp the new owner's state.
+    // Another owner exists (sweeper reclaim, re-claim, or a newer ArcGIS commit
+    // attempt). Abandon silently — any write we attempt now would stomp the new
+    // owner's state — and mark the lease lost so the finally block does not
+    // release an upload session the new owner may have reused (#561 N3).
+    ctx.leaseLost = true;
     ailogger.info(`[UploadWorker] Lease lost for job ${job.jobID} (worker ${workerID}); abandoning silently`);
     return;
   }
@@ -513,6 +516,7 @@ async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<
     });
   } catch (finalizeError) {
     if (finalizeError instanceof WorkerLeaseLostError) {
+      ctx.leaseLost = true;
       ailogger.info(`[UploadWorker] Lease lost while finalizing job ${job.jobID}; abandoning silently`);
       return;
     }
@@ -1163,37 +1167,55 @@ async function runArcgisPipeline(ctx: WorkerRunContext): Promise<void> {
       throw new NonRetryableJobError(`ArcGIS async upload file ${file.fileName} does not match pre-flight file ${arcgisSession.fileName}`);
     }
 
-    const batchID = await assignFileBatchID(ctx.catalogPool, file.jobFileID, generateShortBatchID());
-    ctx.assignedBatches.set(file.jobFileID, { file, batchID });
+    let derivedBatchID: string;
+    try {
+      derivedBatchID = deriveArcgisCommitBatchID(arcgisSession.importSessionId);
+    } catch (error) {
+      if (error instanceof InvalidArcgisImportSessionIDError) throw new NonRetryableJobError(error.message, { cause: error });
+      throw error;
+    }
+    // A job assigned before #561 keeps its old random batch in the catalog; it is sent as the request batch and only
+    // matters for replaying a session committed before the deploy. Ingestion always uses the batch the commit returns.
+    const assignedBatchID = await assignFileBatchID(ctx.catalogPool, file.jobFileID, derivedBatchID);
+    ctx.assignedBatches.set(file.jobFileID, { file, batchID: assignedBatchID });
 
     await setProgress(ctx, 'staging', UPLOAD_JOB_PHASE_PROGRESS.staging, `Committing ArcGIS import ${file.fileName}`);
     await transitionSessionState(ctx, UploadSessionState.UPLOADING);
 
     // No blob download and no parsing here: the pre-flight already staged the
-    // parsed rows in the import session. commitArcgisImport is idempotent for
-    // same-batch retries via its alreadyCommitted claim path.
-    let rowCount: number;
+    // parsed rows in the import session. commitArcgisImport restarts on every
+    // retry and returns alreadyCommitted once the import is committed.
+    let commitResult: CommitArcgisImportResult;
     try {
-      const commitResult = await commitArcgisImport(ctx.connectionManager, {
+      commitResult = await commitArcgisImport(ctx.connectionManager, {
         schema: job.schemaName,
         plotID: job.plotID,
         censusID: job.censusID,
         importSessionId: arcgisSession.importSessionId,
         fileName: file.fileName,
-        batchID,
+        batchID: assignedBatchID,
         uploadMode,
         // MUST equal the pre-flight user or the session claim throws FORBIDDEN.
         userId: job.createdBy,
         uploadSessionID: sessionID
       });
-      rowCount = commitResult.rowCount;
     } catch (error) {
+      if (error instanceof ArcgisCommitSupersededError) {
+        // A newer attempt holds this import, so another owner holds this job: relinquish like a lost lease, so the
+        // finally block leaves the (possibly reused) upload session to the winner (#561 N3).
+        ailogger.info(`[UploadWorker] ${error.message}; relinquishing job ${job.jobID}`);
+        ctx.leaseLost = true;
+        throw new WorkerLeaseLostError(job.jobID, ctx.workerID);
+      }
       if (error instanceof ArcgisImportSessionError) {
         // Ownership/expiry/empty-session failures cannot heal on retry.
         throw new NonRetryableJobError(`ArcGIS import session commit failed: ${error.message}`, { cause: error });
       }
       throw error;
     }
+    const batchID = commitResult.batchID;
+    ctx.assignedBatches.set(file.jobFileID, { file, batchID });
+    const rowCount = commitResult.rowCount;
 
     ctx.processedRows += rowCount;
     await updateBackgroundJobFileStatus(ctx.catalogPool, job.jobID, ctx.workerID, file.jobFileID, {
