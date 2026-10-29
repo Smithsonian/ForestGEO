@@ -138,7 +138,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  resetSingleConnectionState(connectionState);
+  await resetSingleConnectionState(connectionState);
   await connection.query('SELECT RELEASE_ALL_LOCKS()');
   for (const table of SUITE_TABLES) await connection.query(`DELETE FROM ${table}`);
 });
@@ -170,8 +170,8 @@ interface AttemptInstrumentation {
 }
 
 /** Starts a clean statement log and installs this attempt's injections, so ordinal counts restart with every attempt. */
-function beginAttempt(instrumentation: AttemptInstrumentation = {}): void {
-  resetSingleConnectionState(connectionState);
+async function beginAttempt(instrumentation: AttemptInstrumentation = {}): Promise<void> {
+  await resetSingleConnectionState(connectionState);
   connectionState.failOn = instrumentation.failOn ?? null;
   connectionState.rewrite = instrumentation.rewrite ?? null;
 }
@@ -303,7 +303,7 @@ describe('AI5: a retry survives an intervening upload (#561)', () => {
     await startActiveUploadSession(connection, scope, SESSION_FIRST_ATTEMPT);
     const seeded = await seedArcgisImport(scope, importFile, IMPORT_ROW_COUNT, IMPORT_TAG_PREFIX);
 
-    beginAttempt({
+    await beginAttempt({
       rewrite: dropStagedTag(`${IMPORT_TAG_PREFIX}${DROPPED_TAG_ORDINAL}`),
       failOn: failOnStagingInsertContainingTag(`${IMPORT_TAG_PREFIX}${SECOND_WINDOW_FIRST_TAG_ORDINAL}`)
     });
@@ -324,7 +324,7 @@ describe('AI5: a retry survives an intervening upload (#561)', () => {
 
   async function retryAfterInterveningUpload(seeded: SeededArcgisImport, interveningCensusRowIDs: number[]) {
     await startActiveUploadSession(connection, scope, SESSION_RETRY);
-    beginAttempt({ rewrite: dropStagedTag(`${IMPORT_TAG_PREFIX}${DROPPED_TAG_ORDINAL}`) });
+    await beginAttempt({ rewrite: dropStagedTag(`${IMPORT_TAG_PREFIX}${DROPPED_TAG_ORDINAL}`) });
     const result = await commit({ seeded, uploadMode: UploadMode.CLEAN_REUPLOAD, uploadSessionID: SESSION_RETRY });
     console.log(`[AI5 retry] result=${JSON.stringify(result)}`);
 
@@ -405,7 +405,7 @@ describe('AI6: a finalize verification failure is retryable (#561)', () => {
       await startActiveUploadSession(connection, scope, UPLOAD_SESSION);
       const seeded = await seedArcgisImport(scope, IMPORT_FILE, IMPORT_ROW_COUNT, IMPORT_TAG_PREFIX);
 
-      beginAttempt();
+      await beginAttempt();
       const parkedAtFinalize: ParkedTransactionStart = parkNextTransactionStart(connectionState, () =>
         connectionState.statements.some(statement => ARCGIS_COMMIT_STATEMENT.CURSOR_CAS.test(statement.sql) && statement.params[0] === IMPORT_ROW_COUNT)
       );
@@ -447,7 +447,7 @@ describe('AI6: a finalize verification failure is retryable (#561)', () => {
       expect(importRowAfterFailure.state).toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTING);
       expect(changelogAfterFailure).toHaveLength(0);
 
-      beginAttempt();
+      await beginAttempt();
       const retry = await commit({ seeded, uploadMode: UploadMode.REVISIONS, uploadSessionID: UPLOAD_SESSION });
       const stagedAfterRetry = await countStagedFamilyRows(connection, IMPORT_FILE, seeded.batchID);
       const importRowAfterRetry = await readImportRow(connection, seeded.importSessionId);
@@ -472,7 +472,7 @@ describe('AI7: the upload mode is bound to the first claim (#561)', () => {
       await startActiveUploadSession(connection, scope, UPLOAD_SESSION);
       const seeded = await seedArcgisImport(scope, importFile, IMPORT_ROW_COUNT, IMPORT_TAG_PREFIX);
 
-      beginAttempt({
+      await beginAttempt({
         failOn: failOnNthMatchingStatement(CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE, SECOND_REPLACEMENT_WINDOW, 'second replacement window delete')
       });
       await expect(commit({ seeded, uploadMode: UploadMode.CLEAN_REUPLOAD, uploadSessionID: UPLOAD_SESSION })).rejects.toBeInstanceOf(InjectedFailure);
@@ -483,7 +483,7 @@ describe('AI7: the upload mode is bound to the first claim (#561)', () => {
       expect(priorRowsLeft).toBe(REMAINING_PRIOR_ROWS_AFTER_FIRST_WINDOW);
       expect(stagedBefore).toBe(IMPORT_ROW_COUNT);
 
-      beginAttempt();
+      await beginAttempt();
       const wrongModeError = await commit({ seeded, uploadMode: UploadMode.REVISIONS, uploadSessionID: UPLOAD_SESSION }).then(
         () => null,
         (error: unknown) => error
@@ -498,7 +498,7 @@ describe('AI7: the upload mode is bound to the first claim (#561)', () => {
       expect(await countStagedFamilyRows(connection, importFile, seeded.batchID)).toBe(stagedBefore);
       expect(await snapshotImportRow(seeded.importSessionId)).toBe(importRowBefore);
 
-      beginAttempt();
+      await beginAttempt();
       const retry = await commit({ seeded, uploadMode: UploadMode.CLEAN_REUPLOAD, uploadSessionID: UPLOAD_SESSION });
       const deleteAudit = await deleteAuditRows(connection, scope.censusID);
       console.log(`[AI7a retry] result=${JSON.stringify(retry)} deleteAudit=${JSON.stringify(deleteAudit)}`);
@@ -518,14 +518,14 @@ describe('AI7: the upload mode is bound to the first claim (#561)', () => {
       await startActiveUploadSession(connection, scope, UPLOAD_SESSION);
       const seeded = await seedArcgisImport(scope, importFile, IMPORT_ROW_COUNT, IMPORT_TAG_PREFIX);
 
-      beginAttempt({ failOn: failOnStagingInsertContainingTag(`${IMPORT_TAG_PREFIX}${SECOND_WINDOW_FIRST_TAG_ORDINAL}`) });
+      await beginAttempt({ failOn: failOnStagingInsertContainingTag(`${IMPORT_TAG_PREFIX}${SECOND_WINDOW_FIRST_TAG_ORDINAL}`) });
       await expect(commit({ seeded, uploadMode: UploadMode.REVISIONS, uploadSessionID: UPLOAD_SESSION })).rejects.toBeInstanceOf(InjectedFailure);
       const stagedBefore = await countStagedFamilyRows(connection, importFile, seeded.batchID);
       const importRowBefore = await snapshotImportRow(seeded.importSessionId);
       console.log(`[AI7b attempt 1] staged=${stagedBefore} importRow=${importRowBefore}`);
       expect(stagedBefore).toBe(ARCGIS_STAGING_WINDOW_ROWS);
 
-      beginAttempt();
+      await beginAttempt();
       const wrongModeError = await commit({ seeded, uploadMode: UploadMode.CLEAN_REUPLOAD, uploadSessionID: UPLOAD_SESSION }).then(
         () => null,
         (error: unknown) => error
@@ -540,7 +540,7 @@ describe('AI7: the upload mode is bound to the first claim (#561)', () => {
       expect(await countStagedFamilyRows(connection, importFile, seeded.batchID)).toBe(stagedBefore);
       expect(await snapshotImportRow(seeded.importSessionId)).toBe(importRowBefore);
 
-      beginAttempt();
+      await beginAttempt();
       const retry = await commit({ seeded, uploadMode: UploadMode.REVISIONS, uploadSessionID: UPLOAD_SESSION });
       console.log(`[AI7b retry] result=${JSON.stringify(retry)}`);
       expect(retry.alreadyCommitted).toBe(false);
@@ -565,7 +565,7 @@ describe('AI8 (sequential): one committing import per upload session (#561)', ()
       await startActiveUploadSession(connection, scope, UPLOAD_SESSION);
       const importA = await seedArcgisImport(scope, FILE_A, IMPORT_ROW_COUNT, TAG_PREFIX_A);
 
-      beginAttempt({ failOn: failOnStagingInsertContainingTag(`${TAG_PREFIX_A}${SECOND_WINDOW_FIRST_TAG_ORDINAL}`) });
+      await beginAttempt({ failOn: failOnStagingInsertContainingTag(`${TAG_PREFIX_A}${SECOND_WINDOW_FIRST_TAG_ORDINAL}`) });
       await expect(commit({ seeded: importA, uploadMode: UploadMode.REVISIONS, uploadSessionID: UPLOAD_SESSION })).rejects.toBeInstanceOf(InjectedFailure);
       // Pre-flight deletes the user's earlier preflight and committed sessions of the census, so B is seeded once A is committing.
       const importB = await seedArcgisImport(scope, FILE_B, SMALL_IMPORT_ROW_COUNT, TAG_PREFIX_B);
@@ -577,7 +577,7 @@ describe('AI8 (sequential): one committing import per upload session (#561)', ()
       expect((await readImportRow(connection, importA.importSessionId)).state).toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTING);
       expect((await readImportRow(connection, importB.importSessionId)).state).toBe(ARCGIS_IMPORT_SESSION_STATE.PREFLIGHT);
 
-      beginAttempt();
+      await beginAttempt();
       const refusal = await commit({ seeded: importB, uploadMode: UploadMode.REVISIONS, uploadSessionID: UPLOAD_SESSION }).then(
         () => null,
         (error: unknown) => error
@@ -595,12 +595,12 @@ describe('AI8 (sequential): one committing import per upload session (#561)', ()
       expect(await snapshotImportRow(importA.importSessionId)).toBe(importRowA);
       expect(await snapshotImportRow(importB.importSessionId)).toBe(importRowB);
 
-      beginAttempt();
+      await beginAttempt();
       const resultA = await commit({ seeded: importA, uploadMode: UploadMode.REVISIONS, uploadSessionID: UPLOAD_SESSION });
       console.log(`[AI8 A retried] ${JSON.stringify(resultA)}`);
       expect(resultA).toEqual({ rowCount: IMPORT_ROW_COUNT, fileName: FILE_A, alreadyCommitted: false, batchID: importA.batchID });
 
-      beginAttempt();
+      await beginAttempt();
       const resultB = await commit({ seeded: importB, uploadMode: UploadMode.REVISIONS, uploadSessionID: UPLOAD_SESSION });
       console.log(`[AI8 B under the same session] ${JSON.stringify(resultB)}`);
       expect(resultB).toEqual({ rowCount: SMALL_IMPORT_ROW_COUNT, fileName: FILE_B, alreadyCommitted: false, batchID: importB.batchID });
@@ -644,7 +644,7 @@ describe('AI17(b): F0 deletes only the import’s own family (#561)', () => {
       expect(lookalikeBatchIDs).not.toContain(seeded.batchID);
       expect(await countCoreMeasurementsByID(lookalikeRowIDs)).toBe(lookalikeBatchIDs.length);
 
-      beginAttempt({
+      await beginAttempt({
         rewrite: dropStagedTag(`${IMPORT_TAG_PREFIX}${DROPPED_TAG_ORDINAL}`),
         failOn: failOnStagingInsertContainingTag(`${IMPORT_TAG_PREFIX}${SECOND_WINDOW_FIRST_TAG_ORDINAL}`)
       });
@@ -658,7 +658,7 @@ describe('AI17(b): F0 deletes only the import’s own family (#561)', () => {
       expect(leftoverFailureRowIDs).toHaveLength(FIRST_WINDOW_DROPPED_ROWS);
       expect(await deleteAuditRows(connection, scope.censusID)).toEqual({ total: 0, distinctRecordIDs: 0 });
 
-      beginAttempt({ rewrite: dropStagedTag(`${IMPORT_TAG_PREFIX}${DROPPED_TAG_ORDINAL}`) });
+      await beginAttempt({ rewrite: dropStagedTag(`${IMPORT_TAG_PREFIX}${DROPPED_TAG_ORDINAL}`) });
       const retry = await commit({ seeded, uploadMode: UploadMode.REVISIONS, uploadSessionID: UPLOAD_SESSION, batchID: CALLER_BATCH });
       console.log(`[AI17b retry] result=${JSON.stringify(retry)}`);
 

@@ -189,7 +189,7 @@ describe('the resumable ArcGIS commit on MySQL (#561)', () => {
   });
 
   beforeEach(async () => {
-    resetSingleConnectionState(connectionState);
+    await resetSingleConnectionState(connectionState);
     loggedInfo.mockClear();
     await connection.query('SELECT RELEASE_ALL_LOCKS()');
     for (const table of SUITE_TABLES) await connection.query(`DELETE FROM ${table}`);
@@ -215,7 +215,7 @@ describe('the resumable ArcGIS commit on MySQL (#561)', () => {
       expect(seededControlRows).toBe(CONTROL_ROW_COUNT);
       expect(seededMetrics).toBe(PRIOR_METRIC_COUNT);
 
-      resetSingleConnectionState(connectionState);
+      await resetSingleConnectionState(connectionState);
       const result = await commitArcgisImport(ConnectionManager.getInstance(), {
         schema: scope.schema,
         plotID: scope.plotID,
@@ -384,7 +384,7 @@ describe('the resumable ArcGIS commit on MySQL (#561)', () => {
     await seedScopeMetrics(connection, scope, PRIOR_METRIC_COUNT);
     await startActiveUploadSession(connection, scope, uploadSessionID);
     const seeded = await seedArcgisImport(scope, fileName, IMPORT_ROW_COUNT, tagPrefix);
-    resetSingleConnectionState(connectionState);
+    await resetSingleConnectionState(connectionState);
     return seeded;
   }
 

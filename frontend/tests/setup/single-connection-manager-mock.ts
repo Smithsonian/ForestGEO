@@ -58,7 +58,13 @@ export function parkNextTransactionStart(state: SingleConnectionState, when: () 
   return parked;
 }
 
-export function resetSingleConnectionState(state: SingleConnectionState): void {
+/** Clears the recorded statements and injections, and ends whatever an aborted test left open: its transaction is rolled back and its application locks are released. */
+export async function resetSingleConnectionState(state: SingleConnectionState): Promise<void> {
+  if (state.connection) {
+    if (state.activeTransactionID) await state.connection.rollback();
+    for (const lockName of state.heldLocks) await state.connection.query('SELECT RELEASE_LOCK(?)', [lockName]);
+  }
+  state.heldLocks.clear();
   state.activeTransactionID = null;
   state.statements.length = 0;
   state.transactionOutcomes.clear();
