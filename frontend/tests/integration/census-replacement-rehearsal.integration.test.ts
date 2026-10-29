@@ -22,6 +22,13 @@
  *   3 resumedRun          retry of run 2 with the same batch and session; finishes the replacement, no double audit
  *   4 stagingRollbackRun  fresh seed; failure injected at the staging insert after the replacement; staging rolls back,
  *                         the marker stays set, the census stays replaced; the retry runs no replacement transaction
+ *   5 recoveryRun         ingestBatch on a failed-first census (the #562 recovery, 412,427 rows at the full profile): bounded
+ *                         recovery_window transactions then one recovery_final, all outside setup and within budget, flat window
+ *                         locks, one scope read, exact recovered state, setup issues no coremeasurements DELETE
+ *   6 interruptedRecoveryRun  fresh seed; failure injected at the coremeasurements DELETE of the middle recovery window; exactly
+ *                         the committed windows' lowest ids are gone and audited, setup never starts; the retry meets run 5's bar
+ *   7 residualRecoveryRun run 5 plus the supported legacy residue (residual trees and stems, stale staged rows); the final
+ *                         transaction stays within budget and the residue is gone
  *
  * Profiles (env CENSUS_REPLACEMENT_REHEARSAL):
  *   full  — the measured Mpala counts. ONLY a full SUMMARY with "passed":true satisfies acceptance criterion 9
@@ -1104,11 +1111,12 @@ function expectedRecoveredState(profile: RehearsalProfile): CensusThreeState {
   };
 }
 
-function rehearsalFailedChecks(summary: RehearsalSummary, expectations: Record<RunKey, RunExpectation>): string[] {
+function rehearsalFailedChecks(summary: RehearsalSummary, expectations: Record<RunKey, RunExpectation>, recoveryShape: RecoveryShape): string[] {
   const failed: string[] = [];
   if (summary.seed === null) failed.push('seed: did not complete');
   else if (summary.seed.mismatches.length > 0) failed.push(`seed: ${summary.seed.mismatches.join('; ')}`);
   for (const key of RUN_KEYS) failed.push(...runFailedChecks(key, summary.runs[key], expectations[key]));
+  for (const key of RECOVERY_RUN_KEYS) failed.push(...recoveryRunFailedChecks(key, summary.recoveryRuns[key], recoveryShape));
   return failed;
 }
 
@@ -1132,6 +1140,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   let connectionManagerPoolOpened = false;
   /** Built in beforeAll: describe.skipIf still runs this callback with a null profile when the flag is unset. */
   let runExpectations: Record<RunKey, RunExpectation>;
+  let recoveryShape: RecoveryShape;
   const interruptedRunBatchID = generateShortBatchID();
   const stagingRollbackRunBatchID = generateShortBatchID();
 
@@ -1659,6 +1668,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     }
 
     runExpectations = buildRunExpectations(profile);
+    recoveryShape = expectedRecoveryShape(failedRowTotal(profile), CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
     const seedStartedAt = performance.now();
     const setup = await setupTestDatabase({ ...DEFAULT_TEST_CONFIG, database: `${DEFAULT_TEST_CONFIG.database}${REHEARSAL_SCHEMA_SUFFIX}` });
     setupConnection = setup.connection;
@@ -1723,7 +1733,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   }, SEED_TIMEOUT_MS);
 
   afterAll(async () => {
-    rehearsalSummary.failedChecks = rehearsalFailedChecks(rehearsalSummary, runExpectations);
+    rehearsalSummary.failedChecks = rehearsalFailedChecks(rehearsalSummary, runExpectations, recoveryShape);
     rehearsalSummary.passed = rehearsalSummary.failedChecks.length === 0;
     console.log(`${SUMMARY_LOG_PREFIX} ${JSON.stringify(rehearsalSummary)}`);
     try {
@@ -1852,6 +1862,17 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     return preRunMismatches;
   }
 
+  async function verifyRecoveredRun(batchID: string, preRunMismatches: string[], extraStateMismatches: string[]): Promise<RecoveryRunVerification> {
+    const state = await readCensusThreeState(batchID, RECOVERY_NO_SESSION, RECOVERY_INCOMING_FILE);
+    const verification = {
+      preRunMismatches,
+      stateMismatches: [...describeMismatches(expectedRecoveredState(profile), state), ...extraStateMismatches],
+      controlCensusMismatches: describeMismatches(controlBaseline, await readControlFingerprints())
+    };
+    console.log(`[census-replacement-rehearsal] recovery verification ${JSON.stringify(verification)} state=${JSON.stringify(state)}`);
+    return verification;
+  }
+
   it('(0) recovery shapes derive from the profile exactly as the #562 spec tabulates them (catches: a drifted derivation)', () => {
     const derived = expectedRecoveryShape(failedRowTotal(profile), CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
     console.log(`[census-replacement-rehearsal] recovery shape ${profile.name}: ${JSON.stringify(derived)}`);
@@ -1963,6 +1984,74 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       expect(state).toEqual(replacedAndUnstaged);
       expect(controls).toEqual(controlBaseline);
       expect(retryState).toEqual(expectedReplacedState(profile));
+    },
+    RUN_TIMEOUT_MS
+  );
+
+  it(
+    '(5) recovery run: the failed-first-census recovery commits bounded windows outside setup within budget, flat per window, with exact state (catches: recovery inside setup; a window cost that grows with the census)',
+    async () => {
+      const batchID = generateShortBatchID();
+      const preRunMismatches = await reseedForRecovery(batchID);
+      const result = await runRecoveryIngestion(batchID, null);
+      const run = recordRecoveryRun('recoveryRun', result, null);
+      run.verification = await verifyRecoveredRun(batchID, preRunMismatches, []);
+      expect(recoveryRunFailedChecks('recoveryRun', run, recoveryShape), 'every recovery-run check (the same list feeds SUMMARY.passed)').toEqual([]);
+    },
+    RUN_TIMEOUT_MS
+  );
+
+  it(
+    '(6) interrupted recovery run: a failure at the middle window leaves exactly the committed windows deleted and audited and setup unstarted; the retry finishes within budget with no double audit (catches: a recovery that rolls back or over-deletes; a resume that starts over)',
+    async () => {
+      const batchID = generateShortBatchID();
+      const preRunMismatches = await reseedForRecovery(batchID);
+      const prefix = await readInterruptionPrefix(recoveryShape.rowsGoneWhenInterrupted);
+      const injection: FailureInjection = { phase: STATEMENT_PHASE.COREMEASUREMENT_DELETE, occurrence: recoveryShape.interruptedWindow };
+      console.log(
+        `[census-replacement-rehearsal] interruptedRecoveryRun expects prefix ${JSON.stringify(prefix)} (window ${recoveryShape.interruptedWindow} fails)`
+      );
+
+      const result = await runRecoveryIngestion(batchID, injection);
+      const run = recordRecoveryRun('interruptedRecoveryRun', result, null);
+      const interruptedState = await readCensusThreeState(batchID, RECOVERY_NO_SESSION, RECOVERY_INCOMING_FILE);
+      run.verification = {
+        preRunMismatches,
+        stateMismatches: [
+          ...describeMismatches({ ...expectedInterruptedState(prefix), stagedReplacementRows: RECOVERY_INCOMING_ROWS }, interruptedState),
+          ...(await describePrefixMismatches(prefix))
+        ],
+        controlCensusMismatches: describeMismatches(controlBaseline, await readControlFingerprints())
+      };
+
+      const retryResult = await runRecoveryIngestion(batchID, null);
+      run.retry = summarizeRecoveryRun(retryResult, null);
+      run.retry.verification = await verifyRecoveredRun(batchID, [], []);
+      console.log(`[census-replacement-rehearsal] interruptedRecoveryRun retry ${JSON.stringify(run.retry)}`);
+
+      expect(
+        recoveryRunFailedChecks('interruptedRecoveryRun', run, recoveryShape),
+        'every interrupted-recovery check (the same list feeds SUMMARY.passed)'
+      ).toEqual([]);
+    },
+    RUN_TIMEOUT_MS
+  );
+
+  it(
+    '(7) residual recovery run: legacy residual trees, stems and stale staged rows of the supported size go in a final transaction within budget (catches: a census-sized final transaction past the Goal 3 limit)',
+    async () => {
+      const batchID = generateShortBatchID();
+      const preRunMismatches = await reseedForRecovery(batchID);
+      await seedResidualCensusThree();
+      const residualRows = 2 * profile.residualTreeRows + profile.residualStagedRows;
+      const result = await runRecoveryIngestion(batchID, null);
+      const run = recordRecoveryRun('residualRecoveryRun', result, residualRows);
+      const residualMismatches = describeMismatches({ trees: 0, stems: 0, staleStaged: 0 }, await readResidualCounts());
+      run.verification = await verifyRecoveredRun(batchID, preRunMismatches, residualMismatches);
+      console.log(`[census-replacement-rehearsal] residualRecoveryRun finalTransactionMs=${run.finalTransactionMs} perResidualRowMs=${run.residualRowCostMs}`);
+      expect(recoveryRunFailedChecks('residualRecoveryRun', run, recoveryShape), 'every residual-recovery check (the same list feeds SUMMARY.passed)').toEqual(
+        []
+      );
     },
     RUN_TIMEOUT_MS
   );
