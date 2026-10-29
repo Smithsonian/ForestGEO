@@ -298,6 +298,11 @@ function assertExpectedScope(family: BatchFamilyScope, plotID: number, censusID:
   }
 }
 
+/** The family checks the recovery runs before it deletes anything; setup reports the same errors under its discovery step. */
+function isFamilyDiscoveryFailure(error: unknown): boolean {
+  return error instanceof BatchFamilyScopeError || error instanceof OversizedSubBatchError;
+}
+
 export interface IngestBatchResult {
   processedSubBatches: number;
   totalRows: number;
@@ -1213,7 +1218,8 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
     });
   } catch (error: unknown) {
     const recoveryError = error instanceof TransactionCallbackTimeoutError ? new SetupCallbackTimeoutError(error) : error;
-    emit({ outcome: 'failed', errorCode: errorCodeOf(recoveryError), terminal: true });
+    const failedStep: SetupDiagnostic['step'] = isFamilyDiscoveryFailure(error) ? 'discovery' : 'recovery';
+    emit({ step: failedStep, outcome: 'failed', errorCode: errorCodeOf(recoveryError), terminal: true });
     throw recoveryError;
   }
   emit({ outcome: 'completed' });

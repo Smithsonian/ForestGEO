@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ manager: null as any, timeout: null as any }));
+const state = vi.hoisted(() => ({ manager: null as any, timeout: null as any, recoveryDue: false }));
 
 vi.mock('@/lib/db/connectionmanager', () => ({ default: { getInstance: () => state.manager } }));
 vi.mock('@/lib/db/sqlsecurity', () => ({ safeFormatQuery: (_schema: string, sql: string) => sql.replace(/\?\?/g, 'test_schema') }));
-vi.mock('@/lib/failedinitialcensusrecovery', () => ({ shouldRecoverFailedInitialCensus: () => false }));
+vi.mock('@/lib/failedinitialcensusrecovery', () => ({ shouldRecoverFailedInitialCensus: () => state.recoveryDue }));
 vi.mock('@/lib/batchfailuretransfer', () => ({ moveTemporaryBatchToFailedMeasurements: vi.fn() }));
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock('@/lib/db/primitives', () => ({
@@ -14,13 +14,15 @@ vi.mock('@/lib/db/primitives', () => ({
 }));
 
 import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
-import { ingestBatch, SetupCallbackTimeoutError, SetupLockUnavailableError } from './ingest-batch';
+import { getIngestionBatchSize } from './batch-family';
+import { ingestBatch, OversizedSubBatchError, SetupCallbackTimeoutError, SetupLockUnavailableError } from './ingest-batch';
 import { SETUP_FAILURE_CODES } from './setup-failure';
 
 describe('ingestBatch setup diagnostics', () => {
   afterEach(() => {
     state.manager = null;
     state.timeout = null;
+    state.recoveryDue = false;
   });
 
   it('freezes terminal timeout diagnostics with the active step, counters, and typed cause', async () => {
@@ -107,5 +109,72 @@ describe('ingestBatch setup diagnostics', () => {
       'no write ran anywhere'
     ).toBe(false);
     expect(setupQuery, 'nothing ran on the setup transaction').not.toHaveBeenCalled();
+  });
+
+  describe('a due recovery whose staged family cannot be recovered against', () => {
+    const EXPECTED_PLOT_ID = 5;
+    const EXPECTED_CENSUS_ID = 7;
+    const BATCH = 'batch';
+    const INCOMING_FAMILY_ROW = { BatchID: BATCH, PlotID: EXPECTED_PLOT_ID, CensusID: EXPECTED_CENSUS_ID, rowCount: 4, plotCount: 1, censusCount: 1 };
+
+    it.each([
+      ['a family staged for another census', { ...INCOMING_FAMILY_ROW, CensusID: EXPECTED_CENSUS_ID + 1 }, undefined],
+      [
+        'an oversized sub-batch',
+        { ...INCOMING_FAMILY_ROW, BatchID: `${BATCH}__sub001`, rowCount: getIngestionBatchSize() + 1 },
+        SETUP_FAILURE_CODES.oversizedSubBatch
+      ]
+    ])(
+      'reports %s as a failed discovery step, not a failed recovery, and never reaches the setup transaction (catches: the recovery pre-check mislabelled in setup telemetry)',
+      async (_label, familyRow, expectedErrorCode) => {
+        state.recoveryDue = true;
+        const executeQuery = vi.fn(async (sql: string) => {
+          if (sql.includes('GROUP BY BatchID')) return [familyRow];
+          return [{ completedUploads: 0, incompleteUploads: 1, treeCount: 0, stemCount: 0, coreMeasurementCount: 1 }];
+        });
+        state.manager = { executeQuery, withTransaction: vi.fn(), acquireApplicationLock: vi.fn() };
+        const events: Readonly<Record<string, any>>[] = [];
+
+        const caught = await ingestBatch(state.manager, {
+          schema: 'test_schema',
+          fileID: 'file.csv',
+          batchID: BATCH,
+          expectedScope: { plotID: EXPECTED_PLOT_ID, censusID: EXPECTED_CENSUS_ID },
+          onSetupProgress: event => {
+            events.push(event);
+          }
+        }).catch((error: unknown) => error);
+        console.log(
+          `[phase 0 discovery failure] ${_label}: caught=${caught instanceof Error ? `${caught.name}: ${caught.message}` : String(caught)} steps=${JSON.stringify(
+            events.map(event => `${event.step}:${event.outcome}`)
+          )}`
+        );
+
+        expect(caught).toBeInstanceOf(Error);
+        expect(events.map(event => `${event.step}:${event.outcome}`)).toEqual(['recovery:started', 'discovery:failed']);
+        expect(events.at(-1)).toMatchObject({ terminal: true, step: 'discovery', outcome: 'failed', errorCode: expectedErrorCode });
+        expect(state.manager.withTransaction, 'no recovery or setup transaction opened').not.toHaveBeenCalled();
+      }
+    );
+
+    it('keeps a failure of the recovery work itself on the recovery step (control for the discovery mapping)', async () => {
+      state.recoveryDue = true;
+      const recoveryStateReadFailure = new Error('recovery state read failed');
+      state.manager = { executeQuery: vi.fn().mockRejectedValue(recoveryStateReadFailure), withTransaction: vi.fn(), acquireApplicationLock: vi.fn() };
+      const events: Readonly<Record<string, any>>[] = [];
+
+      const caught = await ingestBatch(state.manager, {
+        schema: 'test_schema',
+        fileID: 'file.csv',
+        batchID: BATCH,
+        expectedScope: { plotID: EXPECTED_PLOT_ID, censusID: EXPECTED_CENSUS_ID },
+        onSetupProgress: event => {
+          events.push(event);
+        }
+      }).catch((error: unknown) => error);
+
+      expect(caught).toBe(recoveryStateReadFailure);
+      expect(events.at(-1)).toMatchObject({ terminal: true, step: 'recovery', outcome: 'failed' });
+    });
   });
 });
