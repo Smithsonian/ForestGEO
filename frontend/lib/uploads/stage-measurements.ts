@@ -62,6 +62,7 @@ import {
   lockUploadSessionForCensusReplacement,
   markUploadSessionReplacementCompleted,
   uploadSessionHasCompletedReplacement,
+  type CensusReplacementSessionLock,
   type CensusReplacementSessionScope
 } from '@/lib/uploads/upload-session-replacement-marker';
 
@@ -681,11 +682,39 @@ interface CensusReplacementProgress {
 type CensusReplacementUnitResult<T> = { completedByPeer: true } | { completedByPeer: false; value: T };
 type CensusReplacementLoopEnd = 'done' | 'completed_by_peer';
 
+/** Who a census replacement belongs to: an upload session (#555) or an ArcGIS import session (#561). */
+export interface CensusReplacementOwner {
+  /** Runs first in every replacement transaction; 'marker_already_set' ends the replacement without writing. */
+  lockForUnit: (transactionID: string) => Promise<CensusReplacementSessionLock>;
+  /** Unit D's write, in its own last transaction. */
+  recordCompletion: (transactionID: string) => Promise<void>;
+}
+
+export interface CensusReplacementTarget {
+  schema: string;
+  plotID: number;
+  censusID: number;
+  incomingBatchID: string;
+  changedBy: string | null;
+}
+
+export interface CensusReplacementRunResult extends CensusReplacementProgress {
+  outcome: 'replaced' | 'completed_by_peer';
+}
+
 const NO_REPLACEMENT_WORK = { deletedRows: 0, windowCount: 0 } as const;
+
+function uploadSessionReplacementOwner(connectionManager: ConnectionManager, scope: CensusReplacementSessionScope): CensusReplacementOwner {
+  return {
+    lockForUnit: transactionID => lockUploadSessionForCensusReplacement(connectionManager, scope, transactionID),
+    recordCompletion: transactionID =>
+      markUploadSessionReplacementCompleted(connectionManager, scope.schema, scope.uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID)
+  };
+}
 
 async function runCensusReplacementUnit<T>(
   connectionManager: ConnectionManager,
-  scope: CensusReplacementSessionScope,
+  owner: CensusReplacementOwner,
   progress: CensusReplacementProgress | null,
   work: (transactionID: string) => Promise<T>
 ): Promise<CensusReplacementUnitResult<T>> {
@@ -693,7 +722,7 @@ async function runCensusReplacementUnit<T>(
   try {
     return await connectionManager.withTransaction<CensusReplacementUnitResult<T>>(
       async tx => {
-        const sessionLock = await lockUploadSessionForCensusReplacement(connectionManager, scope, tx.id);
+        const sessionLock = await owner.lockForUnit(tx.id);
         if (sessionLock === 'marker_already_set') return { completedByPeer: true };
         return { completedByPeer: false, value: await work(tx.id) };
       },
@@ -706,22 +735,22 @@ async function runCensusReplacementUnit<T>(
 
 async function deleteMeasurementWindows(
   connectionManager: ConnectionManager,
-  params: CensusReplacementParams,
-  scope: CensusReplacementSessionScope,
+  target: CensusReplacementTarget,
+  owner: CensusReplacementOwner,
   progress: CensusReplacementProgress
 ): Promise<CensusReplacementLoopEnd> {
   let cursor: number | null = 0;
   while (cursor !== null) {
     const windowCursor: number = cursor;
-    const unit = await runCensusReplacementUnit(connectionManager, scope, progress, transactionID =>
+    const unit = await runCensusReplacementUnit(connectionManager, owner, progress, transactionID =>
       deleteCensusReplacementChunk(
         connectionManager,
-        scope.schema,
-        params.batchID,
-        scope.plotID,
-        scope.censusID,
+        target.schema,
+        target.incomingBatchID,
+        target.plotID,
+        target.censusID,
         windowCursor,
-        params.changedBy ?? null,
+        target.changedBy,
         transactionID
       )
     );
@@ -735,13 +764,13 @@ async function deleteMeasurementWindows(
 
 async function deleteLegacyFailureWindows(
   connectionManager: ConnectionManager,
-  params: CensusReplacementParams,
-  scope: CensusReplacementSessionScope,
+  target: CensusReplacementTarget,
+  owner: CensusReplacementOwner,
   progress: CensusReplacementProgress
 ): Promise<CensusReplacementLoopEnd> {
   for (;;) {
-    const unit = await runCensusReplacementUnit(connectionManager, scope, progress, transactionID =>
-      deleteCensusReplacementLegacyFailuresWindow(connectionManager, scope.schema, params.batchID, scope.censusID, transactionID)
+    const unit = await runCensusReplacementUnit(connectionManager, owner, progress, transactionID =>
+      deleteCensusReplacementLegacyFailuresWindow(connectionManager, target.schema, target.incomingBatchID, target.censusID, transactionID)
     );
     if (unit.completedByPeer) return 'completed_by_peer';
     if (unit.value.legacyTableMissing || unit.value.deletedRows < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return 'done';
@@ -750,17 +779,26 @@ async function deleteLegacyFailureWindows(
 
 async function deleteMetricsWindows(
   connectionManager: ConnectionManager,
-  params: CensusReplacementParams,
-  scope: CensusReplacementSessionScope,
+  target: CensusReplacementTarget,
+  owner: CensusReplacementOwner,
   progress: CensusReplacementProgress
 ): Promise<CensusReplacementLoopEnd> {
   for (;;) {
-    const unit = await runCensusReplacementUnit(connectionManager, scope, progress, transactionID =>
-      deleteCensusReplacementMetricsWindow(connectionManager, scope.schema, params.batchID, scope.plotID, scope.censusID, transactionID)
+    const unit = await runCensusReplacementUnit(connectionManager, owner, progress, transactionID =>
+      deleteCensusReplacementMetricsWindow(connectionManager, target.schema, target.incomingBatchID, target.plotID, target.censusID, transactionID)
     );
     if (unit.completedByPeer) return 'completed_by_peer';
     if (unit.value < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return 'done';
   }
+}
+
+/** Unit D: the owner's completion write, in a transaction of its own, so it happens only after every deleting unit committed. */
+async function completeCensusReplacementForOwner(
+  connectionManager: ConnectionManager,
+  owner: CensusReplacementOwner
+): Promise<'replaced' | 'completed_by_peer'> {
+  const unit = await runCensusReplacementUnit(connectionManager, owner, null, transactionID => owner.recordCompletion(transactionID));
+  return unit.completedByPeer ? 'completed_by_peer' : 'replaced';
 }
 
 /** Unit D: the marker, in a transaction of its own, so it is set only after every deleting unit committed. */
@@ -768,26 +806,25 @@ export async function completeCensusReplacement(
   connectionManager: ConnectionManager,
   scope: CensusReplacementSessionScope
 ): Promise<'replaced' | 'completed_by_peer'> {
-  const unit = await runCensusReplacementUnit(connectionManager, scope, null, transactionID =>
-    markUploadSessionReplacementCompleted(connectionManager, scope.schema, scope.uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID)
-  );
-  return unit.completedByPeer ? 'completed_by_peer' : 'replaced';
+  return completeCensusReplacementForOwner(connectionManager, uploadSessionReplacementOwner(connectionManager, scope));
 }
 
-async function runCensusReplacementUnits(
+/** Units A-D (#555) for any owner. Every transaction starts with `owner.lockForUnit`; D is `owner.recordCompletion`. */
+export async function runCensusReplacementUnits(
   connectionManager: ConnectionManager,
-  params: CensusReplacementParams,
-  scope: CensusReplacementSessionScope,
-  progress: CensusReplacementProgress
-): Promise<'replaced' | 'completed_by_peer'> {
-  if ((await deleteMeasurementWindows(connectionManager, params, scope, progress)) === 'completed_by_peer') return 'completed_by_peer';
-  if ((await deleteLegacyFailureWindows(connectionManager, params, scope, progress)) === 'completed_by_peer') return 'completed_by_peer';
-  if ((await deleteMetricsWindows(connectionManager, params, scope, progress)) === 'completed_by_peer') return 'completed_by_peer';
+  target: CensusReplacementTarget,
+  owner: CensusReplacementOwner
+): Promise<CensusReplacementRunResult> {
+  const progress: CensusReplacementProgress = { deletedRows: 0, windowCount: 0, slowestWindowMs: 0 };
+  const finish = (outcome: CensusReplacementRunResult['outcome']): CensusReplacementRunResult => ({ outcome, ...progress });
+  if ((await deleteMeasurementWindows(connectionManager, target, owner, progress)) === 'completed_by_peer') return finish('completed_by_peer');
+  if ((await deleteLegacyFailureWindows(connectionManager, target, owner, progress)) === 'completed_by_peer') return finish('completed_by_peer');
+  if ((await deleteMetricsWindows(connectionManager, target, owner, progress)) === 'completed_by_peer') return finish('completed_by_peer');
 
   const completionStartedAt = Date.now();
-  const completion = await completeCensusReplacement(connectionManager, scope);
+  const completion = await completeCensusReplacementForOwner(connectionManager, owner);
   progress.slowestWindowMs = Math.max(progress.slowestWindowMs, Date.now() - completionStartedAt);
-  return completion;
+  return finish(completion);
 }
 
 /**
@@ -819,10 +856,17 @@ export async function replaceCensusForCleanReupload(connectionManager: Connectio
   const logKeys = { schema: scope.schema, plotID: scope.plotID, censusID: scope.censusID, uploadSessionID: scope.uploadSessionID, batchID: params.batchID };
   ailogger.info(CENSUS_REPLACEMENT_STARTED_EVENT, logKeys);
   const startedAt = Date.now();
-  const progress: CensusReplacementProgress = { deletedRows: 0, windowCount: 0, slowestWindowMs: 0 };
-  const outcome = await runCensusReplacementUnits(connectionManager, params, scope, progress);
+  const target: CensusReplacementTarget = {
+    schema: scope.schema,
+    plotID: scope.plotID,
+    censusID: scope.censusID,
+    incomingBatchID: params.batchID,
+    changedBy: params.changedBy ?? null
+  };
+  const run = await runCensusReplacementUnits(connectionManager, target, uploadSessionReplacementOwner(connectionManager, scope));
+  const { outcome, ...progress } = run;
   ailogger.info(CENSUS_REPLACEMENT_COMPLETED_EVENT, { ...logKeys, outcome, ...progress, elapsedMs: Date.now() - startedAt });
-  return { outcome, deletedRows: progress.deletedRows, windowCount: progress.windowCount };
+  return { outcome, deletedRows: run.deletedRows, windowCount: run.windowCount };
 }
 
 /** Rows staged for the file under `batchID` or any of its `__subNNN` members, in the given plot/census. */
@@ -832,13 +876,14 @@ export async function countStagedRows(
   fileName: string,
   batchID: string,
   plotID: number,
-  censusID: number
+  censusID: number,
+  transactionID?: string
 ): Promise<number> {
   const countSQL = safeFormatQuery(
     schema,
     `SELECT COUNT(*) as count FROM ??.temporarymeasurements
      WHERE FileID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}) AND PlotID = ? AND CensusID = ?`
   );
-  const rows = await connectionManager.executeQuery(countSQL, [fileName, batchID, buildSubBatchPattern(batchID), plotID, censusID]);
+  const rows = await connectionManager.executeQuery(countSQL, [fileName, batchID, buildSubBatchPattern(batchID), plotID, censusID], transactionID);
   return Number(rows?.[0]?.count ?? 0);
 }

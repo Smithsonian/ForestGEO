@@ -19,13 +19,17 @@ import {
   CENSUS_REPLACEMENT_STARTED_EVENT,
   CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS,
   CensusReplacementIncompleteError,
+  countStagedRows,
   EmptyMeasurementUploadError,
   InvalidFirstRowOrdinalError,
   MeasurementChunkResolutionError,
   parseFirstRowOrdinal,
   replaceCensusForCleanReupload,
+  runCensusReplacementUnits,
   stageMeasurementChunk,
-  type CensusReplacementParams
+  type CensusReplacementOwner,
+  type CensusReplacementParams,
+  type CensusReplacementTarget
 } from './stage-measurements';
 import { CensusReplacementMarkerColumnMissingError, resetUploadSessionReplacementMarkerCacheForTests } from './upload-session-replacement-marker';
 import { CENSUS_REPLACEMENT_STATEMENT, SESSION_LOCK_CLAUSE } from '@/tests/setup/census-replacement-statement-patterns';
@@ -705,6 +709,100 @@ describe('U9: staging refuses a clean re-upload whose census replacement is inco
       expect(issuedSQL.filter(sql => ANY_DELETE.test(sql))).toEqual([]);
     }
   );
+});
+
+describe('runCensusReplacementUnits with a caller-supplied owner (#561)', () => {
+  const TARGET: CensusReplacementTarget = { schema: SCHEMA, plotID: PLOT_ID, censusID: CENSUS_ID, incomingBatchID: BATCH_ID, changedBy: 'owner-test' };
+  const OWNER_LOCK = 'owner-lock';
+  const OWNER_COMPLETION = 'owner-completion';
+
+  interface OwnerCall {
+    step: typeof OWNER_LOCK | typeof OWNER_COMPLETION;
+    transactionID: string;
+    statementsAlreadyInTransaction: number;
+  }
+
+  function recordingOwner(harness: ReturnType<typeof makeReplacementConnectionManager>, lockAnswers: Array<'proceed' | 'marker_already_set'>) {
+    const ownerCalls: OwnerCall[] = [];
+    const record = (step: OwnerCall['step'], transactionID: string) => {
+      const transaction = harness.transactions.find(candidate => candidate.id === transactionID);
+      ownerCalls.push({ step, transactionID, statementsAlreadyInTransaction: transaction?.statements.length ?? -1 });
+    };
+    let lockIndex = 0;
+    const owner: CensusReplacementOwner = {
+      lockForUnit: vi.fn(async (transactionID: string) => {
+        record(OWNER_LOCK, transactionID);
+        return lockAnswers[Math.min(lockIndex++, lockAnswers.length - 1)];
+      }),
+      recordCompletion: vi.fn(async (transactionID: string) => {
+        record(OWNER_COMPLETION, transactionID);
+      })
+    };
+    return { owner, ownerCalls };
+  }
+
+  it('locks through the owner first in every unit and records completion through the owner in its own last transaction (catches: owner bypassed)', async () => {
+    const harness = makeReplacementConnectionManager(SINGLE_SHORT_WINDOW_SCRIPT);
+    const { owner, ownerCalls } = recordingOwner(harness, ['proceed']);
+
+    const result = await runCensusReplacementUnits(harness.connectionManager, TARGET, owner);
+
+    console.log(`[owner] result=${JSON.stringify(result)} ownerCalls=${JSON.stringify(ownerCalls)}`);
+    console.log(describeTransactions(harness.transactions));
+    expect(result.outcome).toBe('replaced');
+    expect(result.deletedRows).toBe(SHORT_WINDOW_ROWS);
+    expect(result.windowCount).toBe(1);
+    expect(typeof result.slowestWindowMs).toBe('number');
+
+    const locks = ownerCalls.filter(call => call.step === OWNER_LOCK);
+    expect(
+      locks.map(call => call.transactionID),
+      'one owner lock per replacement transaction, in order'
+    ).toEqual(harness.transactions.map(transaction => transaction.id));
+    for (const lock of locks) expect(lock.statementsAlreadyInTransaction, `${lock.transactionID} locks before any statement`).toBe(0);
+
+    const completion = ownerCalls.filter(call => call.step === OWNER_COMPLETION);
+    expect(completion.map(call => call.transactionID)).toEqual([harness.transactions.at(-1)!.id]);
+    expect(harness.transactions.at(-1)!.statements, 'the completion transaction runs only the owner write').toEqual([]);
+    expect(allStatements(harness.transactions).some(statement => statement.kind === STATEMENT.SESSION_LOCK)).toBe(false);
+    expect(allStatements(harness.transactions).some(statement => statement.kind === STATEMENT.MARKER_UPDATE)).toBe(false);
+  });
+
+  it.each([
+    ['the first measurement window', ['marker_already_set'] as const, 1],
+    ['the legacy pass', ['proceed', 'marker_already_set'] as const, 2],
+    ['the completion unit', ['proceed', 'proceed', 'proceed', 'marker_already_set'] as const, 4]
+  ])('returns completed_by_peer with no write when the owner reports the marker set at %s', async (_label, lockAnswers, expectedTransactions) => {
+    const harness = makeReplacementConnectionManager(SINGLE_SHORT_WINDOW_SCRIPT);
+    const { owner } = recordingOwner(harness, [...lockAnswers]);
+
+    const result = await runCensusReplacementUnits(harness.connectionManager, TARGET, owner);
+
+    console.log(`[owner] marker-set result=${JSON.stringify(result)}`);
+    console.log(describeTransactions(harness.transactions));
+    expect(result.outcome).toBe('completed_by_peer');
+    expect(harness.transactions).toHaveLength(expectedTransactions);
+    expect(harness.transactions.at(-1)!.statements, 'the transaction that saw the marker ran no window statement').toEqual([]);
+    expect(owner.recordCompletion).not.toHaveBeenCalled();
+  });
+});
+
+describe('countStagedRows (#561)', () => {
+  it('runs inside the caller transaction when given one (catches: F counting outside its own transaction)', async () => {
+    const executeQuery = vi.fn(async () => [{ count: 7 }]);
+    const count = await countStagedRows({ executeQuery } as unknown as ConnectionManager, SCHEMA, FILE_NAME, BATCH_ID, PLOT_ID, CENSUS_ID, 'finalize-tx');
+    console.log(`[countStagedRows] count=${count} call=${JSON.stringify(executeQuery.mock.calls[0])}`);
+    expect(count).toBe(7);
+    expect((executeQuery.mock.calls[0] as unknown[])[2]).toBe('finalize-tx');
+  });
+
+  it('stays outside any transaction when none is given', async () => {
+    const executeQuery = vi.fn(async () => [{ count: 3 }]);
+    const count = await countStagedRows({ executeQuery } as unknown as ConnectionManager, SCHEMA, FILE_NAME, BATCH_ID, PLOT_ID, CENSUS_ID);
+    console.log(`[countStagedRows] count=${count} call=${JSON.stringify(executeQuery.mock.calls[0])}`);
+    expect(count).toBe(3);
+    expect((executeQuery.mock.calls[0] as unknown[])[2]).toBeUndefined();
+  });
 });
 
 describe('CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS', () => {
