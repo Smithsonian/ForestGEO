@@ -190,10 +190,6 @@ CALL add_index_if_not_exists('uploadmetrics', 'idx_uploadmetrics_status', 'statu
 CALL add_index_if_not_exists('failedmeasurements', 'idx_upload_session', 'FileID, BatchID');
 CALL add_index_if_not_exists('failedmeasurements', 'idx_plot_census_upload', 'PlotID, CensusID, FileID, BatchID');
 
--- coremeasurements indexes (additional performance indexes)
-CALL add_index_if_not_exists('coremeasurements', 'idx_coremeasurements_census_plot', 'CensusID');
-CALL add_index_if_not_exists('coremeasurements', 'idx_coremeasurements_census_validation', 'CensusID, IsValidated');
-
 -- stems indexes
 CALL add_index_if_not_exists('stems', 'idx_stems_censusid', 'CensusID');
 CALL add_index_if_not_exists('stems', 'idx_stems_treeid_censusid', 'TreeID, CensusID');
