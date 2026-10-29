@@ -116,6 +116,8 @@ const MYSQL_ERRNO_TCP_LOST = 2013; // CR_SERVER_LOST — TCP connection lost dur
  */
 const PROTOCOL_CONNECTION_LOST_CODE = 'PROTOCOL_CONNECTION_LOST';
 
+const SUB_BATCH_CENSUS_SHARE_LOCK_TEMPLATE = 'SELECT CensusID FROM ??.census WHERE CensusID = ? FOR SHARE';
+
 /**
  * MySQL GET_LOCK names may not exceed 64 characters. Hash the full logical
  * scope so a long filename cannot make lock acquisition fail, and include the
@@ -922,6 +924,12 @@ async function processSubBatch(
 
       transactionID = await connectionManager.beginTransaction();
       const tx = transactionExecutorFor(connectionManager, transactionID);
+
+      // The first statement of the transaction, as it is the first of every recovery transaction: a recovery
+      // window that deleted this family's stale rows commits before the snapshot reads them, so the snapshot
+      // diff never audits a row the recovery already audited (#562). The CALL takes the same shared lock on
+      // its first census read, so this adds no lock the transaction would not hold anyway.
+      await tx.query(safeFormatQuery(schema, SUB_BATCH_CENSUS_SHARE_LOCK_TEMPLATE), [censusID]);
 
       // Snapshotted BEFORE the CALL: a self-heal that deletes stale residue
       // and re-inserts can net to zero rows, but a count delta would miss

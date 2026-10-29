@@ -99,12 +99,11 @@ const INSERT_OPERATION = 'INSERT';
 const NO_BACKOFF_JITTER = 0;
 const SEED_SPECIES_CODE = 'ACERRU';
 const SEED_QUADRAT_NAME = 'Q01';
+const SUB_BATCH_CENSUS_SHARE_LOCK = /^\s*SELECT CensusID FROM\s+\S+\.census WHERE CensusID = \? FOR SHARE\s*$/;
 const G_STALE_ROWS = 3;
 const NO_STALE_ROWS = 0;
 const I12_OTHER_FAILED_FILE = 'concurrency-i12-failed.csv';
 const I12_OTHER_FAILED_BATCH = 'concurrency-i12-failed__sub001';
-const RECENT_STATEMENT_COUNT = 4;
-const STATEMENT_PREVIEW_LENGTH = 120;
 const TABLE_LOCK_TYPE = 'TABLE';
 const RECORD_LOCK_TYPE = 'RECORD';
 const INTENTION_SHARED_LOCK_MODE = 'IS';
@@ -236,17 +235,6 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
       status: String(lock.LOCK_STATUS),
       data: lock.LOCK_DATA === null ? null : String(lock.LOCK_DATA)
     }));
-  }
-
-  /** The last statements the session's procedure completed (performance_schema history), newest first: names the statement it is blocked in front of. */
-  async function recentCompletedStatements(threadID: number): Promise<string[]> {
-    const [statements] = await connection.query<RowDataPacket[]>(
-      `SELECT es.SQL_TEXT FROM performance_schema.events_statements_history es
-       JOIN performance_schema.threads th ON th.THREAD_ID = es.THREAD_ID
-       WHERE th.PROCESSLIST_ID = ? AND es.SQL_TEXT IS NOT NULL ORDER BY es.EVENT_ID DESC LIMIT ?`,
-      [threadID, RECENT_STATEMENT_COUNT]
-    );
-    return statements.map(row => String(row.SQL_TEXT).replace(/\s+/g, ' ').trim().slice(0, STATEMENT_PREVIEW_LENGTH));
   }
 
   /** A real writer of the census: tree, stem, resolved measurement and a completed upload metric, in one transaction it commits. */
@@ -465,7 +453,7 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
     ['b', 'the final transaction', 'recovered', HELD_BACK_ROWS, NO_STALE_ROWS],
     ['c', "window 1, which also holds the ingesting family's own stale rows", 'superseded', WINDOW, G_STALE_ROWS]
   ] as const)(
-    'I12(%s) serialization: ingestion inside its CALL waits on the census row while a recovery transaction in %s holds it, holding no prelude lock yet; after the commit it completes once (catches: a CALL that writes before it reaches the census lock; a lost or doubly-ingested family; double audit)',
+    'I12(%s) serialization: ingestion sub-batch transaction waits on the census row, before its snapshot and holding no lock, while a recovery transaction in %s holds it; after the commit it snapshots, completes once and audits each row once (catches: a snapshot taken before the census lock; a lost or doubly-ingested family; double audit)',
     async (variant, label, expectedOutcome, expectedDeleted, ingestingFamilyStaleRows) => {
       await stageCleanFamily();
       await seedUploadMetric(connection, { schema, plotID, censusID, fileID: CLEAN_FILE, batchID: CLEAN_BATCH, status: UPLOAD_STATUS.FAILED });
@@ -474,11 +462,11 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
       let recovery!: Promise<FailedCensusRecoveryResult>;
       const residueIDs: number[] = [];
       await runBarrierScenario(harness, async () => {
-        const beforeSnapshot = harness.placeBarrier(matching(WINDOW_WALK_STATEMENT.PRE_CALL_SNAPSHOT), FIRST_GUARD_OCCURRENCE, 'before');
+        const beforeCensusShare = harness.placeBarrier(matching(SUB_BATCH_CENSUS_SHARE_LOCK), FIRST_GUARD_OCCURRENCE, 'before');
         ingestion = harness.track(
           ingestBatch(realManager, { schema, fileID: CLEAN_FILE, batchID: CLEAN_BATCH, expectedScope: { plotID, censusID }, changedBy: CHANGED_BY })
         );
-        await withinDeadline(beforeSnapshot.reached, 'ingestion parked before its pre-call snapshot', harness.renderStatementLog);
+        await withinDeadline(beforeCensusShare.reached, "ingestion parked before its sub-batch transaction's census lock", harness.renderStatementLog);
         const ingestionTransactionID = harness.statements.at(-1)!.transactionID!;
         const [threadRow] = (await realManager.executeQuery('SELECT CONNECTION_ID() AS threadID', [], ingestionTransactionID)) as Array<{ threadID: number }>;
         const ingestionThreadID = Number(threadRow.threadID);
@@ -517,23 +505,24 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
         );
         await withinDeadline(afterGuard.reached, `recovery past its guard in ${label}`, harness.renderStatementLog);
 
-        beforeSnapshot.release();
+        beforeCensusShare.release();
         const waiting = await waitForLockWait(
           connection,
           { schema, table: 'census', lockData: String(censusID), threadID: ingestionThreadID },
           harness,
           'ingestion waiting on census.PRIMARY'
         );
-        const ingestionCall = harness.statements.find(
-          statement => statement.transactionID === ingestionTransactionID && WINDOW_WALK_STATEMENT.BULK_INGESTION_CALL.test(statement.sql)
-        );
-        expect(ingestionCall, 'ingestion issued its CALL').toBeDefined();
-        expect(ingestionCall!.settled, 'and the CALL has not returned: the wait is inside the procedure').toBe(false);
+        const ingestionStatements = harness.statements.filter(statement => statement.transactionID === ingestionTransactionID);
+        expect(
+          ingestionStatements.some(
+            statement => WINDOW_WALK_STATEMENT.BULK_INGESTION_CALL.test(statement.sql) || WINDOW_WALK_STATEMENT.PRE_CALL_SNAPSHOT.test(statement.sql)
+          ),
+          'ingestion has neither snapshotted nor issued its CALL: it waits on the first statement of its transaction'
+        ).toBe(false);
         const locksHeldWhileWaiting = await locksOf(String(waiting.trx_id));
-        const lastCompleted = await recentCompletedStatements(ingestionThreadID);
         console.log(
           `[I12 ${variant}] ingestionTx=${ingestionTransactionID} thread=${ingestionThreadID} waiting=${JSON.stringify(waiting)}\n` +
-            `locks=${JSON.stringify(locksHeldWhileWaiting)}\nlast completed procedure statements (newest first)=${JSON.stringify(lastCompleted)}`
+            `locks=${JSON.stringify(locksHeldWhileWaiting)}`
         );
         expect(waiting.LOCK_MODE, 'ingestion requests a shared record lock on the census row').toBe(SHARED_RECORD_LOCK_MODE);
         expect(locksHeldWhileWaiting, 'ingestion holds no row lock and no write lock yet: only the census intention lock and its waiting request').toEqual([
