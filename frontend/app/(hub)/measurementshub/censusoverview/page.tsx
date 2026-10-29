@@ -12,8 +12,7 @@ import {
 } from '@/app/contexts/compat-hooks';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import CensusStatTiles from '@/components/dashboard/censusstattiles';
-import ValidationErrorsCard from '@/components/dashboard/validationerrorscard';
-import PublishPreviewCard from '@/components/dashboard/publishpreviewcard';
+import CensusSummaryPanels from '@/components/dashboard/censussummarypanels';
 import PublishBlockerCallout from '@/components/dashboard/publishblockercallout';
 import CensusOverviewActionsMenu from '@/components/dashboard/censusoverviewactionsmenu';
 import { useCensusOverviewSummary } from '@/app/hooks/usecensusoverviewsummary';
@@ -46,8 +45,6 @@ interface StemTypesType {
   CountNewRecruits: number;
   isFirstCensus: boolean;
 }
-
-const PANEL_MIN_WIDTH_PX = 420;
 
 export default function CensusOverviewPage() {
   const currentSite = useSiteContext();
@@ -317,10 +314,7 @@ export default function CensusOverviewPage() {
             {censusSummary.errorMessage}
           </Alert>
         ) : (
-          <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${PANEL_MIN_WIDTH_PX}px, 1fr))`, gap: 2 }}>
-            <ValidationErrorsCard errorOverview={summary?.errorOverview ?? null} />
-            <PublishPreviewCard exportPreview={summary?.exportPreview ?? null} />
-          </Box>
+          <CensusSummaryPanels summary={summary} />
         ))}
 
       <DataQualityCard
