@@ -309,10 +309,11 @@ export async function cleanupStaleMeasurementBatchesForFile(
  * tests/integration/census-replacement-statement-plans.integration.test.ts
  * asserts no warning 3170 at this size at both index counts.
  *
- * replaceCensusForCleanReupload commits every window separately. Callers that
- * pass their own transaction (the ArcGIS commit via cleanupPreviousFileUploads,
- * the ingest-batch recoveries, record-invalid-rows) still hold every row lock
- * they take until that transaction ends.
+ * replaceCensusForCleanReupload and the failed-first-census recovery commit
+ * every window separately. Callers that pass their own transaction (the ArcGIS
+ * commit via cleanupPreviousFileUploads, ingest-batch's setup cleanup,
+ * record-invalid-rows) still hold every row lock they take until that
+ * transaction ends.
  */
 export const CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE = 1000;
 

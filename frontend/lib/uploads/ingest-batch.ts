@@ -640,8 +640,10 @@ export async function recoverFailedInitialCensusInBoundedTransactions(
 /**
  * The cross-file cleanup locks the rows its predicate reads that can change under it: measurements and their
  * error links (resolveMeasurementErrors and the single-failure re-ingest update `mel` alone). It does not lock
- * the measurement_errors catalog, which nothing updates, nor the incoming family's staged rows, which are written
- * only under the setup's per-file application lock (spec #562 D11, E-7).
+ * the measurement_errors catalog, which nothing updates. It does not lock the incoming family's staged rows
+ * (`tm`) either, and the setup's per-file application lock does not guard them: staging takes a different
+ * application lock, and the worker's cleanupBatchArtifacts deletes staged rows with no application lock at all.
+ * They stay unlocked by decision (spec #562 D11, E-7), not because the setup's lock covers them.
  */
 export const CROSS_FILE_CLEANUP_LOCKED_ALIASES: readonly CoreMeasurementLockAlias[] = [COREMEASUREMENTS_JOIN_ALIAS, MEASUREMENT_ERROR_LOG_JOIN_ALIAS];
 
