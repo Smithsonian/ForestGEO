@@ -201,6 +201,21 @@ describe('cleanupOrphanedData', () => {
     expect(result).toEqual({ temporaryDeleted: 4, failedDeleted: 4 });
   });
 
+  it('formats the session lock through safeFormatQuery: the schema is escaped as an identifier', async () => {
+    mocks.executeQuery.mockResolvedValueOnce([{ state: UploadSessionState.FAILED }]);
+    await cleanupOrphanedData('forestgeo_testing', abandonedSession);
+    const lockStatement = String(mocks.executeQuery.mock.calls[0][0]);
+    console.log(`[L3] lock statement=${lockStatement}`);
+    expect(lockStatement).toContain('`forestgeo_testing`.upload_sessions');
+  });
+
+  it('refuses a schema outside the allow-list before any statement runs', async () => {
+    await expect(cleanupOrphanedData('forestgeo_testing; DROP TABLE x', abandonedSession)).rejects.toThrow();
+    console.log(`[L3] statements run=${mocks.executeQuery.mock.calls.length}`);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+    expect(mocks.rollbackTransaction).toHaveBeenCalledWith('tx-cleanup');
+  });
+
   it('does not roll back a second time when the rollback of a skipped sweep itself fails (L5)', async () => {
     mocks.executeQuery.mockResolvedValueOnce([{ state: UploadSessionState.FAILED }]);
     mocks.rollbackTransaction.mockRejectedValueOnce(new Error('rollback failed'));

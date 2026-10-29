@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto';
 import { getConn, runQuery } from '@/lib/db/primitives';
 import ailogger from '@/ailogger';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 
 /**
@@ -685,7 +686,7 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
     // session outside the transaction, and since then a takeover may have flipped it to failed (#561) or another
     // sweep may have cleaned it. Lock order — session row, then data rows — matches the ArcGIS commit units.
     const lockedSessionRows = await connectionManager.executeQuery(
-      `SELECT state FROM ${schema}.upload_sessions WHERE session_id = ? FOR UPDATE`,
+      safeFormatQuery(schema, 'SELECT state FROM ??.upload_sessions WHERE session_id = ? FOR UPDATE'),
       [session.sessionId],
       transactionID
     );
