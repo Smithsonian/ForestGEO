@@ -1861,26 +1861,39 @@ describe('ConnectionManager reaper: own deadline, idle, active (#563 §2)', () =
     );
   });
 
-  it('U3: a transaction whose COMMIT is pending past its deadline is not reaped and commits once', async () => {
-    const { manager } = await loadLifecycleManager();
-    const pendingCommit = deferred<void>();
-    const connection = makeLifecycleConnection();
-    connection.commit.mockImplementation(() => pendingCommit.promise);
-    getConnMock.mockResolvedValueOnce(connection);
-    const transactionId = await manager.beginTransaction({ reaperDeadlineMs: REAPER_DEADLINE_MS });
+  it.each([
+    { phase: 'committing', finish: 'commitTransaction', pendingOperation: 'commit' },
+    { phase: 'rolling_back', finish: 'rollbackTransaction', pendingOperation: 'rollback' }
+  ] as const)(
+    'U3 ($phase): a transaction whose $pendingOperation is pending past its deadline is not reaped and finalizes once when the operation settles',
+    async ({ phase, finish, pendingOperation }) => {
+      const { manager, internals } = await loadLifecycleManager();
+      const pendingSettlement = deferred<void>();
+      const connection = makeLifecycleConnection();
+      connection[pendingOperation].mockImplementation(() => pendingSettlement.promise);
+      getConnMock.mockResolvedValueOnce(connection);
+      const transactionId = await manager.beginTransaction({ reaperDeadlineMs: REAPER_DEADLINE_MS });
+      const occupancyBefore = slotOccupancy(internals) - 1;
 
-    const commit = outcomeOf(manager.commitTransaction(transactionId));
-    await vi.advanceTimersByTimeAsync(PAST_REAPER_DEADLINE_MS);
-    const reaped = await manager.cleanupStaleTransactions();
-    pendingCommit.resolve();
-    const committed = await commit;
-    console.log('[U3] reaped:', reaped, 'commit:', committed);
+      const finishing = outcomeOf(manager[finish](transactionId));
+      await vi.advanceTimersByTimeAsync(PAST_REAPER_DEADLINE_MS);
+      const phaseDuringSweep = internals.transactionMeta.get(transactionId)?.phase;
+      const reaped = await manager.cleanupStaleTransactions();
+      const destroyedBySweep = connection.destroy.mock.calls.length;
+      pendingSettlement.resolve();
+      const finished = await finishing;
+      console.log(`[U3 ${phase}] phase during sweep:`, phaseDuringSweep, 'reaped:', reaped, 'destroyed by sweep:', destroyedBySweep, 'outcome:', finished);
 
-    expect(reaped).toBe(0);
-    expect(committed).toEqual({ resolved: undefined });
-    expect(connection.release).toHaveBeenCalledTimes(1);
-    expect(connection.destroy).not.toHaveBeenCalled();
-  });
+      expect(phaseDuringSweep, 'the sweep must be looking at a transaction that is mid-operation').toBe(phase);
+      expect(reaped, `a sweep that destroys the connection under a pending ${pendingOperation} races its own finalization`).toBe(0);
+      expect(destroyedBySweep).toBe(0);
+      expect(finished).toEqual({ resolved: undefined });
+      expect(connection.release, 'exactly one finalization returns the connection once').toHaveBeenCalledTimes(1);
+      expect(connection.destroy).not.toHaveBeenCalled();
+      expect(slotOccupancy(internals), 'the slot is freed exactly once').toBe(occupancyBefore);
+      expect(internals.transactionMeta.has(transactionId)).toBe(false);
+    }
+  );
 
   it('U4: a transaction with a statement in flight past its deadline is not reaped and its owner commits', async () => {
     const { manager } = await loadLifecycleManager();
