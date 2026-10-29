@@ -584,8 +584,8 @@ class ConnectionManager {
 
   /**
    * Quarantine a transaction's connection whose session can no longer be trusted, so it never returns to the pool,
-   * and finalize the transaction. A later commit or rollback is a no-op. Never throws, so it cannot mask the caller's
-   * own error.
+   * and finalize the transaction. A later rollback is a no-op; a later commit fails closed with
+   * TransactionNotActiveError. Never throws, so it cannot mask the caller's own error.
    */
   public discardTransaction(transactionId: string, reason: string): void {
     if (!this.transactionConnections.has(transactionId)) return;
@@ -609,11 +609,11 @@ class ConnectionManager {
    * transaction's dedicated connection. Because mysql2 serializes commands per
    * connection, a naive ROLLBACK would be queued BEHIND that statement and
    * could not run until it finished on its own — which would defeat the timeout
-   * and pin the slot. To avoid that, on timeout this method issues
-   * `KILL QUERY <threadId>` from a SEPARATE connection (see {@link
-   * killQueryOnThread}) to abort the running statement, so the queued ROLLBACK
-   * and connection release proceed promptly — returning control to the caller
-   * at ~timeoutMs and freeing the transaction slot. An `AbortSignal` cannot
+   * and pin the slot. To avoid that, on timeout this method sends no ROLLBACK:
+   * it quarantines the connection and finalizes the transaction at once, then
+   * issues a bounded `KILL QUERY <threadId>` from a SEPARATE connection (see
+   * {@link killQueryOnThread}) so the server session ends now — returning
+   * control to the caller at ~timeoutMs and freeing the transaction slot. An `AbortSignal` cannot
    * substitute for this: MySQL has no protocol-level statement abort, so the
    * server keeps executing until the statement is KILLed. The orphan
    * `fnPromise` rejection (the KILLed statement) is swallowed so it cannot
