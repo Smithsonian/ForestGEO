@@ -8,6 +8,7 @@
  *   I5  a census writer started between a recovery transaction's guard and its commit waits, and none of its rows is deleted or cascaded
  *   I8  two unbarriered runners of one census finish without a lock error and every row is audited exactly once
  *   I12 ingestion's CALL waits on a recovery transaction's census lock before it writes anything, then completes once
+ *   I14 the failure transfer (give-up, mid-batch cleanup) waits on a recovery transaction's census lock before its snapshot and audits once
  *
  * Prerequisites: docker compose up -d mysql. Run only through the relay's integration lock script.
  */
@@ -111,6 +112,9 @@ const SHARED_RECORD_LOCK_MODE = 'S,REC_NOT_GAP';
 const GRANTED_LOCK_STATUS = 'GRANTED';
 const WAITING_LOCK_STATUS = 'WAITING';
 const PRIMARY_INDEX = 'PRIMARY';
+const KILLED_STATEMENT_ERROR_CODE = 'ER_QUERY_INTERRUPTED';
+const KILLED_STATEMENT_ERRNO = 1317;
+const SUB_BATCH_ATTEMPT_STATEMENTS_BEFORE_TRANSFER = 2;
 
 describe('failed-first-census recovery under concurrent census writers (#562)', () => {
   let connection: Connection;
@@ -588,6 +592,143 @@ describe('failed-first-census recovery under concurrent census writers (#562)', 
         expect(await countOf(connection, 'SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID = ?', [id]), `residue ${id} survives`).toBe(1);
         expect(deleteAudits.has(id), `residue ${id} was never audited as deleted`).toBe(false);
       }
+    },
+    CONCURRENCY_TEST_TIMEOUT_MS
+  );
+
+  it.each([
+    ['give-up', 'the CALL is KILLed, so processSubBatch gives up and moves the sub-batch'],
+    ['cleanup', 'the attempt fails and the upload is aborted, so ingestBatch moves the remaining sub-batches']
+  ] as const)(
+    "I14(%s) the failure transfer waits on the census row before its snapshot while a recovery window that deletes the family's own stale rows holds it, then moves the rows once and audits each row once (catches: a transfer snapshot taken before the census lock, which audits the recovery's DELETEs a second time and fails the transfer)",
+    async (route, routeDescription) => {
+      await stageCleanFamily();
+      await seedUploadMetric(connection, { schema, plotID, censusID, fileID: CLEAN_FILE, batchID: CLEAN_BATCH, status: UPLOAD_STATUS.FAILED });
+      const harness = createStatementHarness(realManager);
+      let abortRequested = false;
+      const failTheCall = (): Error =>
+        route === 'give-up'
+          ? Object.assign(new Error('Query execution was interrupted'), { code: KILLED_STATEMENT_ERROR_CODE, errno: KILLED_STATEMENT_ERRNO })
+          : ((abortRequested = true), deadlockShapedError());
+      vi.spyOn(Math, 'random').mockReturnValue(NO_BACKOFF_JITTER);
+      let ingestion!: Promise<IngestBatchResult>;
+      let recovery!: Promise<FailedCensusRecoveryResult>;
+      const residueIDs: number[] = [];
+      await runBarrierScenario(harness, async () => {
+        const injection = harness.injectAfter(matching(WINDOW_WALK_STATEMENT.BULK_INGESTION_CALL), 1, failTheCall);
+        const beforeTransferFirstStatement = harness.placeBarrier(
+          statement => SUB_BATCH_CENSUS_SHARE_LOCK.test(statement.sql) || WINDOW_WALK_STATEMENT.PRE_CALL_SNAPSHOT.test(statement.sql),
+          SUB_BATCH_ATTEMPT_STATEMENTS_BEFORE_TRANSFER + 1,
+          'before'
+        );
+        ingestion = harness.track(
+          ingestBatch(realManager, {
+            schema,
+            fileID: CLEAN_FILE,
+            batchID: CLEAN_BATCH,
+            expectedScope: { plotID, censusID },
+            changedBy: CHANGED_BY,
+            isAborted: () => abortRequested
+          })
+        );
+        await withinDeadline(
+          beforeTransferFirstStatement.reached,
+          `ingestion parked before the first statement of its failure transfer (${routeDescription})`,
+          harness.renderStatementLog
+        );
+        expect(injection.fired(), 'the CALL ran and was failed before the transfer began').toBe(true);
+        const transferTransactionID = harness.statements.at(-1)!.transactionID!;
+        const [threadRow] = (await realManager.executeQuery('SELECT CONNECTION_ID() AS threadID', [], transferTransactionID)) as Array<{ threadID: number }>;
+        const transferThreadID = Number(threadRow.threadID);
+
+        residueIDs.push(
+          ...(await seedUnresolvedMeasurements(connection, { censusID, fileID: CLEAN_FILE, batchID: CLEAN_BATCH, count: G_STALE_ROWS, tagPrefix: 'GSTALE' })),
+          ...(await seedUnresolvedMeasurements(connection, {
+            censusID,
+            fileID: I12_OTHER_FAILED_FILE,
+            batchID: I12_OTHER_FAILED_BATCH,
+            count: WINDOW + HELD_BACK_ROWS - G_STALE_ROWS,
+            tagPrefix: 'I12F'
+          }))
+        );
+
+        const afterGuard = harness.placeBarrier(matching(WINDOW_WALK_STATEMENT.COMPLETED_UPLOADS_GUARD), FIRST_GUARD_OCCURRENCE, 'after');
+        recovery = harness.track(
+          recoverFailedInitialCensusInBoundedTransactions(realManager, {
+            schema,
+            fileID: CLEAN_FILE,
+            batchID: CLEAN_BATCH,
+            plotID,
+            censusID,
+            changedBy: CHANGED_BY
+          })
+        );
+        await withinDeadline(afterGuard.reached, 'recovery past its guard in window 1', harness.renderStatementLog);
+
+        beforeTransferFirstStatement.release();
+        const waiting = await waitForLockWait(
+          connection,
+          { schema, table: 'census', lockData: String(censusID), threadID: transferThreadID },
+          harness,
+          'failure transfer waiting on census.PRIMARY'
+        );
+        const transferStatements = harness.statements.filter(statement => statement.transactionID === transferTransactionID);
+        console.log(
+          `[I14 ${route}] transferTx=${transferTransactionID} thread=${transferThreadID} waiting=${JSON.stringify(waiting)}\n${harness.renderStatementLog()}`
+        );
+        expect(
+          transferStatements.some(statement => WINDOW_WALK_STATEMENT.PRE_CALL_SNAPSHOT.test(statement.sql)),
+          'the transfer has not snapshotted: it waits on the first statement of its transaction'
+        ).toBe(false);
+        expect(waiting.LOCK_MODE, 'the transfer requests a shared record lock on the census row').toBe(SHARED_RECORD_LOCK_MODE);
+
+        afterGuard.release();
+        await withinDeadline(Promise.allSettled([ingestion, recovery]), 'both sides to settle', harness.renderStatementLog);
+      });
+
+      const [ingestionSettled, recoverySettled] = await Promise.allSettled([ingestion, recovery]);
+      console.log(`[I14 ${route}] settled ingestion=${JSON.stringify(ingestionSettled)} recovery=${JSON.stringify(recoverySettled)}`);
+      expect([ingestionSettled.status, recoverySettled.status], `neither side failed: ${JSON.stringify([ingestionSettled, recoverySettled])}`).toEqual([
+        'fulfilled',
+        'fulfilled'
+      ]);
+      const ingestionResult = (ingestionSettled as PromiseFulfilledResult<IngestBatchResult>).value;
+      const recoveryResult = (recoverySettled as PromiseFulfilledResult<FailedCensusRecoveryResult>).value;
+      const movedRowIDs = (
+        await connection.query<RowDataPacket[]>('SELECT CoreMeasurementID FROM coremeasurements WHERE UploadFileID = ? AND UploadBatchID = ?', [
+          CLEAN_FILE,
+          CLEAN_BATCH
+        ])
+      )[0].map(row => Number(row.CoreMeasurementID));
+      const deleteAudits = await deleteAuditCounts(connection, censusID);
+      const [insertAudits] = await connection.query<RowDataPacket[]>(
+        `SELECT RecordID, COUNT(*) AS auditRows FROM unifiedchangelog WHERE TableName = ? AND Operation = ? AND CensusID = ? GROUP BY RecordID`,
+        [COREMEASUREMENTS_TABLE, INSERT_OPERATION, censusID]
+      );
+      console.log(
+        `[I14 ${route}] ingestion=${JSON.stringify(ingestionResult.subBatchResults)} recovery=${JSON.stringify(recoveryResult)} movedRowIDsLeft=${JSON.stringify(movedRowIDs)} ` +
+          `deleteAudits=${JSON.stringify([...deleteAudits])} insertAudits=${JSON.stringify(insertAudits)}\n${harness.renderStatementLog()}`
+      );
+      expect(ingestionResult.subBatchResults[0], 'the sub-batch was moved to unresolved by the failure transfer').toMatchObject({
+        batchFailedButHandled: true,
+        rowCount: CLEAN_FIXTURE_ROW_COUNT
+      });
+      expect(recoveryResult.deadlockRetries, 'recovery met no deadlock').toBe(0);
+      expect(recoveryResult.outcome, `recovery result: ${JSON.stringify(recoveryResult)}`).toBe('recovered');
+      expect(insertAudits, `INSERT audit RecordIDs: ${JSON.stringify(insertAudits)}`).toHaveLength(CLEAN_FIXTURE_ROW_COUNT);
+      expect(
+        insertAudits.every(row => Number(row.auditRows) === 1),
+        'each moved row is audited as inserted once'
+      ).toBe(true);
+      expect(
+        [...deleteAudits.values()].every(audit => audit.count === 1),
+        `DELETE-audit RecordIDs unique: ${JSON.stringify([...deleteAudits])}`
+      ).toBe(true);
+      for (const id of residueIDs) expect(deleteAudits.get(id)?.count, `residue ${id} was deleted by the recovery and audited once`).toBe(1);
+      expect(
+        await countOf(connection, 'SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ?', [CLEAN_FILE]),
+        'the transfer consumed the staged rows'
+      ).toBe(0);
     },
     CONCURRENCY_TEST_TIMEOUT_MS
   );

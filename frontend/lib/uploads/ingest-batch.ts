@@ -119,6 +119,15 @@ const PROTOCOL_CONNECTION_LOST_CODE = 'PROTOCOL_CONNECTION_LOST';
 const SUB_BATCH_CENSUS_SHARE_LOCK_TEMPLATE = 'SELECT CensusID FROM ??.census WHERE CensusID = ? FOR SHARE';
 
 /**
+ * The first statement of every transaction that snapshots and then audits a sub-batch's coremeasurements
+ * (the CALL attempt and both failure transfers): a recovery window that deleted this family's stale rows commits
+ * before the snapshot reads them, so the snapshot diff never audits a row the recovery already audited (#562).
+ */
+async function takeCensusShareLock(connectionManager: ConnectionManager, schema: string, censusID: number, transactionID: string): Promise<void> {
+  await transactionExecutorFor(connectionManager, transactionID).query(safeFormatQuery(schema, SUB_BATCH_CENSUS_SHARE_LOCK_TEMPLATE), [censusID]);
+}
+
+/**
  * MySQL GET_LOCK names may not exceed 64 characters. Hash the full logical
  * scope so a long filename cannot make lock acquisition fail, and include the
  * schema so equivalent file/plot/census values at different sites do not
@@ -927,11 +936,8 @@ async function processSubBatch(
       transactionID = await connectionManager.beginTransaction();
       const tx = transactionExecutorFor(connectionManager, transactionID);
 
-      // The first statement of the transaction, as it is the first of every recovery transaction: a recovery
-      // window that deleted this family's stale rows commits before the snapshot reads them, so the snapshot
-      // diff never audits a row the recovery already audited (#562). The CALL takes the same shared lock on
-      // its first census read, so this adds no lock the transaction would not hold anyway.
-      await tx.query(safeFormatQuery(schema, SUB_BATCH_CENSUS_SHARE_LOCK_TEMPLATE), [censusID]);
+      // The CALL takes the same shared lock on its first census read, so this adds no lock the transaction would not hold anyway.
+      await takeCensusShareLock(connectionManager, schema, censusID, transactionID);
 
       // Snapshotted BEFORE the CALL: a self-heal that deletes stale residue
       // and re-inserts can net to zero rows, but a count delta would miss
@@ -1106,6 +1112,7 @@ async function processSubBatch(
   const giveUpTransactionID = await connectionManager.beginTransaction();
   let movedRows: number;
   try {
+    await takeCensusShareLock(connectionManager, schema, censusID, giveUpTransactionID);
     movedRows = await moveSubBatchToFailedMeasurementsWithAudit(
       connectionManager,
       schema,
@@ -1369,6 +1376,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       let cleanupTransactionID: string | undefined;
       try {
         cleanupTransactionID = await connectionManager.beginTransaction();
+        await takeCensusShareLock(connectionManager, schema, censusID, cleanupTransactionID);
         for (let j = i; j < subBatchIDs.length; j++) {
           const movedRows = await moveSubBatchToFailedMeasurementsWithAudit(
             connectionManager,
