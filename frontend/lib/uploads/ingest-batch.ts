@@ -61,7 +61,14 @@ import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/
 import { auditCoreMeasurementsScopeDiff, snapshotCoreMeasurementsScope } from '@/lib/changelog/ingestion-audit';
 import { ChangelogOperation, ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
-import { deleteCoreMeasurementsInBoundedChunksWithAudit } from '@/lib/ingestion/temporary-measurements';
+import {
+  COREMEASUREMENTS_JOIN_ALIAS,
+  deleteCoreMeasurementsInBoundedChunksWithAudit,
+  MEASUREMENT_ERROR_LOG_JOIN_ALIAS,
+  PLAIN_COREMEASUREMENTS_FROM_SQL,
+  type CoreMeasurementDeleteScope,
+  type CoreMeasurementLockAlias
+} from '@/lib/ingestion/temporary-measurements';
 
 const MAX_ATTEMPTS_PER_SUBBATCH = 5;
 const SETUP_PHASE_TIMEOUT_MS = 2 * 60 * 1000;
@@ -450,6 +457,55 @@ async function recoverFailedInitialCensusIfNeeded(
   return true;
 }
 
+/**
+ * The cross-file cleanup locks the rows its predicate reads that can change under it: measurements and their
+ * error links (resolveMeasurementErrors and the single-failure re-ingest update `mel` alone). It does not lock
+ * the measurement_errors catalog, which nothing updates, nor the incoming family's staged rows, which are written
+ * only under the setup's per-file application lock (spec #562 D11, E-7).
+ */
+export const CROSS_FILE_CLEANUP_LOCKED_ALIASES: readonly CoreMeasurementLockAlias[] = [COREMEASUREMENTS_JOIN_ALIAS, MEASUREMENT_ERROR_LOG_JOIN_ALIAS];
+
+/** Unresolved rows of the incoming file in batch families other than the incoming one (C2). */
+export function sameFileUnresolvedFailureScope(fileID: string, batchID: string, censusID: number): CoreMeasurementDeleteScope {
+  return {
+    whereSQL: `CensusID = ? AND StemGUID IS NULL AND UploadFileID = ? AND NOT (UploadBatchID <=> ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`,
+    whereParams: [censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    fromSQL: PLAIN_COREMEASUREMENTS_FROM_SQL
+  };
+}
+
+/** Unresolved ingestion failures of other files that match a staged row of the incoming family (C3). */
+export function crossFileUnresolvedFailureScope(fileID: string, batchID: string, censusID: number): CoreMeasurementDeleteScope {
+  return {
+    whereSQL: `cm.CensusID = ? AND cm.StemGUID IS NULL AND NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`,
+    // The JOIN binds the incoming family (FileID, BatchID, LIKE pattern) before the WHERE's census and exclusion params.
+    whereParams: [fileID, batchID, buildSubBatchPattern(batchID), censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    fromSQL: `??.coremeasurements cm
+     INNER JOIN ??.measurement_error_log mel
+       ON mel.MeasurementID = cm.CoreMeasurementID
+      AND mel.IsResolved = FALSE
+     INNER JOIN ??.measurement_errors me
+       ON me.ErrorID = mel.ErrorID
+      AND me.ErrorSource = 'ingestion'
+     INNER JOIN ??.temporarymeasurements tm
+       ON tm.CensusID = cm.CensusID
+      AND tm.FileID = ?
+      AND (tm.BatchID = ? OR tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
+      AND tm.TreeTag <=> cm.RawTreeTag
+      AND tm.StemTag <=> cm.RawStemTag
+      AND tm.SpeciesCode <=> cm.RawSpCode
+      AND tm.QuadratName <=> cm.RawQuadrat
+      AND tm.LocalX <=> cm.RawX
+      AND tm.LocalY <=> cm.RawY
+      AND tm.DBH <=> cm.MeasuredDBH
+      AND tm.HOM <=> cm.MeasuredHOM
+      AND tm.MeasurementDate <=> cm.MeasurementDate
+      AND tm.Codes <=> cm.RawCodes
+      AND tm.Comments <=> cm.RawComments`,
+    lockedAliases: CROSS_FILE_CLEANUP_LOCKED_ALIASES
+  };
+}
+
 async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
   connectionManager: ConnectionManager,
   schema: string,
@@ -470,17 +526,21 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
   // (a different family never matches the new one's pattern).
   //
   // Both deletes go through deleteCoreMeasurementsInBoundedChunksWithAudit
-  // (#507): every removed row is a real committed write and must be audited,
-  // same as Clean Re-Upload's own census-wide cleanup.
+  // (#507, #562): one non-locking read of the scope, primary-key windows with
+  // the predicate re-checked under lock, every removed row audited, and a
+  // locking confirmation before the walk ends. Both stay inside the setup
+  // transaction (spec #562 D7).
+  const sameFileScope = sameFileUnresolvedFailureScope(fileID, batchID, censusID);
   const sameFileDeletedRows = await deleteCoreMeasurementsInBoundedChunksWithAudit(
     connectionManager,
     schema,
-    `CensusID = ? AND StemGUID IS NULL AND UploadFileID = ? AND NOT (UploadBatchID <=> ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`,
-    [censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    sameFileScope.whereSQL,
+    sameFileScope.whereParams,
     changedBy,
     plotID,
     censusID,
-    transactionID
+    transactionID,
+    sameFileScope.fromSQL
   );
 
   if (sameFileDeletedRows > 0) {
@@ -503,42 +563,19 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
     return sameFileDeletedRows;
   }
 
-  // Cross-file match requires joining the incoming file's staged rows, so
-  // this goes through the JOIN-aware `fromSQL` form (aliased `cm`, DISTINCT
-  // id selection) rather than the plain-table default.
-  const crossFileFromSQL = `??.coremeasurements cm
-     INNER JOIN ??.measurement_error_log mel
-       ON mel.MeasurementID = cm.CoreMeasurementID
-      AND mel.IsResolved = FALSE
-     INNER JOIN ??.measurement_errors me
-       ON me.ErrorID = mel.ErrorID
-      AND me.ErrorSource = 'ingestion'
-     INNER JOIN ??.temporarymeasurements tm
-       ON tm.CensusID = cm.CensusID
-      AND tm.FileID = ?
-      AND (tm.BatchID = ? OR tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
-      AND tm.TreeTag <=> cm.RawTreeTag
-      AND tm.StemTag <=> cm.RawStemTag
-      AND tm.SpeciesCode <=> cm.RawSpCode
-      AND tm.QuadratName <=> cm.RawQuadrat
-      AND tm.LocalX <=> cm.RawX
-      AND tm.LocalY <=> cm.RawY
-      AND tm.DBH <=> cm.MeasuredDBH
-      AND tm.HOM <=> cm.MeasuredHOM
-      AND tm.MeasurementDate <=> cm.MeasurementDate
-      AND tm.Codes <=> cm.RawCodes
-      AND tm.Comments <=> cm.RawComments`;
-
+  // Cross-file match joins the incoming family's staged rows; its windows lock only cm and mel (spec #562 D11).
+  const crossFileScope = crossFileUnresolvedFailureScope(fileID, batchID, censusID);
   const deletedRows = await deleteCoreMeasurementsInBoundedChunksWithAudit(
     connectionManager,
     schema,
-    `cm.CensusID = ? AND cm.StemGUID IS NULL AND NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`,
-    [fileID, batchID, buildSubBatchPattern(batchID), censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    crossFileScope.whereSQL,
+    crossFileScope.whereParams,
     changedBy,
     plotID,
     censusID,
     transactionID,
-    crossFileFromSQL
+    crossFileScope.fromSQL,
+    crossFileScope.lockedAliases
   );
 
   if (deletedRows > 0) {

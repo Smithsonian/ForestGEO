@@ -560,6 +560,15 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     expect(calls[confirmationIndex][1]).toEqual(crossFileScopeParams);
     expect(calls[lockIndex][2]).toBe(PHASE1_TRANSACTION_ID);
 
+    const crossFileLockingStatements = calls
+      .map(([sql]) => String(sql))
+      .filter(sql => sql.includes('DISTINCT cm.CoreMeasurementID') && sql.includes('FOR UPDATE'));
+    console.log(`[R1 cross-file locks]\n${crossFileLockingStatements.map(sql => sql.replace(/\s+/g, ' ').slice(-60)).join('\n')}`);
+    expect(crossFileLockingStatements.length, `${diagnostic}\nexpected a window lock and a confirmation`).toBe(2);
+    for (const sql of crossFileLockingStatements) {
+      expect(sql, 'C3 locks only measurement and link rows (spec D11)').toMatch(/FOR UPDATE OF cm, mel\s*$/);
+    }
+
     expectAuditedBoundedDelete(cm, lockIndex, crossFileCoreMeasurementIDs, PHASE1_TRANSACTION_ID, diagnostic);
   });
 
