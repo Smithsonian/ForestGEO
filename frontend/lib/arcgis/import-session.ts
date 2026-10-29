@@ -158,16 +158,6 @@ export interface LoadedArcgisImportSession {
   warnings: TransformWarning[];
 }
 
-export type ClaimedArcgisImportSession =
-  | (LoadedArcgisImportSession & { alreadyCommitted: false })
-  | {
-      alreadyCommitted: true;
-      rowCount: number;
-      fileName: string;
-      committedBatchID: string;
-      committedUploadSessionID: string | null;
-    };
-
 export function assertUploadableArcgisSession(session: ArcgisSessionRow | null, scope: ArcgisSessionScope): asserts session is ArcgisSessionRow {
   if (!session) {
     throw new ArcgisImportSessionError('ArcGIS import session was not found. Re-run the workbook pre-flight step.', HTTPResponses.NOT_FOUND);
@@ -373,81 +363,6 @@ export async function loadStagedArcgisSession(input: {
   });
 
   return toLoadedSession(session, await loadArcgisSessionRows(connectionManager, input.schema, input.importSessionId));
-}
-
-export async function claimArcgisImportSessionForCommit(
-  input: {
-    schema: string;
-    importSessionId: string;
-    plotID: number;
-    censusID: number;
-    userId: string;
-    fileName: string;
-    batchID: string;
-    uploadSessionID: string | null;
-  },
-  transactionID: string
-): Promise<ClaimedArcgisImportSession> {
-  await ensureArcgisImportTables(input.schema);
-  const connectionManager = ConnectionManager.getInstance();
-  const session = await loadArcgisSessionRow(connectionManager, input.schema, input.importSessionId, transactionID, true);
-
-  if (!session) {
-    throw new ArcgisImportSessionError('ArcGIS import session was not found. Re-run the workbook pre-flight step.', HTTPResponses.NOT_FOUND);
-  }
-  if (session.user_id !== input.userId) {
-    throw new ArcgisImportSessionError('ArcGIS import session does not belong to the authenticated user.', HTTPResponses.FORBIDDEN);
-  }
-  if (Number(session.plot_id) !== input.plotID || Number(session.census_id) !== input.censusID) {
-    throw new ArcgisImportSessionError('ArcGIS import session scope does not match the requested plot/census.', HTTPResponses.CONFLICT);
-  }
-  if (session.file_id !== input.fileName) {
-    throw new ArcgisImportSessionError('ArcGIS import session file does not match the requested file.', HTTPResponses.CONFLICT);
-  }
-
-  if (session.state === 'committed') {
-    if (session.committed_batch_id === input.batchID) {
-      return {
-        alreadyCommitted: true,
-        rowCount: Number(session.committed_row_count ?? session.row_count) || 0,
-        fileName: session.committed_file_id || session.file_id,
-        committedBatchID: session.committed_batch_id,
-        committedUploadSessionID: session.committed_upload_session_id ?? null
-      };
-    }
-    throw new ArcgisImportSessionError(
-      `ArcGIS import session has already been committed to batch "${session.committed_batch_id || 'unknown'}". Re-run pre-flight before committing again.`,
-      HTTPResponses.CONFLICT
-    );
-  }
-
-  if (session.state !== 'preflight') {
-    throw new ArcgisImportSessionError(`ArcGIS import session is not uploadable from state "${session.state}".`, HTTPResponses.CONFLICT);
-  }
-
-  // Reserve this preflight session for the in-flight commit: the row is already held under
-  // SELECT ... FOR UPDATE, so this CAS on state = 'preflight' just claims it (affectedRows must be 1)
-  // and records the batch/upload-session it is being committed to. State stays 'preflight' until
-  // markArcgisImportSessionCommitted flips it to 'committed' at the end of the same transaction;
-  // committed_row_count/committed_at are finalized there. If the transaction rolls back, these
-  // committed_* writes revert with it, so no other request ever observes a half-committed preflight row.
-  const claimSQL = format(
-    `UPDATE ??.arcgis_import_sessions
-     SET committed_file_id = file_id,
-         committed_batch_id = ?,
-         committed_upload_session_id = ?,
-         committed_row_count = NULL,
-         committed_at = NULL
-     WHERE import_session_id = ? AND state = 'preflight'`,
-    [input.schema]
-  );
-  const result = await connectionManager.executeQuery(claimSQL, [input.batchID, input.uploadSessionID, input.importSessionId], transactionID);
-  if (Number((result as { affectedRows?: number })?.affectedRows ?? 0) !== 1) {
-    throw new ArcgisImportSessionError('ArcGIS import session could not be claimed for commit. Retry the upload.', HTTPResponses.CONFLICT);
-  }
-
-  const rows = await loadArcgisSessionRows(connectionManager, input.schema, input.importSessionId, transactionID);
-  return { ...toLoadedSession(session, rows), alreadyCommitted: false };
 }
 
 const IMPORT_ROWS_MISSING_MESSAGE = 'ArcGIS import rows are missing. Re-run the workbook pre-flight step.';
@@ -844,29 +759,6 @@ export async function markArcgisImportCommitCompleted(
     transactionID
   );
   if (affectedRowCount(result) !== 1) {
-    throw new ArcgisImportSessionError('ArcGIS import session could not be marked committed.', HTTPResponses.CONFLICT);
-  }
-}
-
-export async function markArcgisImportSessionCommitted(
-  input: {
-    schema: string;
-    importSessionId: string;
-    insertedRowCount: number;
-  },
-  transactionID: string
-): Promise<void> {
-  const connectionManager = ConnectionManager.getInstance();
-  const updateSQL = format(
-    `UPDATE ??.arcgis_import_sessions
-     SET state = 'committed',
-         committed_row_count = ?,
-         committed_at = NOW()
-     WHERE import_session_id = ? AND state = 'preflight'`,
-    [input.schema]
-  );
-  const result = await connectionManager.executeQuery(updateSQL, [input.insertedRowCount, input.importSessionId], transactionID);
-  if (Number((result as { affectedRows?: number })?.affectedRows ?? 0) !== 1) {
     throw new ArcgisImportSessionError('ArcGIS import session could not be marked committed.', HTTPResponses.CONFLICT);
   }
 }
