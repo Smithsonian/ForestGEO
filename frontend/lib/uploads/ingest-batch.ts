@@ -6,9 +6,10 @@
  * and the background upload worker call ingestBatch; neither owns any ingestion
  * internals of its own. The sequence is:
  *
+ *   Phase 0 (failed first census only, #562): recoverFailedInitialCensusInBoundedTransactions,
+ *     separately committed census-locked transactions, before setup opens
  *   Phase 1 (one transaction, application-locked):
  *     - discover the staged batch family once and check its scope and member sizes
- *     - recover dirty failed first-load census state if detected
  *     - remove stale unresolved ingestion rows that match the staged rows
  *     - split rows still staged under the original BatchID (legacy fallback)
  *   Phase 2 (one caller-owned transaction PER sub-batch — #507/#527):
@@ -635,120 +636,6 @@ export async function recoverFailedInitialCensusInBoundedTransactions(
   return { outcome, ...progress };
 }
 
-async function recoverFailedInitialCensusIfNeeded(
-  connectionManager: ConnectionManager,
-  schema: string,
-  fileID: string,
-  batchID: string,
-  plotID: number,
-  censusID: number,
-  changedBy: string | null,
-  transactionID: string
-): Promise<boolean> {
-  const recoveryStateSQL = safeFormatQuery(
-    schema,
-    `SELECT
-       (SELECT COUNT(*) FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status = 'completed') AS completedUploads,
-       (SELECT COUNT(*) FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status IN ('failed', 'processing')) AS incompleteUploads,
-       (SELECT COUNT(*) FROM ??.trees WHERE CensusID = ?) AS treeCount,
-       (SELECT COUNT(*) FROM ??.stems WHERE CensusID = ?) AS stemCount,
-       (SELECT COUNT(*) FROM ??.coremeasurements WHERE CensusID = ?) AS coreMeasurementCount`
-  );
-
-  const recoveryStateRows = await connectionManager.executeQuery(
-    recoveryStateSQL,
-    [plotID, censusID, plotID, censusID, censusID, censusID, censusID],
-    transactionID
-  );
-  const recoveryStateRow = recoveryStateRows[0] ?? {};
-  const recoveryState = {
-    completedUploads: toCount(recoveryStateRow.completedUploads),
-    incompleteUploads: toCount(recoveryStateRow.incompleteUploads),
-    treeCount: toCount(recoveryStateRow.treeCount),
-    stemCount: toCount(recoveryStateRow.stemCount),
-    coreMeasurementCount: toCount(recoveryStateRow.coreMeasurementCount)
-  };
-
-  if (!shouldRecoverFailedInitialCensus(recoveryState)) {
-    return false;
-  }
-
-  ailogger.warn(`Recovering dirty failed first-load census state for plot ${plotID}, census ${censusID} before processing ${fileID}-${batchID}`, {
-    plotID,
-    censusID,
-    fileID,
-    batchID,
-    recoveryState
-  });
-
-  // measurementssummary is derived/reconstructable, not a primary audit trail
-  // (same discipline as cleanupPreviousFileUploads — see
-  // deleteCoreMeasurementsInBoundedChunksWithAudit's doc comment) — delete it
-  // unaudited, before the audited coremeasurements delete below.
-  await connectionManager.executeQuery(safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CensusID = ?'), [censusID], transactionID);
-
-  // Every coremeasurements row in this census is a real committed write and
-  // must be audited before removal (#507): reuse the same bounded,
-  // FOR-UPDATE-locked select-audit-delete sequence Clean Re-Upload's own
-  // census-wide cleanup uses (cleanupPreviousFileUploads), rather than a raw
-  // unaudited DELETE.
-  const recoveredCoreMeasurementsCount = await deleteCoreMeasurementsInBoundedChunksWithAudit(
-    connectionManager,
-    schema,
-    'CensusID = ?',
-    [censusID],
-    changedBy,
-    plotID,
-    censusID,
-    transactionID
-  );
-  if (recoveredCoreMeasurementsCount > 0) {
-    ailogger.warn(`Recovery removed ${recoveredCoreMeasurementsCount} coremeasurement(s) from dirty failed first-load census ${censusID}`);
-  }
-
-  const cleanupSteps = [
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.stems WHERE CensusID = ?'),
-      params: [censusID]
-    },
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.trees WHERE CensusID = ?'),
-      params: [censusID]
-    },
-    {
-      sql: safeFormatQuery(
-        schema,
-        `DELETE tm
-         FROM ??.temporarymeasurements tm
-         INNER JOIN ??.uploadmetrics um
-           ON um.fileID = tm.FileID
-          AND um.batchID = tm.BatchID
-          AND um.plotID = tm.PlotID
-          AND um.censusID = tm.CensusID
-         WHERE tm.PlotID = ?
-           AND tm.CensusID = ?
-           AND um.status IN ('failed', 'processing')
-           AND NOT (tm.FileID = ? AND (tm.BatchID = ? OR tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`
-      ),
-      params: [plotID, censusID, fileID, batchID, buildSubBatchPattern(batchID)]
-    },
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.uploadintegrityalerts WHERE PlotID = ? AND CensusID = ?'),
-      params: [plotID, censusID]
-    },
-    {
-      sql: safeFormatQuery(schema, "DELETE FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status IN ('failed', 'processing')"),
-      params: [plotID, censusID]
-    }
-  ];
-
-  for (const step of cleanupSteps) {
-    await connectionManager.executeQuery(step.sql, step.params, transactionID);
-  }
-
-  return true;
-}
-
 /**
  * The cross-file cleanup locks the rows its predicate reads that can change under it: measurements and their
  * error links (resolveMeasurementErrors and the single-failure re-ingest update `mel` alone). It does not lock
@@ -1295,7 +1182,28 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
   // A deliberate loss, not a bug: ChangedBy is varchar(64) (see identity.ts).
   const changedBy = params.changedBy ? params.changedBy.slice(0, CHANGED_BY_MAX_LENGTH) : null;
 
-  // --- Phase 1: Setup (lock, discover the family, recovery, cleanup, fallback split) ---
+  // --- Phase 0: failed-first-census recovery, in its own bounded transactions (#562) ---
+  activeStep = 'recovery';
+  emit({ outcome: 'started' });
+  let recovery: FailedCensusRecoveryResult;
+  try {
+    recovery = await recoverFailedInitialCensusInBoundedTransactions(connectionManager, {
+      schema,
+      fileID,
+      batchID,
+      plotID: expectedPlotID,
+      censusID: expectedCensusID,
+      changedBy
+    });
+  } catch (error: unknown) {
+    const recoveryError = error instanceof TransactionCallbackTimeoutError ? new SetupCallbackTimeoutError(error) : error;
+    emit({ outcome: 'failed', errorCode: errorCodeOf(recoveryError), terminal: true });
+    throw recoveryError;
+  }
+  emit({ outcome: 'completed' });
+  const recoveredBeforeSetup = recovery.outcome === 'recovered';
+
+  // --- Phase 1: Setup (lock, discover the family, cleanup, fallback split) ---
   let setupResult: SetupResult | null;
   try {
     setupResult = await connectionManager.withTransaction<SetupResult | null>(
@@ -1307,8 +1215,8 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
           throw new SetupLockUnavailableError(fileID);
         }
 
-        // One current-read discovery under the lock. Recovery and the unresolved-row
-        // cleanup below never delete this family's staged rows, so nothing re-reads it.
+        // One current-read discovery under the lock. The unresolved-row cleanup
+        // below never deletes this family's staged rows, so nothing re-reads it.
         activeStep = 'discovery';
         emit({ outcome: 'started' });
         const family = await discoverBatchFamily((sql, sqlParams) => tx.query(sql, sqlParams), schema, fileID, batchID, { currentRead: true });
@@ -1316,20 +1224,6 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
         assertExpectedScope(family, expectedPlotID, expectedCensusID, fileID, batchID);
         const batchSize = getIngestionBatchSize();
         assertMembersWithinBatchSize(family, fileID, batchID, batchSize);
-        emit({ outcome: 'completed', rowCount: family.totalRows });
-
-        activeStep = 'recovery';
-        emit({ outcome: 'started', rowCount: family.totalRows });
-        const recovered = await recoverFailedInitialCensusIfNeeded(
-          connectionManager,
-          schema,
-          fileID,
-          batchID,
-          expectedPlotID,
-          expectedCensusID,
-          changedBy,
-          tx.id
-        );
         emit({ outcome: 'completed', rowCount: family.totalRows });
 
         activeStep = 'cleanup';
@@ -1377,7 +1271,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
         return {
           totalRows: family.totalRows,
           subBatchIDs,
-          recovered,
+          recovered: recoveredBeforeSetup,
           resumedSubBatchCount: family.orphanedSubBatchIDs.length
         };
       },

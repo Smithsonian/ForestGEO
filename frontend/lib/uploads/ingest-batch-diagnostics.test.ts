@@ -66,12 +66,13 @@ describe('ingestBatch setup diagnostics', () => {
     expect(Object.isFrozen(terminal)).toBe(true);
   });
 
-  it('fails with a typed lock error at the lock_wait step and never discovers the family', async () => {
-    const executeQuery = vi.fn(async () => []);
+  it('fails with a typed lock error at the lock_wait step, after a read-only recovery check, and never discovers the family', async () => {
+    const recoveryCheckQuery = vi.fn(async (_sql: string, _params?: unknown[], _transactionID?: string): Promise<unknown[]> => []);
+    const setupQuery = vi.fn(async () => []);
     state.manager = {
-      executeQuery,
+      executeQuery: recoveryCheckQuery,
       acquireApplicationLock: vi.fn(async () => false),
-      withTransaction: vi.fn(async (callback: (tx: any) => Promise<unknown>) => callback({ id: 'tx', query: executeQuery }))
+      withTransaction: vi.fn(async (callback: (tx: any) => Promise<unknown>) => callback({ id: 'tx', query: setupQuery }))
     };
     const events: Readonly<Record<string, any>>[] = [];
 
@@ -84,11 +85,27 @@ describe('ingestBatch setup diagnostics', () => {
         events.push(event);
       }
     }).catch((error: unknown) => error);
-    console.log('[lock-unavailable] caught:', caught, 'terminal:', events.at(-1));
+    const statements = recoveryCheckQuery.mock.calls.map(call => ({ sql: String(call[0]).replace(/\s+/g, ' '), transactionID: call[2] }));
+    console.log(
+      '[lock-unavailable] caught:',
+      caught,
+      'statements:',
+      statements,
+      'steps:',
+      events.map(event => `${event.step}:${event.outcome}`)
+    );
 
     expect(caught).toBeInstanceOf(SetupLockUnavailableError);
     expect((caught as Error).message).toBe('Failed to acquire application lock for file file.csv. Another upload may be in progress.');
     expect(events.at(-1)).toMatchObject({ terminal: true, step: 'lock_wait', outcome: 'failed', errorCode: SETUP_FAILURE_CODES.lockUnavailable });
-    expect(executeQuery).not.toHaveBeenCalled();
+    expect(events.slice(0, 3).map(event => `${event.step}:${event.outcome}`)).toEqual(['recovery:started', 'recovery:completed', 'lock_wait:started']);
+    expect(statements, 'only the recovery-state read ran, outside any transaction').toHaveLength(1);
+    expect(statements[0].sql).toContain('AS coreMeasurementCount');
+    expect(statements[0].transactionID).toBeUndefined();
+    expect(
+      statements.some(statement => /^\s*(DELETE|INSERT|UPDATE)\b/i.test(statement.sql)),
+      'no write ran anywhere'
+    ).toBe(false);
+    expect(setupQuery, 'nothing ran on the setup transaction').not.toHaveBeenCalled();
   });
 });

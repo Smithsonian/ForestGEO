@@ -23,6 +23,7 @@ vi.mock('@/lib/db/primitives', () => ({
 }));
 
 import type ConnectionManager from '@/lib/db/connectionmanager';
+import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
 import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
 import { CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS } from '@/lib/uploads/stage-measurements';
 import { BatchFamilyScopeError, getIngestionBatchSize } from '@/lib/uploads/batch-family';
@@ -30,10 +31,13 @@ import { MYSQL_DEADLOCK_ERRNO, MYSQL_DEADLOCK_ERROR_CODE } from '@/lib/db/deadlo
 import {
   FAILED_CENSUS_RECOVERY_FAILED_EVENT,
   FAILED_CENSUS_RECOVERY_FINAL_READ_LIMIT,
+  ingestBatch,
   OversizedSubBatchError,
   recoverFailedInitialCensusInBoundedTransactions,
+  SetupCallbackTimeoutError,
   SETUP_PHASE_TIMEOUT_MS,
-  type FailedCensusRecoveryParams
+  type FailedCensusRecoveryParams,
+  type SetupDiagnostic
 } from './ingest-batch';
 
 const WINDOW = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE;
@@ -245,7 +249,7 @@ function createRecoveryHarness(script: RecoveryScript) {
   const manager = {
     executeQuery,
     withTransaction,
-    acquireApplicationLock: vi.fn(async () => true),
+    acquireApplicationLock: vi.fn(async (_lockName: string, _transactionID: string, _timeoutMs: number) => true),
     beginTransaction: vi.fn(async () => 'tx-subbatch'),
     commitTransaction: vi.fn(async () => undefined),
     rollbackTransaction: vi.fn(async () => undefined),
@@ -429,5 +433,109 @@ describe('recoverFailedInitialCensusInBoundedTransactions (#562)', () => {
       lockWaitTimeout,
       expect.objectContaining({ censusID: CENSUS_ID, deletedRows: 0, windowCount: 0, deadlockRetries: 0, errorMessage: lockWaitTimeout.message })
     );
+  });
+});
+
+describe('ingestBatch runs the recovery before setup (#562)', () => {
+  const RECOVERY_KINDS: ReadonlySet<RecoveryStatementKind> = new Set([
+    'state_read',
+    'recovery_scope_read',
+    'census_lock',
+    'guard',
+    'final_read',
+    ...DESTRUCTIVE_KINDS
+  ]);
+  const INJECTED_DELETE_FAILURE = 'injected failure at window 2 coremeasurements DELETE';
+
+  beforeEach(() => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+  });
+
+  function runIngestBatch(harness: ReturnType<typeof createRecoveryHarness>, events: SetupDiagnostic[]) {
+    state.manager = harness.raw;
+    return ingestBatch(harness.manager, {
+      schema: SCHEMA,
+      fileID: FILE_ID,
+      batchID: BATCH_ID,
+      expectedScope: { plotID: PLOT_ID, censusID: CENSUS_ID },
+      changedBy: CHANGED_BY,
+      onSetupProgress: diagnostic => {
+        events.push(diagnostic);
+      }
+    });
+  }
+
+  function stepsOf(events: SetupDiagnostic[]): string[] {
+    return events.map(event => `${event.step}:${event.outcome}`);
+  }
+
+  it('U7b: the recovery commits in its own transactions before setup, and setup issues no recovery statement (catches: recovery left inside setup)', async () => {
+    const scopeIDs = sequentialIDs(2 * WINDOW + HELD_BACK_ROWS);
+    const harness = createRecoveryHarness({
+      recoveryState: DUE_WITH_ONLY_RESIDUAL_MEASUREMENTS,
+      scopeReads: [scopeIDs],
+      finalReads: [scopeIDs.slice(2 * WINDOW)]
+    });
+    const events: SetupDiagnostic[] = [];
+
+    const result = await runIngestBatch(harness, events);
+    const setupTransactionID = harness.raw.acquireApplicationLock.mock.calls[0]?.[1];
+    console.log(`[U7b] recovered=${result.recovered} setupTx=${setupTransactionID} steps=${JSON.stringify(stepsOf(events))}\n${harness.render()}`);
+
+    expect(result.recovered).toBe(true);
+    expect(setupTransactionID, 'setup ran').toBeDefined();
+    expect(harness.transactions.slice(0, 4).map(transaction => transaction.id)).toEqual(['tx-1', 'tx-2', 'tx-3', setupTransactionID]);
+    expect(
+      harness.kindsIn(setupTransactionID).filter(kind => RECOVERY_KINDS.has(kind)),
+      harness.render()
+    ).toEqual([]);
+    expect(stepsOf(events).slice(0, 3)).toEqual(['recovery:started', 'recovery:completed', 'lock_wait:started']);
+  });
+
+  it('U8b: a superseded recovery still lets setup run (catches: a guard that aborts the upload)', async () => {
+    const scopeIDs = sequentialIDs(2 * WINDOW + HELD_BACK_ROWS);
+    const harness = createRecoveryHarness({ recoveryState: DUE_WITH_ONLY_RESIDUAL_MEASUREMENTS, scopeReads: [scopeIDs], guardCompletedUploads: [0, 1] });
+    const result = await runIngestBatch(harness, []);
+    console.log(`[U8b] recovered=${result.recovered}\n${harness.render()}`);
+    expect(result.recovered).toBe(false);
+    expect(harness.raw.acquireApplicationLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('U9: a recovery failure propagates before setup with a terminal recovery diagnostic and no later recovery transaction (catches: swallowed errors; setup on a half-recovered census)', async () => {
+    const scopeIDs = sequentialIDs(2 * WINDOW + HELD_BACK_ROWS);
+    const injected = new Error(INJECTED_DELETE_FAILURE);
+    const harness = createRecoveryHarness({
+      recoveryState: DUE_WITH_ONLY_RESIDUAL_MEASUREMENTS,
+      scopeReads: [scopeIDs],
+      failure: { kind: 'measurement_delete', occurrence: 2, makeError: () => injected }
+    });
+    const events: SetupDiagnostic[] = [];
+
+    await expect(runIngestBatch(harness, events)).rejects.toBe(injected);
+    console.log(`[U9] transactions=${JSON.stringify(harness.transactions)} last=${JSON.stringify(events.at(-1))}\n${harness.render()}`);
+    expect(harness.transactions.map(transaction => transaction.end)).toEqual(['committed', 'rolled_back']);
+    expect(harness.raw.acquireApplicationLock).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ step: 'recovery', outcome: 'failed', terminal: true });
+  });
+
+  it('U9: a recovery transaction that times out surfaces as SetupCallbackTimeoutError (catches: an unmapped timeout)', async () => {
+    const timeout = new TransactionCallbackTimeoutError('tx-1', CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS);
+    const harness = createRecoveryHarness({
+      recoveryState: DUE_WITH_ONLY_RESIDUAL_MEASUREMENTS,
+      scopeReads: [sequentialIDs(2 * WINDOW + HELD_BACK_ROWS)],
+      failure: { kind: 'measurement_delete', occurrence: 1, makeError: () => timeout }
+    });
+    const caught = await runIngestBatch(harness, []).catch((error: unknown) => error);
+    console.log(`[U9 timeout] caught=${caught instanceof Error ? caught.constructor.name : caught} cause=${(caught as Error | undefined)?.cause}`);
+    expect(caught).toBeInstanceOf(SetupCallbackTimeoutError);
+    expect((caught as SetupCallbackTimeoutError).cause).toBe(timeout);
+  });
+
+  it('U10b: no staged family → noDataFound and no DELETE anywhere', async () => {
+    const harness = createRecoveryHarness({ recoveryState: DUE_WITH_ONLY_RESIDUAL_MEASUREMENTS, familyRows: [] });
+    const result = await runIngestBatch(harness, []);
+    console.log(`[U10b] ${JSON.stringify(result)}\n${harness.render()}`);
+    expect(result.noDataFound).toBe(true);
+    expect(harness.statements.some(statement => DESTRUCTIVE_KINDS.has(statement.kind))).toBe(false);
   });
 });

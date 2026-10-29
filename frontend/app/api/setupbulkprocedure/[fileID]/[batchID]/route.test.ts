@@ -205,14 +205,18 @@ function primeSetupBulkProcedureQueries(options: SetupBulkProcedureFixtureOption
   const remaining = (rows: Array<{ CoreMeasurementID: number }>) => rows.filter(row => !deletedCoreMeasurementIDs.has(row.CoreMeasurementID));
 
   cm.acquireApplicationLock.mockResolvedValue(true);
-  cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
-    fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: PHASE1_TRANSACTION_ID })
-  );
+  let withTransactionCalls = 0;
+  cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) => {
+    withTransactionCalls += 1;
+    const id = `tx-${withTransactionCalls}`;
+    return fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params, id), id });
+  });
 
   cm.executeQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
     const text = String(sql);
 
     if (text.includes('.temporarymeasurements') && text.includes('GROUP BY BatchID')) return familyRows(familyMembers);
+    if (/\.census WHERE CensusID = \? FOR UPDATE/.test(text)) return [{ CensusID: params[0] }];
     if (text.includes('completedUploads')) return [recoveryState];
     // processSubBatch's before/after coremeasurements scope snapshot: the
     // same statement runs twice per sub-batch attempt, before and after its
@@ -439,7 +443,7 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     expect(cm.rollbackTransaction).not.toHaveBeenCalled();
   });
 
-  it('narrows failed first-load cleanup to temp rows tied to incomplete uploadmetrics batches, auditing the bounded census-wide capture', async () => {
+  it('recovers a dirty failed first-load census in its own transactions before setup, auditing the held-back slice and narrowing the staged-row cleanup to incomplete uploadmetrics batches', async () => {
     shouldRecoverFailedInitialCensus.mockReturnValue(true);
     const recoveredCoreMeasurementIDs = [9001, 9002];
     const cm = primeSetupBulkProcedureQueries({
@@ -470,21 +474,28 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       diagnostic
     ).toBe(false);
 
-    const { readIndex, lockIndex, confirmationIndex } = locateWalkStatements(
-      calls,
-      sql =>
-        /^\s*SELECT (?:\/\*\+ [^*]*\*\/ )?CoreMeasurementID FROM/.test(sql) &&
-        sql.includes('.coremeasurements') &&
-        sql.includes('CensusID = ?') &&
-        !sql.includes('StemGUID'),
-      diagnostic
-    );
-    expect(calls[readIndex][1]).toEqual([DISCOVERED_CENSUS_ID]);
+    const censusLockCall = calls.find(([sql]) => /\.census WHERE CensusID = \? FOR UPDATE/.test(String(sql)));
+    expect(censusLockCall, diagnostic).toBeDefined();
+    const recoveryTransactionID = String(censusLockCall![2]);
+    const setupTransactionID = String(cm.acquireApplicationLock.mock.calls[0][1]);
+    expect(recoveryTransactionID, 'the recovery runs in its own transaction').not.toBe(setupTransactionID);
+    expect(
+      calls.find(
+        ([sql, , transactionID]) => /^\s*SELECT CoreMeasurementID FROM/.test(String(sql)) && transactionID === undefined && !String(sql).includes('LIMIT')
+      ),
+      'one scope read outside any transaction'
+    ).toBeDefined();
+    const lockIndex = calls.findIndex(([sql]) => String(sql).includes('/*+ INDEX(coremeasurements PRIMARY) */') && String(sql).includes('(CensusID = ?)'));
+    expect(lockIndex, diagnostic).toBeGreaterThan(-1);
     expect(calls[lockIndex][1]).toEqual([DISCOVERED_CENSUS_ID, ...recoveredCoreMeasurementIDs]);
-    expect(calls[confirmationIndex][1]).toEqual([DISCOVERED_CENSUS_ID]);
-    expect(calls[lockIndex][2]).toBe(PHASE1_TRANSACTION_ID);
+    expect(calls[lockIndex][2]).toBe(recoveryTransactionID);
 
-    expectAuditedBoundedDelete(cm, lockIndex, recoveredCoreMeasurementIDs, PHASE1_TRANSACTION_ID, diagnostic);
+    expectAuditedBoundedDelete(cm, lockIndex, recoveredCoreMeasurementIDs, recoveryTransactionID, diagnostic);
+    const setupDeletes = calls.filter(([sql, , transactionID]) => transactionID === setupTransactionID && /^\s*DELETE/i.test(String(sql)));
+    expect(
+      setupDeletes.map(([sql]) => String(sql)),
+      'setup runs no recovery DELETE'
+    ).toEqual([]);
   });
 
   it('removes stale unresolved rows from prior same-file batches, auditing exactly the captured ids in the same transaction', async () => {
