@@ -1,4 +1,12 @@
-import { CalendarDay, calendarDayNumber, calendarMonthsBetween, compareCalendarDays, parseCalendarDay, todayCalendarDay } from '@/config/dateformats';
+import {
+  CalendarDay,
+  type CalendarDayInput,
+  calendarDayNumber,
+  calendarMonthsBetween,
+  compareCalendarDays,
+  parseCalendarDay,
+  todayCalendarDay
+} from '@/config/dateformats';
 
 type DateInput = string | Date | null | undefined;
 
@@ -105,4 +113,22 @@ export function formatCensusWindowDuration(ranges: CensusDateFields[] | undefine
   const years = Math.floor(months / 12);
   const remainingMonths = months % 12;
   return remainingMonths === 0 ? `${years} year${years !== 1 ? 's' : ''}` : `${years}y ${remainingMonths}m`;
+}
+
+/** A census window as the edit form and the PATCH payload carry it: calendar days, end optional. */
+export interface CensusDates {
+  startDate: string;
+  endDate: string | null;
+}
+
+export const CENSUS_START_DATE_REQUIRED_MESSAGE = 'Start date is required.';
+export const CENSUS_END_BEFORE_START_MESSAGE = 'End date cannot be before the start date.';
+export const CENSUS_DATES_SAVE_FAILURE_MESSAGE = 'Failed to save the census dates. Please try again.';
+export const CENSUS_DATES_REFRESH_FAILURE_MESSAGE = 'Census dates saved, but refreshing the census list failed. Reload the page to see the new dates.';
+
+/** True when both days are set and the end day falls before the start day. */
+export function isCensusEndBeforeStart(start: CalendarDayInput, end: CalendarDayInput): boolean {
+  const startDay = parseCalendarDay(start);
+  const endDay = parseCalendarDay(end);
+  return startDay !== undefined && endDay !== undefined && compareCalendarDays(endDay, startDay) < 0;
 }
