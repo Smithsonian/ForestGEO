@@ -138,6 +138,19 @@ export function buildCensusDatesPatchBody(censusID: number, dates: CensusDates) 
   };
 }
 
+export async function updateCensusDates(schema: string, censusID: number, dates: CensusDates): Promise<void> {
+  const response = await fetch(`/api/fixeddata/census/${schema}/censusID`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildCensusDatesPatchBody(censusID, dates))
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Census date update failed (HTTP ${response.status}): ${errorBody}`);
+  }
+}
+
 export function reconcileCurrentCensusSelection(currentCensus: OrgCensus, censusList: OrgCensusRDS[]): OrgCensusRDS | undefined {
   if (!currentCensus) return undefined;
 

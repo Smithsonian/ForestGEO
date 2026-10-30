@@ -34,7 +34,7 @@ import {
   useSiteDispatch,
   useSiteListContext
 } from '@/app/contexts/compat-hooks';
-import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/lib/db/definitions/timekeeping';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection, updateCensusDates } from '@/lib/db/definitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/lib/db/definitions/core';
@@ -62,6 +62,9 @@ import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE, CENSUS_DELETE_STALE_LIST_STATUSE
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import CensusCreationModal, { CensusCreationDetails } from '@/components/client/modals/censuscreationmodal';
+import CensusDatesModal from '@/components/client/modals/censusdatesmodal';
+import { CENSUS_DATES_REFRESH_FAILURE_MESSAGE, CENSUS_DATES_SAVE_FAILURE_MESSAGE, type CensusDates, getCensusWindow } from '@/config/censuswindow';
+import { toCalendarDayString } from '@/config/dateformats';
 import { Plot } from '@/lib/db/definitions/zones';
 import { PlotWithCensusCount } from '@/components/dashboard/plotsoverview';
 import { CensusWithStats } from '@/components/dashboard/censusesoverview';
@@ -173,6 +176,10 @@ export default function DashboardPage() {
   const [censusToDelete, setCensusToDelete] = useState<CensusWithStats | OrgCensusRDS | null>(null);
   const [openDeleteCensusModal, setOpenDeleteCensusModal] = useState(false);
   const [isDeletingCensus, setIsDeletingCensus] = useState(false);
+
+  const [censusToEditDates, setCensusToEditDates] = useState<CensusWithStats | OrgCensusRDS | null>(null);
+  const [isSavingCensusDates, setIsSavingCensusDates] = useState(false);
+  const [censusDatesError, setCensusDatesError] = useState<string | null>(null);
 
   // Census creation state
   const isCreatingCensusRef = useRef(false);
@@ -428,6 +435,43 @@ export default function DashboardPage() {
     [censusToDelete, currentSite?.schemaName, refreshCensusList, setLoading]
   );
 
+  const handleCensusEditDates = useCallback((census: CensusWithStats | OrgCensusRDS) => {
+    setCensusDatesError(null);
+    setCensusToEditDates(census);
+  }, []);
+
+  const handleSaveCensusDates = useCallback(
+    async (dates: CensusDates) => {
+      const censusID = censusToEditDates?.dateRanges?.[0]?.censusID;
+      if (!censusID || !currentSite?.schemaName) return;
+
+      setIsSavingCensusDates(true);
+      setCensusDatesError(null);
+      try {
+        await updateCensusDates(currentSite.schemaName, censusID, dates);
+      } catch (saveError) {
+        ailogger.error('Failed to update census dates', saveError instanceof Error ? saveError : undefined);
+        setCensusDatesError(CENSUS_DATES_SAVE_FAILURE_MESSAGE);
+        setIsSavingCensusDates(false);
+        return;
+      }
+
+      // The update has committed; a refresh failure must not read as a failed save.
+      setCensusToEditDates(null);
+      try {
+        await refreshCensusList();
+      } catch (refreshError) {
+        ailogger.error('Census dates saved but census list refresh failed', refreshError instanceof Error ? refreshError : undefined);
+        setError(CENSUS_DATES_REFRESH_FAILURE_MESSAGE);
+      } finally {
+        setIsSavingCensusDates(false);
+      }
+    },
+    [censusToEditDates, currentSite?.schemaName, refreshCensusList]
+  );
+
+  const censusToEditWindow = censusToEditDates?.dateRanges?.[0] ? getCensusWindow(censusToEditDates.dateRanges[0]) : undefined;
+
   const handleAddCensus = useCallback(() => {
     if (isCreatingCensusRef.current) {
       return;
@@ -674,6 +718,7 @@ export default function DashboardPage() {
             isLoading={false}
             userRole={userRole}
             onCensusDelete={handleCensusDelete}
+            onCensusEditDates={handleCensusEditDates}
             onAddCensus={handleAddCensus}
             onSelectCensus={census => {
               if (censusDispatch) {
@@ -1021,6 +1066,17 @@ export default function DashboardPage() {
         isCreating={isCreatingCensus}
         onClose={() => setOpenCreateCensusModal(false)}
         onCreate={handleConfirmCreateCensus}
+      />
+
+      <CensusDatesModal
+        open={censusToEditDates !== null}
+        censusNumber={censusToEditDates?.plotCensusNumber ?? 0}
+        initialStartDate={toCalendarDayString(censusToEditWindow?.start)}
+        initialEndDate={toCalendarDayString(censusToEditWindow?.end)}
+        isSaving={isSavingCensusDates}
+        errorMessage={censusDatesError}
+        onClose={() => setCensusToEditDates(null)}
+        onSave={handleSaveCensusDates}
       />
 
       {/* Census Delete Confirmation Modal */}
