@@ -16,7 +16,7 @@ import {
   Typography
 } from '@mui/joy';
 import { useEffect, useMemo, useState } from 'react';
-import { CENSUS_END_BEFORE_START_MESSAGE, CENSUS_START_DATE_REQUIRED_MESSAGE, type CensusDates, isCensusEndBeforeStart } from '@/config/censuswindow';
+import { type CensusDates, getCensusDatesError } from '@/config/censuswindow';
 
 interface CensusDatesModalProps {
   open: boolean;
@@ -48,11 +48,7 @@ export default function CensusDatesModal({
     setEndDate(initialEndDate ?? '');
   }, [open, initialStartDate, initialEndDate]);
 
-  const dateError = useMemo(() => {
-    if (!startDate) return CENSUS_START_DATE_REQUIRED_MESSAGE;
-    if (isCensusEndBeforeStart(startDate, endDate)) return CENSUS_END_BEFORE_START_MESSAGE;
-    return null;
-  }, [startDate, endDate]);
+  const dateError = useMemo(() => getCensusDatesError(startDate, endDate || null), [startDate, endDate]);
 
   const handleSave = () => {
     if (dateError) return;

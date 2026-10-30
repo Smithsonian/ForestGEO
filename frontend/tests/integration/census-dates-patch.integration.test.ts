@@ -12,7 +12,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
-import { CENSUS_END_BEFORE_START_MESSAGE, type CensusDates } from '@/config/censuswindow';
+import { CENSUS_END_BEFORE_START_MESSAGE, CENSUS_INVALID_DATE_MESSAGE, CENSUS_START_DATE_REQUIRED_MESSAGE, type CensusDates } from '@/config/censuswindow';
 import { buildCensusDatesPatchBody } from '@/lib/db/definitions/timekeeping';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 
@@ -77,11 +77,15 @@ function memberSession() {
 }
 
 async function patchCensusDates(dates: CensusDates): Promise<Response> {
+  return patchCensusBody(buildCensusDatesPatchBody(censusID, dates));
+}
+
+async function patchCensusBody(body: unknown): Promise<Response> {
   const slugs = [schema, CENSUS_GRID_ID];
   const request = new NextRequest(`http://localhost/api/fixeddata/${CENSUS_DATA_TYPE}/${slugs.join('/')}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(buildCensusDatesPatchBody(censusID, dates))
+    body: JSON.stringify(body)
   });
   return PATCH(request, { params: Promise.resolve({ dataType: CENSUS_DATA_TYPE, slugs }) });
 }
@@ -196,6 +200,61 @@ describe('Edit census dates via the production fixeddata PATCH route', () => {
     const after = await readCensusRow();
     expect(after.StartDay).toBe(SEED_START_DATE);
     expect(after.EndDay).toBe(SEED_END_DATE);
+    expect(await readCensusChangelog()).toHaveLength(0);
+  });
+
+  it.each([
+    { startDate: '20240601', endDate: '20240531' },
+    { startDate: '2024-6-1', endDate: '2024-5-31' },
+    { startDate: 20240601, endDate: 20240531 },
+    { startDate: '2024-02-30', endDate: null },
+    { startDate: '2024-06-01T00:00:00.000Z', endDate: null },
+    { startDate: '0999-12-31', endDate: null },
+    { startDate: '10000-01-01', endDate: null },
+    { startDate: '2024-06-01', endDate: '20240531' },
+    { startDate: '2024-06-01', endDate: false },
+    { startDate: '2024-06-01', endDate: { year: 2024, month: 7, day: 1 } },
+    { startDate: '2024-06-01', endDate: '' }
+  ])('rejects invalid date input without changing the row or audit: %j', async dates => {
+    const before = await readCensusRow();
+    const response = await patchCensusBody({ oldRow: { censusID }, newRow: { censusID, ...dates } });
+
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect((await response.json()).error).toBe(CENSUS_INVALID_DATE_MESSAGE);
+    expect(await readCensusRow()).toEqual(before);
+    expect(await readCensusChangelog()).toHaveLength(0);
+  });
+
+  it.each([null, ''])('rejects an explicitly cleared start date (%j)', async startDate => {
+    const before = await readCensusRow();
+    const response = await patchCensusBody({ oldRow: { censusID }, newRow: { censusID, startDate, endDate: null } });
+
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect((await response.json()).error).toBe(CENSUS_START_DATE_REQUIRED_MESSAGE);
+    expect(await readCensusRow()).toEqual(before);
+    expect(await readCensusChangelog()).toHaveLength(0);
+  });
+
+  it.each([
+    { changes: { startDate: '2024-02-29' }, start: '2024-02-29', end: SEED_END_DATE },
+    { changes: { endDate: '2025-01-01' }, start: SEED_START_DATE, end: '2025-01-01' }
+  ])('preserves the untouched calendar day on a partial PATCH: $changes', async ({ changes, start, end }) => {
+    const response = await patchCensusBody({ oldRow: { censusID }, newRow: { censusID, ...changes } });
+
+    expect(response.status).toBe(HTTPResponses.OK);
+    const after = await readCensusRow();
+    expect(after.StartDay).toBe(start);
+    expect(after.EndDay).toBe(end);
+    expect(await readCensusChangelog()).toHaveLength(1);
+  });
+
+  it.each([{ startDate: '2025-01-01' }, { endDate: '2023-12-31' }])('compares a partial date edit against the persisted other date: %j', async changes => {
+    const before = await readCensusRow();
+    const response = await patchCensusBody({ oldRow: { censusID }, newRow: { censusID, ...changes } });
+
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect((await response.json()).error).toBe(CENSUS_END_BEFORE_START_MESSAGE);
+    expect(await readCensusRow()).toEqual(before);
     expect(await readCensusChangelog()).toHaveLength(0);
   });
 });

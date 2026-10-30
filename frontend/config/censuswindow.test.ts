@@ -6,7 +6,9 @@ import {
   getCensusWindowBounds,
   getMeasurementBounds,
   getMeasurementSpan,
-  isCensusEndBeforeStart
+  isCensusEndBeforeStart,
+  getCensusDatesError,
+  CENSUS_INVALID_DATE_MESSAGE
 } from './censuswindow';
 import type { CalendarDay } from './dateformats';
 
@@ -197,5 +199,18 @@ describe('isCensusEndBeforeStart', () => {
     const persistedStart = new Date('2026-01-01T00:00:00.000Z');
     expect(isCensusEndBeforeStart(persistedStart, '2025-12-31')).toBe(true);
     expect(isCensusEndBeforeStart(persistedStart, '2026-01-01')).toBe(false);
+  });
+});
+
+describe('getCensusDatesError', () => {
+  it('accepts leap days, MySQL DATE year bounds, and an open end', () => {
+    expect(getCensusDatesError('2024-02-29', null)).toBeNull();
+    expect(getCensusDatesError('1000-01-01', '9999-12-31')).toBeNull();
+    expect(getCensusDatesError(new Date('2024-02-29T00:00:00.000Z'), '2024-03-01')).toBeNull();
+  });
+
+  it('rejects invalid calendar days and Date objects instead of treating them as absent', () => {
+    expect(getCensusDatesError('2023-02-29', null)).toBe(CENSUS_INVALID_DATE_MESSAGE);
+    expect(getCensusDatesError('2024-02-29', new Date(Number.NaN))).toBe(CENSUS_INVALID_DATE_MESSAGE);
   });
 });
