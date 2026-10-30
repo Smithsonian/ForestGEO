@@ -154,6 +154,15 @@ export default function DashboardPage() {
   const plotID = currentPlot?.plotID;
   const censusID = currentCensus?.dateRanges?.[0]?.censusID;
   const plotCensusNumber = currentCensus?.plotCensusNumber;
+  const censusRefreshScopeRef = useRef<{ schemaName: typeof schemaName; plotID: typeof plotID; controller: AbortController } | null>(null);
+  const censusRefreshSequenceRef = useRef(0);
+
+  useEffect(() => {
+    const scope = { schemaName, plotID, controller: new AbortController() };
+    censusRefreshScopeRef.current = scope;
+    return () => scope.controller.abort();
+  }, [schemaName, plotID]);
+
   const scopeKey = schemaName && plotID && censusID ? `${schemaName}|${plotID}|${censusID}|${plotCensusNumber ?? ''}` : '';
   // Data is only current when it answers the LATEST request started for the current scope.
   // Keying by request id (not just scope) means returning to scope A (A -> B -> A, or a retry)
@@ -321,17 +330,27 @@ export default function DashboardPage() {
       return;
     }
 
+    // The save may finish after its site/plot was left. An in-flight refresh must
+    // also stay invalid after A -> B -> A, even if fetch ignores cancellation.
+    const scope = censusRefreshScopeRef.current;
+    if (!scope || scope.schemaName !== currentSite.schemaName || scope.plotID !== currentPlot.plotID || scope.controller.signal.aborted) return;
+    const requestID = ++censusRefreshSequenceRef.current;
+    const isCurrent = () => !scope.controller.signal.aborted && requestID === censusRefreshSequenceRef.current;
+
     try {
       console.log('Refreshing census list...');
       const response = await fetch(
-        `/api/fetchall/census/${currentPlot.plotID}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`
+        `/api/fetchall/census/${currentPlot.plotID}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`,
+        { signal: scope.controller.signal }
       );
+      if (!response.ok) throw new Error(`Failed to load census data (HTTP ${response.status})`);
       const censusRDSLoad = await response.json();
-      if (!censusRDSLoad) throw new Error('Failed to load census data');
-      const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
-      const updatedCensusList = await createAndUpdateCensusList(censusArray);
+      if (!Array.isArray(censusRDSLoad)) throw new Error('Invalid census list response');
+      const updatedCensusList = await createAndUpdateCensusList(censusRDSLoad);
+      if (!isCurrent()) return;
       if (censusListDispatch) await censusListDispatch({ censusList: updatedCensusList });
 
+      if (!isCurrent()) return;
       if (censusDispatch && currentCensus) {
         const reconciledCensus = reconcileCurrentCensusSelection(currentCensus, updatedCensusList);
         await censusDispatch({ census: reconciledCensus });
@@ -339,6 +358,7 @@ export default function DashboardPage() {
 
       console.log('Census list refreshed successfully');
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('Failed to refresh census list:', error);
       ailogger.error('Failed to refresh census list', error instanceof Error ? error : undefined);
       throw error;
