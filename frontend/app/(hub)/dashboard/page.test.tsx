@@ -9,15 +9,17 @@
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, within as _within, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, within as _within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DashboardPage from './page';
 import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, usePlotContext, useSiteContext, useSiteListContext } from '@/app/contexts/compat-hooks';
+import { useOrgCensusContext, useOrgCensusListDispatch, usePlotContext, useSiteContext, useSiteListContext } from '@/app/contexts/compat-hooks';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useAppStore } from '@/config/store/appstore';
 import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE } from '@/config/censusdeletion';
 import { HTTPResponses } from '@/config/macros';
+import { CENSUS_DATES_REFRESH_FAILURE_MESSAGE, CENSUS_DATES_SAVE_FAILURE_MESSAGE } from '@/config/censuswindow';
+import { buildCensusDatesPatchBody } from '@/lib/db/definitions/timekeeping';
 
 // Mock dependencies
 vi.mock('next-auth/react');
@@ -98,6 +100,9 @@ vi.mock('@/lib/db/definitions/personnel', async importOriginal => {
     })
   };
 });
+// The shared platform mocks stub this module empty; the census edit and refresh paths need the real one.
+vi.mock('@/lib/db/definitions/timekeeping', async importOriginal => importOriginal());
+vi.mock('@/config/datamapper', async importOriginal => importOriginal());
 vi.mock('@/lib/db/definitions/zones', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -877,6 +882,248 @@ describe('Enhanced Dashboard Page', () => {
 
       expect(await screen.findByText(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE)).toBeInTheDocument();
       expect(screen.queryByText(SERVER_INTERNAL_DETAIL)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Edit census dates', () => {
+    const CENSUS_PATCH_URL = '/api/fixeddata/census/testsite/censusID';
+    const CENSUS_LIST_URL_FRAGMENT = '/api/fetchall/census/';
+    const EDITABLE_CENSUS_ID = 7;
+    const EDITABLE_CENSUS = {
+      plotID: 1,
+      plotCensusNumber: 1,
+      censusIDs: [EDITABLE_CENSUS_ID],
+      dateRanges: [
+        {
+          censusID: EDITABLE_CENSUS_ID,
+          startDate: '2023-01-01T00:00:00.000Z',
+          endDate: '2023-12-31T00:00:00.000Z',
+          censusStartDate: '2023-01-01T00:00:00.000Z',
+          censusEndDate: '2023-12-31T00:00:00.000Z',
+          firstMeasurementDate: null,
+          lastMeasurementDate: null
+        }
+      ],
+      description: 'Only census',
+      isActive: true
+    };
+
+    function routeCensusPatchTo(
+      patchResponse: () => Promise<Response>,
+      censusListResponse: () => Promise<Response> = () => Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response)
+    ) {
+      vi.mocked(global.fetch).mockImplementation((url: any) => {
+        if (String(url) === CENSUS_PATCH_URL) return patchResponse();
+        if (String(url).includes(CENSUS_LIST_URL_FRAGMENT)) return censusListResponse();
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response);
+      });
+    }
+
+    function callsAfterThePatch() {
+      const urls = vi.mocked(global.fetch).mock.calls.map(([url]) => String(url));
+      const patchIndex = urls.indexOf(CENSUS_PATCH_URL);
+      return { patchIndex, censusListFetches: urls.slice(patchIndex + 1).filter(url => url.includes(CENSUS_LIST_URL_FRAGMENT)) };
+    }
+
+    async function openEditDatesModal() {
+      const user = userEvent.setup();
+      const view = render(<DashboardPage />);
+      await user.click(await screen.findByRole('button', { name: 'More actions for census 1' }));
+      await user.click(await screen.findByRole('menuitem', { name: /Edit census dates/ }));
+      await screen.findByText('Edit Census 1 Dates');
+      return { user, ...view };
+    }
+
+    beforeEach(() => {
+      vi.mocked(useSession).mockReturnValue({
+        data: { ...mockSession, user: { ...mockSession.user, userStatus: 'global' } },
+        status: 'authenticated',
+        update: vi.fn()
+      } as any);
+      vi.mocked(useOrgCensusContext).mockReturnValue(undefined as any);
+      vi.mocked(useOrgCensusListDispatch).mockReturnValue(async ({ censusList }) => {
+        useAppStore.getState().setCensusList(censusList ?? []);
+      });
+      useAppStore.getState().setCensusList([EDITABLE_CENSUS as any]);
+    });
+
+    afterEach(() => {
+      vi.mocked(useOrgCensusListDispatch).mockReset();
+      useAppStore.getState().setCensusList([]);
+    });
+
+    it('prefills the census window, PATCHes the edited days, refreshes the list once and closes', async () => {
+      routeCensusPatchTo(() => Promise.resolve(new Response(JSON.stringify({ message: 'Update successful', changed: true }), { status: HTTPResponses.OK })));
+      const { user } = await openEditDatesModal();
+
+      const startInput = screen.getByLabelText(/^Start date/) as HTMLInputElement;
+      const endInput = screen.getByLabelText('End date (optional)') as HTMLInputElement;
+      console.log(`[edit census dates page] prefilled start="${startInput.value}" end="${endInput.value}"`);
+      expect(startInput.value).toBe('2023-01-01');
+      expect(endInput.value).toBe('2023-12-31');
+
+      fireEvent.change(startInput, { target: { value: '2023-02-01' } });
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+
+      await waitFor(() => expect(screen.queryByText('Edit Census 1 Dates')).not.toBeInTheDocument());
+      const patchCalls = vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url) === CENSUS_PATCH_URL);
+      console.log(`[edit census dates page] PATCH calls: ${JSON.stringify(patchCalls.map(([, init]) => init))}`);
+      expect(patchCalls).toHaveLength(1);
+      const [, patchInit] = patchCalls[0];
+      expect(patchInit?.method).toBe('PATCH');
+      expect(JSON.parse(String(patchInit?.body))).toEqual(buildCensusDatesPatchBody(EDITABLE_CENSUS_ID, { startDate: '2023-02-01', endDate: '2023-12-31' }));
+      expect(callsAfterThePatch().censusListFetches).toHaveLength(1);
+    });
+
+    it('keeps the modal open with the save error when the PATCH fails, and does not refresh', async () => {
+      routeCensusPatchTo(() => Promise.resolve(new Response(JSON.stringify({ error: 'boom' }), { status: HTTPResponses.INTERNAL_SERVER_ERROR })));
+      const { user } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+
+      expect(await screen.findByText(CENSUS_DATES_SAVE_FAILURE_MESSAGE)).toBeInTheDocument();
+      expect(screen.getByText('Edit Census 1 Dates')).toBeInTheDocument();
+      expect(screen.queryByText('boom')).not.toBeInTheDocument();
+      expect(callsAfterThePatch().censusListFetches).toHaveLength(0);
+    });
+
+    it('closes the modal and reports a refresh failure separately when the save committed', async () => {
+      routeCensusPatchTo(
+        () => Promise.resolve(new Response(JSON.stringify({ message: 'Update successful', changed: true }), { status: HTTPResponses.OK })),
+        () => Promise.reject(new TypeError('network down'))
+      );
+      const { user } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+
+      expect(await screen.findByText(CENSUS_DATES_REFRESH_FAILURE_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText('Edit Census 1 Dates')).not.toBeInTheDocument();
+      expect(screen.queryByText(CENSUS_DATES_SAVE_FAILURE_MESSAGE)).not.toBeInTheDocument();
+    });
+
+    it.each([
+      { status: HTTPResponses.INTERNAL_SERVER_ERROR, body: { error: 'temporary server failure' } },
+      { status: HTTPResponses.OK, body: { unexpected: 'not a census list' } },
+      { status: HTTPResponses.OK, body: null }
+    ])('preserves the list and reports a failed refresh for HTTP $status with $body', async ({ status, body }) => {
+      routeCensusPatchTo(
+        () => Promise.resolve(new Response('{}', { status: HTTPResponses.OK })),
+        () => Promise.resolve(new Response(JSON.stringify(body), { status }))
+      );
+      const { user } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+
+      expect(await screen.findByText(CENSUS_DATES_REFRESH_FAILURE_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText('Edit Census 1 Dates')).not.toBeInTheDocument();
+      expect(screen.queryByText(CENSUS_DATES_SAVE_FAILURE_MESSAGE)).not.toBeInTheDocument();
+      expect(useAppStore.getState().censusList).toEqual([EDITABLE_CENSUS]);
+    });
+
+    it('applies a successful refresh to the current plot', async () => {
+      routeCensusPatchTo(
+        () => Promise.resolve(new Response('{}', { status: HTTPResponses.OK })),
+        () =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify([
+                {
+                  censusID: EDITABLE_CENSUS_ID,
+                  plotID: 1,
+                  plotCensusNumber: 1,
+                  isActive: 1,
+                  censusStartDate: '2023-02-01',
+                  censusEndDate: '2023-12-31'
+                }
+              ]),
+              { status: HTTPResponses.OK }
+            )
+          )
+      );
+      const { user } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+
+      await waitFor(() => expect(useAppStore.getState().censusList[0]?.dateRanges[0].censusStartDate).toBe('2023-02-01'));
+      expect(screen.queryByText(CENSUS_DATES_REFRESH_FAILURE_MESSAGE)).not.toBeInTheDocument();
+    });
+
+    it.each(['site', 'plot', 'site round trip', 'unmount'] as const)('ignores a late refresh after a %s change even when fetch ignores abort', async change => {
+      let finishRefresh!: (response: Response) => void;
+      const pendingRefresh = new Promise<Response>(resolve => {
+        finishRefresh = resolve;
+      });
+      routeCensusPatchTo(
+        () => Promise.resolve(new Response('{}', { status: HTTPResponses.OK })),
+        () => pendingRefresh
+      );
+      const { user, rerender, unmount } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+      await waitFor(() => expect(screen.queryByText('Edit Census 1 Dates')).not.toBeInTheDocument());
+      const refreshCall = vi.mocked(global.fetch).mock.calls.find(([url]) => String(url).includes(CENSUS_LIST_URL_FRAGMENT));
+      expect(refreshCall).toBeDefined();
+
+      const newPlotID = change === 'plot' ? 2 : 1;
+      const newCensus = {
+        ...EDITABLE_CENSUS,
+        plotID: newPlotID,
+        censusIDs: [99],
+        dateRanges: [{ ...EDITABLE_CENSUS.dateRanges[0], censusID: 99 }]
+      };
+      if (change === 'unmount') {
+        unmount();
+      } else if (change === 'plot') {
+        vi.mocked(usePlotContext).mockReturnValue({ ...mockPlot, plotID: newPlotID } as any);
+        rerender(<DashboardPage />);
+      } else {
+        vi.mocked(useSiteContext).mockReturnValue({ schemaName: 'other_site', siteName: 'Other Site' } as any);
+        rerender(<DashboardPage />);
+        if (change === 'site round trip') {
+          vi.mocked(useSiteContext).mockReturnValue(mockSite as any);
+          rerender(<DashboardPage />);
+        }
+      }
+      await act(async () => {
+        useAppStore.getState().setCensusList([newCensus as any]);
+      });
+      expect(refreshCall?.[1]?.signal?.aborted).toBe(true);
+
+      await act(async () =>
+        finishRefresh(
+          new Response(
+            JSON.stringify([
+              {
+                censusID: EDITABLE_CENSUS_ID,
+                plotID: 1,
+                plotCensusNumber: 1,
+                isActive: 1,
+                censusStartDate: '2023-02-01',
+                censusEndDate: '2023-12-31'
+              }
+            ]),
+            { status: HTTPResponses.OK }
+          )
+        )
+      );
+
+      expect(useAppStore.getState().censusList).toEqual([newCensus]);
+      expect(screen.queryByText(CENSUS_DATES_REFRESH_FAILURE_MESSAGE)).not.toBeInTheDocument();
+    });
+
+    it('ignores a stale refresh failure after switching sites', async () => {
+      let failRefresh!: (error: Error) => void;
+      const pendingRefresh = new Promise<Response>((_resolve, reject) => {
+        failRefresh = reject;
+      });
+      routeCensusPatchTo(
+        () => Promise.resolve(new Response('{}', { status: HTTPResponses.OK })),
+        () => pendingRefresh
+      );
+      const { user, rerender } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+      await waitFor(() => expect(screen.queryByText('Edit Census 1 Dates')).not.toBeInTheDocument());
+      vi.mocked(useSiteContext).mockReturnValue({ schemaName: 'other_site', siteName: 'Other Site' } as any);
+      rerender(<DashboardPage />);
+
+      await act(async () => failRefresh(new TypeError('late network failure')));
+      expect(screen.queryByText(CENSUS_DATES_REFRESH_FAILURE_MESSAGE)).not.toBeInTheDocument();
+      expect(useAppStore.getState().censusList).toEqual([EDITABLE_CENSUS]);
     });
   });
 
