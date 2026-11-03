@@ -86,6 +86,9 @@ const QUADRAT_B1_ID = 3;
 const BAR_SPECIES_ID = 2;
 const UNTAGGED_NEIGHBOUR_TREE_ID = 4;
 const NULL_TAGGED_TREE_ID = 5;
+const NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID = 6;
+const TWO_UNTAGGED_STEMS_TREE_ID = 7;
+const TWO_UNTAGGED_STEMS_SECOND_STEM_ID = 8;
 const PRIOR_TREE_COUNT = 1000;
 const FIRST_GENERATED_TREE_ID = 1001;
 const FIRST_GENERATED_STEM_ID = FIRST_GENERATED_TREE_ID;
@@ -110,6 +113,7 @@ const STEM_LOOKUP_ALIAS = 'sl';
 const INDEX_LOOKUP_ACCESS_TYPE = 'ref';
 const STAGE_2_STEM_WRITE_BACK_MARKER = `JOIN stem_lookup ${STEM_LOOKUP_ALIAS}`;
 const CHECK_4_AMBIGUOUS_STEM_MARKER = "'Ambiguous stem key'";
+const AMBIGUOUS_STEM_KEY_REASON = 'Ambiguous stem key';
 
 // Test E fixture: the first census-2 publish, then a reload that fails Stage 5.
 const FIRST_PUBLISH_DBH_TREE_1 = 11;
@@ -1591,6 +1595,98 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
     for (const row of result.failedMeasurementRows) {
       expect(row.Errors.split(ERROR_REASON_SEPARATOR), `row ${row.CoreMeasurementID}: ${row.Errors}`).toContain(EMPTY_STEMTAG_COLLISION_REASON);
     }
+  });
+
+  it('check 1b: a NULL-tagged stem on the same tree in a different quadrat does not block a new untagged stem, because the destination lookup is qualified by quadrat', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+    await connection.query('INSERT INTO Tree (TreeID, Tag, SpeciesID, SubSpeciesID) VALUES (?, ?, ?, NULL)', [
+      NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID,
+      String(NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID),
+      FOO_SPECIES_ID
+    ]);
+    await connection.query('INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber) VALUES (?, ?, NULL, ?, ?)', [
+      NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID,
+      NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID,
+      QUADRAT_B1_ID,
+      LEGACY_DEFAULT_STEM_NUMBER
+    ]);
+    // The staged '' resolves to no destination stem in Stage 2 (<=> treats NULL and '' as different) and forms
+    // no (TreeID, '') lookup group for check 4, so the artifact commits and inserts the stem in A1.
+    const newUntaggedStem = makeMeasurement({
+      Tag: String(NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID),
+      StemTag: EMPTY_STEM_TAG,
+      QuadratName: QUADRAT_A1_NAME,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
+
+    const result = await executeArtifactCapturingValidationFailure(
+      dbName,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows: [newUntaggedStem],
+        attributeRows: []
+      })
+    );
+
+    expect(result, `the artifact must commit; captured: ${JSON.stringify(result)}`).toEqual({ signalMessage: null, failedMeasurementRows: [] });
+    const [insertedStems] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID FROM Stem WHERE TreeID = ? AND StemTag = ? AND QuadratID = ?', [
+      NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID,
+      EMPTY_STEM_TAG,
+      QUADRAT_A1_ID
+    ]);
+    expect(insertedStems, `untagged stems on tree ${NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID} / ${QUADRAT_A1_NAME}: ${JSON.stringify(insertedStems)}`).toHaveLength(
+      EXPECTED_UNTAGGED_STEM_COUNT
+    );
+  });
+
+  it('check 1b: a new untagged stem is rejected with both the collision and the ambiguous-stem reasons when the destination tree has two empty-tag stems', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+    await connection.query('INSERT INTO Tree (TreeID, Tag, SpeciesID, SubSpeciesID) VALUES (?, ?, ?, NULL)', [
+      TWO_UNTAGGED_STEMS_TREE_ID,
+      String(TWO_UNTAGGED_STEMS_TREE_ID),
+      FOO_SPECIES_ID
+    ]);
+    await connection.query('INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber) VALUES ?', [
+      [
+        [TWO_UNTAGGED_STEMS_TREE_ID, TWO_UNTAGGED_STEMS_TREE_ID, EMPTY_STEM_TAG, QUADRAT_A1_ID, LEGACY_DEFAULT_STEM_NUMBER],
+        [TWO_UNTAGGED_STEMS_SECOND_STEM_ID, TWO_UNTAGGED_STEMS_TREE_ID, EMPTY_STEM_TAG, QUADRAT_B1_ID, LEGACY_DEFAULT_STEM_NUMBER]
+      ]
+    ]);
+    // Two ('') stems on the tree form one lookup group with StemCount = 2, so the staged row resolves to neither
+    // (Stage 2), is reported as ambiguous (check 4), and meets an untagged stem in its own quadrat (check 1b).
+    const ambiguousUntaggedStem = makeMeasurement({
+      Tag: String(TWO_UNTAGGED_STEMS_TREE_ID),
+      StemTag: EMPTY_STEM_TAG,
+      QuadratName: QUADRAT_A1_NAME,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
+    const before = await captureDestinationCounts(connection);
+
+    const result = await executeArtifactCapturingValidationFailure(
+      dbName,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows: [ambiguousUntaggedStem],
+        attributeRows: []
+      })
+    );
+
+    expect(result.signalMessage, `captured: ${JSON.stringify(result)}`).toMatch(/Validation failed/);
+    expect(
+      result.failedMeasurementRows.map(row => row.CoreMeasurementID),
+      `captured: ${JSON.stringify(result)}`
+    ).toEqual([ambiguousUntaggedStem.CoreMeasurementID]);
+    expect(result.failedMeasurementRows[0].Errors.split(ERROR_REASON_SEPARATOR), `row errors: ${result.failedMeasurementRows[0].Errors}`).toEqual([
+      EMPTY_STEMTAG_COLLISION_REASON,
+      AMBIGUOUS_STEM_KEY_REASON
+    ]);
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
   });
 
   // -------------------------------------------------------------------------

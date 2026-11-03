@@ -975,6 +975,10 @@ describe('load transaction body', () => {
   const ENVELOPE_TRANSACTION_START = '\n  START TRANSACTION;\n';
   const ENVELOPE_TRANSACTION_COMMIT = '\n  COMMIT;\n';
 
+  const TABLE_MAINTENANCE_VERBS = ['ANALYZE', 'OPTIMIZE', 'CHECK', 'REPAIR'];
+  const SCHEMA_OBJECT_DDL_VERBS = ['CREATE', 'DROP', 'ALTER'];
+  const SCHEMA_OBJECT_TYPES = ['VIEW', 'PROCEDURE', 'FUNCTION', 'TRIGGER', 'EVENT'];
+
   const IMPLICIT_COMMIT_STATEMENTS: ReadonlyArray<{ statement: string; pattern: RegExp; example: string }> = [
     { statement: 'ALTER TABLE', pattern: /\bALTER\s+TABLE\b/gi, example: 'ALTER TABLE staging_x ADD KEY k (a);' },
     { statement: 'CREATE INDEX', pattern: /\bCREATE\s+(UNIQUE\s+)?INDEX\b/gi, example: 'CREATE UNIQUE INDEX k ON staging_x (a);' },
@@ -984,8 +988,24 @@ describe('load transaction body', () => {
     { statement: 'CREATE TABLE without TEMPORARY', pattern: /\bCREATE\s+TABLE\b/gi, example: 'CREATE TABLE staging_x (a INT);' },
     { statement: 'DROP TABLE without TEMPORARY', pattern: /\bDROP\s+TABLE\b/gi, example: 'DROP TABLE staging_x;' },
     { statement: 'LOCK TABLES / UNLOCK TABLES', pattern: /\b(UN)?LOCK\s+TABLES\b/gi, example: 'LOCK TABLES staging_x WRITE;' },
+    { statement: 'LOCK TABLE / UNLOCK TABLE (singular)', pattern: /\b(UN)?LOCK\s+TABLE\b/gi, example: 'LOCK TABLE staging_x WRITE;' },
     { statement: 'COMMIT', pattern: /\bCOMMIT\b/gi, example: 'COMMIT;' },
-    { statement: 'START TRANSACTION', pattern: /\bSTART\s+TRANSACTION\b/gi, example: 'START TRANSACTION;' }
+    { statement: 'START TRANSACTION', pattern: /\bSTART\s+TRANSACTION\b/gi, example: 'START TRANSACTION;' },
+    { statement: 'ROLLBACK (not TO SAVEPOINT)', pattern: /\bROLLBACK\b(?!\s+TO\s+SAVEPOINT\b)/gi, example: 'ROLLBACK;' },
+    { statement: 'SET autocommit', pattern: /\bSET\s+(?:(?:SESSION|GLOBAL)\s+)?autocommit\b/gi, example: 'SET autocommit = 1;' },
+    { statement: 'SET @@autocommit', pattern: /\bSET\s+@@(?:(?:SESSION|GLOBAL)\.)?autocommit\b/gi, example: 'SET @@autocommit = 1;' },
+    ...TABLE_MAINTENANCE_VERBS.map(verb => ({
+      statement: `${verb} TABLE`,
+      pattern: new RegExp(`\\b${verb}\\s+(?:(?:NO_WRITE_TO_BINLOG|LOCAL)\\s+)?TABLE\\b`, 'gi'),
+      example: `${verb} TABLE staging_x;`
+    })),
+    ...SCHEMA_OBJECT_DDL_VERBS.flatMap(verb =>
+      SCHEMA_OBJECT_TYPES.map(objectType => ({
+        statement: `${verb} ${objectType}`,
+        pattern: new RegExp(`\\b${verb}\\s+(?:OR\\s+REPLACE\\s+)?${objectType}\\b`, 'gi'),
+        example: `${verb} ${objectType} some_object;`
+      }))
+    )
   ];
 
   const findImplicitCommitStatements = (sqlBody: string): string[] => {
@@ -1016,6 +1036,7 @@ describe('load transaction body', () => {
   };
 
   const loadBodies = [
+    { name: 'first publish (default, no reload)', options: { allowReload: false, reloadDryRun: false } },
     { name: 'real publish with reload cleanup (all stages)', options: { allowReload: true, reloadDryRun: false } },
     { name: 'reload dry-run', options: { allowReload: false, reloadDryRun: true } }
   ];
@@ -1029,15 +1050,18 @@ describe('load transaction body', () => {
   });
 
   it.each(IMPLICIT_COMMIT_STATEMENTS)('the guard detects $statement, so the check above cannot pass vacuously', ({ statement, pattern, example }) => {
+    expect(Array.from(example.matchAll(pattern)), `pattern for ${statement} (${pattern}) missed its own example: ${example}`).not.toEqual([]);
     expect(findImplicitCommitStatements(example), `guard missed ${statement} (pattern ${pattern})`).not.toEqual([]);
   });
 
-  it('the guard ignores commented-out statements, TEMPORARY tables and the TRUNCATE() function', () => {
+  it('the guard ignores commented-out statements, TEMPORARY tables, the TRUNCATE() function and savepoint rollbacks', () => {
     const permittedSql = [
       '-- TRUNCATE staging_x;',
       'CREATE TEMPORARY TABLE t AS SELECT 1;',
       'DROP TEMPORARY TABLE IF EXISTS t;',
-      'SELECT TRUNCATE(Value, 2) FROM t;'
+      'SELECT TRUNCATE(Value, 2) FROM t;',
+      'SAVEPOINT reload_dry;',
+      'ROLLBACK TO SAVEPOINT reload_dry;'
     ].join('\n');
 
     expect(findImplicitCommitStatements(permittedSql)).toEqual([]);
