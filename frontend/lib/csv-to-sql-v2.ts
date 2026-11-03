@@ -52,6 +52,8 @@ export const TAXON_RANK_SPECIES = 2;
 // Inline key names for the Stage 2 lookup temp tables, shared with tests so the
 // rendered DDL is asserted, not retyped.
 export const STEM_LOOKUP_INDEX_NAME = 'idxTreeStemTag';
+export const TEMP_ID_INDEX_NAME = 'idxTempID';
+export const TREE_LOOKUP_AMBIGUITY_INDEX_NAME = 'idxTreeCount';
 
 // Stage 5 check 1b reason. The operator manual quotes this text verbatim.
 export const EMPTY_STEMTAG_COLLISION_REASON = 'Empty StemTag collides with another stem under same Tree+Quadrat';
@@ -491,13 +493,13 @@ export function renderStage2(opts: Stage2Options): string {
       ) r ON r.Mnemonic = t.Mnemonic;
 
   DROP TEMPORARY TABLE IF EXISTS taxonomy_best_rank;
-  CREATE TEMPORARY TABLE taxonomy_best_rank AS
+  CREATE TEMPORARY TABLE taxonomy_best_rank (KEY ${TEMP_ID_INDEX_NAME} (TempID)) AS
     SELECT TempID, MIN(MatchRank) AS BestRank
       FROM taxonomy_candidates
      GROUP BY TempID;
 
   DROP TEMPORARY TABLE IF EXISTS taxonomy_lookup;
-  CREATE TEMPORARY TABLE taxonomy_lookup AS
+  CREATE TEMPORARY TABLE taxonomy_lookup (KEY ${TEMP_ID_INDEX_NAME} (TempID)) AS
     SELECT c.TempID,
            MIN(CASE WHEN c.MatchRank = b.BestRank THEN c.SpeciesID END)    AS SpeciesID,
            MIN(CASE WHEN c.MatchRank = b.BestRank THEN c.SubSpeciesID END) AS SubSpeciesID,
@@ -525,8 +527,10 @@ export function renderStage2(opts: Stage2Options): string {
         t.SubSpeciesID = tx.SubSpeciesID;
 
   -- Tree lookup (CTFS Tree has no PlotID; scope via Stem -> Quadrat -> Plot)
+  -- Keyed on TreeCount: check 3 probes only ambiguous keys, and a Tag-led key is
+  -- unusable when staging and the destination Tree.Tag differ in charset.
   DROP TEMPORARY TABLE IF EXISTS tree_lookup;
-  CREATE TEMPORARY TABLE tree_lookup AS
+  CREATE TEMPORARY TABLE tree_lookup (KEY ${TREE_LOOKUP_AMBIGUITY_INDEX_NAME} (TreeCount)) AS
     SELECT tr.Tag,
            tr.SpeciesID,
            tr.SubSpeciesID,

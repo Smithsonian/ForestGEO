@@ -19,6 +19,8 @@ import {
   MISSING_PLOT_COORDINATE_SCOPE,
   DESTINATION_PLOT_COORDINATE_TYPE_SCOPE,
   STEM_LOOKUP_INDEX_NAME,
+  TEMP_ID_INDEX_NAME,
+  TREE_LOOKUP_AMBIGUITY_INDEX_NAME,
   EMPTY_STEMTAG_COLLISION_REASON,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
@@ -571,12 +573,29 @@ describe('renderStage2', () => {
     );
   });
 
-  it('tree_lookup groups by (Tag, SpeciesID, SubSpeciesID) and is plot-scoped via Stem -> Quadrat', () => {
+  it('tree_lookup declares its TreeCount key inline, groups by (Tag, SpeciesID, SubSpeciesID) and is plot-scoped via Stem -> Quadrat', () => {
     const s = sql();
-    expect(s).toMatch(/CREATE TEMPORARY TABLE tree_lookup AS/);
+    expect(s).toContain(`CREATE TEMPORARY TABLE tree_lookup (KEY ${TREE_LOOKUP_AMBIGUITY_INDEX_NAME} (TreeCount)) AS`);
     expect(s).toMatch(
       /FROM Tree tr\s+JOIN Stem s ON s\.TreeID = tr\.TreeID\s+JOIN Quadrat q ON q\.QuadratID = s\.QuadratID\s+WHERE q\.PlotID = @target_plot_id\s+GROUP BY tr\.Tag, tr\.SpeciesID, tr\.SubSpeciesID/
     );
+  });
+
+  it('the taxonomy lookup temp tables declare their TempID keys inline (MySQL 5.7 and MariaDB have no hash join for these probes)', () => {
+    const s = sql();
+    expect(s).toContain(`CREATE TEMPORARY TABLE taxonomy_best_rank (KEY ${TEMP_ID_INDEX_NAME} (TempID)) AS`);
+    expect(s).toContain(`CREATE TEMPORARY TABLE taxonomy_lookup (KEY ${TEMP_ID_INDEX_NAME} (TempID)) AS`);
+  });
+
+  it('tree_lookup has no Tag-led key: staging Tag takes the database charset and destination Tree.Tag is latin1', () => {
+    const s = sql();
+    const createStart = s.indexOf('CREATE TEMPORARY TABLE tree_lookup');
+    expect(createStart).toBeGreaterThan(-1);
+    const treeLookupDefinition = s.slice(createStart, s.indexOf(' AS\n', createStart));
+    expect(
+      treeLookupDefinition,
+      'A Tag-led tree_lookup key is unusable when staging and destination Tree.Tag differ in charset, which leaves check 3 a per-row full scan on MySQL 5.7 and MariaDB (spec §3.4)'
+    ).not.toMatch(/\bTag\b/);
   });
 
   it('tree write-back uses NULL-safe <=> on SubSpeciesID, not IS NULL', () => {
