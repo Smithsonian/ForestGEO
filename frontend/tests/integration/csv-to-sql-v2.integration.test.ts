@@ -60,6 +60,7 @@ const DESTINATION_PLOT_ID = 1;
 const CENSUS_NUMBER_1 = '1';
 const CENSUS_NUMBER_2 = '2';
 const DEFAULT_PROCEDURE_NAME = 'ctfs_export_test_proc';
+const RELOAD_PROCEDURE_NAME = 'ctfs_export_reload_proc';
 const DEFAULT_LOCK_NAME = `ctfs-export:${DESTINATION_PLOT_ID}:${CENSUS_NUMBER_1}`;
 const LOCK_NAME_CENSUS_2 = `ctfs-export:${DESTINATION_PLOT_ID}:${CENSUS_NUMBER_2}`;
 const SEEDED_CENSUS_1_ID = 1;
@@ -69,8 +70,10 @@ const UNKNOWN_QUADRAT_NAME = 'Z99';
 
 // Later-census scale fixture (test A). 1,100 prior stems is ~20x the size below which
 // MySQL 8.0.36 scans stem_lookup even with the key (spec §4.1), and the test never runs ANALYZE.
+const QUADRAT_A1_ID = 1;
+const QUADRAT_A1_NAME = 'A1';
 const SEEDED_QUADRATS = [
-  { quadratId: 1, quadratName: 'A1' },
+  { quadratId: QUADRAT_A1_ID, quadratName: QUADRAT_A1_NAME },
   { quadratId: 2, quadratName: 'A2' },
   { quadratId: 3, quadratName: 'B1' },
   { quadratId: 4, quadratName: 'B2' }
@@ -79,7 +82,6 @@ const FOO_SPECIES_ID = 1;
 const USER_DEFINED_SIGNAL_SQLSTATE = '45000';
 const ERROR_REASON_SEPARATOR = '; ';
 const EMPTY_STEM_TAG = '';
-const QUADRAT_A1_ID = 1;
 const QUADRAT_B1_ID = 3;
 const BAR_SPECIES_ID = 2;
 const UNTAGGED_NEIGHBOUR_TREE_ID = 4;
@@ -94,6 +96,10 @@ const LAST_PRIOR_GENERATED_STEM_ID = FIRST_GENERATED_STEM_ID + PRIOR_GENERATED_S
 const NEW_STEMS_ON_EXISTING_TREES = 50;
 const NEW_TREE_COUNT = 50;
 const FIRST_STEM_TAG = '1';
+const SEEDED_TREE_1_ID = 1;
+const SEEDED_TREE_1_TAG = '1';
+const SEEDED_TREE_2_TAG = '2';
+const BAR_SPECIES_FIELDS = { Mnemonic: 'BAR', Genus: 'Barbaria', SpeciesName: 'bar' };
 const SECOND_STEM_TAG = '2';
 const NEW_STEM_TAG = '3';
 const NEW_TREE_TAG_PREFIX = 'N';
@@ -110,6 +116,13 @@ const FIRST_PUBLISH_DBH_TREE_1 = 11;
 const FIRST_PUBLISH_DBH_TREE_2 = 19;
 const RELOAD_DBH_TREE_1 = 99;
 const RELOAD_DBH_TREE_2 = 88;
+const FIRST_PUBLISH_ROW_COUNT = 2;
+
+// Check 1b fixtures (tests B, C, D).
+const EXPECTED_UNTAGGED_STEM_COUNT = 1;
+const EXPECTED_DBH_ROWS_PER_NEW_STEM = 1;
+const FIRST_UNTAGGED_LX = 1;
+const SECOND_UNTAGGED_LX = 2;
 
 // ---------------------------------------------------------------------------
 // ArtifactInput + buildArtifact
@@ -650,13 +663,11 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
         lockName: LOCK_NAME_CENSUS_2,
         allowReload: false,
         measurementRows: [
-          makeMeasurement({ Tag: '1', StemTag: '1', DBH: FIRST_PUBLISH_DBH_TREE_1, PlotCensusNumber: CENSUS_NUMBER_2 }),
+          makeMeasurement({ Tag: SEEDED_TREE_1_TAG, StemTag: FIRST_STEM_TAG, DBH: FIRST_PUBLISH_DBH_TREE_1, PlotCensusNumber: CENSUS_NUMBER_2 }),
           makeMeasurement({
-            Tag: '2',
-            StemTag: '1',
-            Mnemonic: 'BAR',
-            Genus: 'Barbaria',
-            SpeciesName: 'bar',
+            Tag: SEEDED_TREE_2_TAG,
+            StemTag: FIRST_STEM_TAG,
+            ...BAR_SPECIES_FIELDS,
             DBH: FIRST_PUBLISH_DBH_TREE_2,
             PlotCensusNumber: CENSUS_NUMBER_2
           })
@@ -665,23 +676,21 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
       })
     );
     const census2BeforeReload = await selectCensus2StemDbh(connection);
-    expect(census2BeforeReload, 'the first publish must load both census-2 rows').toHaveLength(2);
+    expect(census2BeforeReload, 'the first publish must load both census-2 rows').toHaveLength(FIRST_PUBLISH_ROW_COUNT);
 
     const failingReload = buildArtifact({
-      procedureName: 'ctfs_export_reload_proc',
+      procedureName: RELOAD_PROCEDURE_NAME,
       destinationPlotId: DESTINATION_PLOT_ID,
       censusNumber: CENSUS_NUMBER_2,
       lockName: LOCK_NAME_CENSUS_2,
       allowReload: true,
       reloadDryRun: false,
       measurementRows: [
-        makeMeasurement({ Tag: '1', StemTag: '1', DBH: RELOAD_DBH_TREE_1, PlotCensusNumber: CENSUS_NUMBER_2 }),
+        makeMeasurement({ Tag: SEEDED_TREE_1_TAG, StemTag: FIRST_STEM_TAG, DBH: RELOAD_DBH_TREE_1, PlotCensusNumber: CENSUS_NUMBER_2 }),
         makeMeasurement({
-          Tag: '2',
-          StemTag: '1',
-          Mnemonic: 'BAR',
-          Genus: 'Barbaria',
-          SpeciesName: 'bar',
+          Tag: SEEDED_TREE_2_TAG,
+          StemTag: FIRST_STEM_TAG,
+          ...BAR_SPECIES_FIELDS,
           QuadratName: UNKNOWN_QUADRAT_NAME,
           DBH: RELOAD_DBH_TREE_2,
           PlotCensusNumber: CENSUS_NUMBER_2
@@ -1057,7 +1066,7 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
       })
     ];
     const reloadArtifact = buildArtifact({
-      procedureName: 'ctfs_export_reload_proc',
+      procedureName: RELOAD_PROCEDURE_NAME,
       destinationPlotId: DESTINATION_PLOT_ID,
       censusNumber: CENSUS_NUMBER_2,
       lockName: LOCK_NAME_CENSUS_2,
@@ -1471,7 +1480,12 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
       QUADRAT_B1_ID,
       LEGACY_DEFAULT_STEM_NUMBER
     ]);
-    const newUntaggedStem = makeMeasurement({ Tag: '1', StemTag: EMPTY_STEM_TAG, QuadratName: 'A1', PlotCensusNumber: CENSUS_NUMBER_2 });
+    const newUntaggedStem = makeMeasurement({
+      Tag: SEEDED_TREE_1_TAG,
+      StemTag: EMPTY_STEM_TAG,
+      QuadratName: QUADRAT_A1_NAME,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
 
     const result = await executeArtifactCapturingValidationFailure(
       dbName,
@@ -1487,15 +1501,17 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
 
     expect(result, `the artifact must commit; captured: ${JSON.stringify(result)}`).toEqual({ signalMessage: null, failedMeasurementRows: [] });
     const [insertedStems] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID FROM Stem WHERE TreeID = ? AND StemTag = ? AND QuadratID = ?', [
-      1,
+      SEEDED_TREE_1_ID,
       EMPTY_STEM_TAG,
       QUADRAT_A1_ID
     ]);
-    expect(insertedStems, `untagged stems on tree 1 / A1: ${JSON.stringify(insertedStems)}`).toHaveLength(1);
+    expect(insertedStems, `untagged stems on tree ${SEEDED_TREE_1_ID} / ${QUADRAT_A1_NAME}: ${JSON.stringify(insertedStems)}`).toHaveLength(
+      EXPECTED_UNTAGGED_STEM_COUNT
+    );
     expect(
       await countRows(connection, 'DBH', `CensusID = ${SEEDED_CENSUS_2_ID} AND StemID = ${Number(insertedStems[0].StemID)}`),
       'the new stem must carry its census-2 DBH'
-    ).toBe(1);
+    ).toBe(EXPECTED_DBH_ROWS_PER_NEW_STEM);
   });
 
   it('check 1b: a new untagged stem is rejected when the destination has a NULL-tagged stem under the same tree and quadrat', async () => {
@@ -1512,7 +1528,12 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
       LEGACY_DEFAULT_STEM_NUMBER
     ]);
     // <=> treats NULL and '' as different, so the staged '' does not resolve to the NULL-tagged stem in Stage 2.
-    const collidingStem = makeMeasurement({ Tag: String(NULL_TAGGED_TREE_ID), StemTag: EMPTY_STEM_TAG, QuadratName: 'A1', PlotCensusNumber: CENSUS_NUMBER_2 });
+    const collidingStem = makeMeasurement({
+      Tag: String(NULL_TAGGED_TREE_ID),
+      StemTag: EMPTY_STEM_TAG,
+      QuadratName: QUADRAT_A1_NAME,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
     const before = await captureDestinationCounts(connection);
 
     const result = await executeArtifactCapturingValidationFailure(
@@ -1534,8 +1555,20 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
 
   it('check 1b: two new untagged stems under the same existing tree and quadrat are both rejected', async () => {
     await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
-    const firstUntagged = makeMeasurement({ Tag: '1', StemTag: EMPTY_STEM_TAG, QuadratName: 'A1', LX: 1, PlotCensusNumber: CENSUS_NUMBER_2 });
-    const secondUntagged = makeMeasurement({ Tag: '1', StemTag: EMPTY_STEM_TAG, QuadratName: 'A1', LX: 2, PlotCensusNumber: CENSUS_NUMBER_2 });
+    const firstUntagged = makeMeasurement({
+      Tag: SEEDED_TREE_1_TAG,
+      StemTag: EMPTY_STEM_TAG,
+      QuadratName: QUADRAT_A1_NAME,
+      LX: FIRST_UNTAGGED_LX,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
+    const secondUntagged = makeMeasurement({
+      Tag: SEEDED_TREE_1_TAG,
+      StemTag: EMPTY_STEM_TAG,
+      QuadratName: QUADRAT_A1_NAME,
+      LX: SECOND_UNTAGGED_LX,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
 
     const result = await executeArtifactCapturingValidationFailure(
       dbName,
