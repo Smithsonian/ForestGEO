@@ -25,6 +25,10 @@ import {
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
 import { type MeasurementStagingRow, type AttributeStagingRow, renderInsertChunksMeasurements } from '../lib/csv-to-sql-shared';
+import { renderArtifact } from '../lib/ctfs-export/render-procedure';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Default MeasurementStagingRow for renderStage1 tests — every field
@@ -645,6 +649,9 @@ describe('renderStage2', () => {
 
 describe('renderStage5', () => {
   const opts = { measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' };
+  const TEST_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
+  const PUBLISH_MANUAL_PATH = path.resolve(TEST_DIRECTORY, '../docs/src/content/docs/publishing-census-to-smithsonian-db.mdx');
+  const operatorManual = readFileSync(PUBLISH_MANUAL_PATH, 'utf8');
   const sql = () => renderStage5(opts);
 
   it('check 1: required-field NOT NULL (catches empty strings as well as NULLs)', () => {
@@ -658,8 +665,7 @@ describe('renderStage5', () => {
 
   it("check 1b: empty StemTag collisions are caught (app schema stores StemTag with default ''), scoped to the staged tree and quadrat", () => {
     const s = sql();
-    // Pinned once: the operator manual quotes this reason, so the rendered text must not drift.
-    expect(EMPTY_STEMTAG_COLLISION_REASON).toBe('Empty StemTag collides with another stem under same Tree+Quadrat');
+    expect(operatorManual, `${PUBLISH_MANUAL_PATH} must quote the exact reason text the artifact reports`).toContain(EMPTY_STEMTAG_COLLISION_REASON);
     expect(s).toContain(`'${EMPTY_STEMTAG_COLLISION_REASON}'`);
     expect(s).toMatch(/_stage5_empty_stemtag/);
     expect(s).toContain('s.TreeID = `staging_measurements`.TreeID');
@@ -958,31 +964,82 @@ describe('renderPostLoadViewFullTableCall', () => {
   });
 });
 
-describe('stage renderers inside the load transaction', () => {
-  const tables = { measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' };
+describe('load transaction body', () => {
   const DESTINATION_PLOT_ID = 1;
-  const CENSUS_NUMBER = '2';
+  const CENSUS_NUMBER = '2024';
+  const SOURCE_SCHEMA = 'forestgeo_test';
+  const APP_PLOT_ID = 5;
+  const APP_CENSUS_ID = 7;
+  const GENERATED_AT = new Date('2026-05-19T12:00:00Z');
   const SQL_LINE_COMMENT_PREFIX = '--';
-  const IMPLICIT_COMMIT_DDL = /\b(ALTER\s+TABLE|CREATE\s+(UNIQUE\s+)?INDEX)\b/i;
+  const ENVELOPE_TRANSACTION_START = '\n  START TRANSACTION;\n';
+  const ENVELOPE_TRANSACTION_COMMIT = '\n  COMMIT;\n';
 
-  it('no stage inside the load transaction emits ALTER TABLE or CREATE INDEX (both implicitly commit, even on a temporary table)', () => {
-    const renderedStages = [
-      renderStage0({ destinationPlotId: DESTINATION_PLOT_ID, censusNumber: CENSUS_NUMBER, allowReload: true }),
-      renderStage0bReload({ mode: 'real' }),
-      renderStage0bReload({ mode: 'dry-run' }),
-      renderStage1({ ...tables, measurementRows: [], attributeRows: [] }),
-      renderStage2(tables),
-      renderStage5(tables),
-      renderStage6NewTrees({ measurementsTable: tables.measurementsTable }),
-      renderStage7NewStems({ measurementsTable: tables.measurementsTable }),
-      renderStage8DBH({ measurementsTable: tables.measurementsTable }),
-      renderStage9DBHAttributes(tables),
-      renderStage10(tables)
+  const IMPLICIT_COMMIT_STATEMENTS: ReadonlyArray<{ statement: string; pattern: RegExp; example: string }> = [
+    { statement: 'ALTER TABLE', pattern: /\bALTER\s+TABLE\b/gi, example: 'ALTER TABLE staging_x ADD KEY k (a);' },
+    { statement: 'CREATE INDEX', pattern: /\bCREATE\s+(UNIQUE\s+)?INDEX\b/gi, example: 'CREATE UNIQUE INDEX k ON staging_x (a);' },
+    { statement: 'DROP INDEX', pattern: /\bDROP\s+INDEX\b/gi, example: 'DROP INDEX k ON staging_x;' },
+    { statement: 'TRUNCATE', pattern: /\bTRUNCATE\b(?!\s*\()/gi, example: 'TRUNCATE staging_x;' },
+    { statement: 'RENAME TABLE', pattern: /\bRENAME\s+TABLE\b/gi, example: 'RENAME TABLE staging_x TO staging_y;' },
+    { statement: 'CREATE TABLE without TEMPORARY', pattern: /\bCREATE\s+TABLE\b/gi, example: 'CREATE TABLE staging_x (a INT);' },
+    { statement: 'DROP TABLE without TEMPORARY', pattern: /\bDROP\s+TABLE\b/gi, example: 'DROP TABLE staging_x;' },
+    { statement: 'LOCK TABLES / UNLOCK TABLES', pattern: /\b(UN)?LOCK\s+TABLES\b/gi, example: 'LOCK TABLES staging_x WRITE;' },
+    { statement: 'COMMIT', pattern: /\bCOMMIT\b/gi, example: 'COMMIT;' },
+    { statement: 'START TRANSACTION', pattern: /\bSTART\s+TRANSACTION\b/gi, example: 'START TRANSACTION;' }
+  ];
+
+  const findImplicitCommitStatements = (sqlBody: string): string[] => {
+    const executableSql = sqlBody
+      .split('\n')
+      .filter(line => !line.trim().startsWith(SQL_LINE_COMMENT_PREFIX))
+      .join('\n');
+    return IMPLICIT_COMMIT_STATEMENTS.flatMap(({ statement, pattern }) => Array.from(executableSql.matchAll(pattern), match => `${statement}: "${match[0]}"`));
+  };
+
+  const renderLoadTransactionBody = (overrides: { allowReload: boolean; reloadDryRun: boolean }): string => {
+    const { sql } = renderArtifact({
+      schema: SOURCE_SCHEMA,
+      appPlotId: APP_PLOT_ID,
+      destinationPlotId: DESTINATION_PLOT_ID,
+      appCensusId: APP_CENSUS_ID,
+      plotCensusNumber: CENSUS_NUMBER,
+      generatedAt: GENERATED_AT,
+      measurementRows: [],
+      attributeRows: [],
+      ...overrides
+    });
+    const bodyStart = sql.indexOf(ENVELOPE_TRANSACTION_START);
+    const bodyEnd = sql.lastIndexOf(ENVELOPE_TRANSACTION_COMMIT);
+    expect(bodyStart, 'envelope START TRANSACTION not found in the rendered artifact').toBeGreaterThanOrEqual(0);
+    expect(bodyEnd, 'envelope COMMIT not found in the rendered artifact').toBeGreaterThan(bodyStart);
+    return sql.slice(bodyStart + ENVELOPE_TRANSACTION_START.length, bodyEnd);
+  };
+
+  const loadBodies = [
+    { name: 'real publish with reload cleanup (all stages)', options: { allowReload: true, reloadDryRun: false } },
+    { name: 'reload dry-run', options: { allowReload: false, reloadDryRun: true } }
+  ];
+
+  it.each(loadBodies)('the $name body has no statement that implicitly commits the load transaction', ({ options }) => {
+    const loadBody = renderLoadTransactionBody(options);
+    const offendingStatements = findImplicitCommitStatements(loadBody);
+
+    expect(loadBody.length, 'rendered load body is empty, so the guard would pass vacuously').toBeGreaterThan(0);
+    expect(offendingStatements, `these statements would commit the load transaction mid-procedure:\n${offendingStatements.join('\n')}`).toEqual([]);
+  });
+
+  it.each(IMPLICIT_COMMIT_STATEMENTS)('the guard detects $statement, so the check above cannot pass vacuously', ({ statement, pattern, example }) => {
+    expect(findImplicitCommitStatements(example), `guard missed ${statement} (pattern ${pattern})`).not.toEqual([]);
+  });
+
+  it('the guard ignores commented-out statements, TEMPORARY tables and the TRUNCATE() function', () => {
+    const permittedSql = [
+      '-- TRUNCATE staging_x;',
+      'CREATE TEMPORARY TABLE t AS SELECT 1;',
+      'DROP TEMPORARY TABLE IF EXISTS t;',
+      'SELECT TRUNCATE(Value, 2) FROM t;'
     ].join('\n');
-    const executableLines = renderedStages.split('\n').filter(line => !line.trim().startsWith(SQL_LINE_COMMENT_PREFIX));
-    const offendingLines = executableLines.filter(line => IMPLICIT_COMMIT_DDL.test(line));
 
-    expect(offendingLines, `implicit-commit DDL would commit the load transaction mid-procedure: ${JSON.stringify(offendingLines, null, 2)}`).toEqual([]);
-    expect(executableLines.join('\n'), 'implicit-commit DDL split across lines').not.toMatch(IMPLICIT_COMMIT_DDL);
+    expect(findImplicitCommitStatements(permittedSql)).toEqual([]);
   });
 });

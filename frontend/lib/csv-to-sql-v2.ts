@@ -668,13 +668,15 @@ ${appendErr(
                AND (s.StemTag IS NULL OR s.StemTag = '')
           );
 
-  UPDATE ${m}
-    SET Errors = CONCAT(COALESCE(Errors, ''), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END, '${EMPTY_STEMTAG_COLLISION_REASON}')
-    WHERE StemID IS NULL
+${appendErr(
+  m,
+  EMPTY_STEMTAG_COLLISION_REASON,
+  `StemID IS NULL
       AND (StemTag IS NULL OR StemTag = '')
       AND TreeID IS NOT NULL
       AND QuadratID IS NOT NULL
-      AND EXISTS (SELECT 1 FROM _stage5_empty_stemtag e WHERE e.TreeID = ${m}.TreeID AND e.QuadratID = ${m}.QuadratID);
+      AND EXISTS (SELECT 1 FROM _stage5_empty_stemtag e WHERE e.TreeID = ${m}.TreeID AND e.QuadratID = ${m}.QuadratID)`
+)}
 
   DROP TEMPORARY TABLE IF EXISTS _stage5_empty_stemtag;
 
