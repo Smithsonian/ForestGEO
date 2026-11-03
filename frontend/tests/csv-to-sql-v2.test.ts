@@ -18,6 +18,7 @@ import {
   TAXON_RANK_SPECIES,
   MISSING_PLOT_COORDINATE_SCOPE,
   DESTINATION_PLOT_COORDINATE_TYPE_SCOPE,
+  STEM_LOOKUP_INDEX_NAME,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
 import { type MeasurementStagingRow, type AttributeStagingRow, renderInsertChunksMeasurements } from '../lib/csv-to-sql-shared';
@@ -583,9 +584,9 @@ describe('renderStage2', () => {
     expect(s).not.toMatch(/tl\.SubSpeciesID IS NULL/);
   });
 
-  it('stem_lookup plot-scoped and grouped by (TreeID, StemTag)', () => {
+  it('stem_lookup declares its (TreeID, StemTag) key inline, is plot-scoped and grouped by (TreeID, StemTag)', () => {
     const s = sql();
-    expect(s).toMatch(/CREATE TEMPORARY TABLE stem_lookup AS/);
+    expect(s).toContain(`CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTag)) AS`);
     expect(s).toMatch(/GROUP BY s\.TreeID, s\.StemTag/);
   });
 
@@ -926,5 +927,34 @@ describe('renderPostLoadViewFullTableCall', () => {
     const sql = renderPostLoadViewFullTableCall();
     expect(sql).not.toMatch(/DELIMITER/);
     expect(sql).not.toMatch(/CREATE PROCEDURE/);
+  });
+});
+
+describe('stage renderers inside the load transaction', () => {
+  const tables = { measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' };
+  const DESTINATION_PLOT_ID = 1;
+  const CENSUS_NUMBER = '2';
+  const SQL_LINE_COMMENT_PREFIX = '--';
+  const IMPLICIT_COMMIT_DDL = /\b(ALTER\s+TABLE|CREATE\s+(UNIQUE\s+)?INDEX)\b/i;
+
+  it('no stage inside the load transaction emits ALTER TABLE or CREATE INDEX (both implicitly commit, even on a temporary table)', () => {
+    const renderedStages = [
+      renderStage0({ destinationPlotId: DESTINATION_PLOT_ID, censusNumber: CENSUS_NUMBER, allowReload: true }),
+      renderStage0bReload({ mode: 'real' }),
+      renderStage0bReload({ mode: 'dry-run' }),
+      renderStage1({ ...tables, measurementRows: [], attributeRows: [] }),
+      renderStage2(tables),
+      renderStage5(tables),
+      renderStage6NewTrees({ measurementsTable: tables.measurementsTable }),
+      renderStage7NewStems({ measurementsTable: tables.measurementsTable }),
+      renderStage8DBH({ measurementsTable: tables.measurementsTable }),
+      renderStage9DBHAttributes(tables),
+      renderStage10(tables)
+    ].join('\n');
+    const executableLines = renderedStages.split('\n').filter(line => !line.trim().startsWith(SQL_LINE_COMMENT_PREFIX));
+    const offendingLines = executableLines.filter(line => IMPLICIT_COMMIT_DDL.test(line));
+
+    expect(offendingLines, `implicit-commit DDL would commit the load transaction mid-procedure: ${JSON.stringify(offendingLines, null, 2)}`).toEqual([]);
+    expect(executableLines.join('\n'), 'implicit-commit DDL split across lines').not.toMatch(IMPLICIT_COMMIT_DDL);
   });
 });

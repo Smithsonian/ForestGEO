@@ -27,7 +27,10 @@ import {
   renderStage9DBHAttributes,
   renderStage10,
   renderPostLoadViewFullTableCall,
-  MISSING_PLOT_COORDINATE_SCOPE
+  MISSING_PLOT_COORDINATE_SCOPE,
+  LEGACY_DEFAULT_MEASURE_ID,
+  LEGACY_DEFAULT_STEM_NUMBER,
+  STEM_LOOKUP_INDEX_NAME
 } from '../../lib/csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../../lib/csv-to-sql-shared';
 import { testDbServerOptions } from '../setup/test-db-connection';
@@ -51,6 +54,46 @@ const CENSUS_NUMBER_2 = '2';
 const DEFAULT_PROCEDURE_NAME = 'ctfs_export_test_proc';
 const DEFAULT_LOCK_NAME = `ctfs-export:${DESTINATION_PLOT_ID}:${CENSUS_NUMBER_1}`;
 const LOCK_NAME_CENSUS_2 = `ctfs-export:${DESTINATION_PLOT_ID}:${CENSUS_NUMBER_2}`;
+const SEEDED_CENSUS_1_ID = 1;
+const SEEDED_CENSUS_2_ID = 2;
+const STAGING_TABLES = { measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' };
+const UNKNOWN_QUADRAT_NAME = 'Z99';
+
+// Later-census scale fixture (test A). 1,100 prior stems is ~20x the size below which
+// MySQL 8.0.36 scans stem_lookup even with the key (spec §4.1), and the test never runs ANALYZE.
+const SEEDED_QUADRATS = [
+  { quadratId: 1, quadratName: 'A1' },
+  { quadratId: 2, quadratName: 'A2' },
+  { quadratId: 3, quadratName: 'B1' },
+  { quadratId: 4, quadratName: 'B2' }
+];
+const FOO_SPECIES_ID = 1;
+const PRIOR_TREE_COUNT = 1000;
+const FIRST_GENERATED_TREE_ID = 1001;
+const FIRST_GENERATED_STEM_ID = FIRST_GENERATED_TREE_ID;
+const MULTI_STEM_TREE_INTERVAL = 10;
+const PRIOR_GENERATED_STEM_COUNT = PRIOR_TREE_COUNT + PRIOR_TREE_COUNT / MULTI_STEM_TREE_INTERVAL;
+const FIRST_SECOND_STEM_ID = FIRST_GENERATED_STEM_ID + PRIOR_TREE_COUNT;
+const LAST_PRIOR_GENERATED_STEM_ID = FIRST_GENERATED_STEM_ID + PRIOR_GENERATED_STEM_COUNT - 1;
+const NEW_STEMS_ON_EXISTING_TREES = 50;
+const NEW_TREE_COUNT = 50;
+const FIRST_STEM_TAG = '1';
+const SECOND_STEM_TAG = '2';
+const NEW_STEM_TAG = '3';
+const NEW_TREE_TAG_PREFIX = 'N';
+const PRIOR_DBH = 10;
+const PRIOR_HOM = '1.3';
+const PRIOR_EXACT_DATE = '2024-01-15';
+const STEM_LOOKUP_ALIAS = 'sl';
+const INDEX_LOOKUP_ACCESS_TYPE = 'ref';
+const STAGE_2_STEM_WRITE_BACK_MARKER = `JOIN stem_lookup ${STEM_LOOKUP_ALIAS}`;
+const CHECK_4_AMBIGUOUS_STEM_MARKER = "'Ambiguous stem key'";
+
+// Test E fixture: the first census-2 publish, then a reload that fails Stage 5.
+const FIRST_PUBLISH_DBH_TREE_1 = 11;
+const FIRST_PUBLISH_DBH_TREE_2 = 19;
+const RELOAD_DBH_TREE_1 = 99;
+const RELOAD_DBH_TREE_2 = 88;
 
 // ---------------------------------------------------------------------------
 // ArtifactInput + buildArtifact
@@ -249,6 +292,54 @@ function expectCountsUnchanged(after: DestinationCounts, before: DestinationCoun
   expect(after.dbhAttributes, 'DBHAttributes count must be unchanged after rollback').toBe(before.dbhAttributes);
 }
 
+interface GeneratedPriorStem {
+  stemId: number;
+  treeId: number;
+  stemTag: string;
+  quadratId: number;
+  quadratName: string;
+}
+
+function generatePriorStems(): GeneratedPriorStem[] {
+  const stems: GeneratedPriorStem[] = [];
+  let nextSecondStemId = FIRST_SECOND_STEM_ID;
+  for (let index = 0; index < PRIOR_TREE_COUNT; index++) {
+    const treeId = FIRST_GENERATED_TREE_ID + index;
+    const quadrat = SEEDED_QUADRATS[index % SEEDED_QUADRATS.length];
+    stems.push({ stemId: treeId, treeId, stemTag: FIRST_STEM_TAG, ...quadrat });
+    if (index % MULTI_STEM_TREE_INTERVAL === 0) {
+      stems.push({ stemId: nextSecondStemId++, treeId, stemTag: SECOND_STEM_TAG, ...quadrat });
+    }
+  }
+  return stems;
+}
+
+async function seedPriorStems(connection: mysql.Connection, stems: GeneratedPriorStem[]): Promise<void> {
+  const treeIds = [...new Set(stems.map(stem => stem.treeId))];
+  await connection.query('INSERT INTO Tree (TreeID, Tag, SpeciesID, SubSpeciesID) VALUES ?', [
+    treeIds.map(treeId => [treeId, String(treeId), FOO_SPECIES_ID, null])
+  ]);
+  await connection.query('INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber) VALUES ?', [
+    stems.map(stem => [stem.stemId, stem.treeId, stem.stemTag, stem.quadratId, LEGACY_DEFAULT_STEM_NUMBER])
+  ]);
+  await connection.query('INSERT INTO DBH (MeasureID, CensusID, StemID, DBH, HOM, ExactDate) VALUES ?', [
+    stems.map(stem => [LEGACY_DEFAULT_MEASURE_ID, SEEDED_CENSUS_1_ID, stem.stemId, PRIOR_DBH, PRIOR_HOM, PRIOR_EXACT_DATE])
+  ]);
+}
+
+function findRenderedStatement(renderedSql: string, marker: string): string {
+  const matches = splitSqlFile(renderedSql)
+    .map(statement => statement.sql)
+    .filter(sql => sql.includes(marker));
+  expect(matches, `expected exactly one rendered statement containing ${marker}; found ${JSON.stringify(matches)}`).toHaveLength(1);
+  return matches[0];
+}
+
+async function selectCensus2StemDbh(connection: mysql.Connection): Promise<mysql.RowDataPacket[]> {
+  const [rows] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID, DBH FROM DBH WHERE CensusID = ? ORDER BY StemID', [SEEDED_CENSUS_2_ID]);
+  return rows;
+}
+
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
@@ -400,6 +491,143 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
     // N-row creates a new Tree with Tag=99
     const [nTrees] = await connection.query<mysql.RowDataPacket[]>("SELECT TreeID FROM Tree WHERE Tag = '99'");
     expect(nTrees).toHaveLength(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Later census at scale: the Stage 2 stem write-back must probe stem_lookup by index
+  // -------------------------------------------------------------------------
+
+  it('later census against 1,100 prior stems reuses every prior stem, and on MySQL 8.0.36 the Stage 2 stem write-back probes stem_lookup through its index', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+    const priorStems = generatePriorStems();
+    await seedPriorStems(connection, priorStems);
+
+    const measurementRows = [
+      ...priorStems.map(stem =>
+        makeMeasurement({ Tag: String(stem.treeId), StemTag: stem.stemTag, QuadratName: stem.quadratName, PlotCensusNumber: CENSUS_NUMBER_2 })
+      ),
+      ...priorStems
+        .filter(stem => stem.stemTag === FIRST_STEM_TAG)
+        .slice(0, NEW_STEMS_ON_EXISTING_TREES)
+        .map(stem => makeMeasurement({ Tag: String(stem.treeId), StemTag: NEW_STEM_TAG, QuadratName: stem.quadratName, PlotCensusNumber: CENSUS_NUMBER_2 })),
+      ...Array.from({ length: NEW_TREE_COUNT }, (_, index) =>
+        makeMeasurement({
+          Tag: `${NEW_TREE_TAG_PREFIX}${index + 1}`,
+          StemTag: FIRST_STEM_TAG,
+          QuadratName: SEEDED_QUADRATS[index % SEEDED_QUADRATS.length].quadratName,
+          PlotCensusNumber: CENSUS_NUMBER_2
+        })
+      )
+    ];
+    const stemCountBefore = await countRows(connection, 'Stem');
+
+    await executeArtifact(
+      connection,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows,
+        attributeRows: []
+      })
+    );
+
+    // Destination results first, so a wrong load is reported as such before any plan check.
+    expect(await countRows(connection, 'DBH', `CensusID = ${SEEDED_CENSUS_2_ID}`), 'every staged row must produce one census-2 DBH row').toBe(
+      PRIOR_GENERATED_STEM_COUNT + NEW_STEMS_ON_EXISTING_TREES + NEW_TREE_COUNT
+    );
+    expect((await countRows(connection, 'Stem')) - stemCountBefore, 'only new stems on existing trees and new trees may add Stem rows').toBe(
+      NEW_STEMS_ON_EXISTING_TREES + NEW_TREE_COUNT
+    );
+    expect(
+      await countRows(connection, 'DBH', `CensusID = ${SEEDED_CENSUS_2_ID} AND StemID BETWEEN ${FIRST_GENERATED_STEM_ID} AND ${LAST_PRIOR_GENERATED_STEM_ID}`),
+      'every prior stem must be reused by its census-2 row'
+    ).toBe(PRIOR_GENERATED_STEM_COUNT);
+    const [duplicateStemKeys] = await connection.query<mysql.RowDataPacket[]>(
+      'SELECT TreeID, StemTag, COUNT(*) AS stemCount FROM Stem GROUP BY TreeID, StemTag HAVING COUNT(*) > 1'
+    );
+    expect(duplicateStemKeys, `duplicate (TreeID, StemTag) groups: ${JSON.stringify(duplicateStemKeys)}`).toEqual([]);
+
+    // stem_lookup and staging are session temp tables that outlive the CALL; this EXPLAINs the
+    // rendered write-back on the post-CALL state (spec §4.1), on the same connection.
+    const stemWriteBack = findRenderedStatement(renderStage2(STAGING_TABLES), STAGE_2_STEM_WRITE_BACK_MARKER);
+    const check4 = findRenderedStatement(renderStage5(STAGING_TABLES), CHECK_4_AMBIGUOUS_STEM_MARKER);
+    const [writeBackPlan] = await connection.query<mysql.RowDataPacket[]>(`EXPLAIN ${stemWriteBack}`);
+    const [check4Plan] = await connection.query<mysql.RowDataPacket[]>(`EXPLAIN ${check4}`);
+    const planReport = JSON.stringify({ writeBackPlan, check4PlanDiagnosticOnly: check4Plan }, null, 2);
+    const stemLookupAccess = writeBackPlan.find(row => row.table === STEM_LOOKUP_ALIAS);
+
+    expect(stemLookupAccess?.key, `Stage 2 stem write-back must probe stem_lookup through ${STEM_LOOKUP_INDEX_NAME}. Plans:\n${planReport}`).toBe(
+      STEM_LOOKUP_INDEX_NAME
+    );
+    expect(stemLookupAccess?.type, `stem_lookup access must be an index lookup. Plans:\n${planReport}`).toBe(INDEX_LOOKUP_ACCESS_TYPE);
+    expect(String(stemLookupAccess?.ref), `stem_lookup lookup must be driven by staging TreeID. Plans:\n${planReport}`).toContain('TreeID');
+  });
+
+  // -------------------------------------------------------------------------
+  // Atomicity: the stem_lookup key must stay inline (ALTER TABLE would implicitly commit)
+  // -------------------------------------------------------------------------
+
+  it('a reload that fails Stage 5 keeps the target census: nothing between the Stage 0b deletes and the Stage 5 SIGNAL commits', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+    await executeArtifact(
+      connection,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows: [
+          makeMeasurement({ Tag: '1', StemTag: '1', DBH: FIRST_PUBLISH_DBH_TREE_1, PlotCensusNumber: CENSUS_NUMBER_2 }),
+          makeMeasurement({
+            Tag: '2',
+            StemTag: '1',
+            Mnemonic: 'BAR',
+            Genus: 'Barbaria',
+            SpeciesName: 'bar',
+            DBH: FIRST_PUBLISH_DBH_TREE_2,
+            PlotCensusNumber: CENSUS_NUMBER_2
+          })
+        ],
+        attributeRows: []
+      })
+    );
+    const census2BeforeReload = await selectCensus2StemDbh(connection);
+    expect(census2BeforeReload, 'the first publish must load both census-2 rows').toHaveLength(2);
+
+    const failingReload = buildArtifact({
+      procedureName: 'ctfs_export_reload_proc',
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_2,
+      lockName: LOCK_NAME_CENSUS_2,
+      allowReload: true,
+      reloadDryRun: false,
+      measurementRows: [
+        makeMeasurement({ Tag: '1', StemTag: '1', DBH: RELOAD_DBH_TREE_1, PlotCensusNumber: CENSUS_NUMBER_2 }),
+        makeMeasurement({
+          Tag: '2',
+          StemTag: '1',
+          Mnemonic: 'BAR',
+          Genus: 'Barbaria',
+          SpeciesName: 'bar',
+          QuadratName: UNKNOWN_QUADRAT_NAME,
+          DBH: RELOAD_DBH_TREE_2,
+          PlotCensusNumber: CENSUS_NUMBER_2
+        })
+      ],
+      attributeRows: []
+    });
+
+    await expect(executeArtifact(connection, failingReload)).rejects.toThrow(/Validation failed/);
+
+    const census2AfterFailedReload = await selectCensus2StemDbh(connection);
+    expect(
+      census2AfterFailedReload,
+      `Stage 0b deleted census-2 DBH inside the load transaction; the failed reload must roll it back. before=${JSON.stringify(census2BeforeReload)} after=${JSON.stringify(census2AfterFailedReload)}`
+    ).toEqual(census2BeforeReload);
+    const [[lockState]] = await connection.query<mysql.RowDataPacket[]>('SELECT IS_USED_LOCK(?) AS holder', [LOCK_NAME_CENSUS_2]);
+    expect(lockState.holder, 'the EXIT HANDLER must release the export lock').toBeNull();
   });
 
   // -------------------------------------------------------------------------

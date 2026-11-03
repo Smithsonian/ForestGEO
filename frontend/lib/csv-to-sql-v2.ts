@@ -49,6 +49,10 @@ export const TREE_TAG_MAX_WIDTH = 20;
 export const TAXON_RANK_SUBSPECIES = 1;
 export const TAXON_RANK_SPECIES = 2;
 
+// Inline key names for the Stage 2 lookup temp tables, shared with tests so the
+// rendered DDL is asserted, not retyped.
+export const STEM_LOOKUP_INDEX_NAME = 'idxTreeStemTag';
+
 // Live scalars only — resprout/cursor scratch removed with the pivot.
 // `_viewfulltable_installed` is populated by the Stage 0 ViewFullTable probe.
 // `_tag_col_width` is populated by the Stage 0 Tree.Tag width probe.
@@ -435,7 +439,8 @@ export interface Stage2Options {
  *      Groups by (Tag, SpeciesID, SubSpeciesID)
  *   6. UPDATE measurementsTable JOIN tree_lookup (TreeCount = 1) with NULL-safe <=> on SubSpeciesID
  *      to write back TreeID
- *   7. CREATE TEMPORARY TABLE stem_lookup — scoped via Stem → Quadrat → @target_plot_id
+ *   7. CREATE TEMPORARY TABLE stem_lookup — its (TreeID, StemTag) key declared inline in the CREATE
+ *      (never ALTER TABLE, which would commit the load transaction); scoped via Stem → Quadrat → @target_plot_id
  *   8. UPDATE measurementsTable JOIN stem_lookup with NULL-safe StemTag (<=>) and StemCount = 1
  *      to write back StemID
  *   9. UPDATE attributesTable JOIN TSMAttributes to resolve TSMID
@@ -537,9 +542,10 @@ export function renderStage2(opts: Stage2Options): string {
                        AND tl.TreeCount = 1
     SET t.TreeID = tl.TreeID;
 
-  -- Stem lookup (also plot-scoped)
+  -- Stem lookup (also plot-scoped). The key is declared here because ALTER TABLE or
+  -- CREATE INDEX on a temporary table would implicitly commit the load transaction.
   DROP TEMPORARY TABLE IF EXISTS stem_lookup;
-  CREATE TEMPORARY TABLE stem_lookup AS
+  CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTag)) AS
     SELECT s.TreeID,
            s.StemTag,
            MIN(s.StemID) AS StemID,
