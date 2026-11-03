@@ -9,6 +9,13 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import mysql from 'mysql2/promise';
+import {
+  createConnection as createCallbackConnection,
+  type Connection as CallbackConnection,
+  type OkPacket,
+  type QueryError,
+  type RowDataPacket as CallbackRowDataPacket
+} from 'mysql2';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +37,8 @@ import {
   MISSING_PLOT_COORDINATE_SCOPE,
   LEGACY_DEFAULT_MEASURE_ID,
   LEGACY_DEFAULT_STEM_NUMBER,
-  STEM_LOOKUP_INDEX_NAME
+  STEM_LOOKUP_INDEX_NAME,
+  EMPTY_STEMTAG_COLLISION_REASON
 } from '../../lib/csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../../lib/csv-to-sql-shared';
 import { testDbServerOptions } from '../setup/test-db-connection';
@@ -68,6 +76,14 @@ const SEEDED_QUADRATS = [
   { quadratId: 4, quadratName: 'B2' }
 ];
 const FOO_SPECIES_ID = 1;
+const USER_DEFINED_SIGNAL_SQLSTATE = '45000';
+const ERROR_REASON_SEPARATOR = '; ';
+const EMPTY_STEM_TAG = '';
+const QUADRAT_A1_ID = 1;
+const QUADRAT_B1_ID = 3;
+const BAR_SPECIES_ID = 2;
+const UNTAGGED_NEIGHBOUR_TREE_ID = 4;
+const NULL_TAGGED_TREE_ID = 5;
 const PRIOR_TREE_COUNT = 1000;
 const FIRST_GENERATED_TREE_ID = 1001;
 const FIRST_GENERATED_STEM_ID = FIRST_GENERATED_TREE_ID;
@@ -261,6 +277,61 @@ async function executeArtifact(connection: mysql.Connection, sql: string): Promi
     }
   }
   return resultSets;
+}
+
+interface FailedMeasurementRow {
+  CoreMeasurementID: number;
+  Errors: string;
+}
+
+interface ValidationFailureCapture {
+  signalMessage: string | null;
+  failedMeasurementRows: FailedMeasurementRow[];
+}
+
+function isMeasurementTraceRow(row: CallbackRowDataPacket | OkPacket): row is CallbackRowDataPacket {
+  return 'TempID' in row && 'CoreMeasurementID' in row && 'Errors' in row;
+}
+
+function isUserSignal(error: unknown): error is QueryError {
+  return error instanceof Error && (error as QueryError).sqlState === USER_DEFINED_SIGNAL_SQLSTATE;
+}
+
+function runStatementCollectingTraceRows(callbackConnection: CallbackConnection, sql: string, failedMeasurementRows: FailedMeasurementRow[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    callbackConnection
+      .query(sql)
+      .on('result', (row: CallbackRowDataPacket | OkPacket) => {
+        if (isMeasurementTraceRow(row)) failedMeasurementRows.push({ CoreMeasurementID: Number(row.CoreMeasurementID), Errors: String(row.Errors) });
+      })
+      .on('error', reject)
+      .on('end', resolve);
+  });
+}
+
+/**
+ * mysql2's promise API rejects on the Stage 5 SIGNAL and drops the per-row trace SELECTs emitted just before it,
+ * and the EXIT HANDLER rolls staging back, so the rows can only be captured from the stream. The artifact is
+ * self-contained (Stage 0 sets its own session variables), so running it on a separate session is faithful.
+ * signalMessage is null when the artifact completed without a SIGNAL.
+ */
+async function executeArtifactCapturingValidationFailure(databaseName: string, sql: string): Promise<ValidationFailureCapture> {
+  const callbackConnection = createCallbackConnection({ ...testDbServerOptions(), database: databaseName });
+  const failedMeasurementRows: FailedMeasurementRow[] = [];
+  try {
+    for (const statement of splitSqlFile(sql)) {
+      if (!statement.sql.trim()) continue;
+      try {
+        await runStatementCollectingTraceRows(callbackConnection, statement.sql, failedMeasurementRows);
+      } catch (error) {
+        if (isUserSignal(error)) return { signalMessage: error.message, failedMeasurementRows };
+        throw error;
+      }
+    }
+    return { signalMessage: null, failedMeasurementRows };
+  } finally {
+    await new Promise<void>(resolve => callbackConnection.end(() => resolve()));
+  }
 }
 
 async function countRows(connection: mysql.Connection, table: string, where = ''): Promise<number> {
@@ -1379,6 +1450,113 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
     } finally {
       await conn2.query(`SELECT RELEASE_LOCK(${mysql.escape(lockName)})`);
       await conn2.end();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Stage 5 check 1b: empty StemTag collisions, scoped to the staged tree and quadrat
+  // -------------------------------------------------------------------------
+
+  it('check 1b: an untagged stem on a different tree does not block a new untagged stem on an existing tree', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+    await connection.query('INSERT INTO Tree (TreeID, Tag, SpeciesID, SubSpeciesID) VALUES (?, ?, ?, NULL)', [
+      UNTAGGED_NEIGHBOUR_TREE_ID,
+      String(UNTAGGED_NEIGHBOUR_TREE_ID),
+      BAR_SPECIES_ID
+    ]);
+    await connection.query('INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber) VALUES (?, ?, ?, ?, ?)', [
+      UNTAGGED_NEIGHBOUR_TREE_ID,
+      UNTAGGED_NEIGHBOUR_TREE_ID,
+      EMPTY_STEM_TAG,
+      QUADRAT_B1_ID,
+      LEGACY_DEFAULT_STEM_NUMBER
+    ]);
+    const newUntaggedStem = makeMeasurement({ Tag: '1', StemTag: EMPTY_STEM_TAG, QuadratName: 'A1', PlotCensusNumber: CENSUS_NUMBER_2 });
+
+    const result = await executeArtifactCapturingValidationFailure(
+      dbName,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows: [newUntaggedStem],
+        attributeRows: []
+      })
+    );
+
+    expect(result, `the artifact must commit; captured: ${JSON.stringify(result)}`).toEqual({ signalMessage: null, failedMeasurementRows: [] });
+    const [insertedStems] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID FROM Stem WHERE TreeID = ? AND StemTag = ? AND QuadratID = ?', [
+      1,
+      EMPTY_STEM_TAG,
+      QUADRAT_A1_ID
+    ]);
+    expect(insertedStems, `untagged stems on tree 1 / A1: ${JSON.stringify(insertedStems)}`).toHaveLength(1);
+    expect(
+      await countRows(connection, 'DBH', `CensusID = ${SEEDED_CENSUS_2_ID} AND StemID = ${Number(insertedStems[0].StemID)}`),
+      'the new stem must carry its census-2 DBH'
+    ).toBe(1);
+  });
+
+  it('check 1b: a new untagged stem is rejected when the destination has a NULL-tagged stem under the same tree and quadrat', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+    await connection.query('INSERT INTO Tree (TreeID, Tag, SpeciesID, SubSpeciesID) VALUES (?, ?, ?, NULL)', [
+      NULL_TAGGED_TREE_ID,
+      String(NULL_TAGGED_TREE_ID),
+      FOO_SPECIES_ID
+    ]);
+    await connection.query('INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber) VALUES (?, ?, NULL, ?, ?)', [
+      NULL_TAGGED_TREE_ID,
+      NULL_TAGGED_TREE_ID,
+      QUADRAT_A1_ID,
+      LEGACY_DEFAULT_STEM_NUMBER
+    ]);
+    // <=> treats NULL and '' as different, so the staged '' does not resolve to the NULL-tagged stem in Stage 2.
+    const collidingStem = makeMeasurement({ Tag: String(NULL_TAGGED_TREE_ID), StemTag: EMPTY_STEM_TAG, QuadratName: 'A1', PlotCensusNumber: CENSUS_NUMBER_2 });
+    const before = await captureDestinationCounts(connection);
+
+    const result = await executeArtifactCapturingValidationFailure(
+      dbName,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows: [collidingStem],
+        attributeRows: []
+      })
+    );
+
+    expect(result.signalMessage, `captured: ${JSON.stringify(result)}`).toMatch(/Validation failed/);
+    expect(result.failedMeasurementRows).toEqual([{ CoreMeasurementID: collidingStem.CoreMeasurementID, Errors: EMPTY_STEMTAG_COLLISION_REASON }]);
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  it('check 1b: two new untagged stems under the same existing tree and quadrat are both rejected', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+    const firstUntagged = makeMeasurement({ Tag: '1', StemTag: EMPTY_STEM_TAG, QuadratName: 'A1', LX: 1, PlotCensusNumber: CENSUS_NUMBER_2 });
+    const secondUntagged = makeMeasurement({ Tag: '1', StemTag: EMPTY_STEM_TAG, QuadratName: 'A1', LX: 2, PlotCensusNumber: CENSUS_NUMBER_2 });
+
+    const result = await executeArtifactCapturingValidationFailure(
+      dbName,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows: [firstUntagged, secondUntagged],
+        attributeRows: []
+      })
+    );
+
+    expect(result.signalMessage, `captured: ${JSON.stringify(result)}`).toMatch(/Validation failed/);
+    expect(result.failedMeasurementRows.map(row => row.CoreMeasurementID).sort((a, b) => a - b)).toEqual([
+      firstUntagged.CoreMeasurementID,
+      secondUntagged.CoreMeasurementID
+    ]);
+    // Check 8 ("Duplicate new-stem natural key") also flags both rows; documented here, not asserted.
+    for (const row of result.failedMeasurementRows) {
+      expect(row.Errors.split(ERROR_REASON_SEPARATOR), `row ${row.CoreMeasurementID}: ${row.Errors}`).toContain(EMPTY_STEMTAG_COLLISION_REASON);
     }
   });
 

@@ -227,7 +227,7 @@ A destination contract check failed. The SELECT result sets immediately precedin
 - **Mnemonic not found in destination taxonomy**: No current `Species` or `SubSpecies` row has the staged mnemonic. Confirm that the destination taxonomy is populated and that the source `SpeciesCode` is correct.
 - **Mnemonic is ambiguous**: More than one current destination taxon has the mnemonic, or a `Species` and `SubSpecies` use it for different parent species. The error includes the conflicting `SpeciesID[:SubSpeciesID]` candidates. A `SubSpecies` match intentionally outranks its parent `Species` match when both identify the same taxon, preserving cases such as Panama's `swars1` varieties.
 - **Unknown quadrat / Unknown TSMCode**: The destination is missing a referenced quadrat or TSM attribute. Add it first.
-- **Empty StemTag collides with another stem under same Tree+Quadrat**: Two stems with `StemTag = ''` under the same tree and quadrat would collide on the destination. Assign distinct tags.
+- **Empty StemTag collides with another stem under same Tree+Quadrat**: either the batch has two new stems with an empty `StemTag` under the same tree and quadrat, or the destination already has a stem with a NULL or empty `StemTag` there. Assign distinct tags, or fix the destination stem's tag.
 
 ---
 

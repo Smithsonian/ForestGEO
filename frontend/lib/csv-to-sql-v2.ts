@@ -53,6 +53,9 @@ export const TAXON_RANK_SPECIES = 2;
 // rendered DDL is asserted, not retyped.
 export const STEM_LOOKUP_INDEX_NAME = 'idxTreeStemTag';
 
+// Stage 5 check 1b reason. The operator manual quotes this text verbatim.
+export const EMPTY_STEMTAG_COLLISION_REASON = 'Empty StemTag collides with another stem under same Tree+Quadrat';
+
 // Live scalars only — resprout/cursor scratch removed with the pivot.
 // `_viewfulltable_installed` is populated by the Stage 0 ViewFullTable probe.
 // `_tag_col_width` is populated by the Stage 0 Tree.Tag width probe.
@@ -656,13 +659,13 @@ ${appendErr(
     HAVING COUNT(*) > 1
        OR EXISTS (
             SELECT 1 FROM Stem s
-             WHERE s.TreeID = TreeID
-               AND s.QuadratID = QuadratID
+             WHERE s.TreeID = ${m}.TreeID
+               AND s.QuadratID = ${m}.QuadratID
                AND (s.StemTag IS NULL OR s.StemTag = '')
           );
 
   UPDATE ${m}
-    SET Errors = CONCAT(COALESCE(Errors, ''), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END, 'Empty StemTag collides with another stem under same Tree+Quadrat')
+    SET Errors = CONCAT(COALESCE(Errors, ''), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END, '${EMPTY_STEMTAG_COLLISION_REASON}')
     WHERE StemID IS NULL
       AND (StemTag IS NULL OR StemTag = '')
       AND TreeID IS NOT NULL

@@ -19,6 +19,7 @@ import {
   MISSING_PLOT_COORDINATE_SCOPE,
   DESTINATION_PLOT_COORDINATE_TYPE_SCOPE,
   STEM_LOOKUP_INDEX_NAME,
+  EMPTY_STEMTAG_COLLISION_REASON,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
 import { type MeasurementStagingRow, type AttributeStagingRow, renderInsertChunksMeasurements } from '../lib/csv-to-sql-shared';
@@ -636,9 +637,17 @@ describe('renderStage5', () => {
     );
   });
 
-  it("check 1b: empty StemTag collisions are caught (app schema stores StemTag with default '')", () => {
-    expect(sql()).toMatch(/Empty StemTag collides with another stem under same Tree\+Quadrat/);
-    expect(sql()).toMatch(/_stage5_empty_stemtag/);
+  it("check 1b: empty StemTag collisions are caught (app schema stores StemTag with default ''), scoped to the staged tree and quadrat", () => {
+    const s = sql();
+    // Pinned once: the operator manual quotes this reason, so the rendered text must not drift.
+    expect(EMPTY_STEMTAG_COLLISION_REASON).toBe('Empty StemTag collides with another stem under same Tree+Quadrat');
+    expect(s).toContain(`'${EMPTY_STEMTAG_COLLISION_REASON}'`);
+    expect(s).toMatch(/_stage5_empty_stemtag/);
+    expect(s).toContain('s.TreeID = `staging_measurements`.TreeID');
+    expect(s).toContain('s.QuadratID = `staging_measurements`.QuadratID');
+    // Unqualified, these resolve to Stem s itself and the predicate is always true.
+    expect(s).not.toMatch(/s\.TreeID = TreeID\b/);
+    expect(s).not.toMatch(/s\.QuadratID = QuadratID\b/);
   });
 
   it('check 2: unmatched and ambiguous taxonomy are separate, distinguishable reasons', () => {
