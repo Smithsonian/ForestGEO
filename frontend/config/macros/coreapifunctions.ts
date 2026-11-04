@@ -11,6 +11,8 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { auth } from '@/auth';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
+import type { Session } from 'next-auth';
 import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutation';
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { trimReferenceTextFields } from '@/lib/reference-text';
@@ -744,12 +746,21 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
   const connectionManager = ConnectionManager.getInstance();
+  const session = await auth();
+  try {
+    assertSessionMayEdit(session as Session);
+  } catch (error) {
+    if (error instanceof PendingUserEditForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: HTTPResponses.FORBIDDEN });
+    }
+    throw error;
+  }
+  const changedBy = authenticatedSessionIdentity(session?.user);
   try {
     assertMutableDataType('DELETE', params.dataType);
     const { newRow } = await readMutationBody(request, 'DELETE');
     const primaryKeyColumn = PRIMARY_KEY_MAP[params.dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
     const demappedGridID = primaryKeyColumn;
-    const changedBy = await changelogChangedBy();
 
     await connectionManager.withTransaction(async tx => {
       const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
