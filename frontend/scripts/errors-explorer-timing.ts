@@ -30,6 +30,7 @@ const SAFE_CODES = new Set([
 const SAFE_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'AggregateError']);
 const SAFE_CONTEXT = new Set([
   'test',
+  'list-censuses',
   'read',
   'first',
   'second',
@@ -99,7 +100,7 @@ export async function prepareReadOnlySession(connection: Pick<Connection, 'query
   await connection.query(SESSION_SETUP.maxTime, [maxStatementMs]);
 }
 
-export function createSerializedExecutor(connection: Pick<Connection, 'query' | 'execute'>) {
+export function createSerializedExecutor(connection: Pick<Connection, 'query' | 'execute'>, onStatement?: (label: string) => void) {
   let tail: Promise<unknown> = Promise.resolve();
   let aborted = false;
   const statements: TimingRecord[] = [];
@@ -108,6 +109,7 @@ export function createSerializedExecutor(connection: Pick<Connection, 'query' | 
     const run = async () => {
       if (aborted) throw new TimingRunAbortedError();
       assertReadOnlyStatement(sql);
+      onStatement?.(label);
       const startedAt = performance.now();
       const values = normalizeStatementParams(params);
       const [rows] = usesTextProtocol(sql, values) ? await connection.query(sql, values) : await connection.execute(sql, values);
@@ -261,7 +263,7 @@ async function listGroupSizes(executor: Executor, schema: string, censuses: Reco
     );
     const batch = safeFormatQuery(
       schema,
-      "SELECT COUNT(DISTINCT cm.CoreMeasurementID) AS members, SUM(CHAR_LENGTH(cm.CoreMeasurementID)) + COUNT(*) - 1 AS bytes FROM ??.coremeasurements cm JOIN ??.measurementssummary ms ON ms.CoreMeasurementID = cm.CoreMeasurementID WHERE cm.CensusID = ? AND cm.IsActive = 1 AND cm.UploadFileID IS NOT NULL AND cm.UploadBatchID IS NOT NULL AND ms.TreeTag IS NOT NULL AND ms.TreeTag <> '' GROUP BY cm.UploadFileID, cm.UploadBatchID, ms.TreeTag HAVING COUNT(DISTINCT COALESCE(ms.SpeciesCode, '')) > 1 AND COUNT(DISTINCT cm.CoreMeasurementID) > 1 ORDER BY members DESC LIMIT 1"
+      "SELECT COUNT(DISTINCT cm.CoreMeasurementID) AS members, SUM(CHAR_LENGTH(cm.CoreMeasurementID)) + COUNT(*) - 1 AS bytes FROM ??.coremeasurements cm JOIN ??.measurementssummary ms ON ms.CoreMeasurementID = cm.CoreMeasurementID WHERE cm.CensusID = ? AND COALESCE(cm.IsActive, TRUE) = TRUE AND cm.UploadFileID IS NOT NULL AND cm.UploadBatchID IS NOT NULL AND ms.TreeTag IS NOT NULL AND ms.TreeTag <> '' GROUP BY cm.UploadFileID, cm.UploadBatchID, ms.TreeTag HAVING COUNT(DISTINCT COALESCE(ms.SpeciesCode, '')) > 1 AND COUNT(DISTINCT cm.CoreMeasurementID) > 1 ORDER BY members DESC LIMIT 1"
     );
     const d = ((await executor.executeQuery(duplicate, [c.CensusID], 'duplicate')) as Record<string, unknown>[])[0];
     const b = ((await executor.executeQuery(batch, [c.CensusID], 'batch')) as Record<string, unknown>[])[0];
@@ -316,7 +318,9 @@ export async function runTimingCli(argv: readonly string[], deps: TimingDeps = {
       charset: 'utf8mb4_0900_ai_ci',
       ...(target.target === 'azure' && { ssl: { rejectUnauthorized: true } })
     });
-    executor = createSerializedExecutor(connection);
+    executor = createSerializedExecutor(connection, statementLabel => {
+      label = statementLabel;
+    });
     phase = 'statement';
     const onSignal =
       deps.onSignal ??
@@ -336,6 +340,7 @@ export async function runTimingCli(argv: readonly string[], deps: TimingDeps = {
     if (aborted) throw new TimingRunAbortedError();
     out(`target: ${target.target}`);
     if (argv.includes('--list-censuses')) {
+      scenario = 'list-censuses';
       const index = argv.indexOf('--schema');
       const schema = index < 0 ? undefined : argv[index + 1];
       if (index >= 0 && !schema) throw new Error('Missing schema');

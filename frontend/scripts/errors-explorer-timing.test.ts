@@ -150,6 +150,22 @@ describe('read-only timing safety', () => {
     expect(output).toContain('most physical censuses behind one plot census: 9 (plot 1, PlotCensusNumber NULL) (runs in chunks)');
     expect(output).toContain('3 members, 8 bytes cut');
     expect(f.connection.execute).toHaveBeenCalledTimes(24);
+    const batchSql = f.connection.execute.mock.calls.find(([sql]) => sql.includes('UploadBatchID'))?.[0];
+    expect(batchSql).toContain('COALESCE(cm.IsActive, TRUE) = TRUE');
+  });
+  it('labels and redacts a real census-list statement failure', async () => {
+    const f = fake();
+    const original = { code: 'ER_TABLEACCESS_DENIED_ERROR', errno: 1142, message: 'sentinel_user_544 SENTINEL-PASSWORD-544' };
+    f.connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.TABLES'))
+        return [['census', 'coremeasurements', 'measurement_error_log', 'measurementssummary'].map(tableName => ({ tableName })), []];
+      if (sql.includes('.census')) throw original;
+      return [[], []];
+    });
+    const result = await runTimingCli(['--list-censuses', '--schema', 'forestgeo_example'], f.deps);
+    expect(result.error).toBe(original);
+    expect(f.stderr.join('\n')).toBe('timing: statement failed (ER_TABLEACCESS_DENIED_ERROR, errno 1142) in list-censuses/censuses');
+    expect(f.stderr.join('\n')).not.toMatch(/SENTINEL|sentinel/);
   });
   it('fails closed when read-only session setup is not confirmed', async () => {
     const f = fake();
