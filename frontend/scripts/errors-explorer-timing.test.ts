@@ -167,6 +167,20 @@ describe('read-only timing safety', () => {
     expect(f.stderr.join('\n')).toBe('timing: statement failed (ER_TABLEACCESS_DENIED_ERROR, errno 1142) in list-censuses/censuses');
     expect(f.stderr.join('\n')).not.toMatch(/SENTINEL|sentinel/);
   });
+  it('keeps safe listing context for an unrecognized driver error', async () => {
+    const f = fake();
+    const original = { code: 'SENTINEL_SQL_544', message: 'sentinel_user_544 SENTINEL-PASSWORD-544' };
+    f.connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.TABLES'))
+        return [['census', 'coremeasurements', 'measurement_error_log', 'measurementssummary'].map(tableName => ({ tableName })), []];
+      if (sql.includes('.census')) throw original;
+      return [[], []];
+    });
+    const result = await runTimingCli(['--list-censuses', '--schema', 'forestgeo_example'], f.deps);
+    expect(result.error).toBe(original);
+    expect(f.stderr.join('\n')).toBe('timing: failed (Error) in list-censuses/censuses');
+    expect(f.stderr.join('\n')).not.toMatch(/SENTINEL|sentinel/);
+  });
   it('fails closed when read-only session setup is not confirmed', async () => {
     const f = fake();
     f.connection.query.mockResolvedValueOnce([[], []]).mockResolvedValueOnce([[{ readOnly: 0 }], []]);

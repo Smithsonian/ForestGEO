@@ -187,7 +187,7 @@ function describeFailure(error: unknown, phase: 'connection' | 'statement', scen
   const code = codeOf(error);
   if (phase === 'connection') return `timing: connection failed (${code ?? 'Error'})`;
   if (code) return `timing: statement failed (${code}, errno ${errnoOf(error) ?? 'unknown'}) in ${contextOf(scenario)}/${contextOf(label)}`;
-  return `timing: failed (${classOf(error)})`;
+  return `timing: failed (${classOf(error)}) in ${contextOf(scenario)}/${contextOf(label)}`;
 }
 const USAGE = [
   'Usage:',
