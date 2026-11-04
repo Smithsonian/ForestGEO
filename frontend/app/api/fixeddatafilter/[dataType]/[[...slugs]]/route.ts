@@ -3,7 +3,13 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
-import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
+import {
+  buildFilterModelStub,
+  buildSearchStub,
+  resolveFilterLogicOperatorSql,
+  UNSUPPORTED_LOGIC_OPERATOR_MESSAGE,
+  UnsupportedFilterLogicOperatorError
+} from '@/components/processors/processormacros';
 import { DELETE as coreApiDelete, PATCH as coreApiPatch, POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
 import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
@@ -109,6 +115,13 @@ async function postHandler(request: NextRequest, context: RouteContext) {
       return new NextResponse(JSON.stringify({ error: 'filterModel is empty - filter API should not have triggered' }), {
         status: HTTPResponses.INVALID_REQUEST
       });
+    }
+    try {
+      resolveFilterLogicOperatorSql(filterModel.logicOperator);
+    } catch (error: unknown) {
+      if (!(error instanceof UnsupportedFilterLogicOperatorError)) throw error;
+      ailogger.warn(`[fixeddatafilter API] rejected an unsupported filter logic operator for ${params.dataType}`);
+      return new NextResponse(JSON.stringify({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE }), { status: HTTPResponses.INVALID_REQUEST });
     }
     const page = parseInt(pageParam);
     const pageSize = parseInt(pageSizeParam);
@@ -472,6 +485,8 @@ async function postHandler(request: NextRequest, context: RouteContext) {
         );
       }
     } catch (error: unknown) {
+      if (error instanceof UnsupportedFilterLogicOperatorError)
+        return new NextResponse(JSON.stringify({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE }), { status: HTTPResponses.INVALID_REQUEST });
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error in fixeddatafilter POST:', errorObj);
       return new NextResponse(JSON.stringify({ error: errorObj.message }), {
