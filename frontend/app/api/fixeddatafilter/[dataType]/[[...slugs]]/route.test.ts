@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // Import after mocks
 import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { UNSUPPORTED_LOGIC_OPERATOR_MESSAGE } from '@/components/processors/processormacros';
 
 // -------------------- hoisted spies (safe for vi.mock factories) --------------------
 const { mapDataSpy, singlePostSpy, filterStubSpy, searchStubSpy } = vi.hoisted(() => ({
@@ -22,7 +23,8 @@ vi.mock('@/config/datamapper', () => ({
   default: { getMapper: vi.fn(() => ({ mapData: mapDataSpy })) }
 }));
 
-vi.mock('@/components/processors/processormacros', () => ({
+vi.mock('@/components/processors/processormacros', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/components/processors/processormacros')>()),
   buildFilterModelStub: filterStubSpy,
   buildSearchStub: searchStubSpy
 }));
@@ -390,5 +392,74 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
 
     // The route does not use transactions -- errors are caught and connection is closed in finally
     expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('logicOperator guard (SQL injection)', () => {
+  const GUARD_TEST_SCHEMA = 'testschema';
+  const HOSTILE_LOGIC_OPERATOR = ') OR (1=1) OR (';
+  const CONTROL_DATA_TYPE = 'sitespecificvalidations';
+  // Every entry of the route's ALLOWED_DATA_TYPES, so no branch is left out.
+  const DATA_TYPES = [
+    'sitespecificvalidations',
+    'failedmeasurements',
+    'attributes',
+    'species',
+    'stems',
+    'alltaxonomiesview',
+    'stemtaxonomiesview',
+    'roles',
+    'personnel',
+    'unifiedchangelog',
+    'quadrats',
+    'census',
+    'measurementssummary',
+    'measurementssummary_staging',
+    'measurementssummaryview',
+    'viewfulltable',
+    'viewfulltableview',
+    'coremeasurements'
+  ] as const;
+  const filterBody = (logicOperator: string) => ({
+    filterModel: {
+      items: [
+        { field: 'treeTag', operator: 'equals', value: '010203' },
+        { field: 'stemTag', operator: 'equals', value: '1' }
+      ],
+      quickFilterValues: [],
+      logicOperator
+    }
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('control: the same fixture with a valid operator passes authorization and reaches the handler', async () => {
+    const executeQuerySpy = vi
+      .spyOn((ConnectionManager as any).getInstance(), 'executeQuery')
+      .mockResolvedValueOnce([{ COLUMN_NAME: 'TreeTag' }, { COLUMN_NAME: 'StemTag' }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ totalRows: 0 }]);
+    const response = await POST(makeRequest(filterBody('and')), makeProps(CONTROL_DATA_TYPE, [GUARD_TEST_SCHEMA, '0', '10', '1', '1']));
+    const json = await response.json();
+    console.log('[fixeddatafilter guard] control', response.status, JSON.stringify(json), 'queries', executeQuerySpy.mock.calls.length);
+    expect(json.code).not.toBe('INVALID_SCHEMA');
+    expect(response.status).toBe(HTTPResponses.OK);
+    expect(executeQuerySpy).toHaveBeenCalled();
+  });
+
+  it.each(DATA_TYPES)('answers 400 and runs no query for %s', async dataType => {
+    const executeQuerySpy = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
+    const response = await POST(makeRequest(filterBody(HOSTILE_LOGIC_OPERATOR)), makeProps(dataType, [GUARD_TEST_SCHEMA, '0', '10', '1', '1']));
+    const json = await response.json();
+    console.log('[fixeddatafilter guard]', dataType, response.status, JSON.stringify(json), 'queries', executeQuerySpy.mock.calls.length);
+    expect(json).toEqual({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE });
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(executeQuerySpy).not.toHaveBeenCalled();
   });
 });

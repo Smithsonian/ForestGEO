@@ -1,5 +1,5 @@
 // frontend/app/api/formdownload/[dataType]/[[...slugs]]/route.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ---------- Import route AFTER mocks ----------
 import { GET } from './route';
@@ -23,7 +23,8 @@ vi.mock('@/config/datamapper', () => ({
   default: { getMapper: mapperSpies.getMapperSpy }
 }));
 
-vi.mock('@/components/processors/processormacros', () => ({
+vi.mock('@/components/processors/processormacros', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/components/processors/processormacros')>()),
   buildSearchStub: stubSpies.buildSearchStub,
   buildFilterModelStub: stubSpies.buildFilterModelStub
 }));
@@ -394,5 +395,48 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     expect(body.error).toMatch(/columns fail/i);
 
     expect(exec).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('logicOperator guard (SQL injection)', () => {
+  const GUARD_TEST_SCHEMA = 'forestgeo_testing';
+  const HOSTILE_FILTER = { items: [{ f: 1 }, { f: 2 }], logicOperator: ') OR (1=1) OR (' };
+  const CONTROL_FILTER = { ...HOSTILE_FILTER, logicOperator: 'and' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('control: a valid operator in the path slug passes authorization and reaches the column query', async () => {
+    const exec = vi
+      .spyOn((ConnectionManager as any).getInstance(), 'executeQuery')
+      .mockResolvedValueOnce([{ COLUMN_NAME: 'Code' }])
+      .mockResolvedValueOnce([]);
+    const response = await GET(makeRequest(), makeProps('attributes', [GUARD_TEST_SCHEMA, '10', '20', fm(CONTROL_FILTER)]));
+    console.log('[formdownload guard] control', response.status, 'queries', exec.mock.calls.length);
+    expect(response.status).toBe(HTTPResponses.OK);
+    expect(exec).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the path slug', () => GET(makeRequest(), makeProps('attributes', [GUARD_TEST_SCHEMA, '10', '20', fm(HOSTILE_FILTER)]))],
+    [
+      'the filterModel search parameter',
+      () =>
+        GET(
+          makeRequest(`http://localhost:3000?filterModel=${encodeURIComponent(fm(HOSTILE_FILTER))}`),
+          makeProps('attributes', [GUARD_TEST_SCHEMA, '10', '20'])
+        )
+    ]
+  ])('answers 400 and runs no query when the filter model comes from %s', async (_label, call) => {
+    const exec = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
+    const response = await call();
+    console.log('[formdownload guard]', _label, response.status, 'queries', exec.mock.calls.length);
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(exec).not.toHaveBeenCalled();
   });
 });
