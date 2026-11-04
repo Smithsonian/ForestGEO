@@ -2,8 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ---------- Import route AFTER mocks ----------
-import { GET } from './route';
+import { GET, POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { UNSUPPORTED_LOGIC_OPERATOR_MESSAGE } from '@/components/processors/processormacros';
 
 // ---------- Hoisted spies (usable inside vi.mock factories) ----------
 const mapperSpies = vi.hoisted(() => {
@@ -400,6 +401,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
 
 describe('logicOperator guard (SQL injection)', () => {
   const GUARD_TEST_SCHEMA = 'forestgeo_testing';
+  const makeBodyRequest = (body: unknown) => ({ nextUrl: new URL('http://localhost:3000'), json: async () => body }) as any;
   const HOSTILE_FILTER = { items: [{ f: 1 }, { f: 2 }], logicOperator: ') OR (1=1) OR (' };
   const CONTROL_FILTER = { ...HOSTILE_FILTER, logicOperator: 'and' };
 
@@ -437,6 +439,27 @@ describe('logicOperator guard (SQL injection)', () => {
     const response = await call();
     console.log('[formdownload guard]', _label, response.status, 'queries', exec.mock.calls.length);
     expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('control: a valid operator in the request body passes authorization and reaches the column query', async () => {
+    const exec = vi
+      .spyOn((ConnectionManager as any).getInstance(), 'executeQuery')
+      .mockResolvedValueOnce([{ COLUMN_NAME: 'Code' }])
+      .mockResolvedValueOnce([]);
+    const response = await POST(makeBodyRequest({ filterModel: CONTROL_FILTER }), makeProps('attributes', [GUARD_TEST_SCHEMA, '10', '20']));
+    console.log('[formdownload guard] body control', response.status, 'queries', exec.mock.calls.length);
+    expect(response.status).toBe(HTTPResponses.OK);
+    expect(exec).toHaveBeenCalled();
+  });
+
+  it('answers 400 with the unsupported-operator message and runs no query when the filter model comes from the request body', async () => {
+    const exec = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
+    const response = await POST(makeBodyRequest({ filterModel: HOSTILE_FILTER }), makeProps('attributes', [GUARD_TEST_SCHEMA, '10', '20']));
+    const json = await response.json();
+    console.log('[formdownload guard] body', response.status, JSON.stringify(json), 'queries', exec.mock.calls.length);
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(json).toEqual({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE });
     expect(exec).not.toHaveBeenCalled();
   });
 });
