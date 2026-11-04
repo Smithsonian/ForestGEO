@@ -8,6 +8,7 @@ import {
   groupKeysEqual,
   textBudget,
   pageLoadEstimate,
+  summarizePageLoad,
   redactExplainPlan,
   armOrder,
   compareResponses,
@@ -423,4 +424,46 @@ it('compares dates by their serialized value', () => {
   const comparison = compareResponses({ date: new Date('2020-01-01T00:00:00Z') }, { date: new Date('2021-01-01T00:00:00Z') });
   expect(comparison.paths).toEqual(['$.date']);
   expect(comparison.identical).toBe(false);
+});
+
+it('summarizes page load using matching successful run indices', () => {
+  const query = [
+    { run: 1, criticalMs: 5 },
+    { run: 3, criticalMs: 20 }
+  ];
+  const facets = [
+    { run: 1, criticalMs: 10 },
+    { run: 2, criticalMs: 100 },
+    { run: 3, criticalMs: 12 }
+  ];
+  expect(summarizePageLoad(query, facets, 3)).toEqual({
+    median: 15,
+    min: 10,
+    max: 20,
+    queryMedian: 12.5,
+    facetsMedian: 11,
+    includedRuns: [1, 3],
+    missingRuns: [2],
+    includedCount: 2,
+    missingCount: 1
+  });
+});
+
+it('propagates a non-timeout sibling failure after draining a timed-out operation', async () => {
+  const f = fake();
+  const siblingError = { errno: 1142, code: 'ER_TABLEACCESS_DENIED_ERROR' };
+  let release!: () => void;
+  f.connection.execute.mockRejectedValueOnce({ errno: 3024 }).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        release = () => reject(siblingError);
+      })
+  );
+  const executor = createSerializedExecutor(f.connection as never);
+  const operation = Promise.all([executor.executeQuery('SELECT 1'), executor.executeQuery('SELECT 2'), executor.executeQuery('SELECT 3')]);
+  await expect(operation).rejects.toMatchObject({ errno: 3024 });
+  const followingScenario = executor.drain().then(() => executor.executeQuery('SELECT 4'));
+  release();
+  await expect(followingScenario).rejects.toBe(siblingError);
+  expect(f.connection.execute).toHaveBeenCalledTimes(3);
 });

@@ -185,6 +185,7 @@ export function createSerializedExecutor(connection: Pick<Connection, 'query' | 
   let operation = 'setup';
   let bytesOverhead: number | null = null;
   const statements: TimingRecord[] = [];
+  const failures: unknown[] = [];
   const attempts: Array<{ sql: string; params: readonly unknown[]; operation: string }> = [];
   async function readBytes(): Promise<number> {
     const [rows] = await connection.query<mysql.RowDataPacket[]>(SHOW_BYTES);
@@ -227,7 +228,10 @@ export function createSerializedExecutor(connection: Pick<Connection, 'query' | 
       });
       return rows;
     };
-    const next = tail.then(run, run);
+    const next = tail.then(run, run).catch(error => {
+      failures.push(error);
+      throw error;
+    });
     tail = next;
     return next;
   }
@@ -236,6 +240,9 @@ export function createSerializedExecutor(connection: Pick<Connection, 'query' | 
     calibrateBytes,
     drain: async () => {
       await tail.catch(() => undefined);
+      const pending = failures.splice(0);
+      const nonTimeout = pending.findIndex(error => errnoOf(error) !== TIMEOUT_ERRNO);
+      if (nonTimeout !== -1) throw pending[nonTimeout];
     },
     setOperation: (value: string) => {
       operation = value;
@@ -430,6 +437,24 @@ function summarize(values: number[]) {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
   return { median: sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2, min: sorted[0], max: sorted[sorted.length - 1] };
+}
+export function summarizePageLoad(query: readonly { run: number; criticalMs: number }[], facets: readonly { run: number; criticalMs: number }[], runs: number) {
+  const pairs = query
+    .flatMap(q => {
+      const facet = facets.find(f => f.run === q.run);
+      return facet ? [{ run: q.run, query: q.criticalMs, facets: facet.criticalMs }] : [];
+    })
+    .sort((a, b) => a.run - b.run);
+  const includedRuns = pairs.map(pair => pair.run);
+  const missingRuns = Array.from({ length: runs }, (_, index) => index + 1).filter(run => !includedRuns.includes(run));
+  const counts = { includedRuns, missingRuns, includedCount: includedRuns.length, missingCount: missingRuns.length };
+  if (!pairs.length) return { median: null, min: null, max: null, queryMedian: null, facetsMedian: null, ...counts };
+  return {
+    ...summarize(pairs.map(pair => Math.max(pair.query, pair.facets))),
+    queryMedian: summarize(pairs.map(pair => pair.query)).median,
+    facetsMedian: summarize(pairs.map(pair => pair.facets)).median,
+    ...counts
+  };
 }
 function parsePositive(value: string | undefined): number {
   const number = Number(value);
@@ -631,15 +656,8 @@ async function runMeasurements(
   for (const arm of ['oracle', 'current'] as const) {
     const query = results.queryPage0[arm];
     const facetsCalls = results.facetsDefault[arm];
-    if (query.length === runs && facetsCalls.length === runs) {
-      const loads = query.map((call, i) => Math.max(call.criticalMs, facetsCalls[i].criticalMs));
-      pageLoad[arm] = {
-        ...summarize(loads),
-        queryMedian: summarize(query.map(call => call.criticalMs)).median,
-        facetsMedian: summarize(facetsCalls.map(call => call.criticalMs)).median
-      };
-      out(`pageLoad ${arm}: ${JSON.stringify(pageLoad[arm])}`);
-    }
+    pageLoad[arm] = summarizePageLoad(query, facetsCalls, runs);
+    out(`pageLoad ${arm}: ${JSON.stringify(pageLoad[arm])}`);
   }
   const budget = textBudget(currentAttempts.map(record => record.sql));
   out(`distinct-text budget: ${budget.status} (${budget.count})`);
