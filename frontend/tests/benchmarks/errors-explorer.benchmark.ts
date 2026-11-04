@@ -3,13 +3,14 @@ import mysql, { type Connection, type Pool, type RowDataPacket } from 'mysql2/pr
 import { DEFAULT_ERROR_EXPLORER_FILTERS, ERROR_EXPLORER_PRESETS, type ErrorExplorerFilters } from '@/config/errorsexplorer';
 import * as current from '@/app/api/errors/explorer/_shared';
 import * as oracle from '../oracles/errors-explorer-legacy';
-import { createTestDatabase, DEFAULT_TEST_CONFIG, loadSchema } from '../setup/local-db-setup';
+import { DEFAULT_TEST_CONFIG, loadSchema } from '../setup/local-db-setup';
 import { runQueryDispatch } from '../setup/runquerydispatch';
 import {
   acquireBenchSchemaOwnership,
   assertLocalHostsOrRefuse,
   assertNoOtherActiveSession,
   CONNECTION_CHARSET,
+  createBenchmarkDatabase,
   createBenchmarkSchemaSession,
   freezeTableStatistics,
   killDropAndClose,
@@ -244,7 +245,7 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
     config();
     assertLocalHostsOrRefuse();
     await acquireBenchSchemaOwnership(session);
-    session.setupConnection = await createTestDatabase({ ...DEFAULT_TEST_CONFIG, database: SCHEMA });
+    await createBenchmarkDatabase(session);
     work = await openRawConnection(session);
     pool = mysql.createPool({ ...DEFAULT_TEST_CONFIG, database: SCHEMA, connectionLimit: POOL_SIZE, charset: CONNECTION_CHARSET, timezone: 'Z' });
     pool.pool.on('connection', connection => {
@@ -260,7 +261,7 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
     } finally {
       connections.forEach(connection => connection.release());
     }
-    await assertNoOtherActiveSession(session, session.setupConnection);
+    await assertNoOtherActiveSession(session, session.setupConnection as Connection);
   }, HOOK_TIMEOUT_MS);
   afterAll(async () => {
     await killDropAndClose(session, pool ? () => pool!.end() : undefined);
@@ -273,7 +274,7 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
       if (!benchPool || !session.setupConnection) throw new Error('Benchmark connections not initialized');
       console.log(`${LOG_PREFIX} ${PREDICTIONS}`);
       await seed(work, options);
-      await assertNoOtherActiveSession(session, session.setupConnection);
+      await assertNoOtherActiveSession(session, session.setupConnection as Connection);
       const [[server]] = await work.query<RowDataPacket[]>('SELECT VERSION() AS version, @@innodb_buffer_pool_size AS bufferPoolBytes');
       const request = { schema: SCHEMA, plotID: 1, censusID: 2, censusIDs: [2], page: 0, pageSize: PAGE_SIZE, filters: DEFAULT_ERROR_EXPLORER_FILTERS };
       const setupExecutor = createBenchExecutor(benchPool);

@@ -19,12 +19,13 @@ import { type Connection, type RowDataPacket } from 'mysql2/promise';
 import { checkFinishedCensus } from '@/lib/ctfs-export';
 import { CENSUS_OVERVIEW_ERROR_CENSUS_IDS_PARAM, type CensusOverviewSummary } from '@/config/censusoverview';
 import { HTTPResponses } from '@/config/macros';
-import { createTestDatabase, DEFAULT_TEST_CONFIG, loadSchema } from '../setup/local-db-setup';
+import { loadSchema } from '../setup/local-db-setup';
 import { loadAppDbSeed } from '../fixtures/ctfs-export/load-app-db-seed';
 import {
   acquireBenchSchemaOwnership,
   assertLocalHostsOrRefuse,
   assertNoOtherActiveSession,
+  createBenchmarkDatabase,
   createBenchmarkSchemaSession,
   freezeTableStatistics,
   killDropAndClose,
@@ -46,7 +47,7 @@ const DEFAULT_LABEL = 'unlabelled';
 const CENSUSOVERVIEW_BENCH_SETUP_HOOK_TIMEOUT_MS = 120_000;
 const CENSUSOVERVIEW_BENCH_TEST_TIMEOUT_MS = 45 * 60 * 1000;
 const CENSUSOVERVIEW_BENCH_TEARDOWN_HOOK_TIMEOUT_MS = 5 * 60 * 1000;
-// Fixed, not per-process: a run killed before afterAll leaves the schema behind, and the next run's createTestDatabase drops it.
+// Fixed, not per-process: a run killed before afterAll leaves the schema behind, and the next run's setup drops it.
 const SCHEMA = 'forestgeo_bench_censusoverview';
 // MySQL advisory lock names are server-wide and at most 64 characters. Holding it is what entitles a run to drop SCHEMA.
 const SCHEMA_OWNER_LOCK_NAME = 'forestgeo_bench_censusoverview_schema_owner';
@@ -337,12 +338,12 @@ describe('census overview summary benchmark (opt-in, real local MySQL)', () => {
   beforeAll(async () => {
     assertLocalHostsOrRefuse();
     await acquireBenchSchemaOwnership(session);
-    session.setupConnection = await createTestDatabase({ ...DEFAULT_TEST_CONFIG, database: SCHEMA });
+    await createBenchmarkDatabase(session);
     workConnection = await openRawConnection(session);
     snapshotConnection = await openRawConnection(session);
     gateConnection = await openRawConnection(session);
     shared.facetsConnection = await openRawConnection(session);
-    await assertNoOtherActiveSession(session, session.setupConnection);
+    await assertNoOtherActiveSession(session, session.setupConnection as Connection);
   }, CENSUSOVERVIEW_BENCH_SETUP_HOOK_TIMEOUT_MS);
 
   // Runs after a pass, a failure or a timeout. vitest abandons a timed-out test without waiting for its statement,

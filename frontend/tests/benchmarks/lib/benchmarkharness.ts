@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import { DEFAULT_TEST_CONFIG } from '../../setup/local-db-setup';
+import { TEST_DB_DRIVER_TIMEZONE } from '../../setup/test-db-connection';
 
 export const LOCAL_HOSTS: readonly string[] = ['localhost', '127.0.0.1', '::1'];
 export const CONNECTION_CHARSET = 'UTF8MB4_0900_AI_CI';
@@ -75,6 +76,25 @@ export async function acquireBenchSchemaOwnership(session: BenchmarkSchemaSessio
     throw error;
   }
   session.schemaOwnerConnection = ownerConnection;
+}
+
+export async function createBenchmarkDatabase(session: BenchmarkSchemaSession): Promise<void> {
+  assertLocalHostsOrRefuse();
+  if (!session.schemaOwnerConnection) throw new Error('REFUSING TO RUN: benchmark schema ownership has not been acquired');
+  if (session.setupConnection) throw new Error('REFUSING TO RUN: benchmark setup connection already exists');
+  const connection = await mysql.createConnection({
+    host: DEFAULT_TEST_CONFIG.host,
+    port: DEFAULT_TEST_CONFIG.port,
+    user: DEFAULT_TEST_CONFIG.user,
+    password: DEFAULT_TEST_CONFIG.password,
+    multipleStatements: true,
+    timezone: DEFAULT_TEST_CONFIG.timezone ?? TEST_DB_DRIVER_TIMEZONE,
+    charset: CONNECTION_CHARSET
+  });
+  session.setupConnection = connection;
+  await connection.query('DROP DATABASE IF EXISTS ??', [session.schema]);
+  await connection.query('CREATE DATABASE ?? CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci', [session.schema]);
+  await connection.changeUser({ database: session.schema });
 }
 
 export async function openRawConnection(session: BenchmarkSchemaSession): Promise<Connection> {
