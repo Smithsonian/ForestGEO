@@ -24,6 +24,7 @@
     "test:unit:raw": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run",
     "bench:setup-split": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.benchmark.config.mts tests/benchmarks/setup-split.benchmark.ts",
     "bench:censusoverview-summary": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.benchmark.config.mts tests/benchmarks/censusoverview-summary.benchmark.ts",
+    "bench:errors-explorer": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.benchmark.config.mts tests/benchmarks/errors-explorer.benchmark.ts",
     "test:integration": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.integration.config.mts",
     "test:integration:azure": "dotenv -e .env.testing.azure -- node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.integration.config.mts",
     "test:component": "cypress run --component",
