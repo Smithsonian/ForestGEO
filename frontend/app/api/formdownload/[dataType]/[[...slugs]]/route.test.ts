@@ -437,8 +437,10 @@ describe('logicOperator guard (SQL injection)', () => {
   ])('answers 400 and runs no query when the filter model comes from %s', async (_label, call) => {
     const exec = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
     const response = await call();
-    console.log('[formdownload guard]', _label, response.status, 'queries', exec.mock.calls.length);
+    const json = await response.json();
+    console.log('[formdownload guard]', _label, response.status, JSON.stringify(json), 'queries', exec.mock.calls.length);
     expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(json).toEqual({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE });
     expect(exec).not.toHaveBeenCalled();
   });
 
