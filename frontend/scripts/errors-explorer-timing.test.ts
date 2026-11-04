@@ -2,6 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { AZURE_HOST } from './lib/schema-cli';
 import { cleanupTimingConnections } from '@/tests/setup/stricttestdatabasecleanup';
 import {
+  groupIntoWaves,
+  criticalPathEstimate,
+  diffFieldPaths,
+  groupKeysEqual,
+  textBudget,
+  pageLoadEstimate,
+  redactExplainPlan,
+  armOrder,
+  compareResponses,
   assertReadOnlyStatement,
   createSerializedExecutor,
   ExplainRefusedError,
@@ -302,4 +311,116 @@ describe('read-only timing safety', () => {
     expect(executor.statements[1].startedAt).toBeGreaterThanOrEqual(executor.statements[0].endedAt);
     expect(executor.statements[1].issuedAt).toBeLessThanOrEqual(executor.statements[1].startedAt);
   });
+});
+
+describe('timing calculations', () => {
+  it('groups by issue time relative to the first statement and estimates critical path', () => {
+    const statements = [
+      { issuedAt: 0, startedAt: 0, endedAt: 5 },
+      { issuedAt: 0, startedAt: 5, endedAt: 7 },
+      { issuedAt: 7, startedAt: 7, endedAt: 9 }
+    ];
+    console.log('wave inputs', statements);
+    expect(groupIntoWaves(statements)).toEqual([[statements[0], statements[1]], [statements[2]]]);
+    expect(criticalPathEstimate(statements, 3)).toBe(10);
+  });
+  it('returns only differing paths', () => {
+    expect(diffFieldPaths({ a: 1, b: { c: 2 } }, { a: 1, b: { c: 3 } })).toEqual(['$.b.c']);
+  });
+  it('compares group keys with base sensitivity', () => {
+    expect(groupKeysEqual('duplicate:2:Ab1:1', 'duplicate:2:áb1:1')).toBe(true);
+    expect(groupKeysEqual('duplicate:2:Ab1:1', 'duplicate:2:Ab2:1')).toBe(false);
+  });
+  it('checks the text budget', () => {
+    expect(textBudget(Array.from({ length: 9 }, (_, i) => String(i)))).toEqual({ count: 9, status: 'PASS' });
+    expect(textBudget(Array.from({ length: 10 }, (_, i) => String(i)))).toEqual({ count: 10, status: 'FAIL' });
+  });
+  it('computes page load from separate operations', () => {
+    const query = [
+      { issuedAt: 0, startedAt: 0, endedAt: 5 },
+      { issuedAt: 5, startedAt: 5, endedAt: 6 }
+    ];
+    const facets = [
+      { issuedAt: 0, startedAt: 0, endedAt: 1 },
+      { issuedAt: 1, startedAt: 1, endedAt: 11 }
+    ];
+    expect(pageLoadEstimate(query, facets, 0, 0)).toBe(11);
+  });
+});
+
+describe('measurement safeguards', () => {
+  it('alternates measured arms', () => {
+    expect(armOrder(1)).toEqual(['oracle', 'current']);
+    expect(armOrder(2)).toEqual(['current', 'oracle']);
+  });
+  it('hides literal values in local explain output while retaining plan shape', () => {
+    const plan = "-> Filter: (treeTag like 'SENTINELsearch%')  (cost=4 rows=2)\n    -> Index lookup on t (id=123456789)";
+    const result = redactExplainPlan(plan);
+    expect(result).not.toContain('SENTINELsearch');
+    expect(result).not.toContain('123456789');
+    expect(result).toContain('Filter');
+    expect(result).toContain('cost=4 rows=2');
+  });
+  it('subtracts the calibrated SHOW overhead for each statement', async () => {
+    const f = fake();
+    let count = 0;
+    f.connection.query.mockImplementation(async () => [[{ Value: String([100, 110, 120, 180][count++]) }], []]);
+    const executor = createSerializedExecutor(f.connection as never);
+    await executor.calibrateBytes();
+    executor.setOperation('queryPage0');
+    await executor.executeQuery('SELECT 1');
+    expect(executor.statements[0].bytesSent).toBe(50);
+    expect(executor.statements[0].operation).toBe('queryPage0');
+  });
+});
+
+it('drains a timed-out operation before a subsequent operation starts', async () => {
+  const f = fake();
+  let release!: () => void;
+  f.connection.execute
+    .mockRejectedValueOnce({ errno: 3024 })
+    .mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          release = () => resolve([[], []]);
+        })
+    )
+    .mockResolvedValueOnce([[], []]);
+  const executor = createSerializedExecutor(f.connection as never);
+  executor.setOperation('first');
+  const first = Promise.all([executor.executeQuery('SELECT 1'), executor.executeQuery('SELECT 2')]);
+  await expect(first).rejects.toMatchObject({ errno: 3024 });
+  const drain = executor.drain();
+  let drained = false;
+  void drain.then(() => {
+    drained = true;
+  });
+  await Promise.resolve();
+  expect(drained).toBe(false);
+  expect(f.connection.execute).toHaveBeenCalledTimes(2);
+  release();
+  await drain;
+  executor.setOperation('second');
+  await executor.executeQuery('SELECT 3');
+  expect(executor.statements.map(record => record.operation)).toEqual(['first', 'second']);
+  expect(f.connection.execute).toHaveBeenCalledTimes(3);
+  expect(executor.attempts.map(attempt => attempt.sql)).toEqual(['SELECT 1', 'SELECT 2', 'SELECT 3']);
+  expect(textBudget(executor.attempts.map(attempt => attempt.sql))).toEqual({ count: 3, status: 'PASS' });
+});
+
+it('compares response paths without exposing values and checks group keys separately', () => {
+  const a = { row: { value: 'SECRET-A', contradictionGroupKey: 'duplicate:2:Ab1:1' } };
+  const b = { row: { value: 'SECRET-B', contradictionGroupKey: 'duplicate:2:áb1:1' } };
+  expect(compareResponses(a, b)).toEqual({ identical: false, paths: ['$.row.value'], groupKeysIdentical: true });
+  expect(compareResponses(a, { row: { value: 'SECRET-A', contradictionGroupKey: 'duplicate:2:áb1:1' } })).toEqual({
+    identical: true,
+    paths: [],
+    groupKeysIdentical: true
+  });
+});
+
+it('compares dates by their serialized value', () => {
+  const comparison = compareResponses({ date: new Date('2020-01-01T00:00:00Z') }, { date: new Date('2021-01-01T00:00:00Z') });
+  expect(comparison.paths).toEqual(['$.date']);
+  expect(comparison.identical).toBe(false);
 });

@@ -1,15 +1,18 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { DEFAULT_ERROR_EXPLORER_FILTERS, ERROR_EXPLORER_PRESETS, type ErrorExplorerFilters } from '@/config/errorsexplorer';
 import { fileURLToPath } from 'node:url';
 import mysql, { type Connection, type ConnectionOptions } from 'mysql2/promise';
 import { normalizeStatementParams, usesTextProtocol } from '@/lib/db/statementprotocol';
 import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { AZURE_HOST, LOCAL_HOSTS, UnexpectedHostError, assertExpectedHost, discoverSiteSchemas } from './lib/schema-cli';
-import '@/tests/oracles/errors-explorer-legacy';
-import '@/app/api/errors/explorer/_shared';
+import * as oracle from '@/tests/oracles/errors-explorer-legacy';
+import * as current from '@/app/api/errors/explorer/_shared';
 
 const DEFAULT_MAX_STATEMENT_MS = 60_000;
 const INTERRUPT_EXIT_CODE = 130;
 const TIMEOUT_ERRNO = 3024;
+const SHOW_BYTES = "SHOW SESSION STATUS LIKE 'Bytes_sent'";
 const LEADING_COMMENTS = /^(?:\s*(?:\/\*[\s\S]*?\*\/|--[^\n]*\n))*\s*/;
 const READ_STATEMENT_START = /^(?:SELECT|WITH)\b/i;
 const FORBIDDEN_READ_CLAUSES = [/;/, /\bINTO\b/i, /\bFOR\s+UPDATE\b/i, /\bFOR\s+SHARE\b/i, /\bLOCK\s+IN\s+SHARE\s+MODE\b/i];
@@ -43,7 +46,23 @@ const SAFE_CONTEXT = new Set([
   'invalid',
   'duplicate',
   'batch',
-  'group-limit'
+  'group-limit',
+  'shape',
+  'raw-rows',
+  'duplicate-groups',
+  'same-batch-groups',
+  'queryPage0',
+  'queryLastPage',
+  'queryValidationOnly',
+  'queryContradictions',
+  'queryMostCommonMessage',
+  'queryQuickSearch',
+  'facetsDefault',
+  'facetsContradictions',
+  'detailsFirstRow',
+  'detailsFirstContradictionRow',
+  'messageCounts',
+  'exportDefault'
 ]);
 const REQUIRED_ENV = ['AZURE_SQL_SERVER', 'AZURE_SQL_USER', 'AZURE_SQL_PASSWORD', 'AZURE_SQL_PORT'] as const;
 const REQUIRED_TABLES = ['census', 'coremeasurements', 'measurement_error_log', 'measurementssummary'] as const;
@@ -52,7 +71,10 @@ type Environment = Record<string, string | undefined>;
 type QueryConnection = Pick<Connection, 'query' | 'execute' | 'end' | 'destroy'>;
 type TimingRecord = {
   label: string;
+  operation: string;
   sql: string;
+  params: readonly unknown[];
+  instrumentationMs: number;
   issuedAt: number;
   startedAt: number;
   endedAt: number;
@@ -60,6 +82,56 @@ type TimingRecord = {
   jsonBytes: number;
   bytesSent: number | null;
 };
+
+type WaveStatement = { issuedAt: number; startedAt: number; endedAt: number };
+const STATEMENT_TEXT_LIMIT = 9;
+export function groupIntoWaves<T extends WaveStatement>(statements: readonly T[]): T[][] {
+  const waves: T[][] = [];
+  for (const statement of statements) {
+    const wave = waves[waves.length - 1];
+    if (!wave || statement.issuedAt >= wave[0].endedAt) waves.push([statement]);
+    else wave.push(statement);
+  }
+  return waves;
+}
+export function criticalPathEstimate(statements: readonly WaveStatement[], nodeMs: number): number {
+  return groupIntoWaves(statements).reduce((sum, wave) => sum + Math.max(...wave.map(s => s.endedAt - s.startedAt)), nodeMs);
+}
+export function pageLoadEstimate(query: readonly WaveStatement[], facets: readonly WaveStatement[], queryNodeMs: number, facetsNodeMs: number): number {
+  return Math.max(criticalPathEstimate(query, queryNodeMs), criticalPathEstimate(facets, facetsNodeMs));
+}
+export function groupKeysEqual(a: string, b: string): boolean {
+  return a.localeCompare(b, undefined, { sensitivity: 'base' }) === 0;
+}
+export function textBudget(texts: Iterable<string>): { count: number; status: 'PASS' | 'FAIL' } {
+  const count = new Set(texts).size;
+  return { count, status: count <= STATEMENT_TEXT_LIMIT ? 'PASS' : 'FAIL' };
+}
+export function diffFieldPaths(a: unknown, b: unknown, path = '$'): string[] {
+  if (Object.is(a, b)) return [];
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return [path];
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].flatMap(key => diffFieldPaths(left[key], right[key], Array.isArray(a) ? `${path}[${key}]` : `${path}.${key}`));
+}
+
+export function armOrder(run: number): readonly ['oracle', 'current'] | readonly ['current', 'oracle'] {
+  return run % 2 === 1 ? ['oracle', 'current'] : ['current', 'oracle'];
+}
+export function redactExplainPlan(plan: string): string {
+  return plan
+    .split('\n')
+    .map(line => {
+      const indentation = line.match(/^\s*/)?.[0] ?? '';
+      const operation =
+        line.match(/->\s*(Filter|Index lookup|Table scan|Index scan|Nested loop|Hash|Sort|Limit|Aggregate|Materialize|Union|Remove duplicates)/i)?.[1] ??
+        'Plan operation';
+      const costs = line.match(/\(cost=[0-9.e+ -]+ rows=[0-9.e+ -]+\)/i)?.[0] ?? '';
+      return `${indentation}-> ${operation}${costs ? `  ${costs}` : ''}`;
+    })
+    .join('\n');
+}
 
 export class ReadOnlyStatementRejectedError extends Error {
   constructor(readonly reason: string) {
@@ -100,29 +172,58 @@ export async function prepareReadOnlySession(connection: Pick<Connection, 'query
   await connection.query(SESSION_SETUP.maxTime, [maxStatementMs]);
 }
 
+function classifyStatement(sql: string): string {
+  if (/measurement_error_log\s+mel/i.test(sql)) return 'raw-rows';
+  if (/GROUP_CONCAT\s*\(DISTINCT\s+ms\./i.test(sql)) return 'duplicate-groups';
+  if (/GROUP_CONCAT\s*\(DISTINCT\s+cm\./i.test(sql)) return 'same-batch-groups';
+  return 'unlabelled';
+}
+
 export function createSerializedExecutor(connection: Pick<Connection, 'query' | 'execute'>, onStatement?: (label: string) => void) {
   let tail: Promise<unknown> = Promise.resolve();
   let aborted = false;
+  let operation = 'setup';
+  let bytesOverhead: number | null = null;
   const statements: TimingRecord[] = [];
+  const attempts: Array<{ sql: string; params: readonly unknown[]; operation: string }> = [];
+  async function readBytes(): Promise<number> {
+    const [rows] = await connection.query<mysql.RowDataPacket[]>(SHOW_BYTES);
+    const value = Number(rows[0]?.Value);
+    if (!Number.isFinite(value)) throw new Error('Invalid session status');
+    return value;
+  }
+  async function calibrateBytes(): Promise<void> {
+    const before = await readBytes();
+    bytesOverhead = (await readBytes()) - before;
+  }
   function executeQuery(sql: string, params?: readonly unknown[], label = 'unlabelled'): Promise<unknown> {
     const issuedAt = performance.now();
+    const issuedOperation = operation;
     const run = async () => {
       if (aborted) throw new TimingRunAbortedError();
       assertReadOnlyStatement(sql);
-      onStatement?.(label);
+      const trustedLabel = label === 'unlabelled' ? classifyStatement(sql) : label;
+      onStatement?.(trustedLabel);
+      const instrumentationStart = performance.now();
+      const beforeBytes = bytesOverhead === null ? null : await readBytes();
       const startedAt = performance.now();
       const values = normalizeStatementParams(params);
+      attempts.push({ sql, params: params ?? [], operation: issuedOperation });
       const [rows] = usesTextProtocol(sql, values) ? await connection.query(sql, values) : await connection.execute(sql, values);
       const endedAt = performance.now();
+      const afterBytes = beforeBytes === null ? null : await readBytes();
       statements.push({
-        label,
+        label: trustedLabel,
+        operation: issuedOperation,
         sql,
+        params: params ?? [],
+        instrumentationMs: startedAt - instrumentationStart + performance.now() - endedAt,
         issuedAt,
         startedAt,
         endedAt,
         rows: Array.isArray(rows) ? rows.length : 0,
         jsonBytes: Buffer.byteLength(JSON.stringify(rows)),
-        bytesSent: null
+        bytesSent: afterBytes === null || beforeBytes === null || bytesOverhead === null ? null : Math.max(0, afterBytes - beforeBytes - bytesOverhead)
       });
       return rows;
     };
@@ -132,8 +233,16 @@ export function createSerializedExecutor(connection: Pick<Connection, 'query' | 
   }
   return {
     executeQuery,
+    calibrateBytes,
+    drain: async () => {
+      await tail.catch(() => undefined);
+    },
+    setOperation: (value: string) => {
+      operation = value;
+    },
     runReadOnlyStatement: executeQuery,
     statements,
+    attempts,
     abort: () => {
       aborted = true;
     },
@@ -272,6 +381,290 @@ async function listGroupSizes(executor: Executor, schema: string, censuses: Reco
   }
 }
 
+const DEFAULT_RUNS = 3;
+const PAGE_SIZE = 25;
+const SHOW_PREPARE = "SHOW SESSION STATUS LIKE 'Com_stmt_prepare'";
+const SHOW_REPREPARE = "SHOW SESSION STATUS LIKE 'Com_stmt_reprepare'";
+const SHOW_GLOBAL_PREPARED = "SHOW GLOBAL STATUS LIKE 'Prepared_stmt_count'";
+const SET_VAR_PROBE = "SELECT /*+ SET_VAR(group_concat_max_len = 4) */ CHAR_LENGTH(GROUP_CONCAT(v)) AS probe FROM (SELECT '123456' AS v) AS probe";
+const CAVEATS =
+  "Statements ran serially on one connection while production runs some in parallel on the pool; the shared server's other load is unknown; three runs are a smoke measurement, not a p95. The critical-path estimate excludes network, TLS, rendering and pool contention. Node time includes telemetry overhead from status reads.";
+type ArmName = 'oracle' | 'current';
+type ExplorerModule = Pick<
+  typeof oracle,
+  'queryErrorExplorer' | 'buildErrorExplorerFacets' | 'buildErrorExplorerDetails' | 'buildErrorMessageCounts' | 'fetchGroupedErrorRows' | 'buildErrorExportRows'
+>;
+type TimingScenario = { name: string; run: (arm: ExplorerModule, executor: Executor) => Promise<unknown> };
+type CallResult = { run: number; response: unknown; records: TimingRecord[]; statementMs: number; nodeMs: number; criticalMs: number };
+
+function hashResponse(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+function compareGroupKeys(a: unknown, b: unknown): boolean {
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return true;
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  if ('contradictionGroupKey' in left || 'contradictionGroupKey' in right) {
+    const x = left.contradictionGroupKey;
+    const y = right.contradictionGroupKey;
+    if (typeof x === 'string' && typeof y === 'string' ? !groupKeysEqual(x, y) : x !== y) return false;
+  }
+  return [...new Set([...Object.keys(left), ...Object.keys(right)])].every(key => compareGroupKeys(left[key], right[key]));
+}
+function withoutGroupKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutGroupKeys);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== 'contradictionGroupKey')
+      .map(([key, item]) => [key, withoutGroupKeys(item)])
+  );
+}
+export function compareResponses(a: unknown, b: unknown): { identical: boolean; paths: string[]; groupKeysIdentical: boolean } {
+  const left = withoutGroupKeys(JSON.parse(JSON.stringify(a)) as unknown);
+  const right = withoutGroupKeys(JSON.parse(JSON.stringify(b)) as unknown);
+  const identical = hashResponse(left) === hashResponse(right);
+  return { identical, paths: identical ? [] : diffFieldPaths(left, right), groupKeysIdentical: compareGroupKeys(a, b) };
+}
+function summarize(values: number[]) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return { median: sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2, min: sorted[0], max: sorted[sorted.length - 1] };
+}
+function parsePositive(value: string | undefined): number {
+  const number = Number(value);
+  if (!value || !/^\d+$/.test(value) || !Number.isSafeInteger(number) || number < 1) throw new Error('Invalid argument');
+  return number;
+}
+function argument(argv: readonly string[], name: string): string | undefined {
+  const index = argv.indexOf(name);
+  return index < 0 ? undefined : argv[index + 1];
+}
+async function readStatus(connection: QueryConnection, sql: string): Promise<number> {
+  const [rows] = await connection.query<mysql.RowDataPacket[]>(sql);
+  const value = Number(rows[0]?.Value);
+  if (!Number.isFinite(value)) throw new Error('Invalid session status');
+  return value;
+}
+async function reportShape(executor: Executor, connection: QueryConnection, schema: string, plotID: number, censusIDs: number[], out: (line: string) => void) {
+  const placeholders = censusIDs.map(() => '?').join(',');
+  const scope = `PlotID = ? AND CensusID IN (${placeholders})`;
+  const params = [plotID, ...censusIDs];
+  const read = async (sql: string, values: unknown[] = []) =>
+    (await executor.executeQuery(safeFormatQuery(schema, sql), values, 'shape')) as Record<string, unknown>[];
+  const facts = await read(
+    'SELECT @@version AS version, @@group_concat_max_len AS groupConcatMaxLen, @@innodb_buffer_pool_size AS bufferPoolBytes, @@max_prepared_stmt_count AS maxPreparedStatements'
+  );
+  const probe = await read(SET_VAR_PROBE);
+  const prepared = await readStatus(connection, SHOW_GLOBAL_PREPARED);
+  out(`server facts: ${JSON.stringify(facts[0])}; Prepared_stmt_count ${prepared}; SET_VAR honoured: ${Number(probe[0]?.probe) === 4 ? 'yes' : 'no'}`);
+  const shapeQueries: Array<[string, string, unknown[]]> = [
+    ['scope rows', `SELECT COUNT(*) AS n FROM ??.measurementssummary WHERE ${scope}`, params],
+    [
+      'active measurements',
+      `SELECT COUNT(*) AS n FROM ??.coremeasurements cm JOIN ??.census c ON c.CensusID = cm.CensusID WHERE c.PlotID = ? AND cm.CensusID IN (${placeholders}) AND COALESCE(cm.IsActive, TRUE) = TRUE`,
+      params
+    ],
+    [
+      'scope unresolved logs',
+      `SELECT COUNT(*) AS n FROM ??.measurement_error_log mel JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID JOIN ??.census c ON c.CensusID = cm.CensusID WHERE c.PlotID = ? AND cm.CensusID IN (${placeholders}) AND (mel.IsResolved = FALSE OR mel.IsResolved IS NULL)`,
+      params
+    ],
+    ['schema unresolved logs', 'SELECT COUNT(*) AS n FROM ??.measurement_error_log WHERE IsResolved = FALSE OR IsResolved IS NULL', []],
+    [
+      'invalid no log',
+      `SELECT COUNT(*) AS n FROM ??.measurementssummary ms WHERE ms.PlotID = ? AND ms.CensusID IN (${placeholders}) AND ms.IsValidated = FALSE AND NOT EXISTS (SELECT 1 FROM ??.measurement_error_log mel WHERE mel.MeasurementID = ms.CoreMeasurementID AND (mel.IsResolved = FALSE OR mel.IsResolved IS NULL))`,
+      params
+    ],
+    ['catalog size', 'SELECT COUNT(*) AS n FROM ??.measurement_errors', []],
+    ['tree tags', 'SELECT COUNT(DISTINCT TreeTag) AS tags, COUNT(*) / NULLIF(COUNT(DISTINCT TreeTag), 0) AS averageRowsPerTag FROM ??.measurementssummary', []]
+  ];
+  for (const [name, sql, values] of shapeQueries) out(`${name}: ${JSON.stringify((await read(sql, values))[0])}`);
+  const indexes = await executor.executeQuery(
+    'SELECT TABLE_NAME AS tableName, INDEX_NAME AS indexName, COLUMN_NAME AS columnName, SEQ_IN_INDEX AS position FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (?, ?, ?, ?) ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX',
+    [schema, 'measurementssummary', 'coremeasurements', 'measurement_error_log', 'measurement_errors'],
+    'shape'
+  );
+  out(`indexes: ${JSON.stringify(indexes)}`);
+  out('distinct signatures: n/a');
+  await listGroupSizes(
+    executor,
+    schema,
+    censusIDs.map(CensusID => ({ CensusID })),
+    out
+  );
+}
+
+async function runMeasurements(
+  argv: readonly string[],
+  executor: Executor,
+  connection: QueryConnection,
+  out: (line: string) => void,
+  maxMs: number,
+  setScenario: (name: string) => void
+): Promise<void> {
+  const schema = argument(argv, '--schema');
+  if (!schema) throw new Error('Missing schema');
+  validateSchemaOrThrow(schema);
+  const plotID = parsePositive(argument(argv, '--plot'));
+  const censusArg = argument(argv, '--census');
+  if (!censusArg) throw new Error('Missing census');
+  const censusIDs = [...new Set(censusArg.split(',').map(parsePositive))];
+  const runs = argument(argv, '--runs') === undefined ? DEFAULT_RUNS : parsePositive(argument(argv, '--runs'));
+  const request = { schema, plotID, censusID: censusIDs[0], censusIDs, page: 0, pageSize: PAGE_SIZE, filters: DEFAULT_ERROR_EXPLORER_FILTERS };
+  await reportShape(executor, connection, schema, plotID, censusIDs, out);
+  const page = await oracle.queryErrorExplorer(executor, request);
+  const facets = await oracle.buildErrorExplorerFacets(executor, request);
+  const grouped = await oracle.fetchGroupedErrorRows(executor, schema, plotID, censusIDs, { withContradictions: false });
+  const rawRecords = executor.statements.filter(record => /measurement_error_log\s+mel/i.test(record.sql));
+  out(`error-set measurements: ${grouped.size}; occurrences: ${rawRecords.slice(-censusIDs.length).reduce((sum, record) => sum + record.rows, 0)}`);
+  const first = page.rows[0];
+  const message = facets.messages[0];
+  const preset = (id: string): ErrorExplorerFilters => {
+    const found = ERROR_EXPLORER_PRESETS.find(item => item.id === id);
+    if (!found) throw new Error('Missing preset');
+    return found.filters;
+  };
+  const contradictionPage = await oracle.queryErrorExplorer(executor, { ...request, filters: preset('contradictions') });
+  const contradiction = contradictionPage.rows[0];
+  const firstID = first?.coreMeasurementID;
+  const contradictionID = contradiction?.coreMeasurementID;
+  const scenarios: TimingScenario[] = [
+    { name: 'queryPage0', run: (arm, e) => arm.queryErrorExplorer(e, request) },
+    { name: 'queryLastPage', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, page: Math.max(0, Math.ceil(page.totalRows / PAGE_SIZE) - 1) }) },
+    { name: 'queryValidationOnly', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, filters: preset('validation_only') }) },
+    { name: 'queryContradictions', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, filters: preset('contradictions') }) },
+    ...(message
+      ? [
+          {
+            name: 'queryMostCommonMessage',
+            run: (arm, e) => arm.queryErrorExplorer(e, { ...request, filters: { ...request.filters, exactMessages: [message.value] } })
+          } satisfies TimingScenario
+        ]
+      : []),
+    ...(first?.treeTag
+      ? [
+          {
+            name: 'queryQuickSearch',
+            run: (arm, e) => arm.queryErrorExplorer(e, { ...request, filters: { ...request.filters, quickSearch: first.treeTag!.slice(0, 3) } })
+          } satisfies TimingScenario
+        ]
+      : []),
+    { name: 'facetsDefault', run: (arm, e) => arm.buildErrorExplorerFacets(e, request) },
+    { name: 'facetsContradictions', run: (arm, e) => arm.buildErrorExplorerFacets(e, { ...request, filters: preset('contradictions') }) },
+    ...(firstID != null ? [{ name: 'detailsFirstRow', run: (arm, e) => arm.buildErrorExplorerDetails(e, request, firstID) } satisfies TimingScenario] : []),
+    ...(contradictionID != null
+      ? [{ name: 'detailsFirstContradictionRow', run: (arm, e) => arm.buildErrorExplorerDetails(e, request, contradictionID) } satisfies TimingScenario]
+      : []),
+    { name: 'messageCounts', run: (arm, e) => arm.buildErrorMessageCounts(e, request) },
+    { name: 'exportDefault', run: async (arm, e) => arm.buildErrorExportRows(await arm.fetchGroupedErrorRows(e, schema, plotID, censusIDs), request.filters) }
+  ];
+  for (const name of ['queryMostCommonMessage', 'queryQuickSearch', 'detailsFirstRow', 'detailsFirstContradictionRow'])
+    if (!scenarios.some(item => item.name === name)) out(`${name}: unavailable for this scope`);
+  const arms: Record<ArmName, ExplorerModule> = { oracle, current: current as unknown as ExplorerModule };
+  const results: Record<string, Record<ArmName, CallResult[]>> = {};
+  const currentAttempts: Array<{ sql: string; params: readonly unknown[]; operation: string }> = [];
+  await executor.calibrateBytes();
+  let prepareDelta = 0;
+  let reprepareDelta = 0;
+  const table = ['| Scenario | Arm | Critical ms median (min–max) | Statement ms | Node ms |', '| --- | --- | --- | --- | --- |'];
+  const comparisons: Record<string, Array<{ run: number; identical: boolean; paths: string[]; groupKeysIdentical: boolean }>> = {};
+  for (const scenario of scenarios) {
+    setScenario(scenario.name);
+    const calls: Record<ArmName, CallResult[]> = { oracle: [], current: [] };
+    results[scenario.name] = calls;
+    for (let round = 0; round <= runs; round++) {
+      for (const armName of armOrder(round || 1)) {
+        executor.setOperation(scenario.name);
+        const startIndex = executor.statements.length;
+        const startAttempt = executor.attempts.length;
+        const preparesBefore = armName === 'current' ? await readStatus(connection, SHOW_PREPARE) : 0;
+        const repreparesBefore = armName === 'current' ? await readStatus(connection, SHOW_REPREPARE) : 0;
+        const start = performance.now();
+        try {
+          const response = await scenario.run(arms[armName], executor);
+          const end = performance.now();
+          const records = executor.statements.slice(startIndex);
+          const statementMs = records.reduce((sum, r) => sum + r.endedAt - r.startedAt, 0);
+          const nodeMs = Math.max(0, end - start - statementMs);
+          if (round) calls[armName].push({ run: round, response, records, statementMs, nodeMs, criticalMs: criticalPathEstimate(records, nodeMs) });
+        } catch (error) {
+          if (errnoOf(error) !== TIMEOUT_ERRNO) throw error;
+          await executor.drain();
+          out(`${scenario.name} ${armName}: timed out after ${maxMs} ms`);
+        } finally {
+          if (armName === 'current') currentAttempts.push(...executor.attempts.slice(startAttempt));
+        }
+        if (armName === 'current') {
+          prepareDelta += (await readStatus(connection, SHOW_PREPARE)) - preparesBefore;
+          reprepareDelta += (await readStatus(connection, SHOW_REPREPARE)) - repreparesBefore;
+        }
+      }
+    }
+    for (const arm of ['oracle', 'current'] as const) {
+      if (!calls[arm].length) continue;
+      const critical = summarize(calls[arm].map(call => call.criticalMs));
+      table.push(
+        `| ${scenario.name} | ${arm} | ${critical.median.toFixed(2)} (${critical.min.toFixed(2)}–${critical.max.toFixed(2)}) | ${summarize(calls[arm].map(call => call.statementMs)).median.toFixed(2)} | ${summarize(calls[arm].map(call => call.nodeMs)).median.toFixed(2)} |`
+      );
+      for (const call of calls[arm])
+        for (const record of call.records)
+          out(
+            `statement ${scenario.name} ${arm} run ${call.run}: ${contextOf(record.label)}, ${(record.endedAt - record.startedAt).toFixed(2)} ms, ${record.rows} rows, ${record.bytesSent} server bytes, ${record.jsonBytes} JSON bytes`
+          );
+    }
+    if (calls.oracle.length && calls.current.length) {
+      for (const oracleCall of calls.oracle) {
+        const currentCall = calls.current.find(call => call.run === oracleCall.run);
+        if (!currentCall) continue;
+        const a = oracleCall.response;
+        const b = currentCall.response;
+        const comparison = compareResponses(a, b);
+        (comparisons[scenario.name] ??= []).push({ run: oracleCall.run, ...comparison });
+        out(`${scenario.name} run ${oracleCall.run}: ${comparison.identical ? 'identical' : `differs ${comparison.paths.join(', ')}`}`);
+        out(`${scenario.name} run ${oracleCall.run} contradictionGroupKey: ${comparison.groupKeysIdentical ? 'identical' : 'differs'}`);
+      }
+    }
+  }
+  out(table.join('\n'));
+  const pageLoad: Partial<Record<ArmName, unknown>> = {};
+  for (const arm of ['oracle', 'current'] as const) {
+    const query = results.queryPage0[arm];
+    const facetsCalls = results.facetsDefault[arm];
+    if (query.length === runs && facetsCalls.length === runs) {
+      const loads = query.map((call, i) => Math.max(call.criticalMs, facetsCalls[i].criticalMs));
+      pageLoad[arm] = {
+        ...summarize(loads),
+        queryMedian: summarize(query.map(call => call.criticalMs)).median,
+        facetsMedian: summarize(facetsCalls.map(call => call.criticalMs)).median
+      };
+      out(`pageLoad ${arm}: ${JSON.stringify(pageLoad[arm])}`);
+    }
+  }
+  const budget = textBudget(currentAttempts.map(record => record.sql));
+  out(`distinct-text budget: ${budget.status} (${budget.count})`);
+  out(`Com_stmt_prepare delta: ${prepareDelta}; Com_stmt_reprepare delta: ${reprepareDelta}`);
+  if (argv.includes('--explain')) {
+    out('EXPLAIN output retains operation types, indentation and cost/row estimates; predicates and identifiers are redacted.');
+    const explained = new Set<string>();
+    for (const record of currentAttempts) {
+      if (explained.has(record.sql)) continue;
+      explained.add(record.sql);
+      assertReadOnlyStatement(record.sql);
+      const [rows] = await connection.query<mysql.RowDataPacket[]>(`EXPLAIN FORMAT=TREE ${record.sql}`, normalizeStatementParams(record.params));
+      out(`EXPLAIN ${explained.size}:\n${redactExplainPlan(String(rows[0]?.EXPLAIN ?? ''))}`);
+    }
+  }
+  out(CAVEATS);
+  const summary = Object.fromEntries(
+    Object.entries(results).map(([name, result]) => [
+      name,
+      Object.fromEntries((['oracle', 'current'] as const).map(arm => [arm, result[arm].length ? summarize(result[arm].map(call => call.criticalMs)) : null]))
+    ])
+  );
+  out(`ERRORS_EXPLORER_TIMING_SUMMARY ${JSON.stringify({ scenarios: summary, comparisons, pageLoad, budget })}`);
+}
+
 export async function runTimingCli(argv: readonly string[], deps: TimingDeps = {}): Promise<{ exitCode: number; error: unknown | null }> {
   const out = deps.stdout ?? console.log;
   const err = deps.stderr ?? console.error;
@@ -346,6 +739,10 @@ export async function runTimingCli(argv: readonly string[], deps: TimingDeps = {
       if (index >= 0 && !schema) throw new Error('Missing schema');
       await listCensuses(executor, schema, argv.includes('--with-group-sizes'), out);
     }
+    if (!argv.includes('--list-censuses') && argv.includes('--schema'))
+      await runMeasurements(argv, executor, connection, out, maxMs, name => {
+        scenario = name;
+      });
     for (const item of deps.scenarios ?? []) {
       scenario = item.name;
       try {
