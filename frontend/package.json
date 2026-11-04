@@ -42,6 +42,7 @@
     "apply-schema-migrations": "npx tsx scripts/apply-schema-migrations.ts",
     "apply-catalog-migrations": "npx tsx scripts/apply-catalog-migrations.ts",
     "check:schema-contract": "npx tsx scripts/check-schema-contract.ts",
+    "timing:errors-explorer": "npx tsx scripts/errors-explorer-timing.ts",
     "deploy:validations": "npx tsx scripts/deploy-validations-to-all-schemas.ts",
     "deploy:procedures": "npx tsx scripts/deploy-validations-to-all-schemas.ts --procedures-only",
     "activate:validation19": "npx tsx scripts/deploy-validations-to-all-schemas.ts --activate-validation-19",
