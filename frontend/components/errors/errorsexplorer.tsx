@@ -385,7 +385,10 @@ export default function ErrorsExplorer() {
   const filtersRestored = storageKey !== null && restoredStorageKey === storageKey;
 
   useEffect(() => {
-    if (!storageKey) return;
+    if (!storageKey) {
+      setRestoredStorageKey(null);
+      return;
+    }
     const deepLink = deepLinkRef.current;
     if (deepLink?.filters) {
       if (deepLink.appliedStorageKey === null || deepLink.appliedStorageKey === storageKey) {
@@ -415,7 +418,7 @@ export default function ErrorsExplorer() {
   }, [storageKey]);
 
   useEffect(() => {
-    if (!storageKey || !filtersRestored) return;
+    if (!filtersRestored) return;
     window.localStorage.setItem(storageKey, JSON.stringify(filters));
   }, [filters, filtersRestored, storageKey]);
 

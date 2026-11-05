@@ -279,6 +279,38 @@ describe('ErrorsExplorer deep links (#547)', () => {
     expect(savedFilters(FIRST_CENSUS_ID).exactMessages).toEqual([SAVED_MESSAGE]);
   });
 
+  it('sends one query and one facets round, both with the new census saved filter, when the census switches (#544 C1)', async () => {
+    saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
+    saveFilters(SECOND_CENSUS_ID, [SECOND_CENSUS_SAVED_MESSAGE]);
+    const { rerender } = render(<ErrorsExplorer />);
+    await expectLatestRequestsToFilter([SAVED_MESSAGE]);
+    await settle();
+    fetchMock.mockClear();
+
+    explorerState.census = { dateRanges: [{ censusID: SECOND_CENSUS_ID }] };
+    rerender(<ErrorsExplorer />);
+
+    await expectExactlyOneLoadRound([SECOND_CENSUS_SAVED_MESSAGE]);
+    expect(requestBodies(QUERY_ENDPOINT)[0].censusID).toBe(SECOND_CENSUS_ID);
+    expect(requestBodies(FACETS_ENDPOINT)[0].censusID).toBe(SECOND_CENSUS_ID);
+  });
+
+  it('sends one query and one facets round when the census scope goes away and the same census returns (#544 C1)', async () => {
+    saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
+    const { rerender } = render(<ErrorsExplorer />);
+    await expectExactlyOneLoadRound([SAVED_MESSAGE]);
+
+    explorerState.census = { dateRanges: [] };
+    rerender(<ErrorsExplorer />);
+    await settle();
+    fetchMock.mockClear();
+
+    explorerState.census = { dateRanges: [{ censusID: FIRST_CENSUS_ID }] };
+    rerender(<ErrorsExplorer />);
+
+    await expectExactlyOneLoadRound([SAVED_MESSAGE]);
+  });
+
   it('queries every census behind a grouped plot census, as getDateRangeCensusIDs lists them', async () => {
     explorerState.census = { dateRanges: [{ censusID: 9 }, { censusID: 8 }, { censusID: 9 }] };
     const expectedCensusIDs = getDateRangeCensusIDs(explorerState.census as unknown as OrgCensusRDS);
