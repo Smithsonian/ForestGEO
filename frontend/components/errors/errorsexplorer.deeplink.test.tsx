@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_ERROR_EXPLORER_FILTERS,
@@ -295,20 +295,70 @@ describe('ErrorsExplorer deep links (#547)', () => {
     expect(requestBodies(FACETS_ENDPOINT)[0].censusID).toBe(SECOND_CENSUS_ID);
   });
 
-  it('sends one query and one facets round when the census scope goes away and the same census returns (#544 C1)', async () => {
+  it('re-reads the saved filter, sending nothing while the scope is gone, when the same census returns (#544 C1)', async () => {
+    const changedWhileAway = 'Species code not found';
     saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
     const { rerender } = render(<ErrorsExplorer />);
     await expectExactlyOneLoadRound([SAVED_MESSAGE]);
+    fetchMock.mockClear();
 
     explorerState.census = { dateRanges: [] };
     rerender(<ErrorsExplorer />);
     await settle();
+    console.log(`[#544 C1 scope gone] requests while no census is selected: ${JSON.stringify(fetchMock.mock.calls.map(([input]) => String(input)))}`);
+    expect(requestBodies(QUERY_ENDPOINT), 'no query while the scope is gone').toHaveLength(0);
+    expect(requestBodies(FACETS_ENDPOINT), 'no facets request while the scope is gone').toHaveLength(0);
+
+    saveFilters(FIRST_CENSUS_ID, [changedWhileAway]);
+    explorerState.census = { dateRanges: [{ censusID: FIRST_CENSUS_ID }] };
+    rerender(<ErrorsExplorer />);
+
+    await expectExactlyOneLoadRound([changedWhileAway]);
+  });
+
+  it('does not re-apply an already-applied ?message= link when the scope goes away and the same census returns (#544 C1)', async () => {
+    const userQuickSearch = 'T-1';
+    explorerState.search = new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: LINKED_MESSAGE }).toString();
+    const { rerender, getByLabelText } = render(<ErrorsExplorer />);
+    await expectExactlyOneLoadRound([LINKED_MESSAGE]);
+
+    fireEvent.change(getByLabelText('Quick Search'), { target: { value: userQuickSearch } });
+    await waitFor(() => expect(savedFilters(FIRST_CENSUS_ID).quickSearch).toBe(userQuickSearch));
+    await settle();
     fetchMock.mockClear();
+
+    explorerState.census = { dateRanges: [] };
+    rerender(<ErrorsExplorer />);
+    await settle();
+    explorerState.census = { dateRanges: [{ censusID: FIRST_CENSUS_ID }] };
+    rerender(<ErrorsExplorer />);
+    await expectLatestRequestsToFilter([LINKED_MESSAGE]);
+    await settle();
+
+    const queries = requestBodies(QUERY_ENDPOINT);
+    const facets = requestBodies(FACETS_ENDPOINT);
+    console.log(
+      `[#544 C1 link] query quickSearch ${JSON.stringify(queries.map(body => body.filters.quickSearch))}, facets quickSearch ${JSON.stringify(facets.map(body => body.filters.quickSearch))}, stored ${JSON.stringify(savedFilters(FIRST_CENSUS_ID))}`
+    );
+    expect(queries).toHaveLength(1);
+    expect(facets).toHaveLength(1);
+    expect(queries[0].filters.quickSearch, 'the saved quick search, not the link filters').toBe(userQuickSearch);
+    expect(facets[0].filters.quickSearch).toBe(userQuickSearch);
+    expect(savedFilters(FIRST_CENSUS_ID).quickSearch, 'the link must not overwrite what the user saved').toBe(userQuickSearch);
+  });
+
+  it('applies a ?message= link that arrived while no census was selected once the census appears (#544 C1)', async () => {
+    explorerState.census = { dateRanges: [] };
+    explorerState.search = new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: LINKED_MESSAGE }).toString();
+    const { rerender } = render(<ErrorsExplorer />);
+    await settle();
+    expect(requestBodies(QUERY_ENDPOINT), 'no query before a census exists').toHaveLength(0);
 
     explorerState.census = { dateRanges: [{ censusID: FIRST_CENSUS_ID }] };
     rerender(<ErrorsExplorer />);
 
-    await expectExactlyOneLoadRound([SAVED_MESSAGE]);
+    await expectExactlyOneLoadRound([LINKED_MESSAGE]);
+    await waitFor(() => expect(savedFilters(FIRST_CENSUS_ID).exactMessages).toEqual([LINKED_MESSAGE]));
   });
 
   it('queries every census behind a grouped plot census, as getDateRangeCensusIDs lists them', async () => {

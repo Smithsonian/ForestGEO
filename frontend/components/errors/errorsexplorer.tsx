@@ -385,11 +385,12 @@ export default function ErrorsExplorer() {
   const filtersRestored = storageKey !== null && restoredStorageKey === storageKey;
 
   useEffect(() => {
+    const deepLink = deepLinkRef.current;
     if (!storageKey) {
+      if (deepLink && deepLink.appliedStorageKey !== null) deepLink.filters = null;
       setRestoredStorageKey(null);
       return;
     }
-    const deepLink = deepLinkRef.current;
     if (deepLink?.filters) {
       if (deepLink.appliedStorageKey === null || deepLink.appliedStorageKey === storageKey) {
         deepLink.appliedStorageKey = storageKey;
