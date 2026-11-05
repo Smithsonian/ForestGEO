@@ -542,6 +542,31 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     });
   });
 
+  it('sends one details request and no query request when a row is clicked (#544 C2)', async () => {
+    const defaultFetchImplementation = mockFetch.getMockImplementation() as (input: RequestInfo | URL) => Promise<Response>;
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/errors/explorer/details/')) {
+        return { ok: true, json: async () => ({ row: GRID_ROW, allErrors: [], relatedRows: [] }) } as Response;
+      }
+      return defaultFetchImplementation(input);
+    });
+    const requestedUrlsSince = (callCount: number) => mockFetch.mock.calls.slice(callCount).map(([input]) => String(input));
+
+    await mountExplorer();
+    await screen.findByTestId(`select-row-${GRID_ROW.id}`);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const callsBeforeClick = mockFetch.mock.calls.length;
+    fireEvent.click(screen.getByTestId(`select-row-${GRID_ROW.id}`));
+    await waitFor(() => expect(requestedUrlsSince(callsBeforeClick).some(url => url.includes('/api/errors/explorer/details/'))).toBe(true));
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const urlsAfterClick = requestedUrlsSince(callsBeforeClick);
+    console.log('[#544 C2] requests after click', JSON.stringify(urlsAfterClick));
+    expect(urlsAfterClick.filter(url => url.includes('/api/errors/explorer/details/'))).toHaveLength(1);
+    expect(urlsAfterClick.filter(url => url.includes('/api/errors/explorer/query'))).toHaveLength(0);
+  });
+
   it('links ingestion failures to the failed-measurement recovery modal', async () => {
     mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();

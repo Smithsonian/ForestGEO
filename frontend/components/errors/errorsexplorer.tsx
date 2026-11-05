@@ -419,6 +419,11 @@ export default function ErrorsExplorer() {
     window.localStorage.setItem(storageKey, JSON.stringify(filters));
   }, [filters, filtersRestored, storageKey]);
 
+  const selectedMeasurementIDRef = useRef<number | null>(selectedMeasurementID);
+  useEffect(() => {
+    selectedMeasurementIDRef.current = selectedMeasurementID;
+  }, [selectedMeasurementID]);
+
   const fetchRows = useCallback(
     async (scopeOverride?: ExplorerScope | null, signal?: AbortSignal, options?: RefreshOptions) => {
       const scope = scopeOverride ?? resolveExplorerScope();
@@ -447,8 +452,9 @@ export default function ErrorsExplorer() {
         }
         setResults(data);
         setHasLoadedRows(true);
-        if (selectedMeasurementID && !data.rows.some(row => row.coreMeasurementID === selectedMeasurementID)) {
-          setDetails(current => (current?.row?.coreMeasurementID === selectedMeasurementID ? null : current));
+        const currentSelection = selectedMeasurementIDRef.current;
+        if (currentSelection && !data.rows.some(row => row.coreMeasurementID === currentSelection)) {
+          setDetails(current => (current?.row?.coreMeasurementID === currentSelection ? null : current));
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -459,7 +465,7 @@ export default function ErrorsExplorer() {
         if (!signal?.aborted) setLoadingRows(false);
       }
     },
-    [filters, paginationModel.page, paginationModel.pageSize, resolveExplorerScope, selectedMeasurementID]
+    [filters, paginationModel.page, paginationModel.pageSize, resolveExplorerScope]
   );
 
   const fetchFacets = useCallback(
