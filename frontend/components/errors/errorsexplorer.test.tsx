@@ -212,6 +212,11 @@ function makeApplyResultBody(overrides: Partial<ApplyResult> = {}): ApplyResult 
   };
 }
 
+const SETTLE_MS = 50;
+const settle = () => new Promise(resolve => setTimeout(resolve, SETTLE_MS));
+const QUERY_ENDPOINT = '/api/errors/explorer/query';
+const DETAILS_ENDPOINT_PREFIX = '/api/errors/explorer/details/';
+
 const mockFetch = vi.fn();
 const mockBeginEdit = vi.fn();
 const mockConfirmDialog = vi.fn();
@@ -546,7 +551,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     const defaultFetchImplementation = mockFetch.getMockImplementation() as (input: RequestInfo | URL) => Promise<Response>;
     mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/errors/explorer/details/')) {
+      if (url.includes(DETAILS_ENDPOINT_PREFIX)) {
         return { ok: true, json: async () => ({ row: GRID_ROW, allErrors: [], relatedRows: [] }) } as Response;
       }
       return defaultFetchImplementation(input);
@@ -555,16 +560,16 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
 
     await mountExplorer();
     await screen.findByTestId(`select-row-${GRID_ROW.id}`);
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await settle();
     const callsBeforeClick = mockFetch.mock.calls.length;
     fireEvent.click(screen.getByTestId(`select-row-${GRID_ROW.id}`));
-    await waitFor(() => expect(requestedUrlsSince(callsBeforeClick).some(url => url.includes('/api/errors/explorer/details/'))).toBe(true));
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await waitFor(() => expect(requestedUrlsSince(callsBeforeClick).some(url => url.includes(DETAILS_ENDPOINT_PREFIX))).toBe(true));
+    await settle();
 
     const urlsAfterClick = requestedUrlsSince(callsBeforeClick);
     console.log('[#544 C2] requests after click', JSON.stringify(urlsAfterClick));
-    expect(urlsAfterClick.filter(url => url.includes('/api/errors/explorer/details/'))).toHaveLength(1);
-    expect(urlsAfterClick.filter(url => url.includes('/api/errors/explorer/query'))).toHaveLength(0);
+    expect(urlsAfterClick.filter(url => url.includes(DETAILS_ENDPOINT_PREFIX))).toHaveLength(1);
+    expect(urlsAfterClick.filter(url => url.includes(QUERY_ENDPOINT))).toHaveLength(0);
   });
 
   it('links ingestion failures to the failed-measurement recovery modal', async () => {
