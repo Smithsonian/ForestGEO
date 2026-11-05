@@ -25,16 +25,24 @@ import {
   type PageWindow
 } from './errorsetsql';
 
+const range = (count: number, start = 1) => Array.from({ length: count }, (_, index) => start + index);
+
 const SCHEMA = 'forestgeo_testsite';
 const INVALID_SCHEMA = 'not a schema!';
 const PLOT_ID = 3;
 const KEY_FILTER: ErrorTypeKeyFilter = { allKeysMatch: false, matchingKeys: [1, 7], matchingValidationKeys: [1], matchingIngestionKeys: [7] };
 const ALL_FLAGS: FlagCombinations = { none: true, sameBatchOnly: true, duplicateOnly: true, both: true };
-const WINDOW = { limit: 25, offset: 50 };
+const PAGE_SIZE = 25;
+const LARGE_PAGE_SIZE = 500;
+const FIRST_OFFSET = 0;
+const SECOND_OFFSET = 50;
+const DEEP_OFFSET = 1000;
+const WINDOW: PageWindow = { limit: PAGE_SIZE, offset: SECOND_OFFSET };
 const MAX_CENSUS_LIST_LENGTH = 40;
-const MAX_ID_LIST_LENGTH = 300;
 const ID_LIST_LENGTHS = [1, 2, 127, 128, 129, 200, 256, 257, 300];
+const MAX_ID_LIST_LENGTH = Math.max(...ID_LIST_LENGTHS);
 const EXPECTED_STATEMENT_SHAPES = 9;
+const UNLABELLED = 'unlabelled';
 const FIRST_TABLE_REFERENCE = /\b(?:FROM|JOIN)\s+(\S+)/i;
 const SQL_PREVIEW_LENGTH = 120;
 const QUALIFIED_SCHEMA_PREFIX = `\`${SCHEMA}\`.`;
@@ -51,11 +59,17 @@ const FLAG_BIT_DUPLICATE_ONLY = 4;
 const FLAG_BIT_BOTH = 8;
 const FLAG_COMBINATION_COUNT = 16;
 const MANY_KEYS_COUNT = 50;
-const PLOT_IDS = [PLOT_ID, 41];
+const SECOND_PLOT_ID = 41;
+const PLOT_IDS = [PLOT_ID, SECOND_PLOT_ID];
+const ALL_KEYS_MATCH_VALUES = [true, false];
+const SINGLE_KEY = 7;
+const KEY_SETS: Record<string, readonly number[]> = { empty: [], single: [SINGLE_KEY], many: range(MANY_KEYS_COUNT) };
+const VALIDATION_KEY_PARITY_MODULUS = 2;
+const VALIDATION_KEY_PARITY_REMAINDER = 0;
 const PAGE_WINDOWS: PageWindow[] = [
-  { limit: 25, offset: 0 },
-  { limit: 25, offset: 50 },
-  { limit: 500, offset: 1000 }
+  { limit: PAGE_SIZE, offset: FIRST_OFFSET },
+  { limit: PAGE_SIZE, offset: SECOND_OFFSET },
+  { limit: LARGE_PAGE_SIZE, offset: DEEP_OFFSET }
 ];
 const REPRESENTATIVE_CENSUS_LENGTHS = [1, 8, 9, MAX_CENSUS_LIST_LENGTH];
 const REPRESENTATIVE_ID_LENGTHS = [1, 128, 129];
@@ -63,8 +77,7 @@ const CENSUS_CHUNKED_LENGTH = 26;
 const EXPECTED_CENSUS_CHUNK_LENGTHS = [8, 8, 8, 2];
 const EXPECTED_ID_CHUNK_LENGTHS = [128, 128, 44];
 
-const range = (count: number, start = 1) => Array.from({ length: count }, (_, index) => start + index);
-const scopeFor = (censusIDs: number[]): ErrorSetScope => ({ schema: SCHEMA, plotID: PLOT_ID, censusIDs });
+const scopeFor = (censusIDs: number[], plotID = PLOT_ID): ErrorSetScope => ({ schema: SCHEMA, plotID, censusIDs });
 const preview = (sql: string) => sql.slice(0, SQL_PREVIEW_LENGTH);
 const placeholderCount = (sql: string) => sql.match(PLACEHOLDER)?.length ?? 0;
 
@@ -73,13 +86,14 @@ interface StatementVariant {
   readonly keyFilter: ErrorTypeKeyFilter;
   readonly flags: FlagCombinations;
   readonly window: PageWindow;
+  readonly description: string;
 }
 
-const DEFAULT_VARIANT: StatementVariant = { plotID: PLOT_ID, keyFilter: KEY_FILTER, flags: ALL_FLAGS, window: WINDOW };
+const DEFAULT_VARIANT: StatementVariant = { plotID: PLOT_ID, keyFilter: KEY_FILTER, flags: ALL_FLAGS, window: WINDOW, description: 'default' };
 
 function everyStatementFor(censusIDs: number[], measurementIDs: number[], variant: StatementVariant = DEFAULT_VARIANT): BuiltStatement[] {
   return chunkCensusIDs(censusIDs).flatMap(censusChunk => {
-    const scope: ErrorSetScope = { schema: SCHEMA, plotID: variant.plotID, censusIDs: censusChunk };
+    const scope = scopeFor(censusChunk, variant.plotID);
     return [
       buildCatalogStatement(SCHEMA),
       buildPageStatement(scope, variant.keyFilter, variant.flags, variant.window),
@@ -105,24 +119,31 @@ function flagCombinationsFromBits(bits: number): FlagCombinations {
   };
 }
 
+const isValidationKey = (key: number) => key % VALIDATION_KEY_PARITY_MODULUS === VALIDATION_KEY_PARITY_REMAINDER;
+
 function keyFilterFor(allKeysMatch: boolean, keys: readonly number[]): ErrorTypeKeyFilter {
   return {
     allKeysMatch,
     matchingKeys: keys,
-    matchingValidationKeys: keys.filter(key => key % 2 === 0),
-    matchingIngestionKeys: keys.filter(key => key % 2 !== 0)
+    matchingValidationKeys: keys.filter(isValidationKey),
+    matchingIngestionKeys: keys.filter(key => !isValidationKey(key))
   };
 }
 
 function filterWindowPlotVariants(): StatementVariant[] {
-  const keySets = [[], [7], range(MANY_KEYS_COUNT)];
   const variants: StatementVariant[] = [];
   for (const plotID of PLOT_IDS) {
-    for (const allKeysMatch of [true, false]) {
-      for (const keys of keySets) {
+    for (const allKeysMatch of ALL_KEYS_MATCH_VALUES) {
+      for (const [keySetName, keys] of Object.entries(KEY_SETS)) {
         for (let bits = 0; bits < FLAG_COMBINATION_COUNT; bits++) {
           for (const window of PAGE_WINDOWS) {
-            variants.push({ plotID, keyFilter: keyFilterFor(allKeysMatch, keys), flags: flagCombinationsFromBits(bits), window });
+            variants.push({
+              plotID,
+              keyFilter: keyFilterFor(allKeysMatch, keys),
+              flags: flagCombinationsFromBits(bits),
+              window,
+              description: `plot=${plotID} allKeysMatch=${allKeysMatch} keys=${keySetName} flagBits=${bits} window=${window.limit}/${window.offset}`
+            });
           }
         }
       }
@@ -130,6 +151,12 @@ function filterWindowPlotVariants(): StatementVariant[] {
   }
   return variants;
 }
+
+const labelledStatement = (statements: BuiltStatement[], label: string): BuiltStatement => {
+  const found = statements.find(statement => readStatementLabel(statement.sql) === label);
+  if (!found) throw new Error(`no statement labelled ${label}`);
+  return found;
+};
 
 function everyBuilderWithSchema(schema: string): Array<[string, () => BuiltStatement]> {
   const scope: ErrorSetScope = { schema, plotID: PLOT_ID, censusIDs: [2] };
@@ -192,39 +219,77 @@ describe('errorsetsql statement builders', () => {
 
   it('produces exactly nine distinct statement texts across list lengths, key filters, flags, windows and plots', () => {
     const textsByLabel = new Map<string, Set<string>>();
+    const firstVariantByText = new Map<string, string>();
     const allTexts = new Set<string>();
-    let variantsRun = 0;
-    const recordAll = (statements: BuiltStatement[]) => {
-      variantsRun++;
+    let buildsRun = 0;
+    const recordBuild = (description: string, statements: BuiltStatement[]) => {
+      buildsRun++;
       for (const { sql } of statements) {
         allTexts.add(sql);
-        const label = readStatementLabel(sql) ?? 'unlabelled';
+        if (!firstVariantByText.has(sql)) firstVariantByText.set(sql, description);
+        const label = readStatementLabel(sql) ?? UNLABELLED;
         textsByLabel.set(label, (textsByLabel.get(label) ?? new Set()).add(sql));
       }
     };
+    const describeBuild = (variant: StatementVariant, censusCount: number, idCount: number) =>
+      `${variant.description} censusLength=${censusCount} idLength=${idCount}`;
 
     for (let censusCount = 1; censusCount <= MAX_CENSUS_LIST_LENGTH; censusCount++) {
       for (const idCount of ID_LIST_LENGTHS) {
-        expect(idCount).toBeLessThanOrEqual(MAX_ID_LIST_LENGTH);
-        recordAll(everyStatementFor(range(censusCount), range(idCount)));
+        recordBuild(describeBuild(DEFAULT_VARIANT, censusCount, idCount), everyStatementFor(range(censusCount), range(idCount)));
       }
     }
-    const listLengthVariantsRun = variantsRun;
+    const listLengthBuildsRun = buildsRun;
 
     const filterVariants = filterWindowPlotVariants();
     for (const variant of filterVariants) {
       for (const censusCount of REPRESENTATIVE_CENSUS_LENGTHS) {
         for (const idCount of REPRESENTATIVE_ID_LENGTHS) {
-          recordAll(everyStatementFor(range(censusCount), range(idCount), variant));
+          recordBuild(describeBuild(variant, censusCount, idCount), everyStatementFor(range(censusCount), range(idCount), variant));
         }
       }
     }
 
-    console.log(`list-length variants run: ${listLengthVariantsRun}; filter/flag/window/plot variants: ${filterVariants.length}; total builds: ${variantsRun}`);
+    const expectedListLengthBuilds = MAX_CENSUS_LIST_LENGTH * ID_LIST_LENGTHS.length;
+    const expectedFilterVariants = PLOT_IDS.length * ALL_KEYS_MATCH_VALUES.length * Object.keys(KEY_SETS).length * FLAG_COMBINATION_COUNT * PAGE_WINDOWS.length;
+    const expectedFilterBuilds = expectedFilterVariants * REPRESENTATIVE_CENSUS_LENGTHS.length * REPRESENTATIVE_ID_LENGTHS.length;
+    console.log(
+      `list-length builds: ${listLengthBuildsRun}; filter/flag/window/plot variants: ${filterVariants.length}; filter builds: ${buildsRun - listLengthBuildsRun}; total builds: ${buildsRun}`
+    );
     for (const [label, texts] of textsByLabel) console.log(`${label}: ${texts.size} distinct text(s)`);
     console.log(`distinct statement texts overall: ${allTexts.size}`);
+
+    expect(listLengthBuildsRun).toBe(expectedListLengthBuilds);
+    expect(filterVariants.length).toBe(expectedFilterVariants);
+    expect(buildsRun).toBe(expectedListLengthBuilds + expectedFilterBuilds);
+    expect([...textsByLabel.keys()].sort()).toEqual((Object.values(ERROR_EXPLORER_STATEMENT_LABELS) as string[]).sort());
+    for (const [label, texts] of textsByLabel) {
+      const firstVariants = [...texts].map(text => `  ${preview(text)}... first built by ${firstVariantByText.get(text)}`).join('\n');
+      expect(texts.size, `${label} gained ${texts.size} texts:\n${firstVariants}`).toBe(1);
+    }
     expect(allTexts.size).toBe(EXPECTED_STATEMENT_SHAPES);
-    for (const [label, texts] of textsByLabel) expect(texts.size, label).toBe(1);
+  });
+
+  it('feeds every filter, flag, window and plot variant into the page and totals params', () => {
+    const filterVariants = filterWindowPlotVariants();
+    const pageParamTuples = new Set<string>();
+    const totalsParamTuples = new Set<string>();
+    for (const variant of filterVariants) {
+      const statements = everyStatementFor(range(1), range(1), variant);
+      const pageParams = labelledStatement(statements, ERROR_EXPLORER_STATEMENT_LABELS.page).params;
+      pageParamTuples.add(JSON.stringify(pageParams));
+      totalsParamTuples.add(JSON.stringify(labelledStatement(statements, ERROR_EXPLORER_STATEMENT_LABELS.totals).params));
+      expect(pageParams.includes(SECOND_PLOT_ID), `${variant.description}: second plot id in page params ${JSON.stringify(pageParams)}`).toBe(
+        variant.plotID === SECOND_PLOT_ID
+      );
+    }
+    const expectedPageTuples = filterVariants.length;
+    const expectedTotalsTuples = filterVariants.length / PAGE_WINDOWS.length;
+    console.log(
+      `distinct page param tuples: ${pageParamTuples.size} (expected ${expectedPageTuples}); distinct totals param tuples: ${totalsParamTuples.size} (expected ${expectedTotalsTuples})`
+    );
+    expect(pageParamTuples.size).toBe(expectedPageTuples);
+    expect(totalsParamTuples.size).toBe(expectedTotalsTuples);
   });
 
   it('keeps params aligned with placeholders and pads the census slot with nulls', () => {
@@ -241,7 +306,7 @@ describe('errorsetsql statement builders', () => {
   it('binds LIMIT and OFFSET as the last two decimal-string params and rejects unsafe windows', () => {
     const { params } = buildPageStatement(scopeFor([2]), KEY_FILTER, ALL_FLAGS, WINDOW);
     console.log(`page tail params: ${JSON.stringify(params.slice(-2))}`);
-    expect(params.slice(-2)).toEqual(['25', '50']);
+    expect(params.slice(-PAGE_WINDOW_PARAM_COUNT)).toEqual([String(WINDOW.limit), String(WINDOW.offset)]);
 
     const invalidWindows = [
       { limit: -1, offset: 0 },
