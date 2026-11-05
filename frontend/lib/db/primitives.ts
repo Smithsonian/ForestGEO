@@ -10,6 +10,7 @@ import {
   settleWithinDeadline,
   trackManagedStatement
 } from '@/lib/db/connectionquarantine';
+import { normalizeStatementParams, usesTextProtocol } from '@/lib/db/statementprotocol';
 
 // JS-side backstop for statements MySQL cannot bound on its own:
 // MAX_EXECUTION_TIME applies only to top-level SELECTs, so a long CALL or
@@ -102,12 +103,6 @@ const KILL_CONNECTION_ACQUIRE_TIMEOUT_MS = 5_000;
 export const KILL_STATEMENT_DEADLINE_MS = 5_000;
 
 export const KILL_DEADLINE_EXCEEDED_EVENT = 'db.kill.deadline_exceeded';
-
-/**
- * Statements MySQL cannot prepare (E6), or that mysql2's execute() cannot carry: CALL, savepoints, USE and
- * START TRANSACTION go over the text protocol.
- */
-const TEXT_PROTOCOL_STATEMENT = /^\s*(?:CALL\b|SAVEPOINT\b|RELEASE\s+SAVEPOINT\b|ROLLBACK\s+TO\s+(?:SAVEPOINT\s+)?|USE\b|START\s+TRANSACTION\b)/i;
 
 export type KillQueryOutcome =
   /** KILL QUERY was accepted by the server. */
@@ -242,14 +237,10 @@ export async function runQuery(connection: PoolConnection, query: string, params
   const untrackStatement = trackManagedStatement(connection, reason => cancelStatement(reason));
   let inFlight: Promise<unknown> | undefined;
   try {
-    if (params) {
-      params = params.map(param => (param === undefined ? null : param));
-    }
-    // mysql2's execute() uses prepared statements, which don't support
-    // bulk VALUES arrays, CALL, savepoint commands, USE or START TRANSACTION.
-    const hasBulkValues = params?.some(p => Array.isArray(p) && p.length > 0 && Array.isArray(p[0]));
-    const useTextProtocol = TEXT_PROTOCOL_STATEMENT.test(query) || hasBulkValues;
-    inFlight = useTextProtocol ? connection.query(query, params) : connection.execute(query, params);
+    // execute() prepares statements, which cannot carry bulk VALUES arrays, CALL, savepoints, USE or START TRANSACTION;
+    // statementprotocol.ts holds the rule that routes those over query().
+    const normalizedParams = normalizeStatementParams(params);
+    inFlight = usesTextProtocol(query, normalizedParams) ? connection.query(query, normalizedParams) : connection.execute(query, normalizedParams);
     const [rows] = (await Promise.race([inFlight, timer, cancelled])) as [any, unknown];
     return rows;
   } catch (error: any) {
