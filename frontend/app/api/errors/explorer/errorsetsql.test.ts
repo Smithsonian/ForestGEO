@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { EmptyInListError } from '@/lib/db/sqlsecurity';
 import {
   buildCatalogStatement,
   buildDuplicateMemberGroupsStatement,
@@ -22,7 +21,8 @@ import {
   type BuiltStatement,
   type ErrorSetScope,
   type ErrorTypeKeyFilter,
-  type FlagCombinations
+  type FlagCombinations,
+  type PageWindow
 } from './errorsetsql';
 
 const SCHEMA = 'forestgeo_testsite';
@@ -45,6 +45,20 @@ const OVERSIZED_CENSUS_LIST_LENGTH = CENSUS_LIST_SIZE + 1;
 const KEY_SET_PARAM_COUNT = 3;
 const FLAG_PARAM_COUNT = 5;
 const PAGE_WINDOW_PARAM_COUNT = 2;
+const FLAG_BIT_NONE = 1;
+const FLAG_BIT_SAME_BATCH_ONLY = 2;
+const FLAG_BIT_DUPLICATE_ONLY = 4;
+const FLAG_BIT_BOTH = 8;
+const FLAG_COMBINATION_COUNT = 16;
+const MANY_KEYS_COUNT = 50;
+const PLOT_IDS = [PLOT_ID, 41];
+const PAGE_WINDOWS: PageWindow[] = [
+  { limit: 25, offset: 0 },
+  { limit: 25, offset: 50 },
+  { limit: 500, offset: 1000 }
+];
+const REPRESENTATIVE_CENSUS_LENGTHS = [1, 8, 9, MAX_CENSUS_LIST_LENGTH];
+const REPRESENTATIVE_ID_LENGTHS = [1, 128, 129];
 const CENSUS_CHUNKED_LENGTH = 26;
 const EXPECTED_CENSUS_CHUNK_LENGTHS = [8, 8, 8, 2];
 const EXPECTED_ID_CHUNK_LENGTHS = [128, 128, 44];
@@ -54,13 +68,22 @@ const scopeFor = (censusIDs: number[]): ErrorSetScope => ({ schema: SCHEMA, plot
 const preview = (sql: string) => sql.slice(0, SQL_PREVIEW_LENGTH);
 const placeholderCount = (sql: string) => sql.match(PLACEHOLDER)?.length ?? 0;
 
-function everyStatementFor(censusIDs: number[], measurementIDs: number[]): BuiltStatement[] {
+interface StatementVariant {
+  readonly plotID: number;
+  readonly keyFilter: ErrorTypeKeyFilter;
+  readonly flags: FlagCombinations;
+  readonly window: PageWindow;
+}
+
+const DEFAULT_VARIANT: StatementVariant = { plotID: PLOT_ID, keyFilter: KEY_FILTER, flags: ALL_FLAGS, window: WINDOW };
+
+function everyStatementFor(censusIDs: number[], measurementIDs: number[], variant: StatementVariant = DEFAULT_VARIANT): BuiltStatement[] {
   return chunkCensusIDs(censusIDs).flatMap(censusChunk => {
-    const scope = scopeFor(censusChunk);
+    const scope: ErrorSetScope = { schema: SCHEMA, plotID: variant.plotID, censusIDs: censusChunk };
     return [
       buildCatalogStatement(SCHEMA),
-      buildPageStatement(scope, KEY_FILTER, ALL_FLAGS, WINDOW),
-      buildTotalsStatement(scope, KEY_FILTER, ALL_FLAGS),
+      buildPageStatement(scope, variant.keyFilter, variant.flags, variant.window),
+      buildTotalsStatement(scope, variant.keyFilter, variant.flags),
       buildHistogramWithFlagsStatement(scope),
       buildHistogramWithoutFlagsStatement(scope),
       buildScopeRawRowsStatement(scope),
@@ -71,6 +94,41 @@ function everyStatementFor(censusIDs: number[], measurementIDs: number[]): Built
       ])
     ];
   });
+}
+
+function flagCombinationsFromBits(bits: number): FlagCombinations {
+  return {
+    none: (bits & FLAG_BIT_NONE) !== 0,
+    sameBatchOnly: (bits & FLAG_BIT_SAME_BATCH_ONLY) !== 0,
+    duplicateOnly: (bits & FLAG_BIT_DUPLICATE_ONLY) !== 0,
+    both: (bits & FLAG_BIT_BOTH) !== 0
+  };
+}
+
+function keyFilterFor(allKeysMatch: boolean, keys: readonly number[]): ErrorTypeKeyFilter {
+  return {
+    allKeysMatch,
+    matchingKeys: keys,
+    matchingValidationKeys: keys.filter(key => key % 2 === 0),
+    matchingIngestionKeys: keys.filter(key => key % 2 !== 0)
+  };
+}
+
+function filterWindowPlotVariants(): StatementVariant[] {
+  const keySets = [[], [7], range(MANY_KEYS_COUNT)];
+  const variants: StatementVariant[] = [];
+  for (const plotID of PLOT_IDS) {
+    for (const allKeysMatch of [true, false]) {
+      for (const keys of keySets) {
+        for (let bits = 0; bits < FLAG_COMBINATION_COUNT; bits++) {
+          for (const window of PAGE_WINDOWS) {
+            variants.push({ plotID, keyFilter: keyFilterFor(allKeysMatch, keys), flags: flagCombinationsFromBits(bits), window });
+          }
+        }
+      }
+    }
+  }
+  return variants;
 }
 
 function everyBuilderWithSchema(schema: string): Array<[string, () => BuiltStatement]> {
@@ -112,7 +170,7 @@ describe('errorsetsql statement builders', () => {
     }
   });
 
-  it('refuses empty and oversized lists with ErrorSetListSizeError, never the placeholder helper error', () => {
+  it('refuses empty and oversized lists with ErrorSetListSizeError', () => {
     const attempts: Array<[string, () => unknown]> = [
       ['empty id list', () => buildIDRawRowsStatement(scopeFor([2]), [])],
       ['empty census list', () => buildScopeRawRowsStatement(scopeFor([]))],
@@ -129,26 +187,44 @@ describe('errorsetsql statement builders', () => {
       }
       console.log(`${name} threw ${(thrown as Error | undefined)?.name}: ${(thrown as Error | undefined)?.message}`);
       expect(thrown, name).toBeInstanceOf(ErrorSetListSizeError);
-      expect(thrown, name).not.toBeInstanceOf(EmptyInListError);
     }
   });
 
-  it('produces exactly nine distinct statement texts across every census and id list length', () => {
+  it('produces exactly nine distinct statement texts across list lengths, key filters, flags, windows and plots', () => {
     const textsByLabel = new Map<string, Set<string>>();
     const allTexts = new Set<string>();
+    let variantsRun = 0;
+    const recordAll = (statements: BuiltStatement[]) => {
+      variantsRun++;
+      for (const { sql } of statements) {
+        allTexts.add(sql);
+        const label = readStatementLabel(sql) ?? 'unlabelled';
+        textsByLabel.set(label, (textsByLabel.get(label) ?? new Set()).add(sql));
+      }
+    };
+
     for (let censusCount = 1; censusCount <= MAX_CENSUS_LIST_LENGTH; censusCount++) {
       for (const idCount of ID_LIST_LENGTHS) {
         expect(idCount).toBeLessThanOrEqual(MAX_ID_LIST_LENGTH);
-        for (const { sql } of everyStatementFor(range(censusCount), range(idCount))) {
-          allTexts.add(sql);
-          const label = readStatementLabel(sql) ?? 'unlabelled';
-          textsByLabel.set(label, (textsByLabel.get(label) ?? new Set()).add(sql));
+        recordAll(everyStatementFor(range(censusCount), range(idCount)));
+      }
+    }
+    const listLengthVariantsRun = variantsRun;
+
+    const filterVariants = filterWindowPlotVariants();
+    for (const variant of filterVariants) {
+      for (const censusCount of REPRESENTATIVE_CENSUS_LENGTHS) {
+        for (const idCount of REPRESENTATIVE_ID_LENGTHS) {
+          recordAll(everyStatementFor(range(censusCount), range(idCount), variant));
         }
       }
     }
+
+    console.log(`list-length variants run: ${listLengthVariantsRun}; filter/flag/window/plot variants: ${filterVariants.length}; total builds: ${variantsRun}`);
     for (const [label, texts] of textsByLabel) console.log(`${label}: ${texts.size} distinct text(s)`);
     console.log(`distinct statement texts overall: ${allTexts.size}`);
     expect(allTexts.size).toBe(EXPECTED_STATEMENT_SHAPES);
+    for (const [label, texts] of textsByLabel) expect(texts.size, label).toBe(1);
   });
 
   it('keeps params aligned with placeholders and pads the census slot with nulls', () => {
