@@ -381,6 +381,9 @@ export default function ErrorsExplorer() {
     deepLinkRef.current = { filters: resolveErrorsExplorerDeepLinkFilters(searchParams), appliedStorageKey: null };
   }
 
+  const [restoredStorageKey, setRestoredStorageKey] = useState<string | null>(null);
+  const filtersRestored = storageKey !== null && restoredStorageKey === storageKey;
+
   useEffect(() => {
     if (!storageKey) return;
     const deepLink = deepLinkRef.current;
@@ -388,30 +391,33 @@ export default function ErrorsExplorer() {
       if (deepLink.appliedStorageKey === null || deepLink.appliedStorageKey === storageKey) {
         deepLink.appliedStorageKey = storageKey;
         setFilters(deepLink.filters);
+        setRestoredStorageKey(storageKey);
         return;
       }
       deepLink.filters = null;
     }
     try {
       const stored = window.localStorage.getItem(storageKey);
-      if (!stored) return;
-      const parsed = JSON.parse(stored);
-      setFilters({
-        ...DEFAULT_ERROR_EXPLORER_FILTERS,
-        ...parsed,
-        exactMessages: parsed?.exactMessages ?? [],
-        affectedFields: parsed?.affectedFields ?? [],
-        contradictionTypes: parsed?.contradictionTypes ?? []
-      });
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setFilters({
+          ...DEFAULT_ERROR_EXPLORER_FILTERS,
+          ...parsed,
+          exactMessages: parsed?.exactMessages ?? [],
+          affectedFields: parsed?.affectedFields ?? [],
+          contradictionTypes: parsed?.contradictionTypes ?? []
+        });
+      }
     } catch {
       // Ignore invalid saved state and use defaults.
     }
+    setRestoredStorageKey(storageKey);
   }, [storageKey]);
 
   useEffect(() => {
-    if (!storageKey) return;
+    if (!storageKey || !filtersRestored) return;
     window.localStorage.setItem(storageKey, JSON.stringify(filters));
-  }, [filters, storageKey]);
+  }, [filters, filtersRestored, storageKey]);
 
   const fetchRows = useCallback(
     async (scopeOverride?: ExplorerScope | null, signal?: AbortSignal, options?: RefreshOptions) => {
@@ -658,16 +664,18 @@ export default function ErrorsExplorer() {
   }, []);
 
   useEffect(() => {
+    if (!filtersRestored) return;
     const controller = new AbortController();
     fetchRows(undefined, controller.signal).catch(() => undefined);
     return () => controller.abort();
-  }, [fetchRows]);
+  }, [fetchRows, filtersRestored]);
 
   useEffect(() => {
+    if (!filtersRestored) return;
     const controller = new AbortController();
     fetchFacets(undefined, controller.signal).catch(() => undefined);
     return () => controller.abort();
-  }, [fetchFacets]);
+  }, [fetchFacets, filtersRestored]);
 
   useEffect(() => {
     if (!selectedMeasurementID) {

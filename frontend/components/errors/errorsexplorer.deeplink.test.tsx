@@ -121,6 +121,21 @@ async function expectLatestRequestsToFilter(exactMessages: string[]): Promise<vo
   });
 }
 
+const SETTLE_MS = 50;
+const settle = () => new Promise(resolve => setTimeout(resolve, SETTLE_MS));
+
+async function expectExactlyOneLoadRound(exactMessages: string[]): Promise<void> {
+  await expectLatestRequestsToFilter(exactMessages);
+  await settle();
+  const queries = requestBodies(QUERY_ENDPOINT);
+  const facets = requestBodies(FACETS_ENDPOINT);
+  console.log(
+    `[#544 C1] query bodies ${JSON.stringify(queries.map(body => body.filters.exactMessages))}, facets bodies ${JSON.stringify(facets.map(body => body.filters.exactMessages))}`
+  );
+  expect(queries).toHaveLength(1);
+  expect(facets).toHaveLength(1);
+}
+
 describe('ErrorsExplorer deep links (#547)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -220,6 +235,48 @@ describe('ErrorsExplorer deep links (#547)', () => {
     );
 
     await expectLatestRequestsToFilter([LINKED_MESSAGE]);
+  });
+
+  it('sends one query and one facets request on a load that restores a saved filter (#544 C1)', async () => {
+    saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
+
+    render(<ErrorsExplorer />);
+
+    await expectExactlyOneLoadRound([SAVED_MESSAGE]);
+  });
+
+  it('sends one query and one facets request on a ?message= load (#544 C1)', async () => {
+    explorerState.search = new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: LINKED_MESSAGE }).toString();
+
+    render(<ErrorsExplorer />);
+
+    await expectExactlyOneLoadRound([LINKED_MESSAGE]);
+  });
+
+  it('keeps a plain saved filter under React StrictMode: requests carry it and it stays saved (#544 C1)', async () => {
+    saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
+
+    render(
+      <React.StrictMode>
+        <ErrorsExplorer />
+      </React.StrictMode>
+    );
+
+    await expectLatestRequestsToFilter([SAVED_MESSAGE]);
+    await settle();
+    const queryMessages = requestBodies(QUERY_ENDPOINT).map(body => body.filters.exactMessages);
+    const facetsMessages = requestBodies(FACETS_ENDPOINT).map(body => body.filters.exactMessages);
+    const stored = window.localStorage.getItem(getFilterStorageKey(TEST_SCHEMA, TEST_PLOT_ID, FIRST_CENSUS_ID) as string);
+    console.log(`[#544 C1 strict] query ${JSON.stringify(queryMessages)}, facets ${JSON.stringify(facetsMessages)}, stored ${stored}`);
+    expect(
+      queryMessages.every(messages => messages[0] === SAVED_MESSAGE),
+      'no query went out with the default filters'
+    ).toBe(true);
+    expect(
+      facetsMessages.every(messages => messages[0] === SAVED_MESSAGE),
+      'no facets request went out with the default filters'
+    ).toBe(true);
+    expect(savedFilters(FIRST_CENSUS_ID).exactMessages).toEqual([SAVED_MESSAGE]);
   });
 
   it('queries every census behind a grouped plot census, as getDateRangeCensusIDs lists them', async () => {
