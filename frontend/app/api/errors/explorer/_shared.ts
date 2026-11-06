@@ -3,6 +3,7 @@ import {
   ContradictionType,
   dedupeNumbers,
   dedupeStrings,
+  ERROR_SOURCE,
   ErrorComparisonContext,
   ErrorDetailRecord,
   ErrorExplorerDetailsResponse,
@@ -12,6 +13,8 @@ import {
   ErrorExplorerQueryResponse,
   ErrorExplorerRow,
   ErrorFacetOption,
+  FALLBACK_ERROR_CODE,
+  FALLBACK_ERROR_MESSAGE,
   INGESTION_ERROR_FIELD_MAP
 } from '@/config/errorsexplorer';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
@@ -197,12 +200,12 @@ function buildRawErrorsQuery(schema: string): string {
             mel.PriorCensusID,
             mel.PriorDBH,
             mel.PriorHOM,
-            COALESCE(me.ErrorSource, 'ingestion') AS ErrorSource,
-            COALESCE(me.ErrorCode, 'failed_no_log') AS ErrorCode,
+            COALESCE(me.ErrorSource, '${ERROR_SOURCE.ingestion}') AS ErrorSource,
+            COALESCE(me.ErrorCode, '${FALLBACK_ERROR_CODE}') AS ErrorCode,
             COALESCE(
               NULLIF(ve.Description, ''),
               me.ErrorMessage,
-              'Measurement is marked invalid but has no unresolved error log entry.'
+              '${FALLBACK_ERROR_MESSAGE}'
             ) AS DisplayMessage,
             COALESCE(NULLIF(ve.Criteria, ''), '') AS ValidationCriteria,
             COALESCE(NULLIF(ve.ProcedureName, ''), '') AS ProcedureName
@@ -725,7 +728,8 @@ export async function buildErrorExplorerDetails(
       uploadBatchID: row.baseRow.uploadBatchID ?? null,
       primaryErrorMessage: row.baseRow.primaryErrorMessage,
       errorCount: row.allErrors.length,
-      errorMessages: dedupeStrings(row.allErrors.map(error => error.message))
+      errorMessages: dedupeStrings(row.allErrors.map(error => error.message)),
+      inErrorSet: true
     }));
 
   return {
