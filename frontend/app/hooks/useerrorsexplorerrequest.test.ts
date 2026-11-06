@@ -146,6 +146,47 @@ describe('useErrorsExplorerRequest (P3-1)', () => {
     expect(result.current.isStale).toBe(false);
   });
 
+  it('settles a read the gate aborted: ready with its older data, idle without any', async () => {
+    const inFlight = deferred<string>();
+    const load = vi.fn(() => (load.mock.calls.length === 2 ? inFlight.promise : Promise.resolve('rows')));
+    const { result, rerender } = renderHook(({ gated, requestKey }) => useErrorsExplorerRequest({ requestKey, load, gated }), {
+      initialProps: { gated: false, requestKey: 'k' }
+    });
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => {
+      void result.current.reload();
+    });
+    expect(result.current.status, 'the reload is in flight').toBe('loading');
+
+    rerender({ gated: true, requestKey: 'k' });
+    await act(async () => {
+      inFlight.resolve('rows that the gate made stale');
+    });
+
+    console.log(
+      '[view-errors gate aborts read]',
+      JSON.stringify({ status: result.current.status, isStale: result.current.isStale, data: result.current.data })
+    );
+    expect(result.current.status, 'a gated read is not "loading" for as long as the gate holds').toBe('ready');
+    expect(result.current.isStale).toBe(true);
+    expect(result.current.data, 'the older data stays').toBe('rows');
+  });
+
+  it('settles a first read the gate aborted as idle', async () => {
+    const firstRead = deferred<string>();
+    const load = vi.fn(() => firstRead.promise);
+    const { result, rerender } = renderHook(({ gated }) => useErrorsExplorerRequest({ requestKey: 'k', load, gated }), { initialProps: { gated: false } });
+    await waitFor(() => expect(result.current.status).toBe('loading'));
+
+    rerender({ gated: true });
+    await act(async () => {
+      firstRead.resolve('rows');
+    });
+
+    expect(result.current.status).toBe('idle');
+    expect(result.current.data).toBeNull();
+  });
+
   it('never shows data from another data scope, but keeps it across keys of the same scope', async () => {
     const next = deferred<string>();
     const load = vi.fn(() => (load.mock.calls.length === 1 ? Promise.resolve('census A totals') : next.promise));

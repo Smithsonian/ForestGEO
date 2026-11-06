@@ -145,7 +145,12 @@ export function useErrorsExplorerRequest<T>({
   useEffect(() => {
     if (requestKey === null) return;
     if (gated) {
-      setState(previous => (previous.staleUntilSuccess ? previous : { ...previous, staleUntilSuccess: true }));
+      // The gate aborted any read in flight (the previous run's cleanup), and an aborted read settles nothing itself.
+      setState(previous => ({
+        ...previous,
+        staleUntilSuccess: true,
+        status: previous.status === 'loading' ? (previous.data !== null ? 'ready' : 'idle') : previous.status
+      }));
       return;
     }
     void run();
