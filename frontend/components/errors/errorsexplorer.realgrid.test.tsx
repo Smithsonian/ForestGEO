@@ -646,18 +646,20 @@ describe('a census change during an edit (P2-4, P2-8, A4)', () => {
     await expectNewCensusUnlocked();
   });
 
-  it('does not lock the page when the group of an open dialog leaves the facets, then the dialog is cancelled', async () => {
+  /** A delayed facets response removes the edited group while its preview dialog is open: the grid that owns the lock unmounts. */
+  async function openPreviewThenDropEditedGroup(routeOverrides: Partial<Record<keyof typeof ROUTES, FetchRoute['respond']>> = {}) {
     const user = userEvent.setup();
     let dropGroup = false;
     let holdFacets = false;
     const heldFacets = holdResponses(() =>
       jsonResponse(facetsResponse(dropGroup ? [DRIFT_FACET] : [VALIDATION_FACET], { affectedMeasurements: 2, errorTypeCount: 1 }))
     );
-    installPageFetch(
+    const network = installPageFetch(
       defaultRoutes({
         facets: request =>
           holdFacets ? heldFacets.route(request) : jsonResponse(facetsResponse([VALIDATION_FACET], { affectedMeasurements: 2, errorTypeCount: 1 })),
-        query: driftOr(rowsQuery)
+        query: driftOr(rowsQuery),
+        ...routeOverrides
       })
     );
     render(<PageWithSidebarStandIn />);
@@ -672,12 +674,40 @@ describe('a census change during an edit (P2-4, P2-8, A4)', () => {
     holdFacets = false;
     await act(async () => heldFacets.held.release());
     await waitFor(() => expect(screen.queryByRole('grid', { name: GROUP_LABEL }), 'the edited group left the facets').toBeNull());
-    await user.click(screen.getByTestId('edit-preview-cancel'));
+    return { user, network };
+  }
+
+  async function expectPageControlsUnlocked(topic: string) {
     await act(async () => new Promise(resolve => setTimeout(resolve, UNMOUNT_SETTLE_MS)));
     const showDisabled = showButtons().map(button => (button as HTMLButtonElement).disabled);
-    console.log('[view-errors group left during dialog]', JSON.stringify({ showDisabled }));
+    console.log(`[view-errors ${topic}]`, JSON.stringify({ showDisabled }));
     expect(showDisabled.some(Boolean), 'Show is enabled: no lock is held for a row that is gone').toBe(false);
     expect(screen.getByRole('textbox', { name: VIEW_ERRORS_TEXT.searchLabel })).toBeEnabled();
+  }
+
+  it('does not lock the page when the group of an open dialog leaves the facets, then the dialog is cancelled', async () => {
+    const { user } = await openPreviewThenDropEditedGroup();
+    await user.click(screen.getByTestId('edit-preview-cancel'));
+    await expectPageControlsUnlocked('group left during dialog');
+  });
+
+  it('releases the lock when the group of an open dialog leaves the facets, then the dialog is applied', async () => {
+    const { user, network } = await openPreviewThenDropEditedGroup();
+    const readsBeforeApply = network.requests.length;
+    await user.click(screen.getByTestId('edit-preview-apply'));
+    await waitFor(() => expect(network.bodiesFor(ROUTES.apply)).toHaveLength(1));
+    await waitFor(() => expect(network.bodiesFor(ROUTES.rebuild)).toHaveLength(2));
+    await expectPageControlsUnlocked('group left during dialog, applied');
+    const readsAfterApply = network.urlsSince(readsBeforeApply).filter(url => ROUTES.query.test(url) || ROUTES.facets.test(url));
+    console.log('[view-errors group left during dialog, applied reads]', JSON.stringify(readsAfterApply));
+    expect(readsAfterApply.length, 'the committed save refreshes the reads even though its grid is gone').toBeGreaterThan(0);
+  });
+
+  it('releases the lock when the group of an open dialog leaves the facets, the dialog is applied and the view rebuild fails', async () => {
+    const { user } = await openPreviewThenDropEditedGroup({ rebuildSummary: () => jsonResponse({ error: 'Lock wait timeout exceeded' }, 500) });
+    await user.click(screen.getByTestId('edit-preview-apply'));
+    expect(await screen.findByText(VIEW_ERRORS_ALERTS.savedButRefreshFailed('Lock wait timeout exceeded'))).toBeInTheDocument();
+    await expectPageControlsUnlocked('group left during dialog, applied, rebuild failed');
   });
 
   it("completes an apply in flight: the undo toast carries the operation's census and no read goes to the old scope", async () => {

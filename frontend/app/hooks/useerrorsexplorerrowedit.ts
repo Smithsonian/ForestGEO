@@ -226,9 +226,11 @@ export function useErrorsExplorerRowEdit({ readScope, readScopeKey, refreshAllRe
         return updatedRow;
       }
       setLock({ ...lockAtSave, phase: 'refreshing', readsStarted: false });
+      // The owning grid is gone, so no row-mode callback will start the reads that release this lock.
+      if (unmountedOwnerOperationIDRef.current === lockAtSave.operationID) startReadRefresh();
       return updatedRow;
     },
-    [ownsPageContinuation, recordPendingRebuild, setLock]
+    [ownsPageContinuation, recordPendingRebuild, setLock, startReadRefresh]
   );
 
   const processRowUpdate = useCallback(
