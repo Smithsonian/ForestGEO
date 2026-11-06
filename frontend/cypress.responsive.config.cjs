@@ -114,6 +114,24 @@ module.exports = defineConfig({
       framework: 'next',
       bundler: 'webpack',
       webpackConfig: {
+        module: {
+          rules: [
+            {
+              // @mui/x-virtualizer imports @mui/utils without declaring it, so it lands on the hoisted v5 CommonJS build, whose
+              // default export a strict-ESM importer cannot call. Give it the ESM build of the v7 copy that @mui/x-data-grid itself resolves.
+              test: /\.js$/,
+              include: path.dirname(require.resolve('@mui/x-virtualizer/package.json')),
+              resolve: {
+                alias: {
+                  '@mui/utils': path.join(
+                    path.dirname(require.resolve('@mui/utils/package.json', { paths: [require.resolve('@mui/x-data-grid/package.json')] })),
+                    'esm'
+                  )
+                }
+              }
+            }
+          ]
+        },
         resolve: {
           extensions: ['.js', '.jsx', '.ts', '.tsx'],
           mainFields: ['main', 'module', 'browser'],
