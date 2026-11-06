@@ -1252,7 +1252,7 @@ export async function clearUnresolvedValidationErrors(
   const clearedErrorCount = readAffectedRows(deleted);
   if (clearedErrorCount === 0) await assertIsTrueFallbackRow(cm, input, rows[0].isValidated, transactionID);
   await cm.executeQuery(
-    safeFormatQuery(input.schema, 'UPDATE ??.coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?'),
+    safeFormatQuery(input.schema, '/* skip_changelog */ UPDATE ??.coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?'),
     [input.measurementID],
     transactionID
   );
