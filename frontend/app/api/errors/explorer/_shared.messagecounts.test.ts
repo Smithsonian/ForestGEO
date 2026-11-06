@@ -10,6 +10,7 @@ const SECOND_PARAM_INDEX = 1;
 const RAW_ERRORS_QUERY_MARKER = 'SELECT ms.CoreMeasurementID';
 const DUPLICATE_GROUPS_QUERY_MARKER = 'GROUP_CONCAT(DISTINCT ms.CoreMeasurementID';
 const SAME_BATCH_QUERY_MARKER = 'GROUP_CONCAT(DISTINCT cm.CoreMeasurementID';
+const ACTIVE_COUNT_QUERY_MARKER = 'SELECT COUNT(*) AS n';
 const FALLBACK_INVALID_MESSAGE = 'Measurement is marked invalid but has no unresolved error log entry.';
 const SHRINKAGE_MESSAGE = 'DBH shrank between censuses';
 const MISSING_SPECIES_MESSAGE = 'Species code is not in the species list';
@@ -55,6 +56,7 @@ function recordingConnection() {
     executeQuery: async (sql: string, params: number[]) => {
       executedQueries.push(sql);
       const censusID = params[SECOND_PARAM_INDEX];
+      if (sql.includes(ACTIVE_COUNT_QUERY_MARKER)) return [{ n: 0 }];
       if (sql.includes(DUPLICATE_GROUPS_QUERY_MARKER)) return DUPLICATE_GROUPS_BY_CENSUS[censusID];
       if (sql.includes(SAME_BATCH_QUERY_MARKER)) return SAME_BATCH_GROUPS_BY_CENSUS[censusID];
       if (sql.includes(RAW_ERRORS_QUERY_MARKER)) return RAW_ROWS_BY_CENSUS[censusID];

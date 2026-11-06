@@ -46,6 +46,7 @@ import {
   ContradictionType,
   CONTRADICTION_LABELS,
   DEFAULT_ERROR_EXPLORER_FILTERS,
+  EMPTY_ERROR_CENSUS_TOTALS,
   ErrorExplorerDetailsResponse,
   ErrorComparisonContext,
   ErrorExplorerFacetsResponse,
@@ -96,7 +97,9 @@ const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
     duplicateTagStem: 0,
     sameBatchConflict: 0
   },
-  totalMeasurements: 0
+  totalMeasurements: 0,
+  errorTypes: [],
+  censusTotals: EMPTY_ERROR_CENSUS_TOTALS
 };
 
 const DEFAULT_RESULTS: ErrorExplorerQueryResponse = {

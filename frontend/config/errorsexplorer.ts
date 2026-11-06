@@ -119,6 +119,10 @@ export interface ErrorExplorerFacetsResponse {
   };
   /** Distinct measurements in scope after the facet filters; sourceCounts can overlap. */
   totalMeasurements: number;
+  /** Identities among the page-matching errors of the rows the query would return (spec Data → Facets). */
+  errorTypes: ErrorTypeFacet[];
+  /** Census totals: every grouped row, ignoring the filters. */
+  censusTotals: ErrorCensusTotals;
 }
 
 export interface RelatedContradictionRow {
@@ -515,6 +519,18 @@ export interface ErrorCensusTotals {
   duplicateTagStem: number;
   sameBatchConflict: number;
 }
+
+export const EMPTY_ERROR_CENSUS_TOTALS: ErrorCensusTotals = {
+  affectedMeasurements: 0,
+  activeMeasurements: 0,
+  errorTypeCount: 0,
+  validation: 0,
+  ingestion: 0,
+  failedMeasurements: 0,
+  contradictions: 0,
+  duplicateTagStem: 0,
+  sameBatchConflict: 0
+};
 
 export function buildErrorTypeKey({ source, code, message }: ErrorTypeIdentity): string {
   return JSON.stringify([source, code, message]);

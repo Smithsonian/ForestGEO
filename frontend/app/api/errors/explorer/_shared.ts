@@ -15,13 +15,17 @@ import {
   ErrorExplorerQueryResponse,
   ErrorExplorerRow,
   ErrorFacetOption,
+  ErrorCensusTotals,
+  ErrorTypeFacet,
   ErrorTypeIdentity,
+  buildErrorTypeKey,
   FALLBACK_ERROR_CODE,
   FALLBACK_ERROR_MESSAGE,
   INGESTION_ERROR_FIELD_MAP
 } from '@/config/errorsexplorer';
 import { type ColumnValueRow, compareRowsBySortItem, matchesColumnFilter } from '@/lib/errorsexplorer/columnquery';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildActiveMeasurementCountQuery, readActiveMeasurementCount } from '@/lib/activemeasurementcount';
 
 type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
 
@@ -679,17 +683,67 @@ export async function buildErrorMessageCounts(
   return { totalMeasurements: rows.length, messages: sortFacetOptions(countMeasurementsPerMessage(rows).entries()) };
 }
 
+interface ErrorTypeAccumulator {
+  facet: ErrorTypeFacet;
+  measurementIDs: Set<number>;
+  fields: Set<string>;
+}
+
+function compareErrorTypeFacets(a: ErrorTypeFacet, b: ErrorTypeFacet): number {
+  return b.count - a.count || a.message.localeCompare(b.message) || a.source.localeCompare(b.source) || a.code.localeCompare(b.code);
+}
+
+/** Uses the query's own predicate, so each count equals that identity's query totalRows with no column filter. */
+function buildErrorTypeFacets(rows: GroupedErrorRow[], filters: ErrorExplorerFilters): ErrorTypeFacet[] {
+  const byIdentity = new Map<string, ErrorTypeAccumulator>();
+  rows.forEach(row => {
+    const matchingErrors = materializeMatchingErrors(row, filters);
+    if (!rowMatchesFilters(row, matchingErrors, filters)) return;
+    matchingErrors.forEach(error => {
+      const key = buildErrorTypeKey(error);
+      const entry = byIdentity.get(key) ?? {
+        facet: { source: error.source, code: error.code, message: error.message, fields: [], count: 0, hasContradiction: false },
+        measurementIDs: new Set<number>(),
+        fields: new Set<string>()
+      };
+      entry.measurementIDs.add(Number(row.baseRow.coreMeasurementID));
+      error.fields.forEach(field => entry.fields.add(field));
+      if (row.baseRow.hasContradiction) entry.facet.hasContradiction = true;
+      byIdentity.set(key, entry);
+    });
+  });
+  return Array.from(byIdentity.values())
+    .map(entry => ({ ...entry.facet, fields: Array.from(entry.fields), count: entry.measurementIDs.size }))
+    .sort(compareErrorTypeFacets);
+}
+
+function buildCensusTotals(rows: GroupedErrorRow[], activeMeasurements: number): ErrorCensusTotals {
+  const hasSource = (row: GroupedErrorRow, source: 'validation' | 'ingestion') => row.allErrors.some(error => error.source === source);
+  return {
+    affectedMeasurements: rows.length,
+    activeMeasurements,
+    errorTypeCount: new Set(rows.flatMap(row => row.allErrors.map(buildErrorTypeKey))).size,
+    validation: rows.filter(row => hasSource(row, 'validation')).length,
+    ingestion: rows.filter(row => hasSource(row, 'ingestion')).length,
+    failedMeasurements: rows.filter(row => row.baseRow.isFailedRow).length,
+    contradictions: rows.filter(row => row.baseRow.hasContradiction).length,
+    duplicateTagStem: rows.filter(row => row.baseRow.contradictionTypes.includes('duplicate_tag_stem')).length,
+    sameBatchConflict: rows.filter(row => row.baseRow.contradictionTypes.includes('same_batch_conflict')).length
+  };
+}
+
 export async function buildErrorExplorerFacets(
   connectionManager: ExplorerConnection,
   request: Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters'>
 ): Promise<ErrorExplorerFacetsResponse> {
-  const groupedRows = await fetchGroupedErrorRows(
-    connectionManager,
-    request.schema,
-    request.plotID,
-    request.censusIDs?.length ? request.censusIDs : request.censusID
-  );
-  const scopedRows = Array.from(groupedRows.values()).filter(row => {
+  const censusIDs = request.censusIDs?.length ? request.censusIDs : [request.censusID];
+  const activeCountQuery = buildActiveMeasurementCountQuery(request.schema, request.plotID, censusIDs);
+  const [groupedRows, activeRows] = await Promise.all([
+    fetchGroupedErrorRows(connectionManager, request.schema, request.plotID, censusIDs),
+    connectionManager.executeQuery(activeCountQuery.sql, activeCountQuery.params)
+  ]);
+  const allRows = Array.from(groupedRows.values());
+  const scopedRows = allRows.filter(row => {
     if (request.filters.source !== 'all' && !row.allErrors.some(error => error.source === request.filters.source)) {
       return false;
     }
@@ -721,7 +775,9 @@ export async function buildErrorExplorerFacets(
       duplicateTagStem: scopedRows.filter(row => row.baseRow.contradictionTypes.includes('duplicate_tag_stem')).length,
       sameBatchConflict: scopedRows.filter(row => row.baseRow.contradictionTypes.includes('same_batch_conflict')).length
     },
-    totalMeasurements: scopedRows.length
+    totalMeasurements: scopedRows.length,
+    errorTypes: buildErrorTypeFacets(allRows, request.filters),
+    censusTotals: buildCensusTotals(allRows, readActiveMeasurementCount(activeRows))
   };
 }
 

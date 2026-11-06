@@ -9,6 +9,7 @@ import type {
   ErrorExplorerRow,
   RelatedContradictionRow
 } from '../../config/errorsexplorer';
+import { EMPTY_ERROR_CENSUS_TOTALS } from '../../config/errorsexplorer';
 import { canonicalDiffToRowPatch, mockEditPlanFlow, type EditPlanApplyContext, type EditPlanApplyResponse } from './edit-plan-helpers';
 
 function getContradictionTypes(row: Pick<ErrorExplorerRow, 'contradictionTypes' | 'contradictionType'>): ContradictionType[] {
@@ -100,7 +101,9 @@ function deriveFacets(rows: ErrorExplorerRow[]): ErrorExplorerFacetsResponse {
       duplicateTagStem: rows.filter(row => getContradictionTypes(row).includes('duplicate_tag_stem')).length,
       sameBatchConflict: rows.filter(row => getContradictionTypes(row).includes('same_batch_conflict')).length
     },
-    totalMeasurements: rows.length
+    totalMeasurements: rows.length,
+    errorTypes: [],
+    censusTotals: EMPTY_ERROR_CENSUS_TOTALS
   };
 }
 

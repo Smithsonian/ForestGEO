@@ -74,6 +74,9 @@ const rawErrorRows = [
 function makeConnection() {
   return {
     executeQuery: vi.fn(async (query: string) => {
+      if (query.includes('SELECT COUNT(*) AS n')) {
+        return [{ n: 0 }];
+      }
       if (query.includes('measurement_error_log')) {
         return rawErrorRows;
       }
@@ -158,7 +161,7 @@ describe('API response shape contracts', () => {
   it('keeps Errors Explorer facets stable for filters and chips', async () => {
     const facets = await buildErrorExplorerFacets(makeConnection(), makeRequest());
 
-    expect(facets).toEqual({
+    expect(facets).toMatchObject({
       messages: [
         { value: 'Invalid species reference', count: 1 },
         { value: 'Species mismatch', count: 1 }
@@ -174,5 +177,7 @@ describe('API response shape contracts', () => {
       },
       totalMeasurements: 2
     });
+    expect(facets).toHaveProperty('errorTypes');
+    expect(facets).toHaveProperty('censusTotals');
   });
 });

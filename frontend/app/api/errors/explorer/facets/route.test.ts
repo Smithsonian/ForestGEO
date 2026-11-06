@@ -4,6 +4,8 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 
 const ROUTE_CONTEXT = { params: Promise.resolve({}) };
+const RAW_ERRORS_QUERY_MARKER = 'AS DisplayMessage';
+const ACTIVE_COUNT_QUERY_MARKER = 'SELECT COUNT(*) AS n';
 
 // Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
 // A 'global' admin passes the per-site access gate.
@@ -39,73 +41,76 @@ describe('POST /api/errors/explorer/facets', () => {
 
   it('returns message and field facets scoped to the current census', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    vi.spyOn(cm, 'executeQuery')
-      .mockResolvedValueOnce([
-        {
-          CoreMeasurementID: 101,
-          PlotID: 5,
-          CensusID: 7,
-          QuadratID: 1,
-          TreeID: 11,
-          StemGUID: 21,
-          SpeciesID: 31,
-          TreeTag: 'TREE-1',
-          StemTag: 'A',
-          SpeciesName: 'Species 1',
-          SubspeciesName: null,
-          SpeciesCode: 'SP1',
-          QuadratName: 'Q1',
-          StemLocalX: 10,
-          StemLocalY: 20,
-          MeasurementDate: '2026-01-01',
-          MeasuredDBH: 5.1,
-          MeasuredHOM: 1.3,
-          IsValidated: false,
-          MeasurementDescription: 'row 101',
-          Attributes: null,
-          UserDefinedFields: '{}',
-          UploadFileID: 'file-1',
-          UploadBatchID: 'batch-1',
-          ErrorSource: 'validation',
-          ErrorCode: '5',
-          DisplayMessage: 'Duplicate tree/stem tag',
-          ValidationCriteria: 'treeTag;stemTag',
-          ProcedureName: 'Validation 5'
-        },
-        {
-          CoreMeasurementID: 102,
-          PlotID: 5,
-          CensusID: 7,
-          QuadratID: 1,
-          TreeID: 12,
-          StemGUID: 22,
-          SpeciesID: 32,
-          TreeTag: 'TREE-2',
-          StemTag: 'B',
-          SpeciesName: 'Species 2',
-          SubspeciesName: null,
-          SpeciesCode: 'SP2',
-          QuadratName: 'Q2',
-          StemLocalX: 12,
-          StemLocalY: 22,
-          MeasurementDate: '2026-01-02',
-          MeasuredDBH: 6.2,
-          MeasuredHOM: 1.4,
-          IsValidated: false,
-          MeasurementDescription: 'row 102',
-          Attributes: null,
-          UserDefinedFields: '{}',
-          UploadFileID: 'file-1',
-          UploadBatchID: 'batch-1',
-          ErrorSource: 'ingestion',
-          ErrorCode: 'DUPLICATE_TAG_CONFLICT',
-          DisplayMessage: 'Conflicting duplicate TreeTag/StemTag rows detected in upload batch',
-          ValidationCriteria: '',
-          ProcedureName: ''
-        }
-      ])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+    const rawErrorRows = [
+      {
+        CoreMeasurementID: 101,
+        PlotID: 5,
+        CensusID: 7,
+        QuadratID: 1,
+        TreeID: 11,
+        StemGUID: 21,
+        SpeciesID: 31,
+        TreeTag: 'TREE-1',
+        StemTag: 'A',
+        SpeciesName: 'Species 1',
+        SubspeciesName: null,
+        SpeciesCode: 'SP1',
+        QuadratName: 'Q1',
+        StemLocalX: 10,
+        StemLocalY: 20,
+        MeasurementDate: '2026-01-01',
+        MeasuredDBH: 5.1,
+        MeasuredHOM: 1.3,
+        IsValidated: false,
+        MeasurementDescription: 'row 101',
+        Attributes: null,
+        UserDefinedFields: '{}',
+        UploadFileID: 'file-1',
+        UploadBatchID: 'batch-1',
+        ErrorSource: 'validation',
+        ErrorCode: '5',
+        DisplayMessage: 'Duplicate tree/stem tag',
+        ValidationCriteria: 'treeTag;stemTag',
+        ProcedureName: 'Validation 5'
+      },
+      {
+        CoreMeasurementID: 102,
+        PlotID: 5,
+        CensusID: 7,
+        QuadratID: 1,
+        TreeID: 12,
+        StemGUID: 22,
+        SpeciesID: 32,
+        TreeTag: 'TREE-2',
+        StemTag: 'B',
+        SpeciesName: 'Species 2',
+        SubspeciesName: null,
+        SpeciesCode: 'SP2',
+        QuadratName: 'Q2',
+        StemLocalX: 12,
+        StemLocalY: 22,
+        MeasurementDate: '2026-01-02',
+        MeasuredDBH: 6.2,
+        MeasuredHOM: 1.4,
+        IsValidated: false,
+        MeasurementDescription: 'row 102',
+        Attributes: null,
+        UserDefinedFields: '{}',
+        UploadFileID: 'file-1',
+        UploadBatchID: 'batch-1',
+        ErrorSource: 'ingestion',
+        ErrorCode: 'DUPLICATE_TAG_CONFLICT',
+        DisplayMessage: 'Conflicting duplicate TreeTag/StemTag rows detected in upload batch',
+        ValidationCriteria: '',
+        ProcedureName: ''
+      }
+    ];
+    vi.spyOn(cm, 'executeQuery').mockImplementation(async (query: unknown) => {
+      const sql = String(query);
+      if (sql.includes(RAW_ERRORS_QUERY_MARKER)) return rawErrorRows;
+      if (sql.includes(ACTIVE_COUNT_QUERY_MARKER)) return [{ n: 0 }];
+      return [];
+    });
 
     const response = await POST(
       new Request('http://localhost/api/errors/explorer/facets', {
@@ -180,7 +185,9 @@ describe('POST /api/errors/explorer/facets', () => {
             { ...rawRow, ErrorCode: 'INVALID_SPECIES', DisplayMessage: FIRST_MESSAGE },
             { ...rawRow, ErrorCode: 'COORDINATE_DRIFT', DisplayMessage: SECOND_MESSAGE }
           ]
-        : []
+        : String(query).includes(ACTIVE_COUNT_QUERY_MARKER)
+          ? [{ n: 0 }]
+          : []
     );
 
     const response = await POST(
