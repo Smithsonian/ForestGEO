@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Box, Button, IconButton, Snackbar } from '@mui/joy';
+import { Alert, Box, Button, IconButton, Snackbar, Tooltip } from '@mui/joy';
 import CloseIcon from '@mui/icons-material/Close';
 import UndoIcon from '@mui/icons-material/Undo';
 import ailogger from '@/ailogger';
@@ -23,11 +23,13 @@ interface UndoToastProps {
   onUndo: (confirmedPlanHash?: string) => Promise<UndoRevertOutcome>;
   onDismiss: () => void;
   timeoutMs?: number;
+  /** While set, Undo is disabled and this is its tooltip (the page's edit lock, D-i). The dismiss timer keeps running. */
+  disabledReason?: string | null;
 }
 
 const DEFAULT_TIMEOUT_MS = 12000;
 
-export default function UndoToast({ editOperationID, onUndo, onDismiss, timeoutMs = DEFAULT_TIMEOUT_MS }: UndoToastProps) {
+export default function UndoToast({ editOperationID, onUndo, onDismiss, timeoutMs = DEFAULT_TIMEOUT_MS, disabledReason }: UndoToastProps) {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(true);
   const [previewPlan, setPreviewPlan] = useState<EditPlan | null>(null);
@@ -181,17 +183,27 @@ export default function UndoToast({ editOperationID, onUndo, onDismiss, timeoutM
               // fully clickable siblings instead of a button under an
               // absolutely-positioned overlay.
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Button
-                  size="sm"
-                  variant="solid"
-                  color="primary"
-                  onClick={handleUndoClick}
-                  loading={busy}
-                  disabled={busy || !!previewPlan}
-                  data-testid="undo-toast-undo"
-                >
-                  Undo
-                </Button>
+                {disabledReason ? (
+                  <Tooltip title={disabledReason}>
+                    <span>
+                      <Button size="sm" variant="solid" color="primary" disabled data-testid="undo-toast-undo">
+                        Undo
+                      </Button>
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="solid"
+                    color="primary"
+                    onClick={handleUndoClick}
+                    loading={busy}
+                    disabled={busy || !!previewPlan}
+                    data-testid="undo-toast-undo"
+                  >
+                    Undo
+                  </Button>
+                )}
                 <IconButton variant="plain" size="sm" onClick={triggerDismiss} data-testid="undo-toast-dismiss" aria-label="Dismiss">
                   <CloseIcon />
                 </IconButton>
