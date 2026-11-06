@@ -15,6 +15,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (/FOR UPDATE/.test(sql) && /coremeasurements cm/.test(sql)) return [{ CoreMeasurementID: 42, StemGUID: 7 }];
       if (/census c/.test(sql)) return [{ PlotCensusNumber: 1 }];
       if (/upload_sessions|validation_runs/.test(sql)) return [];
+      if (/^SELECT me\.ErrorCode/.test(sql.trim())) return [];
       return { affectedRows: 1 };
     }),
     beginTransaction: vi.fn(async () => TRANSACTION_ID),

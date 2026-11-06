@@ -3,6 +3,8 @@ import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { MAX_STORED_DECIMAL, parseFiniteBase10Number } from '@/config/editplan/fieldpolicy';
 import { INGESTION_STAGE_ERROR_CODES } from '@/config/errorsexplorer';
+import { toTxExecutor } from '@/config/utils';
+import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutation';
 
 export const INGESTION_ERROR_SOURCE = 'ingestion' as const;
 export const VALIDATION_ERROR_SOURCE = 'validation' as const;
@@ -1178,7 +1180,16 @@ export interface ClearValidationErrorsInput {
   plotID: number;
   censusID: number;
   measurementID: number;
+  /** `unifiedchangelog.ChangedBy` for the audit row; the signed-in user, never a cookie. */
+  changedBy: string;
 }
+
+interface RemovedValidationError {
+  ErrorCode: string;
+  ErrorMessage: string;
+}
+
+const COREMEASUREMENTS_TABLE_NAME = 'coremeasurements';
 
 function readAffectedRows(result: unknown): number {
   const affectedRows =
@@ -1210,12 +1221,57 @@ async function assertIsTrueFallbackRow(cm: ConnectionManager, input: ClearValida
   if (!markedInvalid || (await countUnresolvedIngestionStageEntries(cm, input, transactionID)) > 0) throw new NothingToClearError(input.measurementID);
 }
 
+async function readClearableValidationErrors(
+  cm: ConnectionManager,
+  input: ClearValidationErrorsInput,
+  transactionID: string
+): Promise<RemovedValidationError[]> {
+  const rows = await cm.executeQuery(
+    safeFormatQuery(
+      input.schema,
+      `SELECT me.ErrorCode AS ErrorCode, me.ErrorMessage AS ErrorMessage
+         FROM ??.measurement_error_log mel
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+        WHERE mel.MeasurementID = ? AND me.ErrorSource = ? AND me.ErrorCode NOT IN (${buildInPlaceholders(INGESTION_STAGE_ERROR_CODES.length)})
+          AND mel.IsResolved = FALSE
+        ORDER BY me.ErrorCode ASC`
+    ),
+    [input.measurementID, VALIDATION_ERROR_SOURCE, ...INGESTION_STAGE_ERROR_CODES],
+    transactionID
+  );
+  if (!Array.isArray(rows)) throw new Error(`validation error read returned no row set for measurement ${input.measurementID}`);
+  return rows.map(row => ({ ErrorCode: String(row.ErrorCode), ErrorMessage: String(row.ErrorMessage) }));
+}
+
+async function recordClearInChangelog(
+  cm: ConnectionManager,
+  input: ClearValidationErrorsInput,
+  transactionID: string,
+  previousIsValidated: unknown,
+  removedErrors: RemovedValidationError[]
+): Promise<void> {
+  await recordMutation({
+    tx: toTxExecutor(cm, transactionID),
+    schema: input.schema,
+    tableName: COREMEASUREMENTS_TABLE_NAME,
+    recordID: input.measurementID,
+    operation: ChangelogOperation.UPDATE,
+    oldRowState: { IsValidated: previousIsValidated === null ? null : Number(previousIsValidated), ValidationErrors: removedErrors },
+    newRowState: { IsValidated: null },
+    changedBy: input.changedBy,
+    plotID: input.plotID,
+    censusID: input.censusID
+  });
+}
+
 /**
  * Inside the caller's transaction: locks the row, refuses a failed or out-of-scope row, deletes its unresolved
  * validation-source log entries except the ingestion-stage codes (20, 21), which no validation run can recreate, and
  * sets IsValidated = NULL so the next validation run checks it again. A row with nothing deleted is reset only when it
  * is marked invalid and has no unresolved ingestion-stage entry either (the true fallback row); otherwise
- * NothingToClearError, and the caller rolls back. The caller rebuilds the stored views on the same transaction before committing.
+ * NothingToClearError, and the caller rolls back. Last, it writes one unifiedchangelog row, scoped by the request and
+ * attributed to input.changedBy, holding the previous IsValidated and the removed errors; the connection logger skips
+ * the reset, so this row is the only record. The caller rebuilds the stored views on the same transaction before committing.
  */
 export async function clearUnresolvedValidationErrors(
   cm: ConnectionManager,
@@ -1237,6 +1293,7 @@ export async function clearUnresolvedValidationErrors(
   if (!Array.isArray(rows) || rows.length === 0) throw new ClearMeasurementNotFoundError(input.measurementID);
   if (rows[0].StemGUID === null) throw new FailedMeasurementNotClearableError(input.measurementID);
 
+  const removedErrors = await readClearableValidationErrors(cm, input, transactionID);
   const deleted = await cm.executeQuery(
     safeFormatQuery(
       input.schema,
@@ -1256,5 +1313,6 @@ export async function clearUnresolvedValidationErrors(
     [input.measurementID],
     transactionID
   );
+  await recordClearInChangelog(cm, input, transactionID, rows[0].isValidated, removedErrors);
   return { clearedErrorCount };
 }

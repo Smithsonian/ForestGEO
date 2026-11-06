@@ -47,6 +47,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (/upload_sessions/.test(sql)) return state.uploadSessions;
       if (/validation_runs/.test(sql)) return [];
       if (/FOR UPDATE/.test(sql) && /coremeasurements cm/.test(sql)) return state.measurementRow;
+      if (/^SELECT me\.ErrorCode/.test(sql.trim())) return [];
       if (/^DELETE mel/.test(sql.trim())) return { affectedRows: state.deletedLogEntries };
       if (/COUNT\(\*\) AS retainedCount/.test(sql)) return [{ retainedCount: state.retainedIngestionStageEntries }];
       if (/SET IsValidated = NULL/.test(sql)) return { affectedRows: 1 };
