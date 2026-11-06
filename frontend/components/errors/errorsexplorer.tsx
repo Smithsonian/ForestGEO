@@ -4,7 +4,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
-import { Alert, Button, CircularProgress, Stack, Typography } from '@mui/joy';
+import { Alert, Button, CircularProgress, IconButton, Stack, Typography } from '@mui/joy';
+import CloseIcon from '@mui/icons-material/Close';
 import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
@@ -232,6 +233,20 @@ export default function ErrorsExplorer() {
   const rowEdit = useErrorsExplorerRowEdit({ readScope, readScopeKey, refreshAllReads, patchRowEverywhere, showPageAlert: setPageAlert });
   const gated = rowEdit.isReadScopeGated;
   const pageLockReason = rowEdit.reasons.pageControl;
+  const clearPageAlert = useCallback(() => setPageAlert(null), []);
+
+  // An alert answers the operation that raised it: a new edit, Clear, Undo or Export, or a refresh that lifts the gate, ends it.
+  const editOperationID = rowEdit.lock?.operationID ?? null;
+  const previousEditOperationIDRef = useRef(editOperationID);
+  useEffect(() => {
+    if (editOperationID !== null && editOperationID !== previousEditOperationIDRef.current) clearPageAlert();
+    previousEditOperationIDRef.current = editOperationID;
+  }, [clearPageAlert, editOperationID]);
+  const wasGatedRef = useRef(gated);
+  useEffect(() => {
+    if (wasGatedRef.current && !gated) clearPageAlert();
+    wasGatedRef.current = gated;
+  }, [clearPageAlert, gated]);
 
   const searchParams = useSearchParams();
   // A ?message= / ?view=all link applies once per visit, on the first restore run that has a storage key. It stays
@@ -367,6 +382,7 @@ export default function ErrorsExplorer() {
     if (!sheet) return;
     const release = rowEdit.beginPageMutation('clear');
     if (!release) return;
+    clearPageAlert();
     const operation = { measurementID: sheet.row.measurementID, readScopeKey };
     setClearState({ ...operation, status: 'busy' });
     try {
@@ -394,6 +410,7 @@ export default function ErrorsExplorer() {
 
   const handleExportCsv = async () => {
     if (!readScope) return;
+    clearPageAlert();
     setIsExportingCsv(true);
     let objectUrl: string | null = null;
     let anchor: HTMLAnchorElement | null = null;
@@ -489,11 +506,18 @@ export default function ErrorsExplorer() {
           startDecorator={<ReportProblemOutlinedIcon />}
           data-testid="errors-explorer-page-alert"
           endDecorator={
-            gated ? (
-              <Button size="sm" variant="soft" color="danger" onClick={() => void rowEdit.retryRefresh()}>
-                {VIEW_ERRORS_TEXT.retryRefresh}
-              </Button>
-            ) : undefined
+            <Stack direction="row" spacing={1} alignItems="center">
+              {gated && (
+                <Button size="sm" variant="soft" color="danger" onClick={() => void rowEdit.retryRefresh()}>
+                  {VIEW_ERRORS_TEXT.retryRefresh}
+                </Button>
+              )}
+              {pageAlert !== null && (
+                <IconButton size="sm" variant="plain" color="danger" aria-label={VIEW_ERRORS_TEXT.dismissAlert} onClick={clearPageAlert}>
+                  <CloseIcon />
+                </IconButton>
+              )}
+            </Stack>
           }
         >
           {pageAlert ?? VIEW_ERRORS_ALERTS.pendingRebuild}
@@ -613,7 +637,10 @@ export default function ErrorsExplorer() {
       {rowEdit.undo && (
         <UndoToast
           editOperationID={rowEdit.undo.editOperationID}
-          onUndo={rowEdit.onUndo}
+          onUndo={confirmedPlanHash => {
+            clearPageAlert();
+            return rowEdit.onUndo(confirmedPlanHash);
+          }}
           onDismiss={rowEdit.dismissUndo}
           disabledReason={rowEdit.reasons.undo}
         />

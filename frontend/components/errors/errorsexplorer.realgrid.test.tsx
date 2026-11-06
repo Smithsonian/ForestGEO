@@ -924,3 +924,74 @@ describe('paging a grid keeps the page it navigated to', () => {
     expect(grid.querySelector(`[data-id="${SECOND_PAGE_ROW_ID}"]`), 'the saved row left the group').toBeNull();
   });
 });
+
+describe('the page alert has an end', () => {
+  const PREVIEW_REJECTION = 'species not found';
+  const SAVE_FAILED_ALERT = VIEW_ERRORS_ALERTS.saveFailed(PREVIEW_REJECTION);
+
+  async function failASaveOn(user: ReturnType<typeof userEvent.setup>, grid: HTMLElement, rowID: number) {
+    await startEdit(user, grid, rowID);
+    await changeTagAndSave(user, grid, rowID);
+    expect(await screen.findByText(SAVE_FAILED_ALERT)).toBeInTheDocument();
+    await user.click(rowAction(grid, rowID, 'Cancel'));
+    await waitFor(() => expect(editedInput(grid, rowID)).toBeNull());
+  }
+
+  it("closes with the alert's dismiss control", async () => {
+    const user = userEvent.setup();
+    installPageFetch(defaultRoutes({ preview: () => new Response(PREVIEW_REJECTION, { status: 422 }) }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await failASaveOn(user, grid, 101);
+
+    await user.click(within(screen.getByTestId('errors-explorer-page-alert')).getByRole('button', { name: VIEW_ERRORS_TEXT.dismissAlert }));
+
+    expect(screen.queryByTestId('errors-explorer-page-alert'), 'the dismissed alert is gone').toBeNull();
+  });
+
+  it('clears when the user starts the next edit', async () => {
+    const user = userEvent.setup();
+    installPageFetch(defaultRoutes({ preview: () => new Response(PREVIEW_REJECTION, { status: 422 }) }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await failASaveOn(user, grid, 101);
+
+    await startEdit(user, grid, 102);
+
+    expect(screen.queryByText(SAVE_FAILED_ALERT), 'the earlier failure is not shown over a new edit').toBeNull();
+  });
+
+  it('clears when a Clear starts', async () => {
+    const user = userEvent.setup();
+    installPageFetch(defaultRoutes({ preview: () => new Response(PREVIEW_REJECTION, { status: 422 }) }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await failASaveOn(user, grid, 101);
+    await user.click(rowAction(grid, 102, 'Details'));
+
+    await user.click(await screen.findByRole('button', { name: DETAILS_SHEET_TEXT.clearValidationErrors }));
+
+    await waitFor(() => expect(screen.queryByText(SAVE_FAILED_ALERT), 'the earlier failure is not shown over a new Clear').toBeNull());
+  });
+
+  it('clears once Retry refresh succeeds', async () => {
+    const user = userEvent.setup();
+    let rebuildFails = true;
+    installPageFetch(
+      defaultRoutes({
+        preview: () => jsonResponse(INFO_PLAN),
+        rebuildSummary: () => (rebuildFails ? jsonResponse({ error: 'Lock wait timeout exceeded' }, 500) : jsonResponse({ success: true }))
+      })
+    );
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await changeTagAndSave(user, grid, 101);
+    expect(await screen.findByText(VIEW_ERRORS_ALERTS.savedButRefreshFailed('Lock wait timeout exceeded'))).toBeInTheDocument();
+
+    rebuildFails = false;
+    await user.click(screen.getByRole('button', { name: VIEW_ERRORS_TEXT.retryRefresh }));
+
+    await waitFor(() => expect(screen.queryByTestId('errors-explorer-page-alert'), 'the refresh worked: no alert remains').toBeNull());
+  });
+});

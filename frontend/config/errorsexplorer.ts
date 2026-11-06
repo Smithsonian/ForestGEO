@@ -621,6 +621,7 @@ export const VIEW_ERRORS_TEXT = {
   rowsStale: DETAILS_SHEET_TEXT.rowsStale,
   retry: DETAILS_SHEET_TEXT.retry,
   retryRefresh: 'Retry refresh',
+  dismissAlert: 'Dismiss',
   unavailable: DETAILS_SHEET_TEXT.unavailable,
   validationChip: DETAILS_SHEET_TEXT.validationChip,
   ingestionChip: DETAILS_SHEET_TEXT.ingestionChip,
