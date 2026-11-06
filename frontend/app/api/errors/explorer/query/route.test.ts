@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
+import { ERRORS_EXPLORER_FAILURE_RESPONSES, INVALID_ERRORS_EXPLORER_REQUEST_RESPONSE } from '@/lib/errorsexplorer/explorerrequest';
+import ailogger from '@/ailogger';
 
 const ROUTE_CONTEXT = { params: Promise.resolve({}) };
 
@@ -422,5 +424,102 @@ describe('POST /api/errors/explorer/query', () => {
 
     expect(failedRow.isFailedRow).toBe(true);
     expect(resolvedRow.isFailedRow).toBe(false);
+  });
+});
+
+const VALID_BODY = { schema: 'forestgeo_testing', plotID: 5, censusID: 7, page: 0, pageSize: 25 };
+/** lib/route-authz.ts:119: fromBody turns an unparseable body into a missing schema before the handler runs. */
+const ROUTE_AUTHZ_INVALID_SCHEMA_CODE = 'INVALID_SCHEMA';
+
+function postQuery(body: unknown) {
+  return POST(
+    new Request('http://localhost/api/errors/explorer/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body)
+    }) as any,
+    ROUTE_CONTEXT
+  );
+}
+
+describe('POST /api/errors/explorer/query request validation (P1-1)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each([
+    ['a non-numeric page', { page: 'x' }],
+    ['a negative page', { page: -1 }],
+    ['page size 7', { pageSize: 7 }],
+    ['page size 101', { pageSize: 101 }],
+    ['26 census IDs', { censusIDs: Array.from({ length: 26 }, (_, index) => index + 1) }],
+    ['101 messages', { filters: { exactMessages: Array.from({ length: 101 }, (_, index) => `m${index}`) } }],
+    ['a 1,001-character message', { filters: { exactMessages: ['m'.repeat(1001)] } }],
+    ['an unknown source', { filters: { source: 'bogus' } }],
+    ['a sort field off the allow-list', { sortModel: [{ field: 'attributes', sort: 'asc' }] }],
+    [
+      'two sort items',
+      {
+        sortModel: [
+          { field: 'treeTag', sort: 'asc' },
+          { field: 'stemTag', sort: 'asc' }
+        ]
+      }
+    ],
+    [
+      'two filter items',
+      {
+        columnFilters: [
+          { field: 'treeTag', operator: 'contains', value: 'a' },
+          { field: 'stemTag', operator: 'contains', value: 'b' }
+        ]
+      }
+    ],
+    ['an operator not allowed for the kind', { columnFilters: [{ field: 'treeTag', operator: '>', value: 'a' }] }],
+    ['a text value of 201 characters', { columnFilters: [{ field: 'treeTag', operator: 'contains', value: 'a'.repeat(201) }] }],
+    ['an errorType with an unknown source', { errorType: { source: 'bogus', code: '1', message: 'm' } }]
+  ])('answers %s with the fixed 400 and runs no SQL beyond the cached schema-quarantine lookup', async (_label, overrides) => {
+    const executeQuery = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
+    const response = await postQuery({ ...VALID_BODY, ...overrides });
+    const body = await response.json();
+    console.log('[view-errors query 400]', _label, response.status, JSON.stringify(body), executeQuery.mock.calls.length);
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body).toEqual(INVALID_ERRORS_EXPLORER_REQUEST_RESPONSE);
+    expect(executeQuery).not.toHaveBeenCalled();
+  });
+
+  it("answers a malformed JSON body with the authz wrapper's 400 INVALID_SCHEMA before the handler runs", async () => {
+    const executeQuery = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
+    const response = await postQuery('{"schema":');
+    const body = await response.json();
+    console.log('[view-errors query malformed json]', response.status, JSON.stringify(body));
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe(ROUTE_AUTHZ_INVALID_SCHEMA_CODE);
+    expect(executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('answers a thrown error with the fixed 500 and logs, not returns, the exception', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const secret = 'ER_PARSE_ERROR near SELECT secret_table';
+    vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error(secret));
+    const response = await postQuery(VALID_BODY);
+    const text = await response.text();
+    console.log('[view-errors query 500]', response.status, text);
+    expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(JSON.parse(text)).toEqual(ERRORS_EXPLORER_FAILURE_RESPONSES.query);
+    expect(text).not.toContain(secret);
+    expect(vi.mocked(ailogger.error).mock.calls.some(call => call.some(argument => argument instanceof Error && argument.message === secret))).toBe(true);
+  });
+
+  it('passes errorType, sortModel and columnFilters through to the query', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const errorType = { source: 'validation', code: '5', message: 'Duplicate tree/stem tag' };
+    const sortModel = [{ field: 'treeTag', sort: 'desc' }];
+    const columnFilters = [{ field: 'stemTag', operator: 'contains', value: 'A' }];
+    const executeQuery = vi.spyOn(cm, 'executeQuery').mockResolvedValue([]);
+    const response = await postQuery({ ...VALID_BODY, errorType, sortModel, columnFilters });
+    const body = await response.json();
+    console.log('[view-errors query passthrough]', response.status, JSON.stringify(body), executeQuery.mock.calls.length);
+    expect(response.status).toBe(HTTPResponses.OK);
+    expect(body.rows, 'an empty error set answers an empty grid, so the request was parsed and run').toEqual([]);
+    expect(executeQuery).toHaveBeenCalled();
   });
 });

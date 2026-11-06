@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
+import { ERRORS_EXPLORER_FAILURE_RESPONSES, INVALID_ERRORS_EXPLORER_REQUEST_RESPONSE } from '@/lib/errorsexplorer/explorerrequest';
+import ailogger from '@/ailogger';
 
 const ROUTE_CONTEXT = { params: Promise.resolve({}) };
 const RAW_ERRORS_QUERY_MARKER = 'AS DisplayMessage';
@@ -208,5 +210,62 @@ describe('POST /api/errors/explorer/facets', () => {
     console.log('[#547 facets total]', JSON.stringify({ totalMeasurements: body.totalMeasurements, messages: body.messages }));
     expect(body.messages.map((option: { value: string }) => option.value).sort()).toEqual([SECOND_MESSAGE, FIRST_MESSAGE].sort());
     expect(body.totalMeasurements, 'two messages on one measurement are one affected measurement').toBe(1);
+  });
+});
+
+const VALID_BODY = { schema: 'forestgeo_testing', plotID: 5, censusID: 7 };
+/** lib/route-authz.ts:119: fromBody turns an unparseable body into a missing schema before the handler runs. */
+const ROUTE_AUTHZ_INVALID_SCHEMA_CODE = 'INVALID_SCHEMA';
+
+function postFacets(body: unknown) {
+  return POST(
+    new Request('http://localhost/api/errors/explorer/facets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body)
+    }) as any,
+    ROUTE_CONTEXT
+  );
+}
+
+describe('POST /api/errors/explorer/facets request validation (P1-1)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each([
+    ['26 census IDs', { censusIDs: Array.from({ length: 26 }, (_, index) => index + 1) }],
+    ['101 messages', { filters: { exactMessages: Array.from({ length: 101 }, (_, index) => `m${index}`) } }],
+    ['an unknown source', { filters: { source: 'bogus' } }],
+    ['a page, which facets do not take', { page: 0 }]
+  ])('answers %s with the fixed 400 and runs no SQL beyond the cached schema-quarantine lookup', async (_label, overrides) => {
+    const executeQuery = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
+    const response = await postFacets({ ...VALID_BODY, ...overrides });
+    const body = await response.json();
+    console.log('[view-errors facets 400]', _label, response.status, JSON.stringify(body), executeQuery.mock.calls.length);
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body).toEqual(INVALID_ERRORS_EXPLORER_REQUEST_RESPONSE);
+    expect(executeQuery).not.toHaveBeenCalled();
+  });
+
+  it("answers a malformed JSON body with the authz wrapper's 400 INVALID_SCHEMA before the handler runs", async () => {
+    const executeQuery = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
+    const response = await postFacets('{"schema":');
+    const body = await response.json();
+    console.log('[view-errors facets malformed json]', response.status, JSON.stringify(body));
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe(ROUTE_AUTHZ_INVALID_SCHEMA_CODE);
+    expect(executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('answers a thrown error with the fixed 500 and logs, not returns, the exception', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const secret = 'ER_PARSE_ERROR near SELECT secret_table';
+    vi.spyOn(cm, 'executeQuery').mockRejectedValue(new Error(secret));
+    const response = await postFacets(VALID_BODY);
+    const text = await response.text();
+    console.log('[view-errors facets 500]', response.status, text);
+    expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(JSON.parse(text)).toEqual(ERRORS_EXPLORER_FAILURE_RESPONSES.facets);
+    expect(text).not.toContain(secret);
+    expect(vi.mocked(ailogger.error).mock.calls.some(call => call.some(argument => argument instanceof Error && argument.message === secret))).toBe(true);
   });
 });
