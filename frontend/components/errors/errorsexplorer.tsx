@@ -326,7 +326,7 @@ export default function ErrorsExplorer() {
     else gridsRef.current.delete(gridKey);
   }, []);
 
-  const onRowsChange = useCallback((gridKey: string, rows: ErrorExplorerRow[], totalRows: number) => {
+  const onRowsChange = useCallback((gridKey: string, rows: ErrorExplorerRow[], totalRows: number | null) => {
     const ids = rows.map(row => Number(row.id));
     setViewState(previous => {
       const known = previous.visibleRowIDs[gridKey];

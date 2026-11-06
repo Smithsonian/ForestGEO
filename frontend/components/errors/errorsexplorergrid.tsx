@@ -103,7 +103,8 @@ export interface ErrorsExplorerGridProps {
   rowEdit: ErrorsExplorerRowEdit;
   onOpenDetails: (gridKey: string, row: ErrorExplorerRow) => void;
   registerGrid: (gridKey: string, handle: ErrorsExplorerGridHandle | null) => void;
-  onRowsChange?: (gridKey: string, rows: ErrorExplorerRow[], totalRows: number) => void;
+  /** totalRows is null until a read has answered, so a caller never mistakes loading or a failed read for an empty result. */
+  onRowsChange?: (gridKey: string, rows: ErrorExplorerRow[], totalRows: number | null) => void;
 }
 
 export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
@@ -232,9 +233,16 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridKey, registerGrid]);
 
+  const answeredTotalRows = isInfiniteOn
+    ? infinite.isLoadingMore || infinite.error
+      ? null
+      : infinite.totalRows
+    : rowsResult.status === 'ready'
+      ? rowsResult.totalRows
+      : null;
   useEffect(() => {
-    onRowsChange?.(gridKey, displayedRows, isInfiniteOn ? infinite.totalRows : rowsResult.totalRows);
-  }, [displayedRows, gridKey, infinite.totalRows, isInfiniteOn, onRowsChange, rowsResult.totalRows]);
+    onRowsChange?.(gridKey, displayedRows, answeredTotalRows);
+  }, [answeredTotalRows, displayedRows, gridKey, onRowsChange]);
 
   const priorDbhHeader = useMemo(() => resolvePriorDbhHeader(displayedRows, censusList), [displayedRows, censusList]);
   const columns = useMemo(

@@ -995,3 +995,50 @@ describe('the page alert has an end', () => {
     await waitFor(() => expect(screen.queryByTestId('errors-explorer-page-alert'), 'the refresh worked: no alert remains').toBeNull());
   });
 });
+
+describe('the flat grid empty state waits for a finished read', () => {
+  const isFlatRead = (request: { body: Record<string, unknown> | null }) => request.body?.errorType === undefined;
+  const EMPTY_STATE_TEST_ID = 'errors-explorer-empty';
+
+  it('is not shown while the first flat read is still loading, and not after it lists rows', async () => {
+    const user = userEvent.setup();
+    const flatRead = holdResponses(() => rowsQuery());
+    installPageFetch(defaultRoutes({ query: request => (isFlatRead(request) ? flatRead.route(request) : rowsQuery()) }));
+    render(<PageWithSidebarStandIn />);
+    await findLoadedGrid(GROUP_LABEL);
+
+    await chooseNoGrouping(user);
+    await waitFor(() => expect(flatRead.held.resolvers.length, 'the flat read is in flight').toBeGreaterThan(0));
+    await act(async () => new Promise(resolve => setTimeout(resolve, STAND_IN_SETTLE_MS)));
+    expect(screen.queryByTestId(EMPTY_STATE_TEST_ID), 'no empty state while the read has not answered').toBeNull();
+
+    await act(async () => flatRead.held.release());
+    const flat = await findLoadedGrid(FLAT_LABEL);
+    expect(flat.querySelector('[data-id="101"]')).not.toBeNull();
+    expect(screen.queryByTestId(EMPTY_STATE_TEST_ID)).toBeNull();
+  });
+
+  it('is not shown when the first flat read fails', async () => {
+    const user = userEvent.setup();
+    installPageFetch(defaultRoutes({ query: request => (isFlatRead(request) ? jsonResponse({ error: 'boom' }, 500) : rowsQuery()) }));
+    render(<PageWithSidebarStandIn />);
+    await findLoadedGrid(GROUP_LABEL);
+
+    await chooseNoGrouping(user);
+
+    expect(await screen.findByText(VIEW_ERRORS_TEXT.rowsLoadFailed)).toBeInTheDocument();
+    await act(async () => new Promise(resolve => setTimeout(resolve, STAND_IN_SETTLE_MS)));
+    expect(screen.queryByTestId(EMPTY_STATE_TEST_ID), 'a failed read is not "no errors match"').toBeNull();
+  });
+
+  it('is shown when the flat read answers with no rows', async () => {
+    const user = userEvent.setup();
+    installPageFetch(defaultRoutes({ query: request => (isFlatRead(request) ? jsonResponse({ rows: [], totalRows: 0 }) : rowsQuery()) }));
+    render(<PageWithSidebarStandIn />);
+    await findLoadedGrid(GROUP_LABEL);
+
+    await chooseNoGrouping(user);
+
+    expect(await screen.findByTestId(EMPTY_STATE_TEST_ID)).toHaveTextContent(VIEW_ERRORS_TEXT.emptyFiltered);
+  });
+});

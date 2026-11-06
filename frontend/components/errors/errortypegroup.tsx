@@ -40,7 +40,7 @@ export default function ErrorTypeGroup({ facet, gridKey, expanded, onToggle, col
   const errorLabelFor = useCallback(() => label, [label]);
   const parentOnRowsChange = gridProps.onRowsChange;
   const onRowsChange = useCallback(
-    (key: string, rows: ErrorExplorerRow[], totalRows: number) => {
+    (key: string, rows: ErrorExplorerRow[], totalRows: number | null) => {
       const types = Array.from(new Set(rows.flatMap(row => row.contradictionTypes)));
       setLoadedContradictionTypes(previous => (previous.join() === types.join() ? previous : types));
       parentOnRowsChange?.(key, rows, totalRows);
