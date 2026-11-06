@@ -19,6 +19,7 @@ import {
   SINGLE_ERROR_STEM_PAIR_TREE_TAG,
   SINGLE_ERROR_STEM_TAG_PAIR,
   SINGLE_ERROR_TREE_TAG_PAIR,
+  ACCENT_ONLY_TREE_TAG_PAIR,
   SINGLE_ERROR_SAME_BATCH_PAIR,
   SAME_BATCH_PLOT_MISMATCH_TREE_TAG,
   DECOY_PLOT_ID,
@@ -408,7 +409,7 @@ describe('generateEquivalenceFixture', () => {
     expect(fixture.measurements.filter(row => row.attributes === ATTRIBUTES_ONLY_TOKEN)).toHaveLength(1);
   });
 
-  it('plants one row whose summary plot differs from its census and shares its tag pair with a plot-1 pair', () => {
+  it('plants a plot-2 row in census 1 that shares its tag pair with a plot-1 duplicate pair', () => {
     const [mismatchedID] = fixture.mismatchedPlotRowIDs;
     const mismatched = fixture.measurements.find(row => row.coreMeasurementID === mismatchedID);
     const mates = fixture.measurements.filter(
@@ -440,12 +441,11 @@ describe('generateEquivalenceFixture', () => {
     expect(fixture.censuses.map(census => census.plotCensusNumber)).toEqual([null, null, null]);
   });
 
+  const rowsOf = (ids: number[]) => ids.map(id => fixture.measurements.find(row => row.coreMeasurementID === id) as FixtureMeasurement);
+  const hasUnresolvedLog = (row: FixtureMeasurement) => fixture.logs.some(log => log.measurementID === row.coreMeasurementID && !log.isResolved);
+
   it('plants three witness groups whose spellings differ only by case or accent, each with a non-error member', () => {
-    const rowsOf = (ids: number[]) => ids.map(id => fixture.measurements.find(row => row.coreMeasurementID === id) as FixtureMeasurement);
-    const errorIDs = new Set(fixture.logs.filter(log => !log.isResolved).map(log => log.measurementID));
-    const { treeTagVariants, stemTagVariants, sameBatchVariants, singleErrorTreeTagPair, singleErrorStemTagPair, singleErrorSameBatchPair } =
-      fixture.witnessGroups;
-    const hasUnresolvedLog = (row: FixtureMeasurement) => errorIDs.has(row.coreMeasurementID);
+    const { treeTagVariants, stemTagVariants, sameBatchVariants } = fixture.witnessGroups;
 
     expect(rowsOf(treeTagVariants).map(row => row.treeTag)).toEqual([...WITNESS_TREE_TAGS, WITNESS_NON_ERROR_TREE_TAG]);
     expect(new Set(rowsOf(treeTagVariants).map(row => row.stemTag)).size).toBe(1);
@@ -458,8 +458,23 @@ describe('generateEquivalenceFixture', () => {
     expect(rowsOf(stemTagVariants).map(hasUnresolvedLog)).toEqual([true, true, false]);
     expect(rowsOf(sameBatchVariants).map(hasUnresolvedLog)).toEqual([true, true, false]);
     expect(treeTagVariants.length).toBe(WITNESS_TREE_TAGS.length + 1);
+  });
+
+  it('plants four pairs with exactly one error member and one non-error member, and lists every witness row in order', () => {
+    const {
+      treeTagVariants,
+      stemTagVariants,
+      sameBatchVariants,
+      singleErrorTreeTagPair,
+      accentOnlyTreeTagPair,
+      singleErrorStemTagPair,
+      singleErrorSameBatchPair
+    } = fixture.witnessGroups;
+
     expect(rowsOf(singleErrorTreeTagPair).map(row => row.treeTag)).toEqual([...SINGLE_ERROR_TREE_TAG_PAIR]);
     expect(new Set(rowsOf(singleErrorTreeTagPair).map(row => row.stemTag)).size).toBe(1);
+    expect(rowsOf(accentOnlyTreeTagPair).map(row => row.treeTag)).toEqual([...ACCENT_ONLY_TREE_TAG_PAIR]);
+    expect(new Set(rowsOf(accentOnlyTreeTagPair).map(row => row.stemTag))).toEqual(new Set(rowsOf(singleErrorTreeTagPair).map(row => row.stemTag)));
     expect(rowsOf(singleErrorStemTagPair).map(row => row.stemTag)).toEqual([...SINGLE_ERROR_STEM_TAG_PAIR]);
     expect(new Set(rowsOf(singleErrorStemTagPair).map(row => row.treeTag))).toEqual(new Set([SINGLE_ERROR_STEM_PAIR_TREE_TAG]));
     expect(rowsOf(singleErrorSameBatchPair).map(row => row.treeTag)).toEqual([...SINGLE_ERROR_SAME_BATCH_PAIR]);
@@ -467,7 +482,7 @@ describe('generateEquivalenceFixture', () => {
       ['AAA', '1', 'file-a', 'batch-1'],
       ['BBB', '2', 'file-a', 'batch-1']
     ]);
-    [singleErrorTreeTagPair, singleErrorStemTagPair, singleErrorSameBatchPair].forEach(pair => {
+    [singleErrorTreeTagPair, accentOnlyTreeTagPair, singleErrorStemTagPair, singleErrorSameBatchPair].forEach(pair => {
       expect(rowsOf(pair).map(hasUnresolvedLog)).toEqual([true, false]);
     });
     expect(fixture.witnessRowIDs).toEqual([
@@ -475,6 +490,7 @@ describe('generateEquivalenceFixture', () => {
       ...stemTagVariants,
       ...sameBatchVariants,
       ...singleErrorTreeTagPair,
+      ...accentOnlyTreeTagPair,
       ...singleErrorStemTagPair,
       ...singleErrorSameBatchPair
     ]);

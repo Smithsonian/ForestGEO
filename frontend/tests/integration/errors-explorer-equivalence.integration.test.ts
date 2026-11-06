@@ -41,6 +41,7 @@ import {
   SINGLE_ERROR_STEM_PAIR_TREE_TAG,
   SINGLE_ERROR_STEM_TAG_PAIR,
   SINGLE_ERROR_TREE_TAG_PAIR,
+  ACCENT_ONLY_TREE_TAG_PAIR,
   type FixtureDatabase,
   type FixtureMeasurement,
   type GeneratedFixture
@@ -383,6 +384,10 @@ const COVERAGE_CASES: readonly CoverageCase[] = [
     isCovered: context => variantGroupIsFlagged(context, context.fixture.witnessGroups.singleErrorTreeTagPair, DUPLICATE)
   },
   {
+    name: 'a duplicate pair of tree tags that differ only by an accent, with exactly one error member',
+    isCovered: context => variantGroupIsFlagged(context, context.fixture.witnessGroups.accentOnlyTreeTagPair, DUPLICATE)
+  },
+  {
     name: 'a duplicate pair of case-variant stem tags with exactly one error member',
     isCovered: context => variantGroupIsFlagged(context, context.fixture.witnessGroups.singleErrorStemTagPair, DUPLICATE)
   },
@@ -413,6 +418,7 @@ function isLeftOutOfPlotOneGroups(context: CoverageContext, mismatchedID: number
   const sameBatchMates = plotOneRows.filter(row => row.uploadFileID === mismatched.uploadFileID && row.uploadBatchID === mismatched.uploadBatchID);
   return (
     sameBatchMates.length >= 2 &&
+    sameBatchMates.every(member => context.rowIDs.has(member.coreMeasurementID)) &&
     new Set(sameBatchMates.map(row => (row.speciesCode ?? '').toLowerCase())).size === 1 &&
     sameBatchMates.every(member => !flagsOf(context, member).includes(SAME_BATCH)) &&
     neverRelated
@@ -575,6 +581,14 @@ describe('errors explorer: frozen oracle against production on generated data', 
           ids: fixture.witnessGroups.singleErrorTreeTagPair,
           expectedFlag: DUPLICATE,
           spellings: [...SINGLE_ERROR_TREE_TAG_PAIR],
+          keyFor: (spelling: string) => `duplicate:${FIRST_CENSUS_ID}:${spelling}:${WITNESS_STEM_TAG}`,
+          foreignKey: `duplicate:${FIRST_CENSUS_ID}:${FOREIGN_TAG_SPELLING}:${WITNESS_STEM_TAG}`
+        },
+        {
+          name: 'accent-only tree-tag spellings with one error member',
+          ids: fixture.witnessGroups.accentOnlyTreeTagPair,
+          expectedFlag: DUPLICATE,
+          spellings: [...ACCENT_ONLY_TREE_TAG_PAIR],
           keyFor: (spelling: string) => `duplicate:${FIRST_CENSUS_ID}:${spelling}:${WITNESS_STEM_TAG}`,
           foreignKey: `duplicate:${FIRST_CENSUS_ID}:${FOREIGN_TAG_SPELLING}:${WITNESS_STEM_TAG}`
         },

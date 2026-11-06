@@ -57,6 +57,7 @@ export const WITNESS_NON_ERROR_STEM_TAG = 'SA';
 export const WITNESS_SAME_BATCH_ERROR_TREE_TAGS = ['Sb1', 'sb1'] as const;
 export const WITNESS_SAME_BATCH_NON_ERROR_TREE_TAG = 'SB1';
 export const SINGLE_ERROR_TREE_TAG_PAIR = ['Ab2', 'aB2'] as const;
+export const ACCENT_ONLY_TREE_TAG_PAIR = ['Áb3', 'Ab3'] as const;
 export const SINGLE_ERROR_STEM_PAIR_TREE_TAG = 'Wst2';
 export const SINGLE_ERROR_STEM_TAG_PAIR = ['Sd', 'sD'] as const;
 export const SINGLE_ERROR_SAME_BATCH_PAIR = ['Sb2', 'sb2'] as const;
@@ -141,6 +142,7 @@ export interface WitnessGroups {
   sameBatchVariants: number[];
   /** Each pair is [error member, non-error member]. */
   singleErrorTreeTagPair: number[];
+  accentOnlyTreeTagPair: number[];
   singleErrorStemTagPair: number[];
   singleErrorSameBatchPair: number[];
 }
@@ -815,6 +817,11 @@ function plantedRows(): PlantedRows {
     plant({ treeTag: singleErrorTreeTag, stemTag: WITNESS_STEM_TAG }, [ET.tagMismatch]),
     plant({ treeTag: singleErrorTreeTagMate, stemTag: WITNESS_STEM_TAG })
   ];
+  const [accentOnlyErrorTag, accentOnlyMateTag] = ACCENT_ONLY_TREE_TAG_PAIR;
+  const accentOnlyTreeTagPair = [
+    plant({ treeTag: accentOnlyErrorTag, stemTag: WITNESS_STEM_TAG }, [ET.tagMismatch]),
+    plant({ treeTag: accentOnlyMateTag, stemTag: WITNESS_STEM_TAG })
+  ];
   const singleErrorStemTagPair = [
     plant({ treeTag: SINGLE_ERROR_STEM_PAIR_TREE_TAG, stemTag: singleErrorStemTag }, [ET.tagMismatch]),
     plant({ treeTag: SINGLE_ERROR_STEM_PAIR_TREE_TAG, stemTag: singleErrorStemTagMate })
@@ -835,6 +842,7 @@ function plantedRows(): PlantedRows {
     stemTagVariants: [...witnessStemErrorRowIDs, witnessStemNonErrorRowID],
     sameBatchVariants: [...witnessSameBatchErrorRowIDs, witnessSameBatchNonErrorRowID],
     singleErrorTreeTagPair,
+    accentOnlyTreeTagPair,
     singleErrorStemTagPair,
     singleErrorSameBatchPair
   };
@@ -846,6 +854,7 @@ function plantedRows(): PlantedRows {
       ...witnessGroups.stemTagVariants,
       ...witnessGroups.sameBatchVariants,
       ...witnessGroups.singleErrorTreeTagPair,
+      ...witnessGroups.accentOnlyTreeTagPair,
       ...witnessGroups.singleErrorStemTagPair,
       ...witnessGroups.singleErrorSameBatchPair
     ],
