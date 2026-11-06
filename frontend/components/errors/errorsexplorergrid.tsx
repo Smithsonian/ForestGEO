@@ -140,6 +140,7 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
   // and again after the await, so no entry point reads a stale view and a response that lands gated is dropped (P2-2).
   const gatedRef = useRef(rowEdit.isReadScopeGated);
   gatedRef.current = rowEdit.isReadScopeGated;
+  const infiniteResetKey = JSON.stringify({ readScopeKey, filters, errorType, sortModel, columnFilters });
   const infinite = useInfiniteGridRows<GridRowModel>({
     fetcher: async ({ page, pageSize, signal }) => {
       if (!readScope) return { rows: [], totalRows: 0 };
@@ -149,7 +150,7 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
       return { rows: response.rows as GridRowModel[], totalRows: response.totalRows };
     },
     initialPageSize: paginationModel.pageSize,
-    resetKey: JSON.stringify({ readScopeKey, filters, errorType, sortModel, columnFilters }),
+    resetKey: infiniteResetKey,
     rowIdKey: 'coreMeasurementID',
     paginated: { rows: rowsResult.rows as GridRowModel[], totalRows: rowsResult.totalRows, isLoading: rowsResult.status === 'loading' }
   });
@@ -326,7 +327,25 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
   const infiniteReadError = infinite.error instanceof ErrorsExplorerReadGatedError ? null : infinite.error;
   const hasRows = displayedRows.length > 0;
   const firstLoadFailed = isInfiniteOn ? infiniteReadError !== null && !hasRows : rowsResult.status === 'error' && !hasRows && !rowsResult.isStale;
-  const rowsAreStale = isInfiniteOn ? rowEdit.isReadScopeGated || (infiniteReadError !== null && hasRows) : rowsResult.isStale;
+  const infiniteReadFailedWithRows = infiniteReadError !== null && hasRows;
+  const infiniteRowsMayBeOld = rowEdit.isReadScopeGated || infiniteReadFailedWithRows;
+  // Gate lifts and request starts both clear the signals above before anything newer has landed, so the warning is
+  // latched and ends only when a read lands (successfulReadCount moves) or the list is rebuilt for another scope or mode.
+  const infiniteStaleScope = `${isInfiniteOn}:${infiniteResetKey}`;
+  const [infiniteStaleLatch, setInfiniteStaleLatch] = useState<{ scope: string; successfulReadCount: number } | null>(null);
+  const infiniteStaleLatched =
+    infiniteStaleLatch !== null && infiniteStaleLatch.scope === infiniteStaleScope && infiniteStaleLatch.successfulReadCount === infinite.successfulReadCount;
+  const scopeAtLastLatchCheckRef = useRef(infiniteStaleScope);
+  useEffect(() => {
+    // On the first render of a new scope the hook has not yet discarded the previous scope's rows and error, so those are not latched.
+    const rowsAreFromThisScope = scopeAtLastLatchCheckRef.current === infiniteStaleScope;
+    scopeAtLastLatchCheckRef.current = infiniteStaleScope;
+    const mayBeOld = rowEdit.isReadScopeGated || (infiniteReadFailedWithRows && rowsAreFromThisScope);
+    if (isInfiniteOn && mayBeOld && !infiniteStaleLatched) {
+      setInfiniteStaleLatch({ scope: infiniteStaleScope, successfulReadCount: infinite.successfulReadCount });
+    }
+  }, [infinite.successfulReadCount, infiniteReadFailedWithRows, infiniteStaleLatched, infiniteStaleScope, isInfiniteOn, rowEdit.isReadScopeGated]);
+  const rowsAreStale = isInfiniteOn ? infiniteRowsMayBeOld || infiniteStaleLatched : rowsResult.isStale;
   const retry = () => {
     if (rowEdit.isReadScopeGated) void rowEdit.retryRefresh();
     else if (isInfiniteOn) infinite.retry();

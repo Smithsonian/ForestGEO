@@ -1337,5 +1337,156 @@ describe('the flat grid in infinite mode', () => {
       await waitFor(() => expect(chunkReads().length, 'Retry reads the infinite chunk again').toBe(readsBeforeRetry + 1));
       await waitFor(() => expect(screen.queryByText(VIEW_ERRORS_TEXT.rowsStale), 'the warning clears once the read succeeds').toBeNull());
     });
+
+    describe('the stale warning lasts until a recovery read succeeds (P3-2)', () => {
+      const isInfiniteChunkRead = (request: { body: Record<string, unknown> | null }) => request.body?.pageSize === INFINITE_DEFAULT_CHUNK;
+      const CHUNK_READ_FAILURE = 'chunk read exploded';
+      const SETTLE_AFTER_FAILED_RETRY_MS = 200;
+      type ChunkReadBehaviour = 'answer' | 'fail' | 'hold';
+
+      /** Chunk reads follow `behaviour` when they start; a held read then follows `heldOutcome` when released. */
+      function chunkReadControl() {
+        const control = { behaviour: 'answer' as ChunkReadBehaviour, heldOutcome: 'answer' as 'answer' | 'fail' };
+        const heldChunk = holdResponses(() => (control.heldOutcome === 'fail' ? jsonResponse({ error: CHUNK_READ_FAILURE }, 500) : rowsQuery()));
+        const query: FetchRoute['respond'] = request => {
+          if (!isInfiniteChunkRead(request)) return rowsQuery();
+          if (control.behaviour === 'hold') return heldChunk.route(request);
+          return control.behaviour === 'fail' ? jsonResponse({ error: CHUNK_READ_FAILURE }, 500) : rowsQuery();
+        };
+        return { control, held: heldChunk.held, query };
+      }
+
+      async function openInfiniteFlatGrid(user: ReturnType<typeof userEvent.setup>, network: ReturnType<typeof installPageFetch>) {
+        await findLoadedGrid(GROUP_LABEL);
+        await chooseNoGrouping(user);
+        const flat = await findLoadedGrid(FLAT_LABEL);
+        await switchFlatGridToInfinite();
+        await waitFor(() => expect(chunkReadCount(network)).toBe(1));
+        await waitFor(() => expect(flat.querySelector('[data-id="101"]')).not.toBeNull());
+        return flat;
+      }
+
+      const chunkReadCount = (network: ReturnType<typeof installPageFetch>) =>
+        network.bodiesFor(ROUTES.query).filter(body => body?.pageSize === INFINITE_DEFAULT_CHUNK).length;
+
+      async function saveRowWhileChunkReadsFail(
+        user: ReturnType<typeof userEvent.setup>,
+        flat: HTMLElement,
+        control: ReturnType<typeof chunkReadControl>['control']
+      ) {
+        control.behaviour = 'fail';
+        await startEdit(user, flat, 101);
+        await changeTagAndSave(user, flat, 101);
+        expect(await screen.findByText(VIEW_ERRORS_TEXT.rowsStale), 'the failed refresh says the rows may be out of date').toBeInTheDocument();
+      }
+
+      const staleWarning = () => screen.queryByText(VIEW_ERRORS_TEXT.rowsStale);
+
+      it('keeps the warning while the read after a failed rebuild is pending, and clears it once that read succeeds', async () => {
+        const user = userEvent.setup();
+        let rebuildFails = true;
+        const chunk = chunkReadControl();
+        const network = installPageFetch(
+          defaultRoutes({
+            preview: () => jsonResponse(INFO_PLAN),
+            rebuildSummary: () => (rebuildFails ? jsonResponse({ error: 'Lock wait timeout exceeded' }, 500) : jsonResponse({ success: true })),
+            query: chunk.query
+          })
+        );
+        render(<PageWithSidebarStandIn />);
+        const flat = await openInfiniteFlatGrid(user, network);
+        await startEdit(user, flat, 101);
+        await changeTagAndSave(user, flat, 101);
+        expect(await screen.findByText(VIEW_ERRORS_ALERTS.savedButRefreshFailed('Lock wait timeout exceeded'))).toBeInTheDocument();
+        expect(staleWarning(), 'while the rebuild is failed the grid says its rows may be old').not.toBeNull();
+
+        rebuildFails = false;
+        chunk.control.behaviour = 'hold';
+        const readsBeforeRetry = chunkReadCount(network);
+        await user.click(screen.getByRole('button', { name: VIEW_ERRORS_TEXT.retryRefresh }));
+        await waitFor(() => expect(chunkReadCount(network), 'the lifted gate sends the replacement read').toBe(readsBeforeRetry + 1));
+        await waitFor(() => expect(chunk.held.resolvers, 'and it is still unanswered').toHaveLength(1));
+        console.log(
+          '[view-errors stale warning during held recovery]',
+          JSON.stringify({ warningShown: staleWarning() !== null, pendingReads: chunk.held.resolvers.length })
+        );
+        expect(staleWarning(), 'the old rows are still the only rows, so the warning stays while the replacement read is pending').not.toBeNull();
+
+        await act(async () => chunk.held.release());
+        await waitFor(() => expect(staleWarning(), 'the replacement read succeeded: the warning clears').toBeNull());
+      });
+
+      it('keeps the warning through a held Retry and a failed Retry, and clears it when a Retry succeeds', async () => {
+        const user = userEvent.setup();
+        const chunk = chunkReadControl();
+        const network = installPageFetch(defaultRoutes({ preview: () => jsonResponse(INFO_PLAN), query: chunk.query }));
+        render(<PageWithSidebarStandIn />);
+        const flat = await openInfiniteFlatGrid(user, network);
+        await saveRowWhileChunkReadsFail(user, flat, chunk.control);
+
+        chunk.control.behaviour = 'hold';
+        chunk.control.heldOutcome = 'fail';
+        let readsBefore = chunkReadCount(network);
+        await user.click(within(staleWarning()!.closest('[role="alert"]') as HTMLElement).getByRole('button', { name: VIEW_ERRORS_TEXT.retry }));
+        await waitFor(() => expect(chunkReadCount(network)).toBe(readsBefore + 1));
+        await waitFor(() => expect(chunk.held.resolvers).toHaveLength(1));
+        console.log('[view-errors stale warning during held retry]', JSON.stringify({ warningShown: staleWarning() !== null }));
+        expect(staleWarning(), 'a held Retry has not recovered anything, so the warning stays').not.toBeNull();
+        expect(flat.querySelector('[data-id="101"]'), 'the older rows stay on screen').not.toBeNull();
+
+        await act(async () => chunk.held.release());
+        await act(async () => new Promise(resolve => setTimeout(resolve, SETTLE_AFTER_FAILED_RETRY_MS)));
+        expect(staleWarning(), 'a failed Retry leaves the warning').not.toBeNull();
+        expect(screen.queryByText(VIEW_ERRORS_TEXT.rowsLoadFailed), 'it is still a stale warning, not a first-load failure').toBeNull();
+
+        chunk.control.heldOutcome = 'answer';
+        readsBefore = chunkReadCount(network);
+        await user.click(within(staleWarning()!.closest('[role="alert"]') as HTMLElement).getByRole('button', { name: VIEW_ERRORS_TEXT.retry }));
+        await waitFor(() => expect(chunk.held.resolvers).toHaveLength(1));
+        expect(chunkReadCount(network)).toBe(readsBefore + 1);
+        expect(staleWarning(), 'the second held Retry also keeps the warning').not.toBeNull();
+
+        await act(async () => chunk.held.release());
+        await waitFor(() => expect(staleWarning(), 'a Retry that succeeded clears the warning').toBeNull());
+      });
+
+      it('clears the warning when a sort restarts the read from an empty list, and does not bring it back when that read succeeds', async () => {
+        const user = userEvent.setup();
+        const chunk = chunkReadControl();
+        const network = installPageFetch(defaultRoutes({ preview: () => jsonResponse(INFO_PLAN), query: chunk.query }));
+        render(<PageWithSidebarStandIn />);
+        const flat = await openInfiniteFlatGrid(user, network);
+        await saveRowWhileChunkReadsFail(user, flat, chunk.control);
+
+        chunk.control.behaviour = 'hold';
+        chunk.control.heldOutcome = 'answer';
+        await user.click(within(flat).getByRole('columnheader', { name: /Tree Tag/ }));
+        await waitFor(() => expect(chunk.held.resolvers, 'the sorted read is pending').toHaveLength(1));
+        console.log(
+          '[view-errors stale warning after sort]',
+          JSON.stringify({ warningShown: staleWarning() !== null, rows: flat.querySelectorAll('[data-id]').length })
+        );
+        expect(staleWarning(), 'the sort dropped the old rows, so there is nothing stale to warn about').toBeNull();
+
+        await act(async () => chunk.held.release());
+        await waitFor(() => expect(flat.querySelector('[data-id="101"]')).not.toBeNull());
+        expect(staleWarning(), 'the sorted read succeeded: no warning').toBeNull();
+      });
+
+      it('clears the warning when the census changes', async () => {
+        const user = userEvent.setup();
+        const chunk = chunkReadControl();
+        const network = installPageFetch(defaultRoutes({ preview: () => jsonResponse(INFO_PLAN), query: chunk.query }));
+        render(<PageWithSidebarStandIn />);
+        const flat = await openInfiniteFlatGrid(user, network);
+        await saveRowWhileChunkReadsFail(user, flat, chunk.control);
+
+        chunk.control.behaviour = 'hold';
+        await user.click(screen.getByRole('button', { name: SIDEBAR_STAND_IN }));
+        await act(async () => new Promise(resolve => setTimeout(resolve, STAND_IN_SETTLE_MS)));
+        console.log('[view-errors stale warning after census change]', JSON.stringify({ warningShown: staleWarning() !== null }));
+        expect(staleWarning(), 'the old census rows are gone, so is the warning').toBeNull();
+      });
+    });
   });
 });
