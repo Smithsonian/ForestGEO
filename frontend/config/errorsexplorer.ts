@@ -516,6 +516,8 @@ export interface ErrorExplorerColumnFilter {
 export const MAX_ERROR_EXPLORER_CENSUS_IDS = 25;
 export const MAX_ERROR_EXPLORER_FILTER_STRINGS = 100;
 export const MAX_ERROR_EXPLORER_FILTER_STRING_LENGTH = 1_000;
+/** measurement_errors.ErrorMessage is TEXT, so a stored message can be far longer than a filter string; its group must still be readable. */
+export const MAX_ERROR_TYPE_MESSAGE_LENGTH = 65_535;
 export const MAX_ERROR_EXPLORER_QUICK_SEARCH_LENGTH = 500;
 export const ERROR_EXPLORER_MIN_PAGE_SIZE = 10;
 export const ERROR_EXPLORER_MAX_PAGE_SIZE = 100;

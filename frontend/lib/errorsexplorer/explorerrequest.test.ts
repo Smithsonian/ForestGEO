@@ -4,7 +4,8 @@ import {
   MAX_COLUMN_FILTER_VALUE_LENGTH,
   MAX_ERROR_EXPLORER_CENSUS_IDS,
   MAX_ERROR_EXPLORER_FILTER_STRING_LENGTH,
-  MAX_ERROR_EXPLORER_FILTER_STRINGS
+  MAX_ERROR_EXPLORER_FILTER_STRINGS,
+  MAX_ERROR_TYPE_MESSAGE_LENGTH
 } from '@/config/errorsexplorer';
 import {
   errorExplorerFacetsRequestSchema,
@@ -97,6 +98,15 @@ describe('errors explorer query request', () => {
     const result = parseQuery(overrides);
     console.log('[view-errors request rejected]', _label, JSON.stringify(result.ok ? 'PARSED' : result.issues));
     expect(result.ok).toBe(false);
+  });
+
+  it('reads the group of a stored message longer than a filter string, up to the length the column holds', () => {
+    const longStoredMessage = 'm'.repeat(MAX_ERROR_EXPLORER_FILTER_STRING_LENGTH + 1);
+    const atColumnBound = 'm'.repeat(MAX_ERROR_TYPE_MESSAGE_LENGTH);
+    const overColumnBound = 'm'.repeat(MAX_ERROR_TYPE_MESSAGE_LENGTH + 1);
+    expect(parseQuery({ errorType: { source: 'ingestion', code: 'LONG', message: longStoredMessage } }).ok, 'a 1,001-character stored message').toBe(true);
+    expect(parseQuery({ errorType: { source: 'ingestion', code: 'LONG', message: atColumnBound } }).ok, 'a message filling the TEXT column').toBe(true);
+    expect(parseQuery({ errorType: { source: 'ingestion', code: 'LONG', message: overColumnBound } }).ok, 'a message no column could hold').toBe(false);
   });
 
   it('reports issue paths and codes only, never the rejected values', () => {

@@ -3,6 +3,7 @@ import {
   isErrorExplorerNumberField,
   isOperatorAllowedForField,
   isValuelessFilterOperator,
+  MAX_COLUMN_FILTER_VALUE_LENGTH,
   toFiniteNumberOrNull,
   type ErrorExplorerColumnField,
   type ErrorExplorerColumnFilter,
@@ -104,7 +105,9 @@ export function toServerColumnFilters(items: readonly GridFilterItemLike[]): Err
   if (isErrorExplorerNumberField(item.field)) {
     return typeof item.value === 'number' && Number.isFinite(item.value) ? [{ field: item.field, operator, value: item.value }] : [];
   }
-  return typeof item.value === 'string' && item.value.trim().length > 0 ? [{ field: item.field, operator, value: item.value }] : [];
+  const text = item.value;
+  const isSendableText = typeof text === 'string' && text.trim().length > 0 && text.length <= MAX_COLUMN_FILTER_VALUE_LENGTH;
+  return isSendableText ? [{ field: item.field, operator, value: text }] : [];
 }
 
 export function toServerSortModel(items: readonly GridSortItemLike[]): ErrorExplorerSortItem[] {

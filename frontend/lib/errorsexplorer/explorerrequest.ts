@@ -19,6 +19,7 @@ import {
   MAX_ERROR_EXPLORER_QUICK_SEARCH_LENGTH,
   MAX_ERROR_EXPLORER_SORT_ITEMS,
   MAX_ERROR_TYPE_CODE_LENGTH,
+  MAX_ERROR_TYPE_MESSAGE_LENGTH,
   type ErrorExplorerFilters
 } from '@/config/errorsexplorer';
 
@@ -61,7 +62,7 @@ const errorTypeSchema = z
   .object({
     source: z.enum(ERROR_SOURCE_VALUES),
     code: z.string().min(1).max(MAX_ERROR_TYPE_CODE_LENGTH),
-    message: z.string().max(MAX_ERROR_EXPLORER_FILTER_STRING_LENGTH)
+    message: z.string().max(MAX_ERROR_TYPE_MESSAGE_LENGTH)
   })
   .strict();
 

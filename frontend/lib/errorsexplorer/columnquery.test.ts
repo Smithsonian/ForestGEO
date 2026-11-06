@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ErrorExplorerColumnFilter, ErrorExplorerSortItem } from '@/config/errorsexplorer';
+import { MAX_COLUMN_FILTER_VALUE_LENGTH, type ErrorExplorerColumnFilter, type ErrorExplorerSortItem } from '@/config/errorsexplorer';
 import { compareRowsBySortItem, matchesColumnFilter, toServerColumnFilters, toServerSortModel, type ColumnValueRow } from './columnquery';
 
 const BLANK_PRIOR_ROWS: ColumnValueRow[] = [
@@ -95,6 +95,15 @@ describe('sorting', () => {
 });
 
 describe('grid model normalization', () => {
+  it('does not send a text filter longer than the bound the server rejects', () => {
+    const atBound = 'a'.repeat(MAX_COLUMN_FILTER_VALUE_LENGTH);
+    const overBound = 'a'.repeat(MAX_COLUMN_FILTER_VALUE_LENGTH + 1);
+    expect(toServerColumnFilters([{ field: 'treeTag', operator: 'contains', value: atBound }]), 'a value at the bound is sent').toEqual([
+      { field: 'treeTag', operator: 'contains', value: atBound }
+    ]);
+    expect(toServerColumnFilters([{ field: 'treeTag', operator: 'contains', value: overBound }]), 'a value over the bound would be a 400').toEqual([]);
+  });
+
   it('sends a filter only when its operator takes no value or a value was entered', () => {
     expect(toServerColumnFilters([{ field: 'treeTag', operator: 'contains', value: undefined }])).toEqual([]);
     expect(toServerColumnFilters([{ field: 'treeTag', operator: 'contains', value: '  ' }])).toEqual([]);
