@@ -1148,3 +1148,90 @@ export function buildFailedMeasurementsSelectQuery(schema: string): string {
     ) fm
   `;
 }
+
+export class ClearMeasurementNotFoundError extends Error {
+  constructor(measurementID: number) {
+    super(`measurement ${measurementID} is not an active row of this plot/census`);
+    this.name = 'ClearMeasurementNotFoundError';
+  }
+}
+
+export class FailedMeasurementNotClearableError extends Error {
+  constructor(measurementID: number) {
+    super(`measurement ${measurementID} failed ingestion (StemGUID IS NULL); correct and re-ingest it instead`);
+    this.name = 'FailedMeasurementNotClearableError';
+  }
+}
+
+/** r3 (View Data R2): no unresolved validation entry and not marked invalid, so a Clear would only reset a passed or pending row. */
+export class NothingToClearError extends Error {
+  constructor(measurementID: number) {
+    super(`measurement ${measurementID} has no unresolved validation error and is not marked invalid`);
+    this.name = 'NothingToClearError';
+  }
+}
+
+/** `IsValidated + 0` of the BIT column for a row validation marked invalid. */
+const IS_VALIDATED_FAILED = 0;
+
+export interface ClearValidationErrorsInput {
+  schema: string;
+  plotID: number;
+  censusID: number;
+  measurementID: number;
+}
+
+function readAffectedRows(result: unknown): number {
+  const affectedRows =
+    result !== null && typeof result === 'object' && 'affectedRows' in result ? Number((result as { affectedRows: unknown }).affectedRows) : Number.NaN;
+  if (!Number.isSafeInteger(affectedRows) || affectedRows < 0) throw new Error(`DELETE returned no affected-row count: ${JSON.stringify(result)}`);
+  return affectedRows;
+}
+
+/**
+ * Inside the caller's transaction: locks the row, refuses a failed or out-of-scope row, deletes its unresolved
+ * validation-source log entries and sets IsValidated = NULL so the next validation run checks it again. A row with
+ * nothing deleted is reset only when it is marked invalid (the fallback row); otherwise NothingToClearError, and the
+ * caller rolls back. The caller rebuilds the stored views on the same transaction before committing.
+ */
+export async function clearUnresolvedValidationErrors(
+  cm: ConnectionManager,
+  input: ClearValidationErrorsInput,
+  transactionID: string
+): Promise<{ clearedErrorCount: number }> {
+  const rows = await cm.executeQuery(
+    safeFormatQuery(
+      input.schema,
+      `SELECT cm.CoreMeasurementID, cm.StemGUID, cm.IsValidated + 0 AS isValidated
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON c.CensusID = cm.CensusID
+        WHERE cm.CoreMeasurementID = ? AND cm.CensusID = ? AND c.PlotID = ? AND cm.IsActive = 1
+        FOR UPDATE`
+    ),
+    [input.measurementID, input.censusID, input.plotID],
+    transactionID
+  );
+  if (!Array.isArray(rows) || rows.length === 0) throw new ClearMeasurementNotFoundError(input.measurementID);
+  if (rows[0].StemGUID === null) throw new FailedMeasurementNotClearableError(input.measurementID);
+
+  const deleted = await cm.executeQuery(
+    safeFormatQuery(
+      input.schema,
+      `DELETE mel
+         FROM ??.measurement_error_log mel
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+        WHERE mel.MeasurementID = ? AND me.ErrorSource = ? AND mel.IsResolved = FALSE`
+    ),
+    [input.measurementID, VALIDATION_ERROR_SOURCE],
+    transactionID
+  );
+  const clearedErrorCount = readAffectedRows(deleted);
+  const markedInvalid = rows[0].isValidated !== null && Number(rows[0].isValidated) === IS_VALIDATED_FAILED;
+  if (clearedErrorCount === 0 && !markedInvalid) throw new NothingToClearError(input.measurementID);
+  await cm.executeQuery(
+    safeFormatQuery(input.schema, 'UPDATE ??.coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?'),
+    [input.measurementID],
+    transactionID
+  );
+  return { clearedErrorCount };
+}
