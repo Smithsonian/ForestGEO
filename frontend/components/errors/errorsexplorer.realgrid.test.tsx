@@ -1,0 +1,742 @@
+import React from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  DETAILS_SHEET_TEXT,
+  EDIT_LOCK_TOOLTIPS,
+  VIEW_ERRORS_ALERTS,
+  VIEW_ERRORS_TEXT,
+  type ErrorExplorerRow,
+  type ErrorTypeFacet
+} from '@/config/errorsexplorer';
+import { INFINITE_DEFAULT_CHUNK } from '@/components/datagrids/hooks/useinfinitegridrows';
+import {
+  explorerRow,
+  facetOf,
+  facetsResponse,
+  FIRST_CENSUS_ID,
+  installMemoryStorage,
+  installPageFetch,
+  jsonResponse,
+  ROUTES,
+  SECOND_CENSUS_ID,
+  type FetchRoute,
+  type RecordedRequest
+} from '@/tests/fixtures/errorsexplorer/explorer-page';
+
+const page = vi.hoisted(() => ({
+  userStatus: 'global' as string,
+  censusIDs: [6, 7] as number[],
+  search: '',
+  censusList: [] as unknown[]
+}));
+
+vi.mock('@/app/contexts/compat-hooks', () => ({
+  useSiteContext: () => ({ schemaName: 'forestgeo_testing' }),
+  usePlotContext: () => ({ plotID: 22 }),
+  useOrgCensusContext: () => ({ dateRanges: page.censusIDs.map(censusID => ({ censusID })) }),
+  useOrgCensusListContext: () => page.censusList
+}));
+vi.mock('next-auth/react', () => ({ useSession: () => ({ data: { user: { userStatus: page.userStatus } } }) }));
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(page.search),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => '/measurementshub/errors'
+}));
+vi.mock('@/components/client/clientmacros', () => ({ loadSelectableOptions: vi.fn(async () => undefined) }));
+vi.mock('@/ailogger', () => ({ default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), event: vi.fn() } }));
+
+import ErrorsExplorer from './errorsexplorer';
+
+const VALIDATION_ROW = explorerRow(101, {
+  errorCodes: ['14'],
+  primaryErrorMessage: 'Flagged;Different species',
+  errorMessages: ['Flagged;Different species'],
+  errorFields: ['speciesCode']
+});
+const SECOND_CENSUS_ROW = explorerRow(102, {
+  censusID: SECOND_CENSUS_ID,
+  errorCodes: ['14'],
+  primaryErrorMessage: 'Flagged;Different species',
+  errorMessages: ['Flagged;Different species']
+});
+const VALIDATION_FACET: ErrorTypeFacet = { ...facetOf(VALIDATION_ROW, 2) };
+const GROUP_LABEL = 'Different species rows';
+const APPLY_RESULT = { updatedIDs: { coremeasurements: 102 }, applyErrors: [], editOperationID: 900, validationPending: false };
+const WARN_PLAN = {
+  dataType: 'measurementssummary',
+  targetID: 102,
+  fieldChanges: [{ field: 'MeasuredDBH', from: 10, to: 12 }],
+  effects: [],
+  maxSeverity: 'warn',
+  planHash: 'b'.repeat(64),
+  generatedAt: '2026-11-04T00:00:00Z'
+};
+
+function rowsFor(): ErrorExplorerRow[] {
+  return [VALIDATION_ROW, SECOND_CENSUS_ROW];
+}
+
+function rowsQuery() {
+  const rows = rowsFor();
+  return jsonResponse({ rows, totalRows: rows.length, summary: {} });
+}
+
+function defaultRoutes(overrides: Partial<Record<keyof typeof ROUTES, FetchRoute['respond']>> = {}): FetchRoute[] {
+  const respond: Record<keyof typeof ROUTES, FetchRoute['respond']> = {
+    facets: () => jsonResponse(facetsResponse([VALIDATION_FACET], { affectedMeasurements: 2, errorTypeCount: 1 })),
+    query: rowsQuery,
+    details: request => {
+      const id = Number(/details\/(\d+)/.exec(request.url)?.[1]);
+      const row = [VALIDATION_ROW, SECOND_CENSUS_ROW].find(candidate => candidate.coreMeasurementID === id) ?? null;
+      const allErrors = [{ source: 'validation', code: '14', message: 'Flagged;Different species', fields: ['speciesCode'], comparison: null }];
+      return jsonResponse({ row, allErrors: row ? allErrors : [], relatedRows: [] });
+    },
+    export: () => new Response('csv', { status: 200 }),
+    preview: () => jsonResponse(WARN_PLAN),
+    apply: () => jsonResponse(APPLY_RESULT),
+    revert: () => jsonResponse({ ...APPLY_RESULT, editOperationID: 901 }),
+    rebuildSummary: () => jsonResponse({ success: true }),
+    rebuildFullTable: () => jsonResponse({ success: true }),
+    rebuild: () => jsonResponse({ success: true }),
+    clear: () => jsonResponse({ clearedErrorCount: 1 }),
+    ...overrides
+  };
+  return (Object.keys(ROUTES) as Array<keyof typeof ROUTES>).map(key => ({ match: ROUTES[key], respond: respond[key] }));
+}
+
+beforeEach(() => {
+  page.userStatus = 'global';
+  page.censusIDs = [FIRST_CENSUS_ID, SECOND_CENSUS_ID];
+  page.search = '';
+  page.censusList = [];
+  installMemoryStorage();
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+function PageWithSidebarStandIn() {
+  const [, force] = React.useReducer((count: number) => count + 1, 0);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          page.censusIDs = SWITCHED_CENSUS_IDS;
+          force();
+        }}
+      >
+        Switch census (sidebar stand-in)
+      </button>
+      <ErrorsExplorer />
+    </>
+  );
+}
+
+const EDITED_FIELD = 'treeTag';
+const EDITED_TAG = 'T-101-NEW';
+const SIDEBAR_STAND_IN = 'Switch census (sidebar stand-in)';
+const SWITCHED_CENSUS_IDS = [9];
+const DRIFT_FACET: ErrorTypeFacet = {
+  source: 'ingestion',
+  code: 'COORDINATE_DRIFT',
+  message: 'Stem coordinates drifted',
+  fields: ['stemLocalX'],
+  count: 1,
+  hasContradiction: false
+};
+const DRIFT_LABEL = 'Stem coordinates drifted rows';
+const FLAT_LABEL = VIEW_ERRORS_TEXT.flatGridLabel;
+const GROUP_PAGE_SIZE = 10;
+const FIRST_DRIFT_ROW_ID = 301;
+const DRIFT_ROW_COUNT = 11;
+const STAND_IN_SETTLE_MS = 50;
+const GATE_QUIET_MS = 300;
+// 11 rows: the group's footer starts with "Go to next page" enabled, so a disabled button after locking proves the lock.
+const ELEVEN_ROWS = [
+  VALIDATION_ROW,
+  SECOND_CENSUS_ROW,
+  ...Array.from({ length: 9 }, (_, index) =>
+    explorerRow(103 + index, {
+      errorCodes: ['14'],
+      primaryErrorMessage: 'Flagged;Different species',
+      errorMessages: ['Flagged;Different species'],
+      errorFields: ['speciesCode']
+    })
+  )
+];
+const DRIFT_ROWS = Array.from({ length: DRIFT_ROW_COUNT }, (_, index) =>
+  explorerRow(FIRST_DRIFT_ROW_ID + index, {
+    errorSources: ['ingestion'],
+    errorCodes: [DRIFT_FACET.code],
+    primaryErrorMessage: DRIFT_FACET.message,
+    errorMessages: [DRIFT_FACET.message],
+    errorFields: DRIFT_FACET.fields
+  })
+);
+const INFO_PLAN = { ...WARN_PLAN, maxSeverity: 'info' };
+
+interface Held {
+  resolvers: Array<() => void>;
+  release: () => void;
+}
+
+/** Holds every matching response until release(); `respond` builds the real response at release time. */
+function holdResponses(respond: FetchRoute['respond']): { route: FetchRoute['respond']; held: Held } {
+  const held: Held = {
+    resolvers: [],
+    release: () => held.resolvers.splice(0).forEach(resolve => resolve())
+  };
+  const route: FetchRoute['respond'] = request =>
+    new Promise<Response>(resolve => {
+      held.resolvers.push(() => resolve(respond(request)));
+    });
+  return { route, held };
+}
+
+function pagedQuery(rows: ErrorExplorerRow[]): FetchRoute['respond'] {
+  return request => {
+    const pageIndex = Number(request.body?.page ?? 0);
+    const pageSize = Number(request.body?.pageSize ?? GROUP_PAGE_SIZE);
+    return jsonResponse({ rows: rows.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize), totalRows: rows.length, summary: {} });
+  };
+}
+
+function driftOr(groupRows: FetchRoute['respond']): FetchRoute['respond'] {
+  return request =>
+    (request.body?.errorType as { code?: string } | undefined)?.code === DRIFT_FACET.code ? pagedQuery(DRIFT_ROWS)(request) : groupRows(request);
+}
+
+function actionsCell(grid: HTMLElement, rowID: number): HTMLElement {
+  const found = grid.querySelector(`[data-id="${rowID}"] [data-field="actions"]`);
+  if (!found)
+    throw new Error(`No actions cell for row ${rowID}. Rows: ${Array.from(grid.querySelectorAll('[data-id]'), row => row.getAttribute('data-id')).join(',')}`);
+  return found as HTMLElement;
+}
+
+function editedInput(grid: HTMLElement, rowID: number): HTMLInputElement | null {
+  return grid.querySelector(`[data-id="${rowID}"] [data-field="${EDITED_FIELD}"] input`);
+}
+
+function rowAction(grid: HTMLElement, rowID: number, name: 'Edit' | 'Save' | 'Cancel' | 'Details'): HTMLElement {
+  return within(actionsCell(grid, rowID)).getByRole('menuitem', { name });
+}
+
+async function startEdit(user: ReturnType<typeof userEvent.setup>, grid: HTMLElement, rowID: number) {
+  await user.click(rowAction(grid, rowID, 'Edit'));
+  await waitFor(() => expect(editedInput(grid, rowID), `row ${rowID} opened for edit`).not.toBeNull());
+}
+
+async function changeTagAndSave(user: ReturnType<typeof userEvent.setup>, grid: HTMLElement, rowID: number) {
+  const input = editedInput(grid, rowID) as HTMLInputElement;
+  await user.clear(input);
+  await user.type(input, EDITED_TAG);
+  await user.click(rowAction(grid, rowID, 'Save'));
+}
+
+function showButtons(): HTMLElement[] {
+  return within(screen.getByRole('group', { name: VIEW_ERRORS_TEXT.showLabel })).getAllByRole('button');
+}
+
+function logLockState(topic: string, grid: HTMLElement, otherRowID: number) {
+  const otherEdit = rowAction(grid, otherRowID, 'Edit');
+  console.log(
+    `[view-errors ${topic}]`,
+    JSON.stringify({
+      otherEditDisabled: otherEdit.getAttribute('aria-disabled'),
+      otherEditTitle: otherEdit.getAttribute('title'),
+      showDisabled: showButtons().map(button => (button as HTMLButtonElement).disabled)
+    })
+  );
+}
+
+async function chooseNoGrouping(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('combobox', { name: VIEW_ERRORS_TEXT.groupRowsLabel }));
+  await user.click(await screen.findByRole('option', { name: VIEW_ERRORS_TEXT.noGrouping }));
+}
+
+/** customgridpagination.test.tsx's way into the ∞ option of the rows-per-page select. */
+async function switchFlatGridToInfinite() {
+  const sizeButtons = screen.getAllByLabelText('Rows per page');
+  const sizeButton = sizeButtons[sizeButtons.length - 1];
+  fireEvent.mouseDown(sizeButton);
+  fireEvent.click(sizeButton);
+  const options = await screen.findAllByRole('option');
+  const infinite = options.find(option => option.textContent?.includes('∞'));
+  if (!infinite) throw new Error(`No ∞ option. Options: ${options.map(option => option.textContent).join(', ')}`);
+  fireEvent.click(infinite);
+}
+
+function readCensusIDs(requests: RecordedRequest[], start: number): string[] {
+  return requests
+    .slice(start)
+    .filter(request => ROUTES.facets.test(request.url) || ROUTES.query.test(request.url))
+    .map(request => JSON.stringify(request.body?.censusIDs));
+}
+
+/** The grid element appears before its first read lands, so wait for a data row too. */
+async function findLoadedGrid(name: string): Promise<HTMLElement> {
+  const grid = await screen.findByRole('grid', { name });
+  await waitFor(() => expect(grid.querySelector('[role="row"][data-id]'), `${name}: first rows rendered`).not.toBeNull());
+  return grid;
+}
+
+function groupFooter(grid: HTMLElement): HTMLElement {
+  return grid.closest('[data-testid^="errors-grid-"]')?.querySelector('[data-testid="custom-grid-pagination"]') as HTMLElement;
+}
+
+function groupToggle(headingName: RegExp): HTMLElement {
+  return within(screen.getByRole('heading', { level: 2, name: headingName })).getByRole('button');
+}
+
+describe('the page edit lock with the real grid (D-g, D-i, P2-4, P2-8, P2-13)', () => {
+  it('disables every control that would remove the edited row, with its tooltip, and leaves the sidebar enabled (D-g, D-i)', async () => {
+    const user = userEvent.setup();
+    installPageFetch(defaultRoutes({ preview: () => new Promise(() => undefined), query: pagedQuery(ELEVEN_ROWS) }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await waitFor(() => expect(within(groupFooter(grid)).getByRole('button', { name: 'Go to next page' }), '11 rows: two pages before the lock').toBeEnabled());
+    await startEdit(user, grid, 101);
+    const toggle = within(screen.getAllByRole('heading', { level: 2 })[0]).getByRole('button');
+    const disabledControls = [
+      toggle,
+      showButtons()[1],
+      screen.getByRole('textbox', { name: VIEW_ERRORS_TEXT.searchLabel }),
+      within(groupFooter(grid)).getByRole('button', { name: 'Go to next page' })
+    ];
+    for (const control of disabledControls) expect(control, control.outerHTML.slice(0, 80)).toBeDisabled();
+    expect(groupFooter(grid)).toHaveAttribute('title', EDIT_LOCK_TOOLTIPS.editing);
+    await user.hover(toggle.parentElement as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(EDIT_LOCK_TOOLTIPS.editing);
+    await user.unhover(toggle.parentElement as HTMLElement);
+    const otherDetails = rowAction(grid, 102, 'Details');
+    expect(otherDetails).toHaveAttribute('aria-disabled', 'true');
+    expect(otherDetails).toHaveAttribute('title', EDIT_LOCK_TOOLTIPS.editing);
+    expect(screen.getByRole('button', { name: SIDEBAR_STAND_IN })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: SIDEBAR_STAND_IN }));
+    expect(await screen.findByText(VIEW_ERRORS_ALERTS.editDiscardedByCensusChange('T-101', 'S-1'))).toBeInTheDocument();
+  });
+
+  it('holds the lock while the preview never answers: other rows, Show and Search stay disabled and nothing is applied', async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(defaultRoutes({ preview: () => new Promise(() => undefined) }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await changeTagAndSave(user, grid, 101);
+    await waitFor(() => expect(network.bodiesFor(ROUTES.preview)).toHaveLength(1));
+    logLockState('preview pending', grid, 102);
+    expect(rowAction(grid, 102, 'Edit')).toHaveAttribute('aria-disabled', 'true');
+    expect(rowAction(grid, 102, 'Edit')).toHaveAttribute('title', EDIT_LOCK_TOOLTIPS.saving);
+    for (const button of showButtons()) expect(button).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: VIEW_ERRORS_TEXT.searchLabel })).toBeDisabled();
+    expect(network.bodiesFor(ROUTES.apply)).toHaveLength(0);
+  });
+
+  it('reopens the row and keeps the lock when the preview is rejected', async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(defaultRoutes({ preview: () => new Response('species not found', { status: 422 }) }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await changeTagAndSave(user, grid, 101);
+    expect(await screen.findByText(VIEW_ERRORS_ALERTS.saveFailed('species not found'))).toBeInTheDocument();
+    logLockState('preview rejected', grid, 102);
+    expect(editedInput(grid, 101), 'MUI reopened the row').not.toBeNull();
+    expect(editedInput(grid, 101)?.value, 'the typed value is kept').toBe(EDITED_TAG);
+    expect(rowAction(grid, 102, 'Edit')).toHaveAttribute('title', EDIT_LOCK_TOOLTIPS.editing);
+    expect(network.bodiesFor(ROUTES.apply)).toHaveLength(0);
+  });
+
+  it("reopens the row and keeps the lock when the dialog's Cancel is pressed", async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(defaultRoutes());
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await changeTagAndSave(user, grid, 101);
+    await user.click(await screen.findByTestId('edit-preview-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('edit-preview-apply')).toBeNull());
+    logLockState('dialog cancel', grid, 102);
+    expect(editedInput(grid, 101), 'MUI reopened the row').not.toBeNull();
+    expect(rowAction(grid, 102, 'Edit')).toHaveAttribute('title', EDIT_LOCK_TOOLTIPS.editing);
+    expect(screen.queryByText(/Couldn't save the row/), 'a dialog cancel is not a failure').toBeNull();
+    expect(network.bodiesFor(ROUTES.apply)).toHaveLength(0);
+  });
+
+  it("releases the lock when the row's Cancel is pressed", async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(defaultRoutes());
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await user.click(rowAction(grid, 101, 'Cancel'));
+    await waitFor(() => expect(editedInput(grid, 101)).toBeNull());
+    logLockState('row cancel', grid, 102);
+    expect(rowAction(grid, 102, 'Edit')).not.toHaveAttribute('aria-disabled', 'true');
+    for (const button of showButtons()) expect(button).toBeEnabled();
+    expect(network.bodiesFor(ROUTES.preview)).toHaveLength(0);
+  });
+
+  it('keeps the lock after a successful save until every read has settled', async () => {
+    const user = userEvent.setup();
+    const heldQuery = holdResponses(() => rowsQuery());
+    let holdReads = false;
+    const network = installPageFetch(
+      defaultRoutes({ preview: () => jsonResponse(INFO_PLAN), query: request => (holdReads ? heldQuery.route(request) : rowsQuery()) })
+    );
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    holdReads = true;
+    await changeTagAndSave(user, grid, 101);
+    await waitFor(() => expect(heldQuery.held.resolvers.length).toBeGreaterThan(0));
+    expect(network.bodiesFor(ROUTES.apply)).toHaveLength(1);
+    expect(network.bodiesFor(ROUTES.rebuild)).toHaveLength(2);
+    logLockState('reads pending', grid, 102);
+    expect(rowAction(grid, 102, 'Edit'), 'refreshing still blocks other edits').toHaveAttribute('title', EDIT_LOCK_TOOLTIPS.saving);
+    for (const button of showButtons()) expect(button).toBeDisabled();
+    expect(screen.getByTestId('undo-toast-undo'), 'Undo is free while refreshing (D-i)').toBeEnabled();
+    holdReads = false;
+    await act(async () => heldQuery.held.release());
+    await waitFor(() => expect(showButtons()[0]).toBeEnabled());
+    logLockState('reads settled', grid, 102);
+    expect(rowAction(grid, 102, 'Edit')).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('holds the lock until both rebuilds settle when one fails at once (P3-2)', async () => {
+    const user = userEvent.setup();
+    const heldFullTable = holdResponses(() => jsonResponse({ success: true }));
+    installPageFetch(
+      defaultRoutes({
+        preview: () => jsonResponse(INFO_PLAN),
+        rebuildSummary: () => jsonResponse({ error: 'Lock wait timeout exceeded' }, 500),
+        rebuildFullTable: heldFullTable.route
+      })
+    );
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await changeTagAndSave(user, grid, 101);
+    await waitFor(() => expect(heldFullTable.held.resolvers).toHaveLength(1));
+    await act(async () => new Promise(resolve => setTimeout(resolve, STAND_IN_SETTLE_MS)));
+    logLockState('one rebuild failed, one running', grid, 102);
+    expect(rowAction(grid, 102, 'Edit'), 'no new edit while viewfulltable still rebuilds').toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByRole('button', { name: VIEW_ERRORS_TEXT.retryRefresh }), 'no Retry refresh before both settle').toBeNull();
+    await act(async () => heldFullTable.held.release());
+    expect(await screen.findByText(VIEW_ERRORS_ALERTS.savedButRefreshFailed('Lock wait timeout exceeded'))).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: VIEW_ERRORS_TEXT.retryRefresh })).toBeInTheDocument();
+    expect(rowAction(grid, 102, 'Edit')).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('lets one measurement listed in two groups be edited from either group, one at a time', async () => {
+    const user = userEvent.setup();
+    installPageFetch(
+      defaultRoutes({
+        facets: () => jsonResponse(facetsResponse([VALIDATION_FACET, DRIFT_FACET], { affectedMeasurements: 2, errorTypeCount: 2, ingestion: 1 })),
+        query: request =>
+          (request.body?.errorType as { code?: string } | undefined)?.code === DRIFT_FACET.code
+            ? jsonResponse({ rows: [VALIDATION_ROW], totalRows: 1, summary: {} })
+            : rowsQuery()
+      })
+    );
+    render(<PageWithSidebarStandIn />);
+    const groupA = await findLoadedGrid(GROUP_LABEL);
+    await user.click(groupToggle(/Stem coordinates drifted/));
+    const groupB = await screen.findByRole('grid', { name: DRIFT_LABEL });
+    await startEdit(user, groupA, 101);
+    console.log('[view-errors two groups]', JSON.stringify({ editInB: rowAction(groupB, 101, 'Edit').getAttribute('aria-disabled') }));
+    expect(rowAction(groupB, 101, 'Edit'), 'the same measurement in the other group').toHaveAttribute('aria-disabled', 'true');
+    fireEvent.doubleClick(groupB.querySelector(`[data-id="101"] [data-field="${EDITED_FIELD}"]`) as HTMLElement);
+    expect(editedInput(groupB, 101), 'double-click in the other group opens nothing').toBeNull();
+    await user.click(rowAction(groupA, 101, 'Cancel'));
+    await waitFor(() => expect(editedInput(groupA, 101)).toBeNull());
+    await startEdit(user, groupB, 101);
+    expect(rowAction(groupA, 101, 'Edit'), 'and the other way round').toHaveAttribute('aria-disabled', 'true');
+    expect(editedInput(groupA, 101)).toBeNull();
+  });
+
+  it("refuses edit entry while a Clear's read refresh is outstanding (P2-3)", async () => {
+    const user = userEvent.setup();
+    const heldQuery = holdResponses(() => rowsQuery());
+    let holdReads = false;
+    const network = installPageFetch(defaultRoutes({ query: request => (holdReads ? heldQuery.route(request) : rowsQuery()) }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await user.click(rowAction(grid, 102, 'Details'));
+    const clear = await screen.findByRole('button', { name: DETAILS_SHEET_TEXT.clearValidationErrors });
+    holdReads = true;
+    await user.click(clear);
+    await waitFor(() => expect(heldQuery.held.resolvers.length).toBeGreaterThan(0));
+    await user.click(screen.getByRole('button', { name: DETAILS_SHEET_TEXT.closeDetails }));
+    logLockState('clear refresh pending', grid, 101);
+    expect(network.bodiesFor(ROUTES.clear)).toHaveLength(1);
+    expect(rowAction(grid, 101, 'Edit')).toHaveAttribute('aria-disabled', 'true');
+    expect(rowAction(grid, 101, 'Edit')).toHaveAttribute('title', EDIT_LOCK_TOOLTIPS.saving);
+    fireEvent.doubleClick(grid.querySelector(`[data-id="101"] [data-field="${EDITED_FIELD}"]`) as HTMLElement);
+    expect(editedInput(grid, 101), 'no edit starts that the refresh would remove').toBeNull();
+    holdReads = false;
+    await act(async () => heldQuery.held.release());
+    await waitFor(() => expect(rowAction(grid, 101, 'Edit')).not.toHaveAttribute('aria-disabled', 'true'));
+    await startEdit(user, grid, 101);
+  });
+
+  it('removes a saved row from its group once the refresh no longer lists it', async () => {
+    const user = userEvent.setup();
+    let applied = false;
+    const network = installPageFetch(
+      defaultRoutes({
+        preview: () => jsonResponse(INFO_PLAN),
+        apply: () => {
+          applied = true;
+          return jsonResponse(APPLY_RESULT);
+        },
+        query: () => {
+          const rows = applied ? [SECOND_CENSUS_ROW] : rowsFor();
+          return jsonResponse({ rows, totalRows: rows.length, summary: {} });
+        }
+      })
+    );
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await changeTagAndSave(user, grid, 101);
+    await waitFor(() => expect(network.bodiesFor(ROUTES.apply)).toHaveLength(1));
+    await waitFor(() => expect(grid.querySelector('[data-id="101"]'), 'row 101 left the group after the refresh').toBeNull());
+    console.log('[view-errors removal]', JSON.stringify(Array.from(grid.querySelectorAll('[data-id]'), row => row.getAttribute('data-id'))));
+    expect(grid.querySelector('[data-id="102"]'), 'the other row stays').not.toBeNull();
+  });
+
+  it("disables the Filtered-to chip's remove icon with the tooltip while a row is open", async () => {
+    // Joy's Chip end decorator sets pointer-events: none, which the tooltip's wrapper span inherits.
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+    page.search = 'message=Flagged%3BDifferent%20species';
+    installPageFetch(defaultRoutes());
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    expect(screen.getByRole('button', { name: VIEW_ERRORS_TEXT.removeFilter }), 'the chip is removable before the lock').toBeEnabled();
+    await startEdit(user, grid, 101);
+    const removeFilter = screen.getByRole('button', { name: VIEW_ERRORS_TEXT.removeFilter });
+    expect(removeFilter).toBeDisabled();
+    await user.hover(removeFilter.parentElement as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(EDIT_LOCK_TOOLTIPS.editing);
+  });
+
+  it("disables an earlier save's Undo with the tooltip while another row is open", async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(defaultRoutes({ preview: () => jsonResponse(INFO_PLAN) }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 102);
+    await changeTagAndSave(user, grid, 102);
+    await waitFor(() => expect(network.bodiesFor(ROUTES.rebuild)).toHaveLength(2));
+    await waitFor(() => expect(rowAction(grid, 101, 'Edit')).not.toHaveAttribute('aria-disabled', 'true'));
+    expect(screen.getByTestId('undo-toast-undo'), 'Undo is free before another row opens').toBeEnabled();
+    await startEdit(user, grid, 101);
+    const undo = screen.getByTestId('undo-toast-undo');
+    console.log('[view-errors undo lock]', JSON.stringify({ undoDisabled: (undo as HTMLButtonElement).disabled }));
+    expect(undo).toBeDisabled();
+    await user.hover(undo.parentElement as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(EDIT_LOCK_TOOLTIPS.editing);
+  });
+
+  it("lets another group expand, page and sort, and the edited row's own Details open, while a row is locked", async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(
+      defaultRoutes({
+        facets: () => jsonResponse(facetsResponse([VALIDATION_FACET, DRIFT_FACET], { affectedMeasurements: 13, errorTypeCount: 2, ingestion: 11 })),
+        query: driftOr(rowsQuery)
+      })
+    );
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    expect(groupToggle(/Stem coordinates drifted/), 'another group still expands').toBeEnabled();
+    await user.click(groupToggle(/Stem coordinates drifted/));
+    const driftGrid = await screen.findByRole('grid', { name: DRIFT_LABEL });
+    await waitFor(() => expect(driftGrid.querySelector(`[data-id="${FIRST_DRIFT_ROW_ID}"]`)).not.toBeNull());
+    const next = within(groupFooter(driftGrid)).getByRole('button', { name: 'Go to next page' });
+    expect(next, 'another group still pages').toBeEnabled();
+    await user.click(next);
+    await waitFor(() =>
+      expect(driftGrid.querySelector(`[data-id="${FIRST_DRIFT_ROW_ID + GROUP_PAGE_SIZE}"]`), 'the second page of the other group').not.toBeNull()
+    );
+    const queriesBeforeSort = network.bodiesFor(ROUTES.query).length;
+    await user.click(within(driftGrid).getByRole('columnheader', { name: /Tree Tag/ }));
+    await waitFor(() => expect(network.bodiesFor(ROUTES.query).length).toBeGreaterThan(queriesBeforeSort));
+    const sortedQuery = network.bodiesFor(ROUTES.query).at(-1);
+    console.log('[view-errors other group sort]', JSON.stringify(sortedQuery));
+    expect(sortedQuery?.sortModel, "the other group's sort goes out").toEqual([{ field: 'treeTag', sort: 'asc' }]);
+    expect(editedInput(grid, 101), 'the edit stays open').not.toBeNull();
+    await user.click(rowAction(grid, 101, 'Details'));
+    expect(await screen.findByTestId('error-row-details-sheet'), "the edited row's own Details opens").toBeInTheDocument();
+  });
+});
+
+describe('a census change during an edit (P2-4, P2-8, A4)', () => {
+  it('discards an open row with the page notice', async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(defaultRoutes());
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await user.click(screen.getByRole('button', { name: SIDEBAR_STAND_IN }));
+    expect(await screen.findByText(VIEW_ERRORS_ALERTS.editDiscardedByCensusChange('T-101', 'S-1'))).toBeInTheDocument();
+    expect(network.bodiesFor(ROUTES.preview)).toHaveLength(0);
+  });
+
+  it('aborts a preview in flight: no dialog, no apply, the not-saved notice', async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(defaultRoutes({ preview: () => new Promise(() => undefined) }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await changeTagAndSave(user, grid, 101);
+    await waitFor(() => expect(network.bodiesFor(ROUTES.preview)).toHaveLength(1));
+    await user.click(screen.getByRole('button', { name: SIDEBAR_STAND_IN }));
+    expect(await screen.findByText(VIEW_ERRORS_ALERTS.editCancelledByCensusChange('T-101', 'S-1'))).toBeInTheDocument();
+    const preview = network.requests.find(request => ROUTES.preview.test(request.url));
+    console.log('[view-errors census change preview]', JSON.stringify({ aborted: preview?.signal?.aborted }));
+    expect(preview?.signal?.aborted, 'the preview request is aborted').toBe(true);
+    expect(screen.queryByTestId('edit-preview-apply')).toBeNull();
+    expect(network.bodiesFor(ROUTES.apply)).toHaveLength(0);
+  });
+
+  it("completes an apply in flight: the undo toast carries the operation's census and no read goes to the old scope", async () => {
+    const user = userEvent.setup();
+    const heldApply = holdResponses(() => jsonResponse(APPLY_RESULT));
+    const network = installPageFetch(defaultRoutes({ preview: () => jsonResponse(INFO_PLAN), apply: heldApply.route }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 102);
+    await changeTagAndSave(user, grid, 102);
+    await waitFor(() => expect(heldApply.held.resolvers).toHaveLength(1));
+    await user.click(screen.getByRole('button', { name: SIDEBAR_STAND_IN }));
+    const start = network.requests.length;
+    await act(async () => heldApply.held.release());
+    await waitFor(() => expect(network.bodiesFor(ROUTES.rebuild)).toHaveLength(2));
+    const rebuildBodies = network.bodiesFor(ROUTES.rebuild);
+    await user.click(await screen.findByTestId('undo-toast-undo'));
+    await waitFor(() => expect(network.bodiesFor(ROUTES.revert)).toHaveLength(1));
+    const readScopes = readCensusIDs(network.requests, start);
+    console.log('[view-errors census change apply]', JSON.stringify({ rebuildBodies, revert: network.bodiesFor(ROUTES.revert), readScopes }));
+    const editedRebuildBody = { coreMeasurementIDs: [SECOND_CENSUS_ROW.coreMeasurementID] };
+    expect(rebuildBodies, 'the committed apply rebuilds its own measurement (r3.1, R4)').toEqual([editedRebuildBody, editedRebuildBody]);
+    expect(network.bodiesFor(ROUTES.revert)[0], "the undo toast carries the operation's census").toMatchObject({ censusID: SECOND_CENSUS_ID });
+    expect(
+      readScopes.every(censusIDs => censusIDs === JSON.stringify(SWITCHED_CENSUS_IDS)),
+      'no query or facets request for the old scope'
+    ).toBe(true);
+  });
+
+  it('disables Clear with the saving tooltip in the new census while a detached apply is outstanding, and enables it once the apply settles (r3, P2-8)', async () => {
+    const user = userEvent.setup();
+    const heldApply = holdResponses(() => jsonResponse(APPLY_RESULT));
+    const network = installPageFetch(defaultRoutes({ preview: () => jsonResponse(INFO_PLAN), apply: heldApply.route }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 102);
+    await changeTagAndSave(user, grid, 102);
+    await waitFor(() => expect(heldApply.held.resolvers).toHaveLength(1));
+    await user.click(screen.getByRole('button', { name: SIDEBAR_STAND_IN }));
+    const switchedGrid = await findLoadedGrid(GROUP_LABEL);
+    await waitFor(() => expect(switchedGrid.querySelector('[data-id="101"]'), 'the new census lists row 101').not.toBeNull());
+    await user.click(rowAction(switchedGrid, 101, 'Details'));
+    const clear = await screen.findByRole('button', { name: DETAILS_SHEET_TEXT.clearValidationErrors });
+    console.log(
+      '[view-errors detached apply clear]',
+      JSON.stringify({ clearDisabled: (clear as HTMLButtonElement).disabled, applyHeld: heldApply.held.resolvers.length })
+    );
+    expect(clear, 'Clear is not offered while the old census still saves').toBeDisabled();
+    await user.hover(clear.parentElement as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(EDIT_LOCK_TOOLTIPS.saving);
+    await user.unhover(clear.parentElement as HTMLElement);
+    await act(async () => heldApply.held.release());
+    await waitFor(() => expect(network.bodiesFor(ROUTES.rebuild)).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: DETAILS_SHEET_TEXT.clearValidationErrors }), 'enabled once the apply settled').toBeEnabled());
+    expect(network.bodiesFor(ROUTES.clear), 'no click was swallowed: nothing was sent').toHaveLength(0);
+  });
+
+  it('keeps a committed save committed when the census changes during its rebuilds (P2-4)', async () => {
+    const user = userEvent.setup();
+    const heldSummary = holdResponses(() => jsonResponse({ success: true }));
+    const network = installPageFetch(defaultRoutes({ preview: () => jsonResponse(INFO_PLAN), rebuildSummary: heldSummary.route }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 102);
+    await changeTagAndSave(user, grid, 102);
+    await waitFor(() => expect(heldSummary.held.resolvers).toHaveLength(1));
+    expect(network.bodiesFor(ROUTES.apply)).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: SIDEBAR_STAND_IN }));
+    await act(async () => heldSummary.held.release());
+    console.log(
+      '[view-errors committed census change page]',
+      document.querySelector('[data-testid="errors-explorer-page-alert"]')?.textContent ?? 'no page alert'
+    );
+    expect(screen.queryByText(VIEW_ERRORS_ALERTS.editCancelledByCensusChange('T-102', 'S-1')), 'a committed save is never reported as not saved').toBeNull();
+    expect(await screen.findByTestId('undo-toast-undo')).toBeInTheDocument();
+  });
+});
+
+describe('read gates by scope with the real grid (P2-2)', () => {
+  it('sends no flat infinite read while gated, a sort included, and re-reads once after Retry refresh', async () => {
+    const user = userEvent.setup();
+    let rebuildFails = true;
+    const network = installPageFetch(
+      defaultRoutes({
+        preview: () => jsonResponse(INFO_PLAN),
+        rebuildSummary: () => (rebuildFails ? jsonResponse({ error: 'Lock wait timeout exceeded' }, 500) : jsonResponse({ success: true }))
+      })
+    );
+    render(<PageWithSidebarStandIn />);
+    await findLoadedGrid(GROUP_LABEL);
+    await chooseNoGrouping(user);
+    const flat = await screen.findByRole('grid', { name: FLAT_LABEL });
+    await switchFlatGridToInfinite();
+    const infiniteReads = () => network.bodiesFor(ROUTES.query).filter(body => body?.pageSize === INFINITE_DEFAULT_CHUNK);
+    await waitFor(() => expect(infiniteReads()).toHaveLength(1));
+    await waitFor(() => expect(flat.querySelector('[data-id="101"]')).not.toBeNull());
+    await startEdit(user, flat, 101);
+    await changeTagAndSave(user, flat, 101);
+    expect(await screen.findByText(VIEW_ERRORS_ALERTS.savedButRefreshFailed('Lock wait timeout exceeded'))).toBeInTheDocument();
+    const gatedStart = network.requests.length;
+    await user.click(within(flat).getByRole('columnheader', { name: /Tree Tag/ }));
+    await act(async () => new Promise(resolve => setTimeout(resolve, GATE_QUIET_MS)));
+    console.log('[view-errors flat gate page]', JSON.stringify(network.urlsSince(gatedStart)));
+    expect(
+      network.urlsSince(gatedStart).filter(url => ROUTES.query.test(url) || ROUTES.facets.test(url)),
+      'nothing is read while gated'
+    ).toEqual([]);
+    rebuildFails = false;
+    await user.click(screen.getByRole('button', { name: VIEW_ERRORS_TEXT.retryRefresh }));
+    await waitFor(() => expect(infiniteReads()).toHaveLength(2));
+    expect(infiniteReads()[1]?.sortModel, 'the lifted read carries the sort chosen while gated').toEqual([{ field: 'treeTag', sort: 'asc' }]);
+  });
+
+  it("doesn't gate the details of a census-B row while census A has a pending rebuild", async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(
+      defaultRoutes({ preview: () => jsonResponse(INFO_PLAN), rebuildSummary: () => jsonResponse({ error: 'Lock wait timeout exceeded' }, 500) })
+    );
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await changeTagAndSave(user, grid, 101);
+    expect(await screen.findByText(VIEW_ERRORS_ALERTS.savedButRefreshFailed('Lock wait timeout exceeded'))).toBeInTheDocument();
+    const detailsBefore = network.requests.filter(request => ROUTES.details.test(request.url)).length;
+    await user.click(rowAction(grid, 102, 'Details'));
+    await waitFor(() => expect(network.requests.filter(request => ROUTES.details.test(request.url))).toHaveLength(detailsBefore + 1));
+    const sheet = await screen.findByTestId('error-row-details-sheet');
+    console.log('[view-errors details gate B]', sheet.textContent);
+    expect(within(sheet).queryByText(DETAILS_SHEET_TEXT.rowsStale), "census B's details are current").toBeNull();
+    await user.click(screen.getByRole('button', { name: DETAILS_SHEET_TEXT.closeDetails }));
+    await user.click(rowAction(grid, 101, 'Details'));
+    const gatedSheet = await screen.findByTestId('error-row-details-sheet');
+    await waitFor(() => expect(within(gatedSheet).getByText(DETAILS_SHEET_TEXT.rowsStale)).toBeInTheDocument());
+    expect(
+      network.requests.filter(request => ROUTES.details.test(request.url)),
+      "census A's details wait for the rebuild"
+    ).toHaveLength(detailsBefore + 1);
+  });
+});
