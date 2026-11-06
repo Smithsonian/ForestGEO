@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { Connection } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
-import type { ErrorExplorerFilters, ErrorExplorerRow } from '@/config/errorsexplorer';
+import type { ContradictionType, ErrorExplorerFilters, ErrorExplorerRow } from '@/config/errorsexplorer';
 import { DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import {
   assertLocalOrRefuse,
@@ -10,6 +10,7 @@ import {
   replaceFixture,
   type ExplorerFixture,
   type FixtureDatabase,
+  type FixtureCensus,
   type FixtureErrorType,
   type FixtureLog,
   type FixtureMeasurement,
@@ -29,8 +30,13 @@ const CENSUS_ID = 7;
 const PLOT_CENSUS_NUMBER = 1;
 const UPLOAD_FILE_ID = 'file-1';
 const UPLOAD_BATCH_ID = 'batch-1';
+const DECOY_CENSUS_ID = 8;
+const DECOY_PLOT_CENSUS_NUMBER = 2;
+const UPLOAD_BATCH_ID_OF_DUPLICATE_ONLY_ROW = 'batch-2';
 const FIRST_MEASUREMENT_ID = 101;
 const SECOND_MEASUREMENT_ID = 102;
+const DUPLICATE_ONLY_MEASUREMENT_ID = 103;
+const DECOY_MEASUREMENT_ID = 301;
 const FAILED_MEASUREMENT_ID = 201;
 const RESOLVED_MEASUREMENT_ID = 202;
 const MEASUREMENT_WITH_TWO_ERRORS = 201;
@@ -38,6 +44,16 @@ const MEASUREMENT_WITH_TWO_ERRORS = 201;
 const VALIDATION_DUPLICATE_TAG_ID = 5;
 const VALIDATION_SAME_BATCH_ID = 21;
 const VALIDATION_DBH_OUTLIER_ID = 5;
+
+const FIRST_RAW_CODES = 'MX,I';
+const SECOND_RAW_CODES = 'A';
+const FIRST_DESCRIPTION = 'row 101';
+const SECOND_DESCRIPTION = 'row 102';
+const DUPLICATE_ONLY_DESCRIPTION = 'row 103';
+const RESOLVED_DESCRIPTION = 'row 202';
+const SECOND_SPECIES_CODE = 'SP2';
+const DUPLICATE_TAG_STEM: ContradictionType = 'duplicate_tag_stem';
+const SAME_BATCH_CONFLICT: ContradictionType = 'same_batch_conflict';
 
 const DUPLICATE_TAG_MESSAGE = 'Duplicate tree/stem tag';
 const SAME_BATCH_MESSAGE = 'Same-batch species conflict';
@@ -105,8 +121,8 @@ function firstMeasurement(overrides: Partial<FixtureMeasurement> = {}): FixtureM
     measurementDate: '2026-01-01',
     measuredDBH: 5.1,
     measuredHOM: 1.3,
-    description: 'row 101',
-    rawCodes: 'MX,I',
+    description: FIRST_DESCRIPTION,
+    rawCodes: FIRST_RAW_CODES,
     ...overrides
   });
 }
@@ -119,15 +135,15 @@ function secondMeasurement(overrides: Partial<FixtureMeasurement> = {}): Fixture
     summaryStemGUID: 22,
     speciesID: 32,
     speciesName: 'Species 2',
-    speciesCode: 'SP2',
+    speciesCode: SECOND_SPECIES_CODE,
     quadratName: 'Q2',
     stemLocalX: 12,
     stemLocalY: 22,
     measurementDate: '2026-01-02',
     measuredDBH: 6.2,
     measuredHOM: 1.4,
-    description: 'row 102',
-    rawCodes: 'A',
+    description: SECOND_DESCRIPTION,
+    rawCodes: SECOND_RAW_CODES,
     ...overrides
   });
 }
@@ -167,15 +183,36 @@ function buildMeasurement(overrides: MeasurementOverrides): FixtureMeasurement {
   };
 }
 
+async function readSuccessfulBody(response: Response): Promise<ReturnType<typeof JSON.parse>> {
+  const responseText = await response.text();
+  expect(response.status, `route answered ${response.status} with body: ${responseText}`).toBe(HTTPResponses.OK);
+  return JSON.parse(responseText);
+}
+
+function duplicateOnlyMeasurement(): FixtureMeasurement {
+  return firstMeasurement({
+    coreMeasurementID: DUPLICATE_ONLY_MEASUREMENT_ID,
+    treeID: 13,
+    coreStemGUID: 23,
+    summaryStemGUID: 23,
+    uploadBatchID: UPLOAD_BATCH_ID_OF_DUPLICATE_ONLY_ROW,
+    description: DUPLICATE_ONLY_DESCRIPTION,
+    userDefinedFields: {}
+  });
+}
+
 function unresolvedLog(measurementID: number, errorID: number): FixtureLog {
   return { measurementID, errorID, isResolved: false };
 }
 
-function fixtureOf(parts: Pick<ExplorerFixture, 'errorTypes' | 'validations' | 'measurements' | 'logs'>): ExplorerFixture {
+function fixtureOf(
+  parts: Pick<ExplorerFixture, 'errorTypes' | 'validations' | 'measurements' | 'logs'> & { extraCensuses?: FixtureCensus[] }
+): ExplorerFixture {
+  const { extraCensuses = [], ...fixtureParts } = parts;
   return {
     plotIDs: [PLOT_ID],
-    censuses: [{ censusID: CENSUS_ID, plotID: PLOT_ID, plotCensusNumber: PLOT_CENSUS_NUMBER }],
-    ...parts
+    censuses: [{ censusID: CENSUS_ID, plotID: PLOT_ID, plotCensusNumber: PLOT_CENSUS_NUMBER }, ...extraCensuses],
+    ...fixtureParts
   };
 }
 
@@ -210,17 +247,28 @@ const DUPLICATE_TAG_INGESTION_ERROR: FixtureErrorType = {
   message: DUPLICATE_TAG_INGESTION_MESSAGE
 };
 
-/** 101 and 102 share TREE-1/A (duplicate group) and one upload batch with two species (same-batch group). */
-function contradictingPairFixture(options: { userDefinedFields: Record<string, unknown>; firstRowIngestionError: boolean }): ExplorerFixture {
-  const sharedUserDefinedFields = options.userDefinedFields;
+/**
+ * 101 and 102 share TREE-1/A (duplicate group) and one upload batch with two species (same-batch group).
+ * 103 shares TREE-1/A too but sits in another upload batch, so it joins only the duplicate group.
+ */
+function contradictingPairFixture(options: {
+  userDefinedFields: Record<string, unknown>;
+  firstRowIngestionError: boolean;
+  withDuplicateOnlyRow: boolean;
+}): ExplorerFixture {
   return fixtureOf({
     errorTypes: [DUPLICATE_TAG_VALIDATION_ERROR, SAME_BATCH_VALIDATION_ERROR, DUPLICATE_TAG_INGESTION_ERROR],
     validations: [DUPLICATE_TAG_VALIDATION, SAME_BATCH_VALIDATION],
-    measurements: [firstMeasurement({ userDefinedFields: sharedUserDefinedFields }), secondMeasurement({ userDefinedFields: sharedUserDefinedFields })],
+    measurements: [
+      firstMeasurement({ userDefinedFields: options.userDefinedFields }),
+      secondMeasurement({ userDefinedFields: options.userDefinedFields }),
+      ...(options.withDuplicateOnlyRow ? [duplicateOnlyMeasurement()] : [])
+    ],
     logs: [
       unresolvedLog(FIRST_MEASUREMENT_ID, DUPLICATE_TAG_VALIDATION_ERROR.errorID),
       ...(options.firstRowIngestionError ? [unresolvedLog(FIRST_MEASUREMENT_ID, DUPLICATE_TAG_INGESTION_ERROR.errorID)] : []),
-      unresolvedLog(SECOND_MEASUREMENT_ID, SAME_BATCH_VALIDATION_ERROR.errorID)
+      unresolvedLog(SECOND_MEASUREMENT_ID, SAME_BATCH_VALIDATION_ERROR.errorID),
+      ...(options.withDuplicateOnlyRow ? [unresolvedLog(DUPLICATE_ONLY_MEASUREMENT_ID, DUPLICATE_TAG_VALIDATION_ERROR.errorID)] : [])
     ]
   });
 }
@@ -268,50 +316,51 @@ describe('errors explorer route behaviour on real MySQL', () => {
 
   describe('POST /api/errors/explorer/query', () => {
     it('returns grouped row-centric error data with contradiction links', async () => {
-      await replaceFixture(connection(), contradictingPairFixture({ userDefinedFields: { treestemstate: 'old tree' }, firstRowIngestionError: true }));
+      await replaceFixture(
+        connection(),
+        contradictingPairFixture({ userDefinedFields: { treestemstate: 'old tree' }, firstRowIngestionError: true, withDuplicateOnlyRow: false })
+      );
       const { POST } = await import('@/app/api/errors/explorer/query/route');
 
       const response = await POST(queryRequest(schema(), NO_FILTERS), ROUTE_CONTEXT);
 
-      expect(response.status).toBe(HTTPResponses.OK);
-      const body = await response.json();
+      const body = await readSuccessfulBody(response);
       console.log('[query contradiction links]', JSON.stringify({ totalRows: body.totalRows, summary: body.summary, firstRow: body.rows[0] }));
 
       expect(body.totalRows).toBe(2);
       expect(body.rows[0]).toMatchObject({
-        coreMeasurementID: 101,
-        rawCodes: 'MX,I',
+        coreMeasurementID: FIRST_MEASUREMENT_ID,
+        rawCodes: FIRST_RAW_CODES,
         hasContradiction: true,
-        contradictionType: 'duplicate_tag_stem'
+        contradictionType: DUPLICATE_TAG_STEM
       });
-      expect(body.rows[0].contradictionTypes).toEqual(expect.arrayContaining(['duplicate_tag_stem', 'same_batch_conflict']));
-      expect(body.rows[0].errorMessages).toContain('Duplicate tree/stem tag');
+      expect(body.rows[0].contradictionTypes).toEqual(expect.arrayContaining([DUPLICATE_TAG_STEM, SAME_BATCH_CONFLICT]));
+      expect(body.rows[0].errorMessages).toContain(DUPLICATE_TAG_MESSAGE);
       expect(body.rows[0].errorSources).toEqual(expect.arrayContaining(['validation', 'ingestion']));
-      expect(body.rows[0].relatedMeasurementIDs).toEqual([102]);
+      expect(body.rows[0].relatedMeasurementIDs).toEqual([SECOND_MEASUREMENT_ID]);
       expect(body.summary.contradictions).toBe(2);
       expect(body.summary.duplicateTagStem).toBe(2);
       expect(body.summary.sameBatchConflict).toBe(2);
     });
 
     it('surfaces overlapping contradiction rows in same-batch filters', async () => {
-      await replaceFixture(connection(), contradictingPairFixture({ userDefinedFields: { treestemstate: 'old tree' }, firstRowIngestionError: false }));
+      await replaceFixture(
+        connection(),
+        contradictingPairFixture({ userDefinedFields: { treestemstate: 'old tree' }, firstRowIngestionError: false, withDuplicateOnlyRow: true })
+      );
       const { POST } = await import('@/app/api/errors/explorer/query/route');
 
-      const response = await POST(
-        queryRequest(schema(), { ...NO_FILTERS, contradictionOnly: true, contradictionTypes: ['same_batch_conflict'] }),
-        ROUTE_CONTEXT
-      );
+      const response = await POST(queryRequest(schema(), { ...NO_FILTERS, contradictionOnly: true, contradictionTypes: [SAME_BATCH_CONFLICT] }), ROUTE_CONTEXT);
 
-      expect(response.status).toBe(HTTPResponses.OK);
-      const body = await response.json();
+      const body = await readSuccessfulBody(response);
       console.log('[query same-batch filter]', JSON.stringify({ totalRows: body.totalRows, firstRow: body.rows[0] }));
 
       expect(body.totalRows).toBe(2);
       expect(body.rows[0]).toMatchObject({
-        coreMeasurementID: 101,
-        rawCodes: 'MX,I',
-        contradictionType: 'same_batch_conflict',
-        relatedMeasurementIDs: [102]
+        coreMeasurementID: FIRST_MEASUREMENT_ID,
+        rawCodes: FIRST_RAW_CODES,
+        contradictionType: SAME_BATCH_CONFLICT,
+        relatedMeasurementIDs: [SECOND_MEASUREMENT_ID]
       });
     });
 
@@ -340,7 +389,7 @@ describe('errors explorer route behaviour on real MySQL', () => {
               description: INVALID_SPECIES_DESCRIPTION,
               rawCodes: null
             }),
-            secondMeasurement({ coreMeasurementID: RESOLVED_MEASUREMENT_ID, treeTag: 'TREE-2', stemTag: 'B', description: 'row 202' })
+            secondMeasurement({ coreMeasurementID: RESOLVED_MEASUREMENT_ID, treeTag: 'TREE-2', stemTag: 'B', description: RESOLVED_DESCRIPTION })
           ],
           logs: [unresolvedLog(FAILED_MEASUREMENT_ID, invalidSpeciesError.errorID), unresolvedLog(RESOLVED_MEASUREMENT_ID, dbhOutlierError.errorID)]
         })
@@ -349,8 +398,7 @@ describe('errors explorer route behaviour on real MySQL', () => {
 
       const response = await POST(queryRequest(schema(), NO_FILTERS), ROUTE_CONTEXT);
 
-      expect(response.status).toBe(HTTPResponses.OK);
-      const body = await response.json();
+      const body = await readSuccessfulBody(response);
       const failedRow = body.rows.find((row: ErrorExplorerRow) => row.coreMeasurementID === FAILED_MEASUREMENT_ID);
       const resolvedRow = body.rows.find((row: ErrorExplorerRow) => row.coreMeasurementID === RESOLVED_MEASUREMENT_ID);
       console.log('[query isFailedRow]', JSON.stringify({ failedRow, resolvedRow }));
@@ -367,10 +415,16 @@ describe('errors explorer route behaviour on real MySQL', () => {
         fixtureOf({
           errorTypes: [DUPLICATE_TAG_VALIDATION_ERROR, DUPLICATE_TAG_INGESTION_ERROR],
           validations: [DUPLICATE_TAG_VALIDATION],
-          measurements: [firstMeasurement({ userDefinedFields: {} }), secondMeasurement({ treeTag: 'TREE-2', stemTag: 'B', userDefinedFields: {} })],
+          extraCensuses: [{ censusID: DECOY_CENSUS_ID, plotID: PLOT_ID, plotCensusNumber: DECOY_PLOT_CENSUS_NUMBER }],
+          measurements: [
+            firstMeasurement({ userDefinedFields: {} }),
+            secondMeasurement({ treeTag: 'TREE-2', stemTag: 'B', userDefinedFields: {} }),
+            firstMeasurement({ coreMeasurementID: DECOY_MEASUREMENT_ID, censusID: DECOY_CENSUS_ID, treeTag: 'TREE-DECOY', stemTag: 'D', userDefinedFields: {} })
+          ],
           logs: [
             unresolvedLog(FIRST_MEASUREMENT_ID, DUPLICATE_TAG_VALIDATION_ERROR.errorID),
-            unresolvedLog(SECOND_MEASUREMENT_ID, DUPLICATE_TAG_INGESTION_ERROR.errorID)
+            unresolvedLog(SECOND_MEASUREMENT_ID, DUPLICATE_TAG_INGESTION_ERROR.errorID),
+            unresolvedLog(DECOY_MEASUREMENT_ID, DUPLICATE_TAG_VALIDATION_ERROR.errorID)
           ]
         })
       );
@@ -378,17 +432,17 @@ describe('errors explorer route behaviour on real MySQL', () => {
 
       const response = await POST(facetsRequest(schema(), NO_FILTERS), ROUTE_CONTEXT);
 
-      expect(response.status).toBe(HTTPResponses.OK);
-      const body = await response.json();
+      const body = await readSuccessfulBody(response);
       console.log('[facets messages and fields]', JSON.stringify({ messages: body.messages, fields: body.fields }));
 
       expect(body.messages).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ value: 'Duplicate tree/stem tag', count: 1 }),
-          expect.objectContaining({ value: 'Conflicting duplicate TreeTag/StemTag rows detected in upload batch', count: 1 })
+          expect.objectContaining({ value: DUPLICATE_TAG_MESSAGE, count: 1 }),
+          expect.objectContaining({ value: DUPLICATE_TAG_INGESTION_MESSAGE, count: 1 })
         ])
       );
       expect(body.fields).toEqual(expect.arrayContaining([expect.objectContaining({ value: 'treeTag', count: 2 })]));
+      expect(body.totalMeasurements, `the decoy row ${DECOY_MEASUREMENT_ID} in census ${DECOY_CENSUS_ID} must not be counted`).toBe(2);
     });
 
     it('reports one distinct measurement when a row carries two error messages (#547)', async () => {
@@ -410,8 +464,7 @@ describe('errors explorer route behaviour on real MySQL', () => {
 
       const response = await POST(facetsRequest(schema(), NO_FILTERS), ROUTE_CONTEXT);
 
-      expect(response.status).toBe(HTTPResponses.OK);
-      const body = await response.json();
+      const body = await readSuccessfulBody(response);
       console.log('[#547 facets total]', JSON.stringify({ totalMeasurements: body.totalMeasurements, messages: body.messages }));
       expect(body.messages.map((option: { value: string }) => option.value).sort()).toEqual([SECOND_TWO_ERRORS_MESSAGE, FIRST_TWO_ERRORS_MESSAGE].sort());
       expect(body.totalMeasurements, 'two messages on one measurement are one affected measurement').toBe(1);
@@ -429,7 +482,12 @@ describe('errors explorer route behaviour on real MySQL', () => {
           validations: [DUPLICATE_TAG_VALIDATION, SAME_BATCH_VALIDATION],
           measurements: [
             firstMeasurement({ userDefinedFields: {} }),
-            secondMeasurement({ userDefinedFields: {}, uploadBatchID: 'batch-2', stemLocalX: DETAIL_STEM_LOCAL_X, stemLocalY: DETAIL_STEM_LOCAL_Y })
+            secondMeasurement({
+              userDefinedFields: {},
+              uploadBatchID: UPLOAD_BATCH_ID_OF_DUPLICATE_ONLY_ROW,
+              stemLocalX: DETAIL_STEM_LOCAL_X,
+              stemLocalY: DETAIL_STEM_LOCAL_Y
+            })
           ],
           logs: [
             unresolvedLog(FIRST_MEASUREMENT_ID, DUPLICATE_TAG_VALIDATION_ERROR.errorID),
@@ -441,22 +499,21 @@ describe('errors explorer route behaviour on real MySQL', () => {
 
       const response = await GET(detailsRequest(schema(), FIRST_MEASUREMENT_ID), detailsContext(FIRST_MEASUREMENT_ID));
 
-      expect(response.status).toBe(HTTPResponses.OK);
-      const body = await response.json();
+      const body = await readSuccessfulBody(response);
       console.log('[details related rows]', JSON.stringify({ row: body.row, allErrors: body.allErrors, relatedRows: body.relatedRows }));
 
       expect(body.row).toMatchObject({
-        coreMeasurementID: 101,
-        rawCodes: 'MX,I',
+        coreMeasurementID: FIRST_MEASUREMENT_ID,
+        rawCodes: FIRST_RAW_CODES,
         hasContradiction: true,
-        contradictionType: 'duplicate_tag_stem'
+        contradictionType: DUPLICATE_TAG_STEM
       });
-      expect(body.row.contradictionTypes).toEqual(expect.arrayContaining(['duplicate_tag_stem']));
+      expect(body.row.contradictionTypes).toEqual([DUPLICATE_TAG_STEM]);
       expect(body.allErrors).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            code: '5',
-            message: 'Duplicate tree/stem tag',
+            code: String(VALIDATION_DUPLICATE_TAG_ID),
+            message: DUPLICATE_TAG_MESSAGE,
             fields: ['treeTag', 'stemTag']
           })
         ])
@@ -464,42 +521,52 @@ describe('errors explorer route behaviour on real MySQL', () => {
       expect(body.relatedRows).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            coreMeasurementID: 102,
-            speciesCode: 'SP2',
+            coreMeasurementID: SECOND_MEASUREMENT_ID,
+            speciesCode: SECOND_SPECIES_CODE,
             stemLocalX: `${DETAIL_STEM_LOCAL_X}${DECIMAL_SCALE_SUFFIX}`,
             stemLocalY: `${DETAIL_STEM_LOCAL_Y}${DECIMAL_SCALE_SUFFIX}`,
-            description: 'row 102',
+            description: SECOND_DESCRIPTION,
             errorCount: 1,
-            errorMessages: ['Same-batch species conflict']
+            errorMessages: [SAME_BATCH_MESSAGE]
           })
         ])
       );
     });
 
     it('uses the requested contradiction type when a row belongs to multiple groups', async () => {
-      await replaceFixture(connection(), contradictingPairFixture({ userDefinedFields: {}, firstRowIngestionError: false }));
+      await replaceFixture(connection(), contradictingPairFixture({ userDefinedFields: {}, firstRowIngestionError: false, withDuplicateOnlyRow: true }));
       const { GET } = await import('@/app/api/errors/explorer/details/[measurementID]/route');
 
-      const response = await GET(detailsRequest(schema(), FIRST_MEASUREMENT_ID, 'same_batch_conflict'), detailsContext(FIRST_MEASUREMENT_ID));
+      const response = await GET(detailsRequest(schema(), FIRST_MEASUREMENT_ID, SAME_BATCH_CONFLICT), detailsContext(FIRST_MEASUREMENT_ID));
 
-      expect(response.status).toBe(HTTPResponses.OK);
-      const body = await response.json();
+      const body = await readSuccessfulBody(response);
       console.log('[details requested contradiction type]', JSON.stringify({ row: body.row, relatedRows: body.relatedRows }));
 
       expect(body.row).toMatchObject({
-        coreMeasurementID: 101,
-        rawCodes: 'MX,I',
-        contradictionType: 'same_batch_conflict'
+        coreMeasurementID: FIRST_MEASUREMENT_ID,
+        rawCodes: FIRST_RAW_CODES,
+        contradictionType: SAME_BATCH_CONFLICT
       });
-      expect(body.row.contradictionTypes).toEqual(expect.arrayContaining(['duplicate_tag_stem', 'same_batch_conflict']));
+      expect(body.row.contradictionTypes).toEqual(expect.arrayContaining([DUPLICATE_TAG_STEM, SAME_BATCH_CONFLICT]));
       expect(body.relatedRows).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            coreMeasurementID: 102,
-            speciesCode: 'SP2'
+            coreMeasurementID: SECOND_MEASUREMENT_ID,
+            speciesCode: SECOND_SPECIES_CODE
           })
         ])
       );
+      const sameBatchRelatedIDs = body.relatedRows.map((related: { coreMeasurementID: number }) => related.coreMeasurementID);
+      expect(sameBatchRelatedIDs, `same-batch related rows must leave out the duplicate-only row ${DUPLICATE_ONLY_MEASUREMENT_ID}`).toEqual([
+        SECOND_MEASUREMENT_ID
+      ]);
+
+      const duplicateResponse = await GET(detailsRequest(schema(), FIRST_MEASUREMENT_ID, DUPLICATE_TAG_STEM), detailsContext(FIRST_MEASUREMENT_ID));
+      const duplicateBody = await readSuccessfulBody(duplicateResponse);
+      const duplicateRelatedIDs = duplicateBody.relatedRows.map((related: { coreMeasurementID: number }) => related.coreMeasurementID).sort();
+      console.log('[details duplicate-type related rows]', JSON.stringify({ sameBatchRelatedIDs, duplicateRelatedIDs }));
+      expect(duplicateBody.row.contradictionType).toBe(DUPLICATE_TAG_STEM);
+      expect(duplicateRelatedIDs, 'duplicate related rows include the duplicate-only row').toEqual([SECOND_MEASUREMENT_ID, DUPLICATE_ONLY_MEASUREMENT_ID]);
     });
   });
 });
