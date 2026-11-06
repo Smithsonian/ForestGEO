@@ -8,7 +8,7 @@ import { Alert, Button, CircularProgress, Stack, Typography } from '@mui/joy';
 import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
-import type { GridColumnVisibilityModel } from '@mui/x-data-grid';
+import type { GridColumnVisibilityModel, GridFilterModel, GridSortModel } from '@mui/x-data-grid';
 import { useOrgCensusContext, useOrgCensusListContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { getDateRangeCensusIDs } from '@/lib/censusscope';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
@@ -79,8 +79,25 @@ function groupGridKey(facet: ErrorTypeFacet): string {
   return `group:${buildErrorTypeKey(facet)}`;
 }
 
+// MUI reads a new filterModel object as a filter change and jumps to page 1, so a default must keep one identity.
+const NO_SORT: GridSortModel = [];
+const NO_COLUMN_FILTERS: GridFilterModel = { items: [] };
+
 function emptyModels(columnVisibilityModel: GridColumnVisibilityModel): ErrorsExplorerGridModels {
-  return { sortModel: [], filterModel: { items: [] }, columnVisibilityModel };
+  return { sortModel: NO_SORT, filterModel: NO_COLUMN_FILTERS, columnVisibilityModel };
+}
+
+function useDefaultGroupModels(): (facet: ErrorTypeFacet) => ErrorsExplorerGridModels {
+  const cacheRef = useRef(new Map<string, ErrorsExplorerGridModels>());
+  return useCallback((facet: ErrorTypeFacet) => {
+    const identityKey = buildErrorTypeKey(facet);
+    const columnVisibilityModel = buildGroupColumnVisibility(facet);
+    const cached = cacheRef.current.get(identityKey);
+    if (cached && JSON.stringify(cached.columnVisibilityModel) === JSON.stringify(columnVisibilityModel)) return cached;
+    const created = emptyModels(columnVisibilityModel);
+    cacheRef.current.set(identityKey, created);
+    return created;
+  }, []);
 }
 
 export function toDetailsPanelRow(row: ErrorExplorerRow): DetailsPanelRow {
@@ -193,6 +210,7 @@ export default function ErrorsExplorer() {
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
   const codeOptions = selectableOpts.codes;
   const [clearState, setClearState] = useState<ClearOperationState | null>(null);
+  const defaultGroupModelsFor = useDefaultGroupModels();
   const gridsRef = useRef(new Map<string, ErrorsExplorerGridHandle>());
   const facetsReloadRef = useRef<(options?: RefreshOptions) => Promise<void>>(async () => undefined);
   const detailsReloadRef = useRef<(options?: RefreshOptions) => Promise<void>>(async () => undefined);
@@ -541,7 +559,7 @@ export default function ErrorsExplorer() {
                 activeMeasurements={totals?.activeMeasurements ?? null}
                 gridProps={{
                   ...gridProps,
-                  models: view.groupModels[identityKey] ?? emptyModels(buildGroupColumnVisibility(facet)),
+                  models: view.groupModels[identityKey] ?? defaultGroupModelsFor(facet),
                   onModelsChange: models => setViewState(previous => ({ ...previous, groupModels: { ...previous.groupModels, [identityKey]: models } }))
                 }}
               />

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DETAILS_SHEET_TEXT,
   EDIT_LOCK_TOOLTIPS,
+  ERRORS_FLAT_GRID_PAGE_SIZE,
   VIEW_ERRORS_ALERTS,
   VIEW_ERRORS_TEXT,
   type ErrorExplorerRow,
@@ -738,5 +739,70 @@ describe('read gates by scope with the real grid (P2-2)', () => {
       network.requests.filter(request => ROUTES.details.test(request.url)),
       "census A's details wait for the rebuild"
     ).toHaveLength(detailsBefore + 1);
+  });
+});
+
+const PAGING_SETTLE_MS = 400;
+const SECOND_PAGE_ROW_ID = 111;
+const SECOND_PAGE_INDEX = 1;
+const FLAT_PAGING_ROW_COUNT = 30;
+const FIRST_FLAT_PAGING_ROW_ID = 701;
+
+function queryPagesSince(network: ReturnType<typeof installPageFetch>, start: number): unknown[] {
+  return network.requests
+    .slice(start)
+    .filter(request => ROUTES.query.test(request.url))
+    .map(request => request.body?.page);
+}
+
+describe('paging a grid keeps the page it navigated to (stage 6, finding 1)', () => {
+  it('shows the second page of a group after Next, with no snap back to page 1', async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(defaultRoutes({ query: pagedQuery(ELEVEN_ROWS) }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    const next = within(groupFooter(grid)).getByRole('button', { name: 'Go to next page' });
+    await waitFor(() => expect(next, '11 rows: Next is enabled on page 1').toBeEnabled());
+    const requestsBefore = network.requests.length;
+
+    await user.click(next);
+    await waitFor(() => expect(grid.querySelector(`[data-id="${SECOND_PAGE_ROW_ID}"]`), 'the second-page row appears').not.toBeNull());
+    await act(async () => new Promise(resolve => setTimeout(resolve, PAGING_SETTLE_MS)));
+
+    const visibleRowIDs = Array.from(grid.querySelectorAll('[role="row"][data-id]'), row => row.getAttribute('data-id'));
+    const pagesRequested = queryPagesSince(network, requestsBefore);
+    console.log('[view-errors group paging]', JSON.stringify({ pagesRequested, visibleRowIDs }));
+    expect(visibleRowIDs, 'the second-page row is still shown after the grid settled').toContain(String(SECOND_PAGE_ROW_ID));
+    expect(pagesRequested.at(-1), 'the last page requested is the second page').toBe(SECOND_PAGE_INDEX);
+  });
+
+  it('shows the second page of the flat grid after Next, with no snap back to page 1', async () => {
+    const user = userEvent.setup();
+    const rows = Array.from({ length: FLAT_PAGING_ROW_COUNT }, (_, index) =>
+      explorerRow(FIRST_FLAT_PAGING_ROW_ID + index, {
+        errorCodes: ['14'],
+        primaryErrorMessage: 'Flagged;Different species',
+        errorMessages: ['Flagged;Different species']
+      })
+    );
+    const network = installPageFetch(defaultRoutes({ query: pagedQuery(rows) }));
+    render(<PageWithSidebarStandIn />);
+    await findLoadedGrid(GROUP_LABEL);
+    await chooseNoGrouping(user);
+    const flat = await findLoadedGrid(FLAT_LABEL);
+    const next = within(groupFooter(flat)).getByRole('button', { name: 'Go to next page' });
+    await waitFor(() => expect(next, 'more rows than one flat page: Next is enabled').toBeEnabled());
+    const requestsBefore = network.requests.length;
+
+    await user.click(next);
+    const secondPageRowID = FIRST_FLAT_PAGING_ROW_ID + ERRORS_FLAT_GRID_PAGE_SIZE;
+    await waitFor(() => expect(flat.querySelector(`[data-id="${secondPageRowID}"]`), 'the second-page row appears').not.toBeNull());
+    await act(async () => new Promise(resolve => setTimeout(resolve, PAGING_SETTLE_MS)));
+
+    const visibleRowIDs = Array.from(flat.querySelectorAll('[role="row"][data-id]'), row => row.getAttribute('data-id'));
+    const pagesRequested = queryPagesSince(network, requestsBefore);
+    console.log('[view-errors flat paging]', JSON.stringify({ pagesRequested, visibleRowIDs }));
+    expect(visibleRowIDs, 'the second-page row is still shown after the grid settled').toContain(String(secondPageRowID));
+    expect(pagesRequested.at(-1), 'the last page requested is the second page').toBe(SECOND_PAGE_INDEX);
   });
 });
