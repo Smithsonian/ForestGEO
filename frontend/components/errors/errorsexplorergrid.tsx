@@ -64,6 +64,13 @@ function ErrorsGridPagination(slotProps: CustomGridPaginationProps) {
 
 const ERRORS_GRID_SLOTS = { pagination: ErrorsGridPagination };
 
+// A save that empties the last page makes MUI clamp the page once the smaller total arrives, possibly while the lock still
+// holds for the slower reads; the disabled footer already stops the user paging, so only this correction is let through.
+function isClampToLastPage(next: GridPaginationModel, current: GridPaginationModel, totalRows: number): boolean {
+  const currentPageIsPastTheEnd = current.page * current.pageSize >= totalRows;
+  return currentPageIsPastTheEnd && next.pageSize === current.pageSize && next.page < current.page;
+}
+
 export interface ErrorsExplorerGridHandle {
   refresh: (options?: RefreshOptions) => Promise<void>;
   patchRow: (row: ErrorExplorerRow) => void;
@@ -351,7 +358,7 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
             filterMode="server"
             paginationModel={paginationModel}
             onPaginationModelChange={model => {
-              if (!locked) setPaginationModel(model);
+              if (!locked || isClampToLastPage(model, paginationModel, rowsResult.totalRows)) setPaginationModel(model);
             }}
             pageSizeOptions={[...(isGroup ? ERROR_TYPE_GROUP_PAGE_SIZE_OPTIONS : ERRORS_FLAT_GRID_PAGE_SIZE_OPTIONS)]}
             sortModel={models.sortModel}

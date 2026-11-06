@@ -831,7 +831,7 @@ function queryPagesSince(network: ReturnType<typeof installPageFetch>, start: nu
     .map(request => request.body?.page);
 }
 
-describe('paging a grid keeps the page it navigated to (stage 6, finding 1)', () => {
+describe('paging a grid keeps the page it navigated to', () => {
   it('shows the second page of a group after Next, with no snap back to page 1', async () => {
     const user = userEvent.setup();
     const network = installPageFetch(defaultRoutes({ query: pagedQuery(ELEVEN_ROWS) }));
@@ -880,5 +880,47 @@ describe('paging a grid keeps the page it navigated to (stage 6, finding 1)', ()
     console.log('[view-errors flat paging]', JSON.stringify({ pagesRequested, visibleRowIDs }));
     expect(visibleRowIDs, 'the second-page row is still shown after the grid settled').toContain(String(secondPageRowID));
     expect(pagesRequested.at(-1), 'the last page requested is the second page').toBe(SECOND_PAGE_INDEX);
+  });
+
+  it('moves a group back to its last remaining page when a save empties the page it was on', async () => {
+    const user = userEvent.setup();
+    let rows = [...ELEVEN_ROWS];
+    let holdFacets = false;
+    const slowFacets = holdResponses(() => jsonResponse(facetsResponse([VALIDATION_FACET], { affectedMeasurements: rows.length, errorTypeCount: 1 })));
+    const network = installPageFetch(
+      defaultRoutes({
+        facets: request =>
+          holdFacets ? slowFacets.route(request) : jsonResponse(facetsResponse([VALIDATION_FACET], { affectedMeasurements: rows.length, errorTypeCount: 1 })),
+        preview: () => jsonResponse(INFO_PLAN),
+        query: request => pagedQuery(rows)(request),
+        apply: () => {
+          holdFacets = true;
+          rows = rows.slice(0, GROUP_PAGE_SIZE);
+          return jsonResponse(APPLY_RESULT);
+        }
+      })
+    );
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    const next = within(groupFooter(grid)).getByRole('button', { name: 'Go to next page' });
+    await waitFor(() => expect(next).toBeEnabled());
+    await user.click(next);
+    await waitFor(() => expect(grid.querySelector(`[data-id="${SECOND_PAGE_ROW_ID}"]`)).not.toBeNull());
+    await startEdit(user, grid, SECOND_PAGE_ROW_ID);
+    await changeTagAndSave(user, grid, SECOND_PAGE_ROW_ID);
+    await waitFor(() => expect(network.bodiesFor(ROUTES.apply)).toHaveLength(1));
+    await waitFor(() => expect(slowFacets.held.resolvers.length, 'the facets read is still outstanding').toBeGreaterThan(0));
+    await waitFor(() => expect(queryPagesSince(network, 0).length, 'the group re-read its emptied page while the lock holds').toBeGreaterThan(2));
+    await act(async () => new Promise(resolve => setTimeout(resolve, PAGING_SETTLE_MS)));
+    expect(showButtons()[0], 'the page is still locked by the slow facets read').toBeDisabled();
+    holdFacets = false;
+    await act(async () => slowFacets.held.release());
+    await waitFor(() => expect(showButtons()[0], 'the refresh finished and released the lock').toBeEnabled());
+    await act(async () => new Promise(resolve => setTimeout(resolve, PAGING_SETTLE_MS)));
+
+    const visibleRowIDs = Array.from(grid.querySelectorAll('[role="row"][data-id]'), row => row.getAttribute('data-id'));
+    console.log('[view-errors last page emptied]', JSON.stringify({ visibleRowIDs, pagesRequested: queryPagesSince(network, 0) }));
+    expect(visibleRowIDs, 'the group shows its remaining first page instead of an empty grid').toHaveLength(GROUP_PAGE_SIZE);
+    expect(grid.querySelector(`[data-id="${SECOND_PAGE_ROW_ID}"]`), 'the saved row left the group').toBeNull();
   });
 });
