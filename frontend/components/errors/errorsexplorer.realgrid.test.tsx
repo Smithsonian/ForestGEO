@@ -1210,4 +1210,84 @@ describe('the flat grid in infinite mode', () => {
     expect(readsForSort, 'one read for the sort').toHaveLength(1);
     expect(readsForSort[0]?.pageSize, 'and it is the infinite chunk').toBe(INFINITE_DEFAULT_CHUNK);
   });
+
+  describe('failures are presented from the infinite reader, not the idle paginated one (P3-1)', () => {
+    const isInfiniteChunkRead = (request: { body: Record<string, unknown> | null }) => request.body?.pageSize === INFINITE_DEFAULT_CHUNK;
+    const CHUNK_READ_FAILURE = 'chunk read exploded';
+
+    function alertWithText(text: string): HTMLElement {
+      const alert = screen.getByText(text).closest('[role="alert"]');
+      if (!alert) throw new Error(`"${text}" is not inside an alert`);
+      return alert as HTMLElement;
+    }
+
+    it('says the rows could not load, and Retry reads the chunk again, when the first infinite read fails', async () => {
+      const user = userEvent.setup();
+      let chunkReadsFail = true;
+      const network = installPageFetch(
+        defaultRoutes({ query: request => (chunkReadsFail && isInfiniteChunkRead(request) ? jsonResponse({ error: CHUNK_READ_FAILURE }, 500) : rowsQuery()) })
+      );
+      render(<PageWithSidebarStandIn />);
+      await findLoadedGrid(GROUP_LABEL);
+      await chooseNoGrouping(user);
+      const flat = await findLoadedGrid(FLAT_LABEL);
+      await switchFlatGridToInfinite();
+
+      expect(
+        await screen.findByText(VIEW_ERRORS_TEXT.rowsLoadFailed),
+        'the failed first infinite read is announced, not shown as "No rows"'
+      ).toBeInTheDocument();
+      const chunkReads = () => network.bodiesFor(ROUTES.query).filter(body => body?.pageSize === INFINITE_DEFAULT_CHUNK);
+      console.log(
+        '[view-errors infinite first read failed]',
+        JSON.stringify({ chunkReads: chunkReads().length, rowIDs: flat.querySelectorAll('[data-id]').length })
+      );
+      expect(flat.querySelector('[data-id="101"]'), 'the paginated rows are not shown beside the failure').toBeNull();
+
+      chunkReadsFail = false;
+      await user.click(within(alertWithText(VIEW_ERRORS_TEXT.rowsLoadFailed)).getByRole('button', { name: VIEW_ERRORS_TEXT.retry }));
+
+      await waitFor(() => expect(flat.querySelector('[data-id="101"]'), 'Retry in the banner re-reads the infinite chunk').not.toBeNull());
+      expect(chunkReads(), 'one failed read, one retried read').toHaveLength(2);
+      expect(screen.queryByText(VIEW_ERRORS_TEXT.rowsLoadFailed)).toBeNull();
+    });
+
+    it('keeps the rows with the stale warning, and Retry reads again, when a refresh of the infinite rows fails', async () => {
+      const user = userEvent.setup();
+      let chunkReadsFail = false;
+      const network = installPageFetch(
+        defaultRoutes({
+          preview: () => jsonResponse(INFO_PLAN),
+          query: request => (chunkReadsFail && isInfiniteChunkRead(request) ? jsonResponse({ error: CHUNK_READ_FAILURE }, 500) : rowsQuery())
+        })
+      );
+      render(<PageWithSidebarStandIn />);
+      await findLoadedGrid(GROUP_LABEL);
+      await chooseNoGrouping(user);
+      const flat = await findLoadedGrid(FLAT_LABEL);
+      await switchFlatGridToInfinite();
+      const chunkReads = () => network.bodiesFor(ROUTES.query).filter(body => body?.pageSize === INFINITE_DEFAULT_CHUNK);
+      await waitFor(() => expect(chunkReads()).toHaveLength(1));
+      await waitFor(() => expect(flat.querySelector('[data-id="101"]')).not.toBeNull());
+
+      chunkReadsFail = true;
+      await startEdit(user, flat, 101);
+      await changeTagAndSave(user, flat, 101);
+
+      expect(await screen.findByText(VIEW_ERRORS_TEXT.rowsStale), 'the failed refresh says the rows may be out of date').toBeInTheDocument();
+      console.log(
+        '[view-errors infinite refresh failed]',
+        JSON.stringify({ chunkReads: chunkReads().length, rowStillListed: flat.querySelector('[data-id="101"]') !== null })
+      );
+      expect(flat.querySelector('[data-id="101"]'), 'the older rows stay on screen').not.toBeNull();
+      expect(screen.queryByText(VIEW_ERRORS_TEXT.rowsLoadFailed), 'it is a stale warning, not a first-load failure').toBeNull();
+
+      chunkReadsFail = false;
+      const readsBeforeRetry = chunkReads().length;
+      await user.click(within(alertWithText(VIEW_ERRORS_TEXT.rowsStale)).getByRole('button', { name: VIEW_ERRORS_TEXT.retry }));
+
+      await waitFor(() => expect(chunkReads().length, 'Retry reads the infinite chunk again').toBe(readsBeforeRetry + 1));
+      await waitFor(() => expect(screen.queryByText(VIEW_ERRORS_TEXT.rowsStale), 'the warning clears once the read succeeds').toBeNull());
+    });
+  });
 });

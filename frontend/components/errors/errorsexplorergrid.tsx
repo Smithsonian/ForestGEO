@@ -322,11 +322,16 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
     [infiniteDescriptor, isGroup, lockReason, locked]
   );
 
+  // The banners describe the reader that feeds the grid: the infinite hook while infinite is on, the page read otherwise.
+  const infiniteReadError = infinite.error instanceof ErrorsExplorerReadGatedError ? null : infinite.error;
+  const hasRows = displayedRows.length > 0;
+  const firstLoadFailed = isInfiniteOn ? infiniteReadError !== null && !hasRows : rowsResult.status === 'error' && !hasRows && !rowsResult.isStale;
+  const rowsAreStale = isInfiniteOn ? rowEdit.isReadScopeGated || (infiniteReadError !== null && hasRows) : rowsResult.isStale;
   const retry = () => {
     if (rowEdit.isReadScopeGated) void rowEdit.retryRefresh();
+    else if (isInfiniteOn) infinite.retry();
     else void rowsResult.reload();
   };
-  const firstLoadFailed = rowsResult.status === 'error' && rowsResult.rows.length === 0 && !rowsResult.isStale;
 
   return (
     <GridPaginationExtrasContext.Provider value={paginationExtras}>
@@ -344,7 +349,7 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
             {VIEW_ERRORS_TEXT.rowsLoadFailed}
           </Alert>
         )}
-        {rowsResult.isStale && (
+        {rowsAreStale && (
           <Alert
             color="warning"
             role="alert"
