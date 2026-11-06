@@ -513,7 +513,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
 
     const { unmount } = await mountExplorer();
 
-    const recoveryLink = await screen.findByRole('link', { name: 'Fix 1 failed uploads' });
+    const recoveryLink = await screen.findByRole('link', { name: 'Fix 1 failed upload' });
     console.log(`[view-errors repoint recovery link] ${recoveryLink.textContent} -> ${recoveryLink.getAttribute('href')}`);
     expect(recoveryLink).toHaveAttribute('href', '/measurementshub/summary?openFailed=1');
 
@@ -521,7 +521,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     mockSessionUserStatus = 'pending';
     await mountExplorer();
     await waitForGridRow(GROUP_GRID);
-    expect(screen.queryByRole('link', { name: /fix \d+ failed uploads/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /fix \d+ failed uploads?/i })).not.toBeInTheDocument();
   });
 
   it('does not call the legacy PATCH endpoint when a row is saved', async () => {

@@ -26,6 +26,7 @@ import {
   formatContradictionCaption,
   formatDbhChange,
   formatErrorTypeLabel,
+  formatFixFailedUploads,
   formatViewErrorsFactsLine,
   INGESTION_ERROR_FIELD_MAP,
   isErrorExplorerNumberField,
@@ -270,6 +271,14 @@ describe('text helpers', () => {
     { affected: 0, active: 1, errorTypes: 0, expected: '0 of 1 active measurement have an unresolved error · 0 error types' }
   ])('agrees the facts line with its counts: $affected of $active active, $errorTypes types', ({ affected, active, errorTypes, expected }) => {
     expect(formatViewErrorsFactsLine(affected, active, errorTypes)).toBe(expected);
+  });
+
+  it.each([
+    { count: 1, expected: 'Fix 1 failed upload' },
+    { count: 2, expected: 'Fix 2 failed uploads' },
+    { count: 1234, expected: 'Fix 1,234 failed uploads' }
+  ])('agrees the Fix link with its count: $count', ({ count, expected }) => {
+    expect(formatFixFailedUploads(count)).toBe(expected);
   });
 
   it('has a hint only for the four codes on the board', () => {

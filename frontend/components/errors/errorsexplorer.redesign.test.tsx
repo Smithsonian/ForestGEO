@@ -223,7 +223,7 @@ describe('Show control and census totals', () => {
   it('keeps the tiles on census totals while Show and Search change, and drives the Failed tile and Fix button from failedMeasurements', async () => {
     await mountPage();
     await waitFor(() => expect(within(screen.getByTestId('errors-tile-failed')).getByText('1')).toBeInTheDocument());
-    expect(screen.getByTestId('errorsexplorer-fix-failed-link')).toHaveTextContent('Fix 1 failed uploads');
+    expect(screen.getByTestId('errorsexplorer-fix-failed-link')).toHaveTextContent(/^Fix 1 failed upload$/);
     await userEvent.type(screen.getByRole('textbox', { name: VIEW_ERRORS_TEXT.searchLabel }), 'zz');
     expect(within(screen.getByTestId('errors-tile-affected')).getByText('3')).toBeInTheDocument();
   });
@@ -550,7 +550,7 @@ describe('Show control tiles and empty states', () => {
     const failedTile = await screen.findByTestId('errors-tile-failed');
     console.log('[view-errors failed tile]', failedTile.textContent, screen.getByTestId('errorsexplorer-fix-failed-link').textContent);
     expect(within(failedTile).getByText('2')).toBeInTheDocument();
-    expect(screen.getByTestId('errorsexplorer-fix-failed-link')).toHaveTextContent('Fix 2 failed uploads');
+    expect(screen.getByTestId('errorsexplorer-fix-failed-link')).toHaveTextContent(/^Fix 2 failed uploads$/);
   });
 
   it('offers no Fix button to a user who cannot edit', async () => {

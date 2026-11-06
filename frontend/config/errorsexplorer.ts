@@ -686,7 +686,7 @@ export function formatMoreErrors(totalErrorCount: number): string | null {
 }
 
 export function formatFixFailedUploads(count: number): string {
-  return `Fix ${formatCount(count)} failed uploads`;
+  return `Fix ${formatCount(count)} failed ${count === 1 ? 'upload' : 'uploads'}`;
 }
 
 export function formatPriorDbhHeader(plotCensusNumber: number | null): string {
