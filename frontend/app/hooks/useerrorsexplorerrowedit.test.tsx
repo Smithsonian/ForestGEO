@@ -229,6 +229,41 @@ describe('useErrorsExplorerRowEdit', () => {
     ]);
   });
 
+  it('runs one whole-scope rebuild for a Retry refresh clicked twice while the first is still running', async () => {
+    const heldRebuild = deferred<Response>();
+    let holdRebuilds = false;
+    const { result, bodies } = harness([
+      { match: /\/api\/edits\/preview/, respond: () => json(INFO_PLAN) },
+      { match: /\/api\/edits\/apply/, respond: () => json(APPLY_RESULT) },
+      {
+        match: /\/api\/refreshviews\//,
+        respond: () => (holdRebuilds ? heldRebuild.promise : json({ error: 'still failing' }, 500))
+      }
+    ]);
+    enterEdit(result);
+    await act(async () => {
+      await result.current.processRowUpdate(GRID)(EDITED, ROW);
+    });
+    expect(result.current.isReadScopeGated).toBe(true);
+    const rebuildsBeforeRetry = bodies(/\/api\/refreshviews\//).length;
+    holdRebuilds = true;
+
+    let firstClick!: Promise<void>;
+    let secondClick!: Promise<void>;
+    act(() => {
+      firstClick = result.current.retryRefresh();
+      secondClick = result.current.retryRefresh();
+    });
+    await act(async () => {
+      heldRebuild.resolve(json({ success: true }));
+      await Promise.all([firstClick, secondClick]);
+    });
+
+    const rebuildsFromRetry = bodies(/\/api\/refreshviews\//).length - rebuildsBeforeRetry;
+    console.log('[view-errors retry double click]', JSON.stringify({ rebuildsFromRetry }));
+    expect(rebuildsFromRetry, 'one scope, two views, once').toBe(2);
+  });
+
   it('discards an open row on a census change with the page notice', () => {
     const { result, rerender, showPageAlert } = harness([]);
     enterEdit(result);

@@ -363,18 +363,26 @@ export function useErrorsExplorerRowEdit({ readScope, readScopeKey, refreshAllRe
 
   const dismissUndo = useCallback(() => setUndo(null), []);
 
-  const retryRefresh = useCallback(async () => {
+  const retryInFlightRef = useRef<Promise<void> | null>(null);
+  const retryRefresh = useCallback((): Promise<void> => {
+    if (retryInFlightRef.current) return retryInFlightRef.current;
     const scope = readScopeRef.current;
-    if (!scope) return;
-    for (const pending of pendingRef.current.filter(entry => scopeOverlapsRead(entry, scope))) {
-      try {
-        await requestScopeViewRebuilds(pending);
-        setPendingViewRebuilds(removePendingScope(pendingRef.current, pending));
-      } catch (error: unknown) {
-        showPageAlertRef.current(VIEW_ERRORS_ALERTS.savedButRefreshFailed(toError(error).message));
-        return;
+    if (!scope) return Promise.resolve();
+    const attempt = (async () => {
+      for (const pending of pendingRef.current.filter(entry => scopeOverlapsRead(entry, scope))) {
+        try {
+          await requestScopeViewRebuilds(pending);
+          setPendingViewRebuilds(removePendingScope(pendingRef.current, pending));
+        } catch (error: unknown) {
+          showPageAlertRef.current(VIEW_ERRORS_ALERTS.savedButRefreshFailed(toError(error).message));
+          return;
+        }
       }
-    }
+    })().finally(() => {
+      retryInFlightRef.current = null;
+    });
+    retryInFlightRef.current = attempt;
+    return attempt;
   }, [setPendingViewRebuilds]);
 
   const isReadScopeGated = readScope !== null && pendingViewRebuilds.some(entry => scopeOverlapsRead(entry, readScope));
