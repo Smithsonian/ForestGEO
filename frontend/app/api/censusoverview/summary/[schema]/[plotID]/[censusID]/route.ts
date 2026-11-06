@@ -3,6 +3,7 @@ import type { RowDataPacket } from 'mysql2/promise';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { getConn } from '@/lib/db/primitives';
 import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildActiveMeasurementCountQuery, readActiveMeasurementCount } from '@/lib/activemeasurementcount';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { HTTPResponses } from '@/config/macros';
 import { CENSUS_OVERVIEW_ERROR_CENSUS_IDS_PARAM, TOP_ERROR_TYPE_LIMIT, type CensusOverviewSummary, type ExportSkipReasonCount } from '@/config/censusoverview';
@@ -60,16 +61,8 @@ async function readPublishScopeSnapshot({ schema, plotID, censusID, errorCensusI
     const publishInput = { schema, plotId: plotID, censusId: censusID };
     const { blockers, count, totalActiveCount, skipReasons } = await countPublishPreconditions(conn, publishInput, isBlockingPreconditionKind);
     const exportedWithUnresolvedErrorCount = await countExportedRowsWithUnresolvedErrors(conn, publishInput);
-    const [activeRows] = await conn.query<RowDataPacket[]>(
-      safeFormatQuery(
-        schema,
-        `SELECT COUNT(*) AS n
-           FROM ??.coremeasurements cm
-           JOIN ??.census c ON c.CensusID = cm.CensusID
-          WHERE c.PlotID = ? AND cm.IsActive = 1 AND cm.CensusID IN (${censusIDPlaceholders})`
-      ),
-      [plotID, ...errorCensusIDs]
-    );
+    const activeCountQuery = buildActiveMeasurementCountQuery(schema, plotID, errorCensusIDs);
+    const [activeRows] = await conn.query<RowDataPacket[]>(activeCountQuery.sql, activeCountQuery.params);
 
     return {
       blockers,
@@ -77,7 +70,7 @@ async function readPublishScopeSnapshot({ schema, plotID, censusID, errorCensusI
       totalActiveCount,
       skipReasons,
       exportedWithUnresolvedErrorCount,
-      errorsScopeActiveMeasurements: Number(activeRows[0].n)
+      errorsScopeActiveMeasurements: readActiveMeasurementCount(activeRows)
     };
   } finally {
     if (transactionActive) {
