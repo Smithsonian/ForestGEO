@@ -203,7 +203,7 @@ describe.each(RANDOM_SEEDS)('weighted facet and message math against the frozen 
       errors: row.allErrors,
       contradictionTypes: row.baseRow.contradictionTypes,
       hasContradiction: row.baseRow.hasContradiction,
-      measurementCount: 1
+      measurementCount: SINGLE_MEASUREMENT_WEIGHT
     }));
     const collapsed = collapseBySignature(grouped, generated, catalog);
     return { grouped, perGroupedRow, collapsed };
@@ -484,7 +484,11 @@ describe('signature rows', () => {
 
     console.log('[signatures] merged', merged);
     expect(merged).toHaveLength(2);
-    expect(merged.find(row => row.ErrorTypeKeys === '1,2')?.MeasurementCount).toBe(10);
+    const mergedRow = merged.find(row => row.ErrorTypeKeys === '1,2');
+    expect(mergedRow?.MeasurementCount).toBe(10);
+    expect(mergedRow?.HasSameBatch, 'a merged row keeps its same-batch flag').toBe(SQL_TRUE);
+    expect(mergedRow?.HasDuplicate, 'a merged row keeps its duplicate flag').toBe(SQL_FALSE);
+    expect(mergedRow?.SignatureComplete, 'a merged row keeps its completeness').toBe(SQL_TRUE);
     expect(merged.find(row => row.ErrorTypeKeys === '3')?.MeasurementCount, 'a row that merges with nothing still gets a numeric count').toBe(7);
   });
 
