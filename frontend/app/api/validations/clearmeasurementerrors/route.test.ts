@@ -1,8 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import { CLEAR_MEASUREMENT_ERRORS_CODES } from '@/config/errorsexplorer';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
+
+const AUTH_POLL_URL = 'https://auth.forestgeo.test/poll';
+const EDITOR_EMAIL = 'editor@forestgeo.test';
 
 const TRANSACTION_ID = 'tx-clear';
 const SCHEMA = 'forestgeo_testing';
@@ -23,6 +26,8 @@ const state = vi.hoisted(() => ({
   censusRow: [{ PlotCensusNumber: 1 }] as Array<Record<string, unknown>>,
   uploadSessions: [] as Array<Record<string, unknown>>,
   scopeLockAcquired: true,
+  /** What the authoritative auth endpoint answers for the session's email; null is a 404 (user removed). */
+  freshAuthorization: null as { userStatus: string; allowedSites: Array<Record<string, unknown>> } | null,
   failOn: null as RegExp | null,
   statements: [] as Array<{ sql: string; params: unknown[]; transactionID?: string }>
 }));
@@ -58,6 +63,11 @@ vi.mock('@/lib/db/connectionmanager', () => {
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { POST } from './route';
 
+function authorizationEndpointAnswer(): Response {
+  if (state.freshAuthorization === null) return new Response(null, { status: HTTPResponses.NOT_FOUND });
+  return new Response(JSON.stringify(state.freshAuthorization), { status: HTTPResponses.OK });
+}
+
 function post(body: unknown) {
   return POST(
     new NextRequest('http://localhost/api/validations/clearmeasurementerrors', {
@@ -85,7 +95,54 @@ describe('POST /api/validations/clearmeasurementerrors', () => {
     state.censusRow = [{ PlotCensusNumber: 1 }];
     state.uploadSessions = [];
     state.scopeLockAcquired = true;
-    state.session = { user: { email: 'editor@forestgeo.test', userStatus: 'field crew', sites: [{ schemaName: SCHEMA }] } };
+    state.session = { user: { email: EDITOR_EMAIL, userStatus: 'field crew', sites: [{ schemaName: SCHEMA }] } };
+    state.freshAuthorization = { userStatus: 'field crew', allowedSites: [{ schemaName: SCHEMA }] };
+    vi.stubEnv('AUTH_FUNCTIONS_POLL_URL', AUTH_POLL_URL);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => authorizationEndpointAnswer())
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  describe('fresh authorization (stage 6 finding 4)', () => {
+    const noWriteIssued = () => ({
+      wrote: state.statements.some(statement => /^(DELETE|UPDATE|INSERT)/.test(statement.sql.trim())),
+      committed: manager().commitTransaction.mock.calls.length > 0
+    });
+
+    it.each([
+      ['demoted to pending since sign-in', { userStatus: 'pending', allowedSites: [{ schemaName: SCHEMA }] }],
+      ['demoted to another role since sign-in', { userStatus: 'lead technician', allowedSites: [{ schemaName: SCHEMA }] }],
+      ['removed from the site since sign-in', { userStatus: 'field crew', allowedSites: [{ schemaName: 'forestgeo_other' }] }],
+      ['removed from the user list since sign-in', null]
+    ])('answers a user %s with 401 and changes nothing', async (_label, fresh) => {
+      state.freshAuthorization = fresh;
+      const response = await post(BODY);
+      const body = await response.json();
+      console.log('[view-errors clear fresh authorization]', _label, response.status, JSON.stringify(body), JSON.stringify(noWriteIssued()));
+      expect(response.status).toBe(HTTPResponses.UNAUTHORIZED);
+      expect(body.code).toBe(CLEAR_MEASUREMENT_ERRORS_CODES.sessionExpired);
+      expect(noWriteIssued()).toEqual({ wrote: false, committed: false });
+      expect(manager().rollbackTransaction).toHaveBeenCalledWith(TRANSACTION_ID);
+    });
+
+    it('answers with 401 and changes nothing when the authorization endpoint is not configured', async () => {
+      vi.stubEnv('AUTH_FUNCTIONS_POLL_URL', '');
+      const response = await post(BODY);
+      expect(response.status).toBe(HTTPResponses.UNAUTHORIZED);
+      expect(noWriteIssued().wrote).toBe(false);
+    });
+
+    it('asks the authorization endpoint for the session email before the first write', async () => {
+      const response = await post(BODY);
+      expect(response.status).toBe(HTTPResponses.OK);
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(`${AUTH_POLL_URL}?email=${encodeURIComponent(EDITOR_EMAIL)}`, expect.objectContaining({ method: 'GET' }));
+    });
   });
 
   it('clears, rebuilds both views on the same transaction, commits once and reports the count', async () => {

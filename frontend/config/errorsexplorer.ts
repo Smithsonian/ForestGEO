@@ -147,6 +147,7 @@ export const CLEAR_NOTHING_TO_CLEAR_MESSAGE = "Nothing to clear: this row's erro
 export const CLEAR_MEASUREMENT_ERRORS_CODES = {
   invalidRequest: 'INVALID_CLEAR_REQUEST',
   pendingUser: 'PENDING_USER_FORBIDDEN',
+  sessionExpired: 'SESSION_EXPIRED',
   scopeForbidden: 'SCOPE_FORBIDDEN',
   scopeBusy: 'SCOPE_BUSY',
   notInScope: 'MEASUREMENT_NOT_IN_SCOPE',

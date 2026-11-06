@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import { TRANSACTION_COMMIT_OUTCOME_UNKNOWN_CODE, TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 
 const TRANSACTION_ID = 'tx-clear-unknown';
 const INJECTED_COMMIT_DEADLINE_MS = 30_000;
+const AUTH_POLL_URL = 'https://auth.forestgeo.test/poll';
 
 vi.mock('@/auth', () => ({ auth: vi.fn(async () => ({ user: { email: 'admin@forestgeo.test', userStatus: 'global', sites: [] } })) }));
 vi.mock('@/ailogger', () => ({ default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
@@ -29,6 +30,19 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { POST } from './route';
 
 describe('POST /api/validations/clearmeasurementerrors after an unknown COMMIT outcome (P3-3)', () => {
+  beforeEach(() => {
+    vi.stubEnv('AUTH_FUNCTIONS_POLL_URL', AUTH_POLL_URL);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ userStatus: 'global', allowedSites: [] }), { status: HTTPResponses.OK }))
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
   it('answers with the unknown-outcome code, never retries and never rolls back', async () => {
     const cm = ConnectionManager.getInstance() as unknown as Record<'beginTransaction' | 'commitTransaction' | 'rollbackTransaction', ReturnType<typeof vi.fn>>;
     cm.commitTransaction.mockRejectedValueOnce(new TransactionCommitOutcomeUnknownError(TRANSACTION_ID, 'deadline_exceeded', INJECTED_COMMIT_DEADLINE_MS));
