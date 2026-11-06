@@ -4,7 +4,13 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { toSqlUtcDateTime } from '@/config/dateformats';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
-import { refreshMeasurementsSummaryForScope, refreshViewFullTableForScope } from '@/lib/measurementviewrefresh';
+import {
+  refreshMeasurementsSummaryForCoreMeasurements,
+  refreshMeasurementsSummaryForScope,
+  refreshViewFullTableForCoreMeasurements,
+  refreshViewFullTableForScope
+} from '@/lib/measurementviewrefresh';
+import { hasCoreMeasurementIDs, INVALID_VIEW_REFRESH_IDS_RESPONSE, parseMeasurementViewRefreshIDs } from '@/lib/measurementviewrefreshrequest';
 import { updatePostValidationLastRun } from '@/lib/postvalidationlastrun';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
@@ -153,20 +159,30 @@ async function handler(request: NextRequest, context: RouteContext) {
   let _plotID: number | undefined;
   let _censusID: number | undefined;
   let _runPostValidation = false;
+  let coreMeasurementIDs: number[] | undefined;
 
-  try {
-    const body = await request.json().catch(() => ({}));
-    const hasPlotID = body.plotID !== undefined;
-    const hasCensusID = body.censusID !== undefined;
-    _plotID = parsePositiveInteger(body.plotID);
-    _censusID = parsePositiveInteger(body.censusID);
-    _runPostValidation = body.runPostValidation === true;
-
-    if (hasPlotID !== hasCensusID || ((hasPlotID || hasCensusID || _runPostValidation) && (_plotID === undefined || _censusID === undefined))) {
-      return new NextResponse(JSON.stringify({ error: 'plotID and censusID must be strict positive integers' }), { status: HTTPResponses.INVALID_REQUEST });
+  const body = await request.json().catch(() => ({}));
+  if (hasCoreMeasurementIDs(body)) {
+    const parsed = parseMeasurementViewRefreshIDs(body);
+    if (!parsed.ok) {
+      ailogger.warn(`Invalid coreMeasurementIDs body for the ${view} refresh: ${JSON.stringify(parsed.issues)}`);
+      return NextResponse.json(INVALID_VIEW_REFRESH_IDS_RESPONSE, { status: HTTPResponses.INVALID_REQUEST });
     }
-  } catch {
-    // No body provided, that's fine
+    coreMeasurementIDs = parsed.coreMeasurementIDs;
+  } else {
+    try {
+      const hasPlotID = body.plotID !== undefined;
+      const hasCensusID = body.censusID !== undefined;
+      _plotID = parsePositiveInteger(body.plotID);
+      _censusID = parsePositiveInteger(body.censusID);
+      _runPostValidation = body.runPostValidation === true;
+
+      if (hasPlotID !== hasCensusID || ((hasPlotID || hasCensusID || _runPostValidation) && (_plotID === undefined || _censusID === undefined))) {
+        return new NextResponse(JSON.stringify({ error: 'plotID and censusID must be strict positive integers' }), { status: HTTPResponses.INVALID_REQUEST });
+      }
+    } catch {
+      // No body provided, that's fine
+    }
   }
 
   const MAX_LOCK_RETRIES = 3;
@@ -180,7 +196,13 @@ async function handler(request: NextRequest, context: RouteContext) {
       transactionID = await connectionManager.beginTransaction();
 
       // Execute the view refresh procedure - view is validated above against whitelist
-      if (_plotID != null && _censusID != null) {
+      if (coreMeasurementIDs) {
+        if (view === 'measurementssummary') {
+          await refreshMeasurementsSummaryForCoreMeasurements(connectionManager, schema, coreMeasurementIDs, transactionID);
+        } else {
+          await refreshViewFullTableForCoreMeasurements(connectionManager, schema, coreMeasurementIDs, transactionID);
+        }
+      } else if (_plotID != null && _censusID != null) {
         if (view === 'measurementssummary') {
           await refreshMeasurementsSummaryForScope(connectionManager, schema, _plotID, _censusID, transactionID);
         } else {

@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 // --------- Import the handler AFTER mocks ---------
 import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager'; // --------- Helpers ---------
+import { INVALID_VIEW_REFRESH_IDS_RESPONSE, MAX_VIEW_REFRESH_MEASUREMENT_IDS } from '@/lib/measurementviewrefreshrequest';
 
 // --------- Mocks (must be BEFORE importing the route) ---------
 
@@ -165,6 +166,85 @@ describe('POST /api/refreshviews/[view]/[schema]', () => {
 
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     expect(begin).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['measurementssummary', 'tx-ids-ms'],
+    ['viewfulltable', 'tx-ids-vft']
+  ] as const)('%s with coreMeasurementIDs rebuilds only those rows, in one transaction (R4)', async (view, transactionID) => {
+    const cm = (ConnectionManager as any).getInstance();
+    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce(transactionID);
+    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValue(undefined);
+    const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    const request = new NextRequest('http://localhost', { method: 'POST', body: JSON.stringify({ coreMeasurementIDs: [31, 7] }) });
+    const res = await POST(request, makeProps(view, 'myschema'));
+    const body = await res.json();
+
+    const statements = exec.mock.calls.map(([sql, params, tx]) => ({ sql: String(sql).slice(0, 90), params, tx }));
+    console.log('[view-errors refreshviews ids dispatch]', view, res.status, JSON.stringify({ body, statements }));
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(body).toEqual({ success: true, postValidation: null });
+    expect(begin).toHaveBeenCalledTimes(1);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec).toHaveBeenNthCalledWith(1, `DELETE FROM \`myschema\`.${view} WHERE CoreMeasurementID IN (?, ?)`, [7, 31], transactionID);
+    expect(exec).toHaveBeenNthCalledWith(2, expect.stringContaining(`INSERT IGNORE INTO \`myschema\`.${view}`), [7, 31], transactionID);
+    expect(String(exec.mock.calls[1]?.[0])).toContain('cm.CoreMeasurementID IN (?, ?)');
+    expect(String(exec.mock.calls[1]?.[0]), 'no plot-census filter').not.toContain('c.PlotID = ?');
+    expect(
+      exec.mock.calls.some(([sql]) => String(sql).startsWith('CALL')),
+      'no whole-schema procedure'
+    ).toBe(false);
+    expect(commit).toHaveBeenCalledWith(transactionID);
+    expect(rollback).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['an empty list', { coreMeasurementIDs: [] }],
+    ['a digit string', { coreMeasurementIDs: ['7'] }],
+    ['one more than the bound', { coreMeasurementIDs: Array.from({ length: MAX_VIEW_REFRESH_MEASUREMENT_IDS + 1 }, (_, index) => index + 1) }],
+    ['plot and census alongside', { coreMeasurementIDs: [7], plotID: 17, censusID: 42 }],
+    ['runPostValidation alongside', { coreMeasurementIDs: [7], plotID: 17, censusID: 42, runPostValidation: true }]
+  ])('returns 400 with no transaction and no SQL for coreMeasurementIDs as %s', async (label, requestBody) => {
+    const cm = (ConnectionManager as any).getInstance();
+    const begin = vi.spyOn(cm, 'beginTransaction');
+    const exec = vi.spyOn(cm, 'executeQuery');
+
+    const res = await POST(
+      new NextRequest('http://localhost', { method: 'POST', body: JSON.stringify(requestBody) }),
+      makeProps('measurementssummary', 'myschema')
+    );
+    const body = await res.json();
+
+    console.log('[view-errors refreshviews ids 400]', label, res.status, JSON.stringify(body));
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body).toEqual(INVALID_VIEW_REFRESH_IDS_RESPONSE);
+    expect(begin).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('keeps the plot-census parse for a body without coreMeasurementIDs, digit strings included', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-legacy');
+    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValue(undefined);
+    vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+    vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    const res = await POST(
+      new NextRequest('http://localhost', { method: 'POST', body: JSON.stringify({ plotID: '17', censusID: '42' }) }),
+      makeProps('viewfulltable', 'myschema')
+    );
+
+    console.log(
+      '[view-errors refreshviews legacy body]',
+      res.status,
+      JSON.stringify(exec.mock.calls.map(([sql, params]) => [String(sql).slice(0, 70), params]))
+    );
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(exec).toHaveBeenNthCalledWith(1, 'DELETE FROM `myschema`.viewfulltable WHERE PlotID = ? AND CensusID = ?', [17, 42], 'tx-legacy');
   });
 
   it('measurementssummary with runPostValidation executes and scopes post-validation last-run status', async () => {
