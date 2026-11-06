@@ -1,5 +1,6 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
 import {
+  computeDbhChangePercent,
   ContradictionType,
   dedupeNumbers,
   DBH_CHANGE_VALIDATION_CODES,
@@ -14,10 +15,12 @@ import {
   ErrorExplorerQueryResponse,
   ErrorExplorerRow,
   ErrorFacetOption,
+  ErrorTypeIdentity,
   FALLBACK_ERROR_CODE,
   FALLBACK_ERROR_MESSAGE,
   INGESTION_ERROR_FIELD_MAP
 } from '@/config/errorsexplorer';
+import { type ColumnValueRow, compareRowsBySortItem, matchesColumnFilter } from '@/lib/errorsexplorer/columnquery';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
@@ -439,14 +442,25 @@ function buildFilteredRows(groupedRows: Map<number, GroupedErrorRow>, filters: E
   return Array.from(groupedRows.values()).filter(groupedRow => rowMatchesFilters(groupedRow, materializeMatchingErrors(groupedRow, filters), filters));
 }
 
-function toDisplayRow(groupedRow: GroupedErrorRow, filters: ErrorExplorerFilters, preferredContradictionType?: ContradictionType): ErrorExplorerRow {
-  const matchingErrors = materializeMatchingErrors(groupedRow, filters);
+function matchesErrorTypeIdentity(error: ErrorDetailRecord, identity: ErrorTypeIdentity): boolean {
+  return error.source === identity.source && error.code === identity.code && error.message === identity.message;
+}
+
+function toDisplayRow(
+  groupedRow: GroupedErrorRow,
+  filters: ErrorExplorerFilters,
+  preferredContradictionType?: ContradictionType,
+  errorType?: ErrorTypeIdentity
+): ErrorExplorerRow {
+  const pageMatchingErrors = materializeMatchingErrors(groupedRow, filters);
+  const matchingErrors = errorType ? pageMatchingErrors.filter(error => matchesErrorTypeIdentity(error, errorType)) : pageMatchingErrors;
   const visibleErrors = matchingErrors.length > 0 ? matchingErrors : groupedRow.allErrors;
   const visibleContradictions = getVisibleContradictions(groupedRow.contradictions, filters, preferredContradictionType);
 
   const comparisonSource = [...visibleErrors]
     .filter(error => error.comparison !== null && error.source === 'validation')
     .sort((a, b) => Number(a.code) - Number(b.code))[0];
+  const priorDBH = comparisonSource?.comparison?.priorDBH ?? null;
 
   return {
     ...groupedRow.baseRow,
@@ -456,6 +470,7 @@ function toDisplayRow(groupedRow: GroupedErrorRow, filters: ErrorExplorerFilters
     errorFields: dedupeStrings(visibleErrors.flatMap(error => error.fields)),
     errorCodes: dedupeStrings(visibleErrors.map(error => error.code)),
     errorCount: visibleErrors.length,
+    totalErrorCount: groupedRow.allErrors.length,
     contradictionTypes: visibleContradictions.contradictionTypes,
     contradictionType: visibleContradictions.primaryType,
     contradictionGroupKey: visibleContradictions.primaryType
@@ -463,9 +478,10 @@ function toDisplayRow(groupedRow: GroupedErrorRow, filters: ErrorExplorerFilters
       : null,
     relatedMeasurementIDs: visibleContradictions.relatedMeasurementIDs,
     priorCensusID: comparisonSource?.comparison?.priorCensusID ?? null,
-    priorDBH: comparisonSource?.comparison?.priorDBH ?? null,
+    priorDBH,
     priorHOM: comparisonSource?.comparison?.priorHOM ?? null,
-    homChanged: comparisonSource?.comparison?.homChanged ?? false
+    homChanged: comparisonSource?.comparison?.homChanged ?? false,
+    dbhChangePercent: computeDbhChangePercent(priorDBH, groupedRow.baseRow.measuredDBH)
   };
 }
 
@@ -528,6 +544,20 @@ export async function fetchGroupedErrorRows(
   }, new Map<number, GroupedErrorRow>());
 }
 
+function toColumnValueRow(row: ErrorExplorerRow): ColumnValueRow {
+  return { ...row, coreMeasurementID: Number(row.coreMeasurementID) };
+}
+
+interface QueryRowPair {
+  grouped: GroupedErrorRow;
+  display: ErrorExplorerRow;
+}
+
+/**
+ * Spec Data → Query, steps 1-7: rebuild, page filters, identity (decided on the page-matching
+ * errors, so search and Show behave exactly as the facets do), pair every row with the projection
+ * its cells show, column filter, sort, slice. totalRows counts after the column filter.
+ */
 export async function queryErrorExplorer(connectionManager: ExplorerConnection, request: ErrorExplorerQueryRequest): Promise<ErrorExplorerQueryResponse> {
   const groupedRows = await fetchGroupedErrorRows(
     connectionManager,
@@ -535,14 +565,24 @@ export async function queryErrorExplorer(connectionManager: ExplorerConnection, 
     request.plotID,
     request.censusIDs?.length ? request.censusIDs : request.censusID
   );
-  const filteredRows = buildFilteredRows(groupedRows, request.filters).sort(sortRows);
+  const pageMatchingRows = buildFilteredRows(groupedRows, request.filters);
+  const identity = request.errorType;
+  const identityRows = identity
+    ? pageMatchingRows.filter(row => materializeMatchingErrors(row, request.filters).some(error => matchesErrorTypeIdentity(error, identity)))
+    : pageMatchingRows;
+  const pairs: QueryRowPair[] = identityRows.map(grouped => ({ grouped, display: toDisplayRow(grouped, request.filters, undefined, identity) }));
+  const columnFilter = request.columnFilters?.[0];
+  const filteredPairs = columnFilter ? pairs.filter(pair => matchesColumnFilter(toColumnValueRow(pair.display), columnFilter)) : pairs;
+  const sortItem = request.sortModel?.[0];
+  filteredPairs.sort((a, b) =>
+    sortItem ? compareRowsBySortItem(toColumnValueRow(a.display), toColumnValueRow(b.display), sortItem) : sortRows(a.grouped, b.grouped)
+  );
   const start = request.page * request.pageSize;
-  const paginatedRows = filteredRows.slice(start, start + request.pageSize).map(row => toDisplayRow(row, request.filters));
 
   return {
-    rows: paginatedRows,
-    totalRows: filteredRows.length,
-    summary: buildSummary(filteredRows, request.filters)
+    rows: filteredPairs.slice(start, start + request.pageSize).map(pair => pair.display),
+    totalRows: filteredPairs.length,
+    summary: buildSummary(pageMatchingRows, request.filters)
   };
 }
 
