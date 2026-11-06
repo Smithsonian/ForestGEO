@@ -4,6 +4,7 @@ import { loadSchema } from './local-db-setup';
 import {
   assertLocalOrRefuse,
   createFixtureDatabaseSession,
+  FixtureSessionAlreadyOpenError,
   createRecordingExecutor,
   describeMismatch,
   EQUIVALENCE_GROUP_CONCAT_MAX_LEN,
@@ -189,6 +190,58 @@ describe('createFixtureDatabaseSession', () => {
     expect(openError).toBe(schemaFailure);
     expect(callsAfterFailedOpen, 'the failed open cleans up by itself').toEqual([`setup.query ${DROP_STATEMENT}`, 'setup.end']);
     expect(cleanupCalls(calls), 'close() must add no further DROP or end').toEqual(callsAfterFailedOpen);
+  });
+
+  it('close() called while open() is pending, when that open then fails, logs the failure with its parts and does not throw or tear down twice', async () => {
+    const calls: string[] = [];
+    const schemaFailure = new Error('late schema load sentinel');
+    const cleanupFailure = new Error('late cleanup drop sentinel');
+    queueConnections(fakeConnection('setup', calls, { dropFailure: cleanupFailure }));
+    let failSchemaLoad: (error: Error) => void = () => undefined;
+    vi.mocked(loadSchema).mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          failSchemaLoad = reject;
+        })
+    );
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const session = createFixtureDatabaseSession(DATABASE);
+
+    const opening = session.open().catch(caught => caught);
+    const closing = session.close();
+    await letPendingWorkRun();
+    expect(cleanupCalls(calls), 'nothing is torn down while the open is pending').toEqual([]);
+
+    failSchemaLoad(schemaFailure);
+    const openError = await opening;
+    await expect(closing).resolves.toBeUndefined();
+    const loggedText = logged.mock.calls.map(call => call.map(String).join(' ')).join('\n');
+    console.log('[session late failure] open error', openError, 'logged', loggedText);
+
+    expect(openError).toBeInstanceOf(AggregateError);
+    expect(loggedText, 'the log names the database').toContain(DATABASE);
+    expect(loggedText, 'the log carries the original failure').toContain('late schema load sentinel');
+    expect(loggedText, 'the log carries the cleanup failure that may have left the schema behind').toContain('late cleanup drop sentinel');
+    expect(
+      cleanupCalls(calls).filter(call => call.includes('DROP DATABASE')),
+      'close() issues no DROP of its own after a failed open'
+    ).toEqual([`setup.query ${DROP_STATEMENT}`]);
+  });
+
+  it('open() rejects while a session is already open and keeps the first handle, and works again after close()', async () => {
+    const calls: string[] = [];
+    queueConnections(fakeConnection('setup', calls), fakeConnection('explorer', calls), fakeConnection('setup', calls), fakeConnection('explorer', calls));
+    const session = createFixtureDatabaseSession(DATABASE);
+
+    const first = await session.open();
+    await expect(session.open()).rejects.toBeInstanceOf(FixtureSessionAlreadyOpenError);
+    expect(mysql.createConnection, 'the refused open must not start a second setup').toHaveBeenCalledTimes(2);
+
+    await session.close();
+    expect(cleanupCalls(calls), 'close() tears down the first open, not a lost handle').toEqual(['explorer.end', `setup.query ${DROP_STATEMENT}`, 'setup.end']);
+    expect(first.database).toBe(DATABASE);
+
+    await expect(session.open()).resolves.toMatchObject({ database: DATABASE });
   });
 
   it('close() without open() does nothing, and a second close() tears down only once', async () => {

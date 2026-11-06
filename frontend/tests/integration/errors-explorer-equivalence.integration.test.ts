@@ -537,7 +537,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
       console.log(
         `[equivalence] seed=${seed} measurements=${fixture.measurements.length} logs=${fixture.logs.length} witness=${fixture.witnessRowIDs.join(',')}`
       );
-    });
+    }, FIXTURE_HOOK_TIMEOUT_MS);
 
     afterAll(() => {
       wholeListCache.clear();

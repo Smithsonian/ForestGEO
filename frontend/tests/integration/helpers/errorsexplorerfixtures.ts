@@ -226,17 +226,37 @@ export async function openFixtureDatabase(database: string): Promise<FixtureData
 /** Above the 90 s vitest hookTimeout that setup overran at host load 18; setup itself takes about 2 s on an idle host. */
 export const FIXTURE_HOOK_TIMEOUT_MS = 5 * 60 * 1000;
 
+export class FixtureSessionAlreadyOpenError extends Error {
+  constructor(readonly database: string) {
+    super(`The fixture session for ${database} is already open; close() it before opening again`);
+    this.name = 'FixtureSessionAlreadyOpenError';
+  }
+}
+
 export interface FixtureDatabaseSession {
-  /** Starts openFixtureDatabase and remembers the pending promise so that close() can wait for it. */
+  /** Starts openFixtureDatabase and remembers the pending promise so that close() can wait for it. Rejects with FixtureSessionAlreadyOpenError until close() has run. */
   open(): Promise<FixtureDatabase>;
-  /** Waits for a pending open, then tears down what it opened. A rejected open is not rethrown: it already cleaned up and its own hook reported it. */
+  /**
+   * Waits for a pending open, then tears down what it opened. A rejected open is logged with its parts and not rethrown: the open cleaned up after
+   * itself where it could, and a failure in an abandoned hook has no other reporter, so a schema left behind is named in that log.
+   */
   close(): Promise<void>;
+}
+
+function logAbandonedOpenFailure(database: string, openError: unknown): void {
+  const parts = openError instanceof AggregateError ? openError.errors : [openError];
+  console.error(
+    `[fixture session] open of ${database} failed and its cleanup may be incomplete: the schema or its connections may remain.`,
+    `${parts.length} part(s):`
+  );
+  parts.forEach((part, index) => console.error(`[fixture session] part ${index + 1} of ${parts.length}:`, inspect(part, { depth: null })));
 }
 
 export function createFixtureDatabaseSession(database: string): FixtureDatabaseSession {
   let pendingOpen: Promise<FixtureDatabase> | null = null;
   return {
     open: () => {
+      if (pendingOpen) return Promise.reject(new FixtureSessionAlreadyOpenError(database));
       pendingOpen = openFixtureDatabase(database);
       return pendingOpen;
     },
@@ -247,7 +267,8 @@ export function createFixtureDatabaseSession(database: string): FixtureDatabaseS
       let opened: FixtureDatabase;
       try {
         opened = await opening;
-      } catch {
+      } catch (openError) {
+        logAbandonedOpenFailure(database, openError);
         return;
       }
       await opened.teardown();
