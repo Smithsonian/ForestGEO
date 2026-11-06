@@ -17,6 +17,7 @@ const IS_VALIDATED_FAILED = 0;
 const IS_VALIDATED_PASSED = 1;
 const ROUTE_CONTEXT = { params: Promise.resolve({}) };
 const SCOPE_LOCK_STATEMENT_PREFIX = 'GET_LOCK ';
+const SKIP_CHANGELOG_MARKER = '/* skip_changelog */';
 /** lib/route-authz.ts:119: fromBody turns an unparseable body into a missing schema before the handler runs. */
 const ROUTE_AUTHZ_INVALID_SCHEMA_CODE = 'INVALID_SCHEMA';
 
@@ -148,6 +149,14 @@ describe('POST /api/validations/clearmeasurementerrors', () => {
       expect(response.status).toBe(HTTPResponses.OK);
       expect(vi.mocked(fetch)).toHaveBeenCalledWith(`${AUTH_POLL_URL}?email=${encodeURIComponent(EDITOR_EMAIL)}`, expect.objectContaining({ method: 'GET' }));
     });
+  });
+
+  it("sends the validation reset with the skip_changelog marker, because the logger would otherwise scope the entry by the caller's cookies", async () => {
+    const response = await post(BODY);
+    const reset = state.statements.find(statement => /SET IsValidated = NULL/.test(statement.sql));
+    console.log('[view-errors clear route reset]', response.status, reset?.sql);
+    expect(response.status).toBe(HTTPResponses.OK);
+    expect(reset?.sql.trimStart().startsWith(SKIP_CHANGELOG_MARKER), 'the reset begins with the marker').toBe(true);
   });
 
   it('clears, rebuilds both views on the same transaction, commits once and reports the count', async () => {
