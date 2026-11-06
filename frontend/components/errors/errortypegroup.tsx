@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useId, useState } from 'react';
 import { Button, Chip, Sheet, Stack, Typography } from '@mui/joy';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -49,7 +49,7 @@ export default function ErrorTypeGroup({ facet, gridKey, expanded, onToggle, col
   );
   const hint = errorTypeHintFor(facet);
   const collapseLocked = expanded && collapseDisabledReason !== null;
-  const panelID = `${gridKey}-panel`;
+  const panelID = useId();
 
   return (
     <Sheet variant="outlined" sx={{ borderRadius: 'md', p: 1 }}>

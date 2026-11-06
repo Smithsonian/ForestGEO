@@ -105,6 +105,18 @@ describe('ErrorTypeGroup', () => {
     expect(await screen.findByRole('tooltip')).toHaveTextContent(EDIT_LOCK_TOOLTIPS.editing);
   });
 
+  it('points aria-controls at the panel with one space-free id even when the grid key is JSON with spaces', () => {
+    const gridKeyWithSpaces = JSON.stringify({ source: 'validation', code: '14', message: ATTRIBUTE.message });
+    renderGroup({ expanded: true, gridKey: gridKeyWithSpaces });
+    const toggle = within(screen.getByRole('heading', { level: 2 })).getByRole('button');
+    const controlsIdref = toggle.getAttribute('aria-controls');
+    console.log('[view-errors group panel id]', { gridKeyWithSpaces, controlsIdref });
+    expect(controlsIdref).toBeTruthy();
+    expect(controlsIdref).not.toMatch(/\s/);
+    const panel = screen.getByTestId('grid-14').parentElement as HTMLElement;
+    expect(panel.id).toBe(controlsIdref);
+  });
+
   it('calls onToggle from the header button', async () => {
     const props = renderGroup();
     await userEvent.click(within(screen.getByRole('heading', { level: 2 })).getByRole('button'));
