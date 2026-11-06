@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import { CLEAR_MEASUREMENT_ERRORS_CODES } from '@/config/errorsexplorer';
+import { INGESTION_STAGE_ERROR_CODES } from '@/config/errorsexplorer';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 
 const AUTH_POLL_URL = 'https://auth.forestgeo.test/poll';
@@ -23,6 +24,8 @@ const state = vi.hoisted(() => ({
   session: { user: { email: 'editor@forestgeo.test', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } } as Record<string, unknown>,
   measurementRow: [{ CoreMeasurementID: 42, StemGUID: 7, isValidated: 0 }] as Array<Record<string, unknown>>,
   deletedLogEntries: 0,
+  /** Unresolved validation-source entries with an ingestion-stage code (20, 21) the DELETE leaves in place. */
+  retainedIngestionStageEntries: 0,
   censusRow: [{ PlotCensusNumber: 1 }] as Array<Record<string, unknown>>,
   uploadSessions: [] as Array<Record<string, unknown>>,
   scopeLockAcquired: true,
@@ -44,6 +47,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (/validation_runs/.test(sql)) return [];
       if (/FOR UPDATE/.test(sql) && /coremeasurements cm/.test(sql)) return state.measurementRow;
       if (/^DELETE mel/.test(sql.trim())) return { affectedRows: state.deletedLogEntries };
+      if (/COUNT\(\*\) AS retainedCount/.test(sql)) return [{ retainedCount: state.retainedIngestionStageEntries }];
       if (/SET IsValidated = NULL/.test(sql)) return { affectedRows: 1 };
       return { affectedRows: 1 };
     }),
@@ -92,6 +96,7 @@ describe('POST /api/validations/clearmeasurementerrors', () => {
     state.failOn = null;
     state.measurementRow = [{ CoreMeasurementID: 42, StemGUID: 7, isValidated: 0 }];
     state.deletedLogEntries = DELETED_LOG_ENTRIES;
+    state.retainedIngestionStageEntries = 0;
     state.censusRow = [{ PlotCensusNumber: 1 }];
     state.uploadSessions = [];
     state.scopeLockAcquired = true;
@@ -180,7 +185,7 @@ describe('POST /api/validations/clearmeasurementerrors', () => {
     for (const index of [lockIndex, deleteIndex, resetIndex, summaryRebuildIndex, fullTableRebuildIndex]) {
       expect(state.statements[index].transactionID, state.statements[index].sql.slice(0, 60)).toBe(TRANSACTION_ID);
     }
-    expect(state.statements[deleteIndex].params).toEqual([42, 'validation']);
+    expect(state.statements[deleteIndex].params).toEqual([42, 'validation', ...INGESTION_STAGE_ERROR_CODES]);
     expect(manager().commitTransaction).toHaveBeenCalledTimes(1);
     expect(manager().rollbackTransaction).not.toHaveBeenCalled();
   });
@@ -291,6 +296,63 @@ describe('POST /api/validations/clearmeasurementerrors', () => {
     ).toBe(false);
     expect(manager().rollbackTransaction).toHaveBeenCalledWith(TRANSACTION_ID);
     expect(manager().commitTransaction).not.toHaveBeenCalled();
+  });
+
+  describe('ingestion-stage flags that no validation run can recreate (stage 6 finding 3)', () => {
+    const deleteStatement = () => state.statements.find(statement => /^DELETE mel/.test(statement.sql.trim()));
+    const resetIssued = () => state.statements.some(statement => /SET IsValidated = NULL/.test(statement.sql));
+
+    it('never deletes an entry carrying code 20 or 21: the DELETE excludes them by code', async () => {
+      await post(BODY);
+      const statement = deleteStatement();
+      console.log('[view-errors clear keeps ingestion stage]', statement?.sql.replace(/\s+/g, ' '), JSON.stringify(statement?.params));
+      expect(statement?.sql).toMatch(/me\.ErrorCode NOT IN \(\?, \?\)/);
+      expect(statement?.params).toEqual([BODY.measurementID, 'validation', '20', '21']);
+    });
+
+    it('clears the other validation errors of a row that also carries code 20, and reports only what it deleted', async () => {
+      state.measurementRow = [{ CoreMeasurementID: 42, StemGUID: 7, isValidated: IS_VALIDATED_FAILED }];
+      state.deletedLogEntries = 1;
+      state.retainedIngestionStageEntries = 1;
+      const response = await post(BODY);
+      const body = await response.json();
+      console.log('[view-errors clear mixed with code 20]', response.status, JSON.stringify(body));
+      expect(response.status).toBe(HTTPResponses.OK);
+      expect(body).toEqual({ clearedErrorCount: 1 });
+      expect(resetIssued(), 'the row goes back to pending so the next run re-checks the cleared rules').toBe(true);
+      expect(manager().commitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['marked invalid (IsValidated FALSE)', IS_VALIDATED_FAILED],
+      ['pending (IsValidated NULL)', null]
+    ])('answers a row %s whose only unresolved validation errors are codes 20/21 with 409 NOTHING_TO_CLEAR and resets nothing', async (_label, isValidated) => {
+      state.measurementRow = [{ CoreMeasurementID: 42, StemGUID: 7, isValidated }];
+      state.deletedLogEntries = 0;
+      state.retainedIngestionStageEntries = 1;
+      const response = await post(BODY);
+      const body = await response.json();
+      console.log('[view-errors clear only code 20]', _label, response.status, JSON.stringify(body));
+      expect(response.status).toBe(HTTPResponses.CONFLICT);
+      expect(body.code).toBe(CLEAR_MEASUREMENT_ERRORS_CODES.nothingToClear);
+      expect(resetIssued(), 'IsValidated is not reset: no run could re-flag the row').toBe(false);
+      expect(
+        state.statements.some(statement => /INSERT IGNORE INTO/.test(statement.sql)),
+        'no view rebuild'
+      ).toBe(false);
+      expect(manager().rollbackTransaction).toHaveBeenCalledWith(TRANSACTION_ID);
+      expect(manager().commitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('still clears a true fallback row: marked invalid, nothing deleted and no code 20/21 entry kept', async () => {
+      state.measurementRow = [{ CoreMeasurementID: 42, StemGUID: 7, isValidated: IS_VALIDATED_FAILED }];
+      state.deletedLogEntries = 0;
+      state.retainedIngestionStageEntries = 0;
+      const response = await post(BODY);
+      expect(response.status).toBe(HTTPResponses.OK);
+      expect(await response.json()).toEqual({ clearedErrorCount: 0 });
+      expect(resetIssued()).toBe(true);
+    });
   });
 
   it('still clears a fallback row (IsValidated FALSE, nothing logged) and reports 0 (r3, R2)', async () => {

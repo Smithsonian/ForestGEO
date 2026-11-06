@@ -107,12 +107,13 @@ const EXPLORER_PAGE_SIZE = 100;
 const ERROR_SOURCE_VALIDATION = 'validation';
 const ERROR_SOURCE_INGESTION = 'ingestion';
 const VALIDATION_CODE_ONLY_VALIDATION_ERROR = '14';
+const VALIDATION_CODE_INGESTION_STAGE = '20';
 const INGESTION_CODE_INVALID_SPECIES = 'INVALID_SPECIES';
 
 const MEASUREMENT_DATE = '2024-06-01';
 const STEM_BASE_GUID = 990_000;
 const STEM_TAG = '1';
-const SEED_OFFSETS = { fallback: 1, validation: 2, mixed: 3, atomic: 4, contended: 5, passed: 6 } as const;
+const SEED_OFFSETS = { fallback: 1, validation: 2, mixed: 3, atomic: 4, contended: 5, passed: 6, stageMixed: 7, stageOnly: 8 } as const;
 const TREE_TAGS = {
   fallback: 'CLR-FALLBACK',
   validation: 'CLR-VALID',
@@ -120,7 +121,9 @@ const TREE_TAGS = {
   failed: 'CLR-FAILED',
   atomic: 'CLR-ATOMIC',
   contended: 'CLR-LOCKED',
-  passed: 'CLR-PASSED'
+  passed: 'CLR-PASSED',
+  stageMixed: 'CLR-STAGE-MIXED',
+  stageOnly: 'CLR-STAGE-ONLY'
 } as const;
 
 interface SeededRows {
@@ -309,6 +312,48 @@ describe('POST /api/validations/clearmeasurementerrors against real MySQL', () =
     expect(body.code).toBe(CLEAR_MEASUREMENT_ERRORS_CODES.nothingToClear);
     expect(Number(core.IsValidated), 'a passed row is never sent back to pending').toBe(IS_VALIDATED_PASSED);
     expect(Number(stored), 'the stored summary still says passed').toBe(IS_VALIDATED_PASSED);
+  });
+
+  async function unresolvedValidationCodes(measurementID: number): Promise<string[]> {
+    const [logs] = await connection.query<RowDataPacket[]>(
+      `SELECT me.ErrorCode FROM measurement_error_log mel JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+        WHERE mel.MeasurementID = ? AND me.ErrorSource = ? AND mel.IsResolved = 0 ORDER BY me.ErrorCode`,
+      [measurementID, ERROR_SOURCE_VALIDATION]
+    );
+    return logs.map(log => String(log.ErrorCode));
+  }
+
+  it('clears the other validation errors of a row but keeps its ingestion-stage code 20 (stage 6 finding 3)', async () => {
+    const stageMixedRow = await seedLinkedRow(connection, censusID, quadratID, speciesID, TREE_TAGS.stageMixed, SEED_OFFSETS.stageMixed);
+    await logError(connection, stageMixedRow, ERROR_SOURCE_VALIDATION, VALIDATION_CODE_ONLY_VALIDATION_ERROR);
+    await logError(connection, stageMixedRow, ERROR_SOURCE_VALIDATION, VALIDATION_CODE_INGESTION_STAGE);
+    await refreshMeasurementViewsForScope(ConnectionManager.getInstance(), schema, plotID, censusID);
+    const response = await clear(stageMixedRow);
+    const body = await response.json();
+    const remaining = await unresolvedValidationCodes(stageMixedRow);
+    const core = await coreIsValidated(stageMixedRow);
+    console.log('[view-errors clear keeps code 20]', response.status, JSON.stringify({ body, remaining, core }));
+    expect(response.status).toBe(HTTP_OK);
+    expect(body).toEqual({ clearedErrorCount: 1 });
+    expect(remaining, 'only code 20 survives; no validation run can recreate it').toEqual([VALIDATION_CODE_INGESTION_STAGE]);
+    expect(core.IsValidated, 'the row is pending again').toBeNull();
+  });
+
+  it('refuses a row whose only unresolved validation error is code 20 with 409 NOTHING_TO_CLEAR and resets nothing, though IsValidated is FALSE (stage 6 finding 3)', async () => {
+    const stageOnlyRow = await seedLinkedRow(connection, censusID, quadratID, speciesID, TREE_TAGS.stageOnly, SEED_OFFSETS.stageOnly);
+    await logError(connection, stageOnlyRow, ERROR_SOURCE_VALIDATION, VALIDATION_CODE_INGESTION_STAGE);
+    await refreshMeasurementViewsForScope(ConnectionManager.getInstance(), schema, plotID, censusID);
+    const response = await clear(stageOnlyRow);
+    const body = await response.json();
+    const remaining = await unresolvedValidationCodes(stageOnlyRow);
+    const core = await coreIsValidated(stageOnlyRow);
+    const stored = await storedIsValidated(stageOnlyRow);
+    console.log('[view-errors clear only code 20]', response.status, JSON.stringify({ body, remaining, core, stored }));
+    expect(response.status).toBe(HTTP_CONFLICT);
+    expect(body.code).toBe(CLEAR_MEASUREMENT_ERRORS_CODES.nothingToClear);
+    expect(remaining).toEqual([VALIDATION_CODE_INGESTION_STAGE]);
+    expect(Number(core.IsValidated), 'IsValidated is unchanged').toBe(IS_VALIDATED_FAILED);
+    expect(Number(stored), 'the stored summary is unchanged').toBe(IS_VALIDATED_FAILED);
   });
 
   it('leaves the log and IsValidated intact when the second statement fails', async () => {

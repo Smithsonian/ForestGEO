@@ -10,6 +10,7 @@ import {
   FALLBACK_ERROR_MESSAGE,
   MARKED_INVALID_NO_ERROR_LOGGED_LABEL,
   type DetailsPanelRow,
+  type ErrorDetailRecord,
   type ErrorExplorerDetailsResponse,
   type ErrorExplorerRow
 } from '@/config/errorsexplorer';
@@ -121,6 +122,36 @@ describe('ErrorRowDetailsPanel (shared, P5-3, P5-5)', () => {
     expect(within(sheet).getByText(DETAILS_SHEET_TEXT.rowResolved)).toBeInTheDocument();
     expect(within(sheet).queryByText(MARKED_INVALID_NO_ERROR_LOGGED_LABEL), 'a stale grid-row flag must not outvote fetched details').toBeNull();
     expect(within(sheet).queryByRole('button', { name: DETAILS_SHEET_TEXT.clearValidationErrors })).toBeNull();
+  });
+
+  it.each([
+    ['code 20', [{ source: 'validation', code: '20', message: 'Species mismatch from previous census', fields: ['speciesCode'], comparison: null }]],
+    [
+      'codes 20 and 21',
+      [
+        { source: 'validation', code: '20', message: 'Species mismatch from previous census', fields: [], comparison: null },
+        { source: 'validation', code: '21', message: 'Previous census stem missing', fields: [], comparison: null }
+      ]
+    ]
+  ] satisfies Array<[string, ErrorDetailRecord[]]>)('offers no Clear for a linked row whose only validation errors are %s', (_label, allErrors) => {
+    renderPanel({ errorDetails: { row: DETAIL_ROW, allErrors, relatedRows: [] }, onClearValidationErrors: vi.fn() });
+    console.log('[view-errors sheet only ingestion stage codes]', _label, screen.getByTestId('error-row-details-sheet').textContent);
+    expect(screen.queryByRole('button', { name: DETAILS_SHEET_TEXT.clearValidationErrors })).toBeNull();
+  });
+
+  it('offers Clear for a linked row that has another validation error beside code 20', () => {
+    renderPanel({
+      errorDetails: {
+        row: DETAIL_ROW,
+        allErrors: [
+          ...VALIDATION_DETAILS.allErrors,
+          { source: 'validation', code: '20', message: 'Species mismatch from previous census', fields: [], comparison: null }
+        ],
+        relatedRows: []
+      },
+      onClearValidationErrors: vi.fn()
+    });
+    expect(screen.getByRole('button', { name: DETAILS_SHEET_TEXT.clearValidationErrors })).toBeEnabled();
   });
 
   it('shows Clear for a linked row with a validation error, disabled with a reason while locked', async () => {

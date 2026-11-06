@@ -17,6 +17,8 @@ import {
   formatDbhChange,
   formatErrorTypeLabel,
   INGESTION_ERROR_FIELD_MAP,
+  INGESTION_STAGE_ERROR_CODES,
+  isClearableValidationError,
   isMarkedInvalidWithoutLoggedError,
   MARKED_INVALID_NO_ERROR_LOGGED_LABEL,
   resolveErrorsExplorerDeepLinkFilters
@@ -192,5 +194,22 @@ describe('formatDbhChange', () => {
 describe('DBH-change codes', () => {
   it('keeps the DBH-change codes in config, where the client can read them', () => {
     expect(Array.from(DBH_CHANGE_VALIDATION_CODES).sort()).toEqual(['1', '2']);
+  });
+});
+
+describe('isClearableValidationError (ingestion-stage flags stay, stage 6 finding 3)', () => {
+  it.each([
+    [{ source: 'validation', code: '1' }, true],
+    [{ source: 'validation', code: '14' }, true],
+    [{ source: 'validation', code: '20' }, false],
+    [{ source: 'validation', code: '21' }, false],
+    [{ source: 'ingestion', code: 'INVALID_SPECIES' }, false],
+    [{ source: 'ingestion', code: '1' }, false]
+  ] as const)('%j → %s', (error, expected) => {
+    expect(isClearableValidationError(error)).toBe(expected);
+  });
+
+  it('keeps the ingestion-stage code list the Clear route and the correction writer both exclude', () => {
+    expect([...INGESTION_STAGE_ERROR_CODES]).toEqual(['20', '21']);
   });
 });
