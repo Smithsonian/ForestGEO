@@ -1042,3 +1042,46 @@ describe('the flat grid empty state waits for a finished read', () => {
     expect(await screen.findByTestId(EMPTY_STATE_TEST_ID)).toHaveTextContent(VIEW_ERRORS_TEXT.emptyFiltered);
   });
 });
+
+describe('the Filtered-to chip in No grouping', () => {
+  const DEEP_LINK_MESSAGE = 'Flagged;Different species';
+  const FILTERED_CHIP_TEXT = `${VIEW_ERRORS_TEXT.filteredToPrefix} Different species`;
+
+  it('names the message filter narrowing the flat grid and clears it', async () => {
+    const user = userEvent.setup();
+    page.search = `message=${encodeURIComponent(DEEP_LINK_MESSAGE)}`;
+    const network = installPageFetch(defaultRoutes());
+    render(<PageWithSidebarStandIn />);
+    await findLoadedGrid(GROUP_LABEL);
+
+    await chooseNoGrouping(user);
+    const flat = await findLoadedGrid(FLAT_LABEL);
+
+    expect(screen.getByText(FILTERED_CHIP_TEXT), 'the flat grid says what it is filtered to').toBeInTheDocument();
+    const flatReadsBefore = network.bodiesFor(ROUTES.query).filter(body => body?.errorType === undefined);
+    expect(flatReadsBefore.at(-1)?.filters, 'the flat read carries the message filter the chip names').toMatchObject({ exactMessages: [DEEP_LINK_MESSAGE] });
+
+    await user.click(screen.getByRole('button', { name: VIEW_ERRORS_TEXT.removeFilter }));
+
+    await waitFor(() => expect(screen.queryByText(FILTERED_CHIP_TEXT)).toBeNull());
+    await waitFor(() => {
+      const flatReads = network.bodiesFor(ROUTES.query).filter(body => body?.errorType === undefined);
+      expect(flatReads.at(-1)?.filters, 'the flat read drops the filter').toMatchObject({ exactMessages: [] });
+    });
+    expect(flat).toBeInTheDocument();
+  });
+
+  it('disables its remove icon while a row is open in the flat grid', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+    page.search = `message=${encodeURIComponent(DEEP_LINK_MESSAGE)}`;
+    installPageFetch(defaultRoutes());
+    render(<PageWithSidebarStandIn />);
+    await findLoadedGrid(GROUP_LABEL);
+    await chooseNoGrouping(user);
+    const flat = await findLoadedGrid(FLAT_LABEL);
+
+    await startEdit(user, flat, 101);
+
+    expect(screen.getByRole('button', { name: VIEW_ERRORS_TEXT.removeFilter })).toBeDisabled();
+  });
+});

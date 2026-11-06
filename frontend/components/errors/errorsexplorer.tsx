@@ -56,6 +56,7 @@ import { mergeEditedRow } from '@/app/hooks/useerrorsexplorerrows';
 import ErrorsTotalsTiles from './errorstotalstiles';
 import ErrorsExplorerToolbar, { type ErrorsExplorerGroupMode } from './errorsexplorertoolbar';
 import ErrorTypeGroupList from './errortypegrouplist';
+import FilteredToChip from './filteredtochip';
 import ErrorTypeGroup from './errortypegroup';
 import ErrorsExplorerGrid, { type ErrorsExplorerGridHandle, type ErrorsExplorerGridModels } from './errorsexplorergrid';
 import ErrorRowDetailsPanel, { type ErrorRowDetailsStatus } from './errorrowdetailspanel';
@@ -403,6 +404,8 @@ export default function ErrorsExplorer() {
     }
   };
 
+  const clearExactMessages = () => setFilters(previous => ({ ...previous, exactMessages: [] }));
+
   const clearAllFilters = () => {
     setFilters(defaultFilters());
     setViewState(previous => ({ ...previous, flatModels: { ...previous.flatModels, filterModel: { items: [] } } }));
@@ -560,7 +563,7 @@ export default function ErrorsExplorer() {
         <ErrorTypeGroupList
           errorTypes={errorTypes}
           exactMessages={filters.exactMessages}
-          onClearExactMessages={() => setFilters(previous => ({ ...previous, exactMessages: [] }))}
+          onClearExactMessages={clearExactMessages}
           clearDisabledReason={pageLockReason}
           renderGroup={facet => {
             const identityKey = buildErrorTypeKey(facet);
@@ -591,6 +594,8 @@ export default function ErrorsExplorer() {
           }}
         />
       )}
+
+      {groupMode === 'none' && <FilteredToChip exactMessages={filters.exactMessages} onClear={clearExactMessages} clearDisabledReason={pageLockReason} />}
 
       {groupMode === 'none' && (
         <ErrorsExplorerGrid

@@ -1,11 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Box, Button, Chip, ChipDelete, Stack, Typography } from '@mui/joy';
-import { ERROR_TYPE_GROUP_INITIAL_LIMIT, formatErrorTypeLabel, formatShowMoreErrorTypes, VIEW_ERRORS_TEXT, type ErrorTypeFacet } from '@/config/errorsexplorer';
-import LockedControl from './lockedcontrol';
-
-const LABEL_SEPARATOR = ', ';
+import { Button, Stack, Typography } from '@mui/joy';
+import { ERROR_TYPE_GROUP_INITIAL_LIMIT, formatShowMoreErrorTypes, VIEW_ERRORS_TEXT, type ErrorTypeFacet } from '@/config/errorsexplorer';
+import FilteredToChip from './filteredtochip';
 
 export interface ErrorTypeGroupListProps {
   errorTypes: ErrorTypeFacet[];
@@ -21,22 +19,7 @@ export default function ErrorTypeGroupList({ errorTypes, renderGroup, exactMessa
   const remaining = errorTypes.length - visible.length;
   return (
     <Stack spacing={1}>
-      {exactMessages.length > 0 && (
-        <Stack direction="row">
-          <Chip
-            variant="soft"
-            endDecorator={
-              <Box component="span" sx={{ display: 'inherit', pointerEvents: 'auto' }}>
-                <LockedControl reason={clearDisabledReason}>
-                  <ChipDelete aria-label={VIEW_ERRORS_TEXT.removeFilter} disabled={clearDisabledReason !== null} onDelete={onClearExactMessages} />
-                </LockedControl>
-              </Box>
-            }
-          >
-            {`${VIEW_ERRORS_TEXT.filteredToPrefix} ${exactMessages.map(formatErrorTypeLabel).join(LABEL_SEPARATOR)}`}
-          </Chip>
-        </Stack>
-      )}
+      <FilteredToChip exactMessages={exactMessages} onClear={onClearExactMessages} clearDisabledReason={clearDisabledReason} />
       {visible.map(renderGroup)}
       {remaining > 0 && (
         <Button variant="plain" onClick={() => setShowAll(true)} sx={{ alignSelf: 'flex-start' }}>
