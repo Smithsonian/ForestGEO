@@ -16,8 +16,10 @@ import { DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { runQueryDispatch } from '../setup/runquerydispatch';
 import {
   assertLocalOrRefuse,
+  ATTRIBUTES_ONLY_TOKEN,
   createRecordingExecutor,
   DECOY_CENSUS_ID,
+  DECOY_PLOT_ID,
   expectExplorerEqual,
   FIRST_CENSUS_ID,
   FIXTURE_MESSAGES,
@@ -27,6 +29,14 @@ import {
   replaceFixture,
   resolveEquivalenceSeeds,
   SECOND_CENSUS_ID,
+  WITNESS_ERROR_STEM_TAGS,
+  WITNESS_NON_ERROR_STEM_TAG,
+  WITNESS_NON_ERROR_TREE_TAG,
+  WITNESS_SAME_BATCH_ERROR_TREE_TAGS,
+  WITNESS_SAME_BATCH_NON_ERROR_TREE_TAG,
+  WITNESS_STEM_TAG,
+  WITNESS_STEM_VARIANT_TREE_TAG,
+  WITNESS_TREE_TAGS,
   type FixtureDatabase,
   type FixtureMeasurement,
   type GeneratedFixture
@@ -38,7 +48,11 @@ const PAGE_SIZES: readonly number[] = [10, 25, 100];
 const IRREGULAR_PAGES: readonly number[] = [NaN, 1.5, Infinity];
 const DERIVATION_PAGE_SIZE = 25;
 const WHOLE_LIST_PAGE_SIZE = Number.MAX_SAFE_INTEGER;
-const QUICK_SEARCH_VALUES: readonly string[] = ['', '   ', 'T1', 'T12', 't12', 'T12 1', 'condition', 'speciesCode', 'Á'];
+const QUICK_SEARCH_VALUES: readonly string[] = ['', '   ', 'T1', 'T12', 't12', 'T12 1', 'condition', 'speciesCode', 'Á', ATTRIBUTES_ONLY_TOKEN];
+const MATCHES_NOTHING_AXIS = 'message:matches nothing';
+const NO_LOG_AXIS = 'message:no-log fallback message';
+const FOREIGN_TAG_SPELLING = 'Zb1';
+const FOREIGN_STEM_SPELLING = 'Zz';
 const NON_ERROR_ID_COUNT = 10;
 const IRREGULAR_MEASUREMENT_IDS: readonly number[] = [NaN, -1, 1.5];
 const PAGE_BOUNDARY_PAGE_SIZES: readonly number[] = [10, 25];
@@ -51,6 +65,7 @@ type ProductionExecutor = Parameters<typeof production.queryErrorExplorer>[0];
 
 interface Scope {
   name: string;
+  plotID: number;
   censusID: number;
   censusIDs: number[];
 }
@@ -58,12 +73,18 @@ interface NamedFilters {
   label: string;
   filters: ErrorExplorerFilters;
   sweepWithSearch: boolean;
+  axes: string[];
 }
 
 const SCOPES: readonly Scope[] = [
-  { name: 'single census', censusID: FIRST_CENSUS_ID, censusIDs: [FIRST_CENSUS_ID] },
-  { name: 'two-census plot census', censusID: FIRST_CENSUS_ID, censusIDs: [FIRST_CENSUS_ID, SECOND_CENSUS_ID] },
-  { name: 'empty censusIDs falls back to censusID', censusID: FIRST_CENSUS_ID, censusIDs: [] }
+  { name: 'single census', plotID: MAIN_PLOT_ID, censusID: FIRST_CENSUS_ID, censusIDs: [FIRST_CENSUS_ID] },
+  { name: 'two-census plot census', plotID: MAIN_PLOT_ID, censusID: FIRST_CENSUS_ID, censusIDs: [FIRST_CENSUS_ID, SECOND_CENSUS_ID] },
+  { name: 'empty censusIDs falls back to censusID', plotID: MAIN_PLOT_ID, censusID: FIRST_CENSUS_ID, censusIDs: [] }
+];
+const PLOT_SCOPES: readonly Scope[] = [
+  { name: 'plot 2 on its own census', plotID: DECOY_PLOT_ID, censusID: DECOY_CENSUS_ID, censusIDs: [DECOY_CENSUS_ID] },
+  { name: 'plot 1 asked for the other plot census', plotID: MAIN_PLOT_ID, censusID: DECOY_CENSUS_ID, censusIDs: [DECOY_CENSUS_ID] },
+  { name: 'plot 2 asked for the first census', plotID: DECOY_PLOT_ID, censusID: FIRST_CENSUS_ID, censusIDs: [FIRST_CENSUS_ID] }
 ];
 const GROUPED_SCOPE = SCOPES[1];
 const DEFAULT_FILTERS: ErrorExplorerFilters = oracleFilters({});
@@ -81,7 +102,7 @@ function buildFilterGrid(): NamedFilters[] {
   const messages: ReadonlyArray<{ label: string; exactMessages: string[] }> = [
     { label: 'no message', exactMessages: [] },
     { label: 'shared message', exactMessages: [FIXTURE_MESSAGES.shared] },
-    { label: 'fallback message', exactMessages: [FIXTURE_MESSAGES.fallbackFields] },
+    { label: 'type 5 message', exactMessages: [FIXTURE_MESSAGES.fallbackFields] },
     { label: 'semicolon message', exactMessages: [FIXTURE_MESSAGES.semicolonMessage] },
     { label: 'semicolon-criteria message', exactMessages: [FIXTURE_MESSAGES.semicolonCriteria] },
     { label: 'matches nothing', exactMessages: [FIXTURE_MESSAGES.matchesNothing] }
@@ -106,7 +127,8 @@ function buildFilterGrid(): NamedFilters[] {
       affectedFields: [...preset.filters.affectedFields],
       contradictionTypes: [...preset.filters.contradictionTypes]
     }),
-    sweepWithSearch: true
+    sweepWithSearch: true,
+    axes: [`preset:${preset.id}`]
   }));
   const grid: NamedFilters[] = [];
   for (const source of sources)
@@ -123,21 +145,62 @@ function buildFilterGrid(): NamedFilters[] {
               contradictionTypes: contradiction.contradictionTypes
             }),
             sweepWithSearch:
-              source === 'all' && message.label === 'shared message' && field.label === 'no field' && contradiction.label === 'contradictions off'
+              source === 'all' && message.label === 'shared message' && field.label === 'no field' && contradiction.label === 'contradictions off',
+            axes: [`source:${source}`, `message:${message.label}`, `fields:${field.label}`, `contradiction:${contradiction.label}`]
           });
         }
+  const noLogMessage: NamedFilters[] = [];
+  for (const source of sources)
+    for (const contradiction of contradictions.slice(0, 2)) {
+      noLogMessage.push({
+        label: `${source} | no-log fallback message | no field | ${contradiction.label}`,
+        filters: oracleFilters({
+          source,
+          exactMessages: [FIXTURE_MESSAGES.noLogFallback],
+          contradictionOnly: contradiction.contradictionOnly,
+          contradictionTypes: contradiction.contradictionTypes
+        }),
+        sweepWithSearch: false,
+        axes: [`source:${source}`, NO_LOG_AXIS, 'fields:no field', `contradiction:${contradiction.label}`]
+      });
+    }
+  const supplementaryContradictions: ReadonlyArray<{ label: string; contradictionOnly: boolean; contradictionTypes: ContradictionType[] }> = [
+    { label: 'types without the contradictions-only box: duplicates', contradictionOnly: false, contradictionTypes: [DUPLICATE] },
+    { label: 'types without the contradictions-only box: same-batch', contradictionOnly: false, contradictionTypes: [SAME_BATCH] },
+    { label: 'types without the contradictions-only box: duplicates then same-batch', contradictionOnly: false, contradictionTypes: [DUPLICATE, SAME_BATCH] },
+    { label: 'types without the contradictions-only box: same-batch then duplicates', contradictionOnly: false, contradictionTypes: [SAME_BATCH, DUPLICATE] },
+    { label: 'contradictions only: same-batch then duplicates', contradictionOnly: true, contradictionTypes: [SAME_BATCH, DUPLICATE] }
+  ];
+  const supplementary: NamedFilters[] = supplementaryContradictions.map(contradiction => ({
+    label: `all | no message | no field | ${contradiction.label}`,
+    filters: oracleFilters({ contradictionOnly: contradiction.contradictionOnly, contradictionTypes: contradiction.contradictionTypes }),
+    sweepWithSearch: false,
+    axes: [`contradiction:${contradiction.label}`]
+  }));
   const irregular: NamedFilters[] = [
     {
       label: 'exactMessages given as a string',
       filters: oracleFilters({ exactMessages: FIXTURE_MESSAGES.tagMismatch as unknown as string[] }),
-      sweepWithSearch: false
+      sweepWithSearch: false,
+      axes: []
     },
-    { label: 'unknown source', filters: oracleFilters({ source: 'bogus' as ErrorExplorerSource }), sweepWithSearch: false }
+    { label: 'unknown source', filters: oracleFilters({ source: 'bogus' as ErrorExplorerSource }), sweepWithSearch: false, axes: [] }
   ];
-  return [...presets, ...grid, ...irregular];
+  return [...presets, ...grid, ...noLogMessage, ...supplementary, ...irregular];
 }
 
 const FILTER_GRID = buildFilterGrid();
+const PRESET_FILTERS = FILTER_GRID.slice(0, ERROR_EXPLORER_PRESETS.length);
+const NO_LOG_FILTER_LABEL_PART = 'no-log fallback message';
+interface ScopedFilters {
+  scope: Scope;
+  named: NamedFilters;
+}
+const GRID_COMBINATIONS: ScopedFilters[] = [
+  ...SCOPES.flatMap(scope => FILTER_GRID.map(named => ({ scope, named }))),
+  ...PLOT_SCOPES.flatMap(scope => PRESET_FILTERS.map(named => ({ scope, named })))
+];
+const PRESET_COMBINATIONS: ScopedFilters[] = [...SCOPES, ...PLOT_SCOPES].flatMap(scope => PRESET_FILTERS.map(named => ({ scope, named })));
 
 function pagesFor(totalRows: number, pageSize: number): number[] {
   const lastPage = Math.max(0, Math.ceil(totalRows / pageSize) - 1);
@@ -298,8 +361,55 @@ const COVERAGE_CASES: readonly CoverageCase[] = [
   {
     name: 'an error row with both flags',
     isCovered: ({ rows }) => rows.some(row => row.contradictionTypes.includes(DUPLICATE) && row.contradictionTypes.includes(SAME_BATCH))
-  }
+  },
+  {
+    name: 'a duplicate group whose tree-tag spellings differ by case and accent, with a non-error member',
+    isCovered: context => variantGroupIsFlagged(context, context.fixture.witnessGroups.treeTagVariants, DUPLICATE)
+  },
+  {
+    name: 'a duplicate group whose stem-tag spellings differ by case, with a non-error member',
+    isCovered: context => variantGroupIsFlagged(context, context.fixture.witnessGroups.stemTagVariants, DUPLICATE)
+  },
+  {
+    name: 'a same-batch group whose tree-tag spellings differ by case and whose species conflict, with a non-error member',
+    isCovered: context => variantGroupIsFlagged(context, context.fixture.witnessGroups.sameBatchVariants, SAME_BATCH)
+  },
+  {
+    name: 'a row of another plot sharing a tag pair with a duplicate pair, left out of that pair',
+    isCovered: context =>
+      context.fixture.mismatchedPlotRowIDs.some(mismatchedID => {
+        const mismatched = context.measurementByID.get(mismatchedID);
+        const pair = context.fixture.measurements.filter(
+          row =>
+            row.plotID === MAIN_PLOT_ID && row.censusID === mismatched?.censusID && row.treeTag === mismatched?.treeTag && row.stemTag === mismatched?.stemTag
+        );
+        return (
+          mismatched !== undefined &&
+          mismatched.plotID !== MAIN_PLOT_ID &&
+          !context.rowIDs.has(mismatchedID) &&
+          pair.length >= 2 &&
+          pair.every(
+            member =>
+              flagsOf(context, member).includes(DUPLICATE) && !context.rowByID.get(member.coreMeasurementID)?.relatedMeasurementIDs.includes(mismatchedID)
+          )
+        );
+      })
+  },
+  { name: 'an error row whose Attributes alone carry the search token', isCovered: ({ rows }) => rows.some(row => row.attributes === ATTRIBUTES_ONLY_TOKEN) }
 ];
+
+function variantGroupIsFlagged(context: CoverageContext, groupIDs: number[], flag: ContradictionType): boolean {
+  const errorMemberIDs = groupIDs.slice(0, -1);
+  const nonErrorMemberID = groupIDs[groupIDs.length - 1];
+  return (
+    errorMemberIDs.length > 0 &&
+    !context.rowIDs.has(nonErrorMemberID) &&
+    errorMemberIDs.every(id => {
+      const row = context.rowByID.get(id);
+      return row !== undefined && row.contradictionTypes.includes(flag) && row.relatedMeasurementIDs.includes(nonErrorMemberID);
+    })
+  );
+}
 
 function findUncoveredCases(fixture: GeneratedFixture, rows: ErrorExplorerRow[]): string[] {
   const context: CoverageContext = {
@@ -331,6 +441,8 @@ describe('errors explorer: frozen oracle against production on generated data', 
     let apiCalls = 0;
     let statementCount = 0;
     const wholeListCache = new Map<string, Promise<ErrorExplorerQueryResponse>>();
+    const axisMaxima = new Map<string, number>();
+    const noLogTotals = new Map<string, number>();
 
     const database = () => (fixtureDatabase as FixtureDatabase).database;
     const explorerConnection = () => (fixtureDatabase as FixtureDatabase).explorerConnection;
@@ -346,7 +458,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
 
     const queryRequest = (scope: Scope, filters: ErrorExplorerFilters, page: number, pageSize: number): ErrorExplorerQueryRequest => ({
       schema: database(),
-      plotID: MAIN_PLOT_ID,
+      plotID: scope.plotID,
       censusID: scope.censusID,
       censusIDs: scope.censusIDs,
       page,
@@ -355,21 +467,25 @@ describe('errors explorer: frozen oracle against production on generated data', 
     });
     const facetRequest = (scope: Scope, filters: ErrorExplorerFilters) => ({
       schema: database(),
-      plotID: MAIN_PLOT_ID,
+      plotID: scope.plotID,
       censusID: scope.censusID,
       censusIDs: scope.censusIDs,
       filters
     });
 
     const oracleWholeList = (scope: Scope, filters: ErrorExplorerFilters): Promise<ErrorExplorerQueryResponse> => {
+      const isReusable = filters.quickSearch === '';
       const cacheKey = JSON.stringify([scope.name, filters]);
-      const cached = wholeListCache.get(cacheKey);
+      const cached = isReusable ? wholeListCache.get(cacheKey) : undefined;
       if (cached) return cached;
       apiCalls++;
       const pending = oracle.queryErrorExplorer(oracleExecutor(), queryRequest(scope, filters, 0, WHOLE_LIST_PAGE_SIZE));
-      wholeListCache.set(cacheKey, pending);
+      if (isReusable) wholeListCache.set(cacheKey, pending);
       return pending;
     };
+
+    const noteAxisTotals = (axes: readonly string[], totalRows: number) =>
+      axes.forEach(axis => axisMaxima.set(axis, Math.max(axisMaxima.get(axis) ?? 0, totalRows)));
 
     const compare = (context: Record<string, unknown>, actual: unknown, expected: unknown) =>
       expectExplorerEqual(explorerConnection(), { seed, ...context }, actual, expected, witnessIDs());
@@ -386,10 +502,16 @@ describe('errors explorer: frozen oracle against production on generated data', 
     beforeAll(async () => {
       fixture = generateEquivalenceFixture(seed);
       wholeListCache.clear();
+      axisMaxima.clear();
+      noLogTotals.clear();
       await replaceFixture((fixtureDatabase as FixtureDatabase).setupConnection, fixture);
       console.log(
         `[equivalence] seed=${seed} measurements=${fixture.measurements.length} logs=${fixture.logs.length} witness=${fixture.witnessRowIDs.join(',')}`
       );
+    });
+
+    afterAll(() => {
+      wholeListCache.clear();
     });
 
     it('generator covers every planted case', async () => {
@@ -399,24 +521,81 @@ describe('errors explorer: frozen oracle against production on generated data', 
       expect(uncovered.map(name => `generator did not cover ${name}`)).toEqual([]);
     });
 
-    it('witness rows share one duplicate group whose keys differ byte-wise but not under the collation', async () => {
-      const whole = await production.queryErrorExplorer(productionExecutor(), queryRequest(SCOPES[0], DEFAULT_FILTERS, 0, WHOLE_LIST_PAGE_SIZE));
-      const witnessRows = whole.rows.filter(row => fixture.witnessRowIDs.includes(Number(row.coreMeasurementID)));
-      const witnessTags = fixture.measurements.filter(row => fixture.witnessRowIDs.includes(row.coreMeasurementID)).map(row => row.treeTag);
-      console.log(`[witness] seed=${seed} tags=${JSON.stringify(witnessTags)} keys=${JSON.stringify(witnessRows.map(row => row.contradictionGroupKey))}`);
+    const witnessFamilies = () => {
+      const sameBatchRow = fixture.measurements.find(row => row.coreMeasurementID === fixture.witnessGroups.sameBatchVariants[0]) as FixtureMeasurement;
+      const sameBatchPrefix = `same-batch:${FIRST_CENSUS_ID}:${sameBatchRow.uploadFileID}:${sameBatchRow.uploadBatchID}`;
+      return [
+        {
+          name: 'tree-tag spellings',
+          ids: fixture.witnessGroups.treeTagVariants,
+          expectedFlag: DUPLICATE,
+          spellings: [...WITNESS_TREE_TAGS, WITNESS_NON_ERROR_TREE_TAG],
+          keyFor: (spelling: string) => `duplicate:${FIRST_CENSUS_ID}:${spelling}:${WITNESS_STEM_TAG}`,
+          foreignKey: `duplicate:${FIRST_CENSUS_ID}:${FOREIGN_TAG_SPELLING}:${WITNESS_STEM_TAG}`
+        },
+        {
+          name: 'stem-tag spellings',
+          ids: fixture.witnessGroups.stemTagVariants,
+          expectedFlag: DUPLICATE,
+          spellings: [...WITNESS_ERROR_STEM_TAGS, WITNESS_NON_ERROR_STEM_TAG],
+          keyFor: (spelling: string) => `duplicate:${FIRST_CENSUS_ID}:${WITNESS_STEM_VARIANT_TREE_TAG}:${spelling}`,
+          foreignKey: `duplicate:${FIRST_CENSUS_ID}:${WITNESS_STEM_VARIANT_TREE_TAG}:${FOREIGN_STEM_SPELLING}`
+        },
+        {
+          name: 'same-batch tree-tag spellings',
+          ids: fixture.witnessGroups.sameBatchVariants,
+          expectedFlag: SAME_BATCH,
+          spellings: [...WITNESS_SAME_BATCH_ERROR_TREE_TAGS, WITNESS_SAME_BATCH_NON_ERROR_TREE_TAG],
+          keyFor: (spelling: string) => `${sameBatchPrefix}:${spelling}`,
+          foreignKey: `${sameBatchPrefix}:${FOREIGN_TAG_SPELLING}`
+        }
+      ];
+    };
 
-      expect(new Set(witnessTags).size).toBe(fixture.witnessRowIDs.length);
-      expect(witnessRows).toHaveLength(fixture.witnessRowIDs.length);
-      witnessRows.forEach(row => {
-        expect(row.contradictionType).toBe(DUPLICATE);
-        expect([...row.relatedMeasurementIDs].sort((a, b) => a - b)).toEqual(
-          fixture.witnessRowIDs.filter(id => id !== row.coreMeasurementID).sort((a, b) => a - b)
+    const withGroupKey = (response: ErrorExplorerQueryResponse, rowIDs: ReadonlySet<number>, groupKey: string): ErrorExplorerQueryResponse => ({
+      ...response,
+      rows: response.rows.map(row => (rowIDs.has(Number(row.coreMeasurementID)) ? { ...row, contradictionGroupKey: groupKey } : row))
+    });
+
+    it('production lists each witness group with its non-error spelling as a related row, and leaves that member out of the error set', async () => {
+      const response = await production.queryErrorExplorer(productionExecutor(), queryRequest(SCOPES[0], DEFAULT_FILTERS, 0, WHOLE_LIST_PAGE_SIZE));
+      for (const family of witnessFamilies()) {
+        const errorMemberIDs = family.ids.slice(0, -1);
+        const nonErrorMemberID = family.ids[family.ids.length - 1];
+        const rows = response.rows.filter(row => errorMemberIDs.includes(Number(row.coreMeasurementID)));
+        console.log(`[witness] seed=${seed} ${family.name} keys=${JSON.stringify(rows.map(row => row.contradictionGroupKey))}`);
+        expect(rows.map(row => row.coreMeasurementID).sort((a, b) => Number(a) - Number(b))).toEqual([...errorMemberIDs].sort((a, b) => a - b));
+        expect(response.rows.some(row => row.coreMeasurementID === nonErrorMemberID)).toBe(false);
+        rows.forEach(row => {
+          expect(row.contradictionType).toBe(family.expectedFlag);
+          expect([...row.relatedMeasurementIDs].sort((a, b) => a - b)).toEqual(family.ids.filter(id => id !== row.coreMeasurementID).sort((a, b) => a - b));
+        });
+      }
+    });
+
+    it('every case or accent spelling of a witness group key is accepted on the real connection, a different tag is rejected', async () => {
+      const whole = await oracleWholeList(SCOPES[0], DEFAULT_FILTERS);
+      for (const family of witnessFamilies()) {
+        const groupRowIDs = new Set(family.ids.slice(0, -1));
+        expect(whole.rows.filter(row => groupRowIDs.has(Number(row.coreMeasurementID)))).toHaveLength(groupRowIDs.size);
+        for (const spelling of family.spellings) {
+          const rewritten = withGroupKey(whole, groupRowIDs, family.keyFor(spelling));
+          await expectExplorerEqual(explorerConnection(), { seed, scenario: `${family.name}: key rewritten to ${spelling}` }, rewritten, whole, witnessIDs());
+        }
+        const foreign = withGroupKey(whole, groupRowIDs, family.foreignKey);
+        const error = await expectExplorerEqual(
+          explorerConnection(),
+          { seed, scenario: `${family.name}: key rewritten to another tag` },
+          foreign,
+          whole,
+          witnessIDs()
+        ).then(
+          () => null,
+          (caught: Error) => caught
         );
-      });
-      const [firstKey, ...otherKeys] = witnessRows.map(row => row.contradictionGroupKey as string);
-      for (const otherKey of otherKeys) {
-        const [rows] = await explorerConnection().query('SELECT ? = ? COLLATE utf8mb4_0900_ai_ci AS same', [firstKey, otherKey]);
-        expect((rows as Array<{ same: number }>)[0].same).toBe(1);
+        console.log(`[witness] seed=${seed} ${family.name}: another tag -> ${error?.message.split('\n')[2] ?? 'NOT REJECTED'}`);
+        expect(error, `${family.name}: a key for another tag must be rejected`).not.toBeNull();
+        expect(error?.message).toContain('contradictionGroupKey of row');
       }
     });
 
@@ -457,31 +636,32 @@ describe('errors explorer: frozen oracle against production on generated data', 
       'queryErrorExplorer: every filter, scope, page size and page',
       async () =>
         runTimed('queryErrorExplorer', async () => {
-          for (const scope of SCOPES) {
-            for (const preset of FILTER_GRID.slice(0, ERROR_EXPLORER_PRESETS.length)) {
-              const whole = await oracleWholeList(scope, preset.filters);
-              for (const page of pagesFor(whole.totalRows, DERIVATION_PAGE_SIZE)) {
-                apiCalls++;
-                const oraclePage = await oracle.queryErrorExplorer(oracleExecutor(), queryRequest(scope, preset.filters, page, DERIVATION_PAGE_SIZE));
-                await compare(
-                  { scenario: 'oracle per page against its whole-list slice', scope: scope.name, filters: preset.label, page, pageSize: DERIVATION_PAGE_SIZE },
-                  sliceOracleWholeList(whole, page, DERIVATION_PAGE_SIZE),
-                  oraclePage
-                );
-              }
+          for (const { scope, named } of PRESET_COMBINATIONS) {
+            const whole = await oracleWholeList(scope, named.filters);
+            for (const page of pagesFor(whole.totalRows, DERIVATION_PAGE_SIZE)) {
+              apiCalls++;
+              const oraclePage = await oracle.queryErrorExplorer(oracleExecutor(), queryRequest(scope, named.filters, page, DERIVATION_PAGE_SIZE));
+              await compare(
+                { scenario: 'oracle per page against its whole-list slice', scope: scope.name, filters: named.label, page, pageSize: DERIVATION_PAGE_SIZE },
+                sliceOracleWholeList(whole, page, DERIVATION_PAGE_SIZE),
+                oraclePage
+              );
             }
-            for (const { label, filters } of FILTER_GRID) {
-              const whole = await oracleWholeList(scope, filters);
-              for (const pageSize of PAGE_SIZES) {
-                for (const page of pagesFor(whole.totalRows, pageSize)) {
-                  apiCalls++;
-                  const actual = await production.queryErrorExplorer(productionExecutor(), queryRequest(scope, filters, page, pageSize));
-                  await compare(
-                    { scenario: 'queryErrorExplorer', scope: scope.name, filters: label, filterValues: filters, page, pageSize },
-                    actual,
-                    sliceOracleWholeList(whole, page, pageSize)
-                  );
-                }
+          }
+          for (const { scope, named } of GRID_COMBINATIONS) {
+            const { label, filters, axes } = named;
+            const whole = await oracleWholeList(scope, filters);
+            noteAxisTotals(axes, whole.totalRows);
+            if (label.includes(NO_LOG_FILTER_LABEL_PART)) noLogTotals.set(`${scope.name} | ${label}`, whole.totalRows);
+            for (const pageSize of PAGE_SIZES) {
+              for (const page of pagesFor(whole.totalRows, pageSize)) {
+                apiCalls++;
+                const actual = await production.queryErrorExplorer(productionExecutor(), queryRequest(scope, filters, page, pageSize));
+                await compare(
+                  { scenario: 'queryErrorExplorer', scope: scope.name, filters: label, filterValues: filters, page, pageSize },
+                  actual,
+                  sliceOracleWholeList(whole, page, pageSize)
+                );
               }
             }
           }
@@ -498,6 +678,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
               for (const quickSearch of QUICK_SEARCH_VALUES) {
                 const searchFilters = { ...filters, quickSearch };
                 const whole = await oracleWholeList(scope, searchFilters);
+                noteAxisTotals([`search:${quickSearch}`], whole.totalRows);
                 apiCalls++;
                 const actualWhole = await production.queryErrorExplorer(productionExecutor(), queryRequest(scope, searchFilters, 0, WHOLE_LIST_PAGE_SIZE));
                 await compare(
@@ -536,19 +717,17 @@ describe('errors explorer: frozen oracle against production on generated data', 
       'buildErrorExplorerFacets: every filter, scope and search value',
       async () =>
         runTimed('buildErrorExplorerFacets', async () => {
-          for (const scope of SCOPES) {
-            for (const { label, filters } of FILTER_GRID) {
-              for (const quickSearch of QUICK_SEARCH_VALUES) {
-                const searchFilters = { ...filters, quickSearch };
-                apiCalls += 2;
-                const expected = await oracle.buildErrorExplorerFacets(oracleExecutor(), facetRequest(scope, searchFilters));
-                const actual = await production.buildErrorExplorerFacets(productionExecutor(), facetRequest(scope, searchFilters));
-                await compare(
-                  { scenario: 'buildErrorExplorerFacets', scope: scope.name, filters: label, filterValues: searchFilters, quickSearch },
-                  actual,
-                  expected
-                );
-              }
+          for (const { scope, named } of GRID_COMBINATIONS) {
+            for (const quickSearch of QUICK_SEARCH_VALUES) {
+              const searchFilters = { ...named.filters, quickSearch };
+              apiCalls += 2;
+              const expected = await oracle.buildErrorExplorerFacets(oracleExecutor(), facetRequest(scope, searchFilters));
+              const actual = await production.buildErrorExplorerFacets(productionExecutor(), facetRequest(scope, searchFilters));
+              await compare(
+                { scenario: 'buildErrorExplorerFacets', scope: scope.name, filters: named.label, filterValues: searchFilters, quickSearch },
+                actual,
+                expected
+              );
             }
           }
         }),
@@ -625,19 +804,19 @@ describe('errors explorer: frozen oracle against production on generated data', 
       async () =>
         runTimed('buildErrorExportRows', async () => {
           const exportFilters: NamedFilters[] = [
-            ...FILTER_GRID.slice(0, ERROR_EXPLORER_PRESETS.length),
-            { label: 'semicolon message', filters: oracleFilters({ exactMessages: [FIXTURE_MESSAGES.semicolonMessage] }), sweepWithSearch: false }
+            ...PRESET_FILTERS,
+            { label: 'semicolon message', filters: oracleFilters({ exactMessages: [FIXTURE_MESSAGES.semicolonMessage] }), sweepWithSearch: false, axes: [] }
           ];
           for (const scope of SCOPES) {
             const censusArgument = scopeCensusArgument(scope);
             for (const { label, filters } of exportFilters) {
               apiCalls += 2;
               const expected = oracle.buildErrorExportRows(
-                await oracle.fetchGroupedErrorRows(oracleExecutor(), database(), MAIN_PLOT_ID, censusArgument),
+                await oracle.fetchGroupedErrorRows(oracleExecutor(), database(), scope.plotID, censusArgument),
                 filters
               );
               const actual = production.buildErrorExportRows(
-                await production.fetchGroupedErrorRows(productionExecutor(), database(), MAIN_PLOT_ID, censusArgument),
+                await production.fetchGroupedErrorRows(productionExecutor(), database(), scope.plotID, censusArgument),
                 filters
               );
               await compare({ scenario: 'buildErrorExportRows', scope: scope.name, filters: label }, actual, expected);
@@ -646,6 +825,17 @@ describe('errors explorer: frozen oracle against production on generated data', 
         }),
       SEED_TEST_TIMEOUT_MS
     );
+
+    it('every filter axis value and every search value selects rows somewhere, so no comparison is between two empty lists', () => {
+      const emptyAxes = [...axisMaxima.entries()].filter(([axis, maximum]) => maximum === 0 && axis !== MATCHES_NOTHING_AXIS).map(([axis]) => axis);
+      console.log(`[axes] seed=${seed} axisValues=${axisMaxima.size} maxima=${JSON.stringify(Object.fromEntries(axisMaxima))}`);
+      console.log(`[no-log] seed=${seed} oracle totalRows per no-log fallback set: ${JSON.stringify(Object.fromEntries(noLogTotals))}`);
+
+      expect(axisMaxima.size, 'the query and quick-search tests must have recorded the axes first').toBeGreaterThan(QUICK_SEARCH_VALUES.length);
+      expect(axisMaxima.get(MATCHES_NOTHING_AXIS), 'the matches-nothing control must stay empty').toBe(0);
+      expect(axisMaxima.get(NO_LOG_AXIS), 'the no-log fallback message needs a positive oracle count').toBeGreaterThan(0);
+      expect(emptyAxes).toEqual([]);
+    });
   });
 
   describe('coverage assertion can fail', () => {

@@ -5,7 +5,7 @@ import { DEFAULT_TEST_CONFIG, loadSchema, seededRandom } from '../../setup/local
 import { runQueryDispatch } from '../../setup/runquerydispatch';
 import { cleanupTimingConnections, createTestDatabaseStrict } from '../../setup/stricttestdatabasecleanup';
 import { TEST_DB_DRIVER_TIMEZONE } from '../../setup/test-db-connection';
-import { readStatementLabel } from '@/app/api/errors/explorer/errorsetsql';
+import { NO_LOG_ERROR_MESSAGE, readStatementLabel } from '@/app/api/errors/explorer/errorsetsql';
 
 export const EQUIVALENCE_GROUP_CONCAT_MAX_LEN = 1_048_576;
 export const FIXTURE_CONNECTION_CHARSET = 'UTF8MB4_0900_AI_CI';
@@ -44,11 +44,23 @@ export const FIXTURE_MESSAGES = {
   invalidSpecies: 'Species code is not in the species list',
   sqlException: 'The database rejected this row',
   nullCode: 'Row failed ingestion for an unrecorded reason',
+  noLogFallback: NO_LOG_ERROR_MESSAGE,
   matchesNothing: 'No such message'
 } as const;
 
 export const WITNESS_TREE_TAGS = ['Ab1', 'ab1', 'Áb1'] as const;
+export const WITNESS_NON_ERROR_TREE_TAG = 'AB1';
 export const WITNESS_STEM_TAG = '1';
+export const WITNESS_STEM_VARIANT_TREE_TAG = 'Wst';
+export const WITNESS_ERROR_STEM_TAGS = ['Sa', 'sA'] as const;
+export const WITNESS_NON_ERROR_STEM_TAG = 'SA';
+export const WITNESS_SAME_BATCH_ERROR_TREE_TAGS = ['Sb1', 'sb1'] as const;
+export const WITNESS_SAME_BATCH_NON_ERROR_TREE_TAG = 'SB1';
+export const ATTRIBUTES_ONLY_TOKEN = 'buttressed';
+export const SEARCH_PAIR_TREE_TAG = 'T12';
+export const SEARCH_PAIR_STEM_TAG = '1';
+export const PLOT_MISMATCH_TREE_TAG = 'D1';
+export const PLOT_MISMATCH_STEM_TAG = '1';
 
 const DEFAULT_SEEDS: readonly number[] = [544, 20261104, 4242];
 export const EQUIVALENCE_SEEDS_ENV = 'ERRORS_EXPLORER_EQUIVALENCE_SEEDS';
@@ -89,6 +101,15 @@ export interface FixtureMeasurement {
   rawCodes: string | null;
   stemLocalX: string | number | null;
   stemLocalY: string | number | null;
+  quadratID: number | null;
+  treeID: number | null;
+  speciesID: number | null;
+  speciesName: string | null;
+  subspeciesName: string | null;
+  stemPlotX: string | number | null;
+  stemPlotY: string | number | null;
+  attributes: string | null;
+  userDefinedFields: Record<string, unknown> | null;
   description: string | null;
   uploadFileID: string | null;
   uploadBatchID: string | null;
@@ -109,14 +130,24 @@ export interface ExplorerFixture {
   measurements: FixtureMeasurement[];
   logs: FixtureLog[];
 }
+export interface WitnessGroups {
+  treeTagVariants: number[];
+  stemTagVariants: number[];
+  sameBatchVariants: number[];
+}
 export interface GeneratedFixture extends ExplorerFixture {
   seed: number;
+  /** Rows whose contradictionGroupKey spelling depends on which group member MySQL picks: compared under the collation. */
   witnessRowIDs: number[];
+  witnessGroups: WitnessGroups;
+  /** Rows whose summary PlotID differs from their census's plot. */
+  mismatchedPlotRowIDs: number[];
 }
 
 export function resolveEquivalenceSeeds(rawEnvValue: string | undefined = process.env[EQUIVALENCE_SEEDS_ENV]): number[] {
   if (!rawEnvValue?.trim()) return [...DEFAULT_SEEDS];
-  const seeds = rawEnvValue.split(',').map(part => Number(part.trim()));
+  const parts = rawEnvValue.split(',').map(part => part.trim());
+  const seeds = parts.map(part => (part === '' ? NaN : Number(part)));
   const invalid = seeds.filter(seed => !Number.isInteger(seed));
   if (invalid.length > 0) throw new RangeError(`${EQUIVALENCE_SEEDS_ENV} must be comma-separated integers; got ${JSON.stringify(rawEnvValue)}`);
   return seeds;
@@ -283,7 +314,16 @@ export async function replaceFixture(connection: Connection, fixture: ExplorerFi
         'MeasuredDBH',
         'MeasuredHOM',
         'IsValidated',
-        'Description'
+        'Description',
+        'QuadratID',
+        'TreeID',
+        'SpeciesID',
+        'SpeciesName',
+        'SubspeciesName',
+        'StemPlotX',
+        'StemPlotY',
+        'Attributes',
+        'UserDefinedFields'
       ],
       fixture.measurements.map(row => [
         row.coreMeasurementID,
@@ -300,7 +340,16 @@ export async function replaceFixture(connection: Connection, fixture: ExplorerFi
         row.measuredDBH,
         row.measuredHOM,
         row.summaryIsValidated,
-        row.description
+        row.description,
+        row.quadratID,
+        row.treeID,
+        row.speciesID,
+        row.speciesName,
+        row.subspeciesName,
+        row.stemPlotX,
+        row.stemPlotY,
+        row.attributes,
+        row.userDefinedFields === null ? null : JSON.stringify(row.userDefinedFields)
       ])
     );
     await insertRows(
@@ -329,6 +378,8 @@ export interface RecordingExecutor {
   reset(): void;
   /** Runs once, right after the first statement whose label equals `label` returns (its rows are already read). */
   afterStatementOnce(label: string, hook: () => Promise<void>): void;
+  /** Throws, naming the labels, if any registered hook has not fired yet. */
+  assertAllHooksFired(): void;
 }
 
 export function createRecordingExecutor(connection: Pick<Connection, 'query' | 'execute'>): RecordingExecutor {
@@ -340,7 +391,11 @@ export function createRecordingExecutor(connection: Pick<Connection, 'query' | '
       statements.length = 0;
     },
     afterStatementOnce: (label, hook) => {
+      if (pendingHooks.has(label)) throw new Error(`A hook for statement label ${label} is already registered and has not fired`);
       pendingHooks.set(label, hook);
+    },
+    assertAllHooksFired: () => {
+      if (pendingHooks.size > 0) throw new Error(`Hooks never fired for statement labels: ${[...pendingHooks.keys()].join(', ')}`);
     },
     executeQuery: async (sql, params = []) => {
       const rows = await runQueryDispatch(connection, sql, params);
@@ -518,6 +573,7 @@ const MEASUREMENT_DATES: readonly string[] = ['2020-03-01', '2020-03-02', '2020-
 const STEM_TAGS: ReadonlyArray<string | null> = ['1', '1', '2', '', null, ' '];
 const BLANK_TREE_TAGS: ReadonlyArray<string | null> = [null, '', ' '];
 const SPECIES_CODES: readonly string[] = ['AAA', 'aaa', 'BBB', 'CCC'];
+const SAME_BATCH_VARIANT_SPECIES: readonly string[] = ['AAA', 'BBB', 'CCC'];
 const QUADRAT_NAMES: readonly string[] = ['Q01', 'Q02', 'Q03', 'Q04', 'Q05'];
 const UPLOAD_FILES: readonly string[] = ['file-a', 'file-b'];
 const UPLOAD_BATCHES: readonly string[] = ['batch-1', 'batch-2'];
@@ -530,6 +586,17 @@ const DBH_MIN = 10;
 const DBH_SPAN = 490;
 const COORDINATE_SPAN = 20;
 const PRIOR_DBH_FACTOR_MIN = 0.5;
+const QUADRAT_ID_BASE = 300;
+const QUADRAT_ID_MODULUS = 97;
+const TREE_ID_BASE = 100_000;
+const SPECIES_ID_BASE = 5000;
+const SPECIES_ID_MODULUS = 53;
+const SUBSPECIES_NULL_EVERY = 3;
+const PLOT_X_STEP = 0.125;
+const PLOT_X_OFFSET = 0.25;
+const PLOT_Y_STEP = 0.0625;
+const PLOT_Y_OFFSET = 0.75;
+const ATTRIBUTES: ReadonlyArray<string | null> = [null, null, 'fluted', 'hollow', 'snag'];
 
 const FIXTURE_ERROR_TYPES: FixtureErrorType[] = [
   { errorID: FIXTURE_ERROR_TYPE_IDS.dbhGrowth, source: 'validation', code: '1', message: FIXTURE_MESSAGES.dbhGrowth },
@@ -575,6 +642,26 @@ function pickLogCount(random: Random): number {
   return index === -1 ? LOG_COUNT_THRESHOLDS.length : index;
 }
 
+type DisplayColumns = Pick<
+  FixtureMeasurement,
+  'quadratID' | 'treeID' | 'speciesID' | 'speciesName' | 'subspeciesName' | 'stemPlotX' | 'stemPlotY' | 'attributes' | 'userDefinedFields'
+>;
+
+/** Every id yields values that differ from the other columns' values for the same row, so a swapped or dropped column shows up as a difference. */
+function displayColumnsFor(coreMeasurementID: number, attributes: string | null): DisplayColumns {
+  return {
+    quadratID: QUADRAT_ID_BASE + (coreMeasurementID % QUADRAT_ID_MODULUS),
+    treeID: TREE_ID_BASE + coreMeasurementID,
+    speciesID: SPECIES_ID_BASE + (coreMeasurementID % SPECIES_ID_MODULUS),
+    speciesName: `Genus ${coreMeasurementID % SPECIES_ID_MODULUS}`,
+    subspeciesName: coreMeasurementID % SUBSPECIES_NULL_EVERY === 0 ? null : `subsp. ${coreMeasurementID}`,
+    stemPlotX: coreMeasurementID * PLOT_X_STEP + PLOT_X_OFFSET,
+    stemPlotY: coreMeasurementID * PLOT_Y_STEP + PLOT_Y_OFFSET,
+    attributes,
+    userDefinedFields: { ordinal: coreMeasurementID, label: `row-${coreMeasurementID}`, flags: [coreMeasurementID % 2 === 0] }
+  };
+}
+
 function randomMeasurement(random: Random, coreMeasurementID: number, census: FixtureCensus): FixtureMeasurement {
   const summaryIsValidated = pickOne(random, VALIDATION_STATES);
   const isStale = chance(random, STALE_SUMMARY_RATE);
@@ -599,6 +686,7 @@ function randomMeasurement(random: Random, coreMeasurementID: number, census: Fi
     rawCodes: pickOne(random, RAW_CODES),
     stemLocalX: chance(random, NULL_DATE_RATE) ? null : roundTo(random() * COORDINATE_SPAN, 2),
     stemLocalY: chance(random, NULL_DATE_RATE) ? null : roundTo(random() * COORDINATE_SPAN, 2),
+    ...displayColumnsFor(coreMeasurementID, pickOne(random, ATTRIBUTES)),
     description: pickOne(random, DESCRIPTIONS),
     uploadFileID: hasUpload ? pickOne(random, UPLOAD_FILES) : null,
     uploadBatchID: hasUpload ? pickOne(random, UPLOAD_BATCHES) : null
@@ -622,6 +710,8 @@ interface PlantedRows {
   measurements: FixtureMeasurement[];
   logs: FixtureLog[];
   witnessRowIDs: number[];
+  witnessGroups: WitnessGroups;
+  mismatchedPlotRowIDs: number[];
 }
 
 /** Every seed carries the same planted rows: they are the cases the random draw cannot be trusted to produce. */
@@ -651,6 +741,7 @@ function plantedRows(): PlantedRows {
       rawCodes: null,
       stemLocalX: 1.5,
       stemLocalY: 2.5,
+      ...displayColumnsFor(coreMeasurementID, null),
       description: null,
       uploadFileID: null,
       uploadBatchID: null,
@@ -682,7 +773,7 @@ function plantedRows(): PlantedRows {
   plant({ treeTag: 'C1', stemTag: '1', speciesCode: 'CCC', ...bothBatch }, [ET.sqlException]);
   plant({ treeTag: 'C1', stemTag: '1', speciesCode: 'BBB', ...bothBatch }, [ET.sqlException]);
   plant({ treeTag: 'U1', stemTag: '1' }, [ET.nullCode]);
-  const witnessRowIDs = WITNESS_TREE_TAGS.map(treeTag => plant({ treeTag, stemTag: WITNESS_STEM_TAG }, [ET.tagMismatch]));
+  const witnessTreeErrorRowIDs = WITNESS_TREE_TAGS.map(treeTag => plant({ treeTag, stemTag: WITNESS_STEM_TAG }, [ET.tagMismatch]));
   BLANK_TREE_TAGS.forEach(treeTag => plant({ treeTag, stemTag: '1' }, [ET.fallbackFields]));
   BLANK_TREE_TAGS.forEach((stemTag, index) => plant({ treeTag: `B${index + 1}`, stemTag }, [ET.fallbackFields]));
   plant({ treeTag: 'M1', stemTag: '1' }, [ET.semicolonMessage]);
@@ -695,7 +786,34 @@ function plantedRows(): PlantedRows {
   plant({ treeTag: 'X7', stemTag: '1' }, [], [ET.tagMismatch]);
   plant({ treeTag: 'X8', stemTag: '1' });
 
-  return { measurements, logs, witnessRowIDs };
+  const witnessTreeNonErrorRowID = plant({ treeTag: WITNESS_NON_ERROR_TREE_TAG, stemTag: WITNESS_STEM_TAG });
+  const witnessStemErrorRowIDs = WITNESS_ERROR_STEM_TAGS.map(stemTag => plant({ treeTag: WITNESS_STEM_VARIANT_TREE_TAG, stemTag }, [ET.tagMismatch]));
+  const witnessStemNonErrorRowID = plant({ treeTag: WITNESS_STEM_VARIANT_TREE_TAG, stemTag: WITNESS_NON_ERROR_STEM_TAG });
+  const witnessSameBatchErrorRowIDs = WITNESS_SAME_BATCH_ERROR_TREE_TAGS.map((treeTag, index) =>
+    plant({ treeTag, stemTag: String(index + 1), speciesCode: SAME_BATCH_VARIANT_SPECIES[index], ...sameBatch }, [ET.invalidSpecies])
+  );
+  const witnessSameBatchNonErrorRowID = plant({
+    treeTag: WITNESS_SAME_BATCH_NON_ERROR_TREE_TAG,
+    stemTag: String(WITNESS_SAME_BATCH_ERROR_TREE_TAGS.length + 1),
+    speciesCode: SAME_BATCH_VARIANT_SPECIES[WITNESS_SAME_BATCH_ERROR_TREE_TAGS.length],
+    ...sameBatch
+  });
+  const mismatchedPlotRowID = plant({ plotID: DECOY_PLOT_ID, treeTag: PLOT_MISMATCH_TREE_TAG, stemTag: PLOT_MISMATCH_STEM_TAG }, [ET.tagMismatch]);
+  plant({ treeTag: 'A1', stemTag: '1', attributes: ATTRIBUTES_ONLY_TOKEN }, [ET.fallbackFields]);
+  plant({ treeTag: SEARCH_PAIR_TREE_TAG, stemTag: SEARCH_PAIR_STEM_TAG }, [ET.fallbackFields]);
+
+  const witnessGroups: WitnessGroups = {
+    treeTagVariants: [...witnessTreeErrorRowIDs, witnessTreeNonErrorRowID],
+    stemTagVariants: [...witnessStemErrorRowIDs, witnessStemNonErrorRowID],
+    sameBatchVariants: [...witnessSameBatchErrorRowIDs, witnessSameBatchNonErrorRowID]
+  };
+  return {
+    measurements,
+    logs,
+    witnessRowIDs: [...witnessGroups.treeTagVariants, ...witnessGroups.stemTagVariants, ...witnessGroups.sameBatchVariants],
+    witnessGroups,
+    mismatchedPlotRowIDs: [mismatchedPlotRowID]
+  };
 }
 
 export function generateEquivalenceFixture(seed: number): GeneratedFixture {
@@ -718,6 +836,8 @@ export function generateEquivalenceFixture(seed: number): GeneratedFixture {
     validations: FIXTURE_VALIDATIONS.map(validation => ({ ...validation })),
     measurements: [...measurements, ...planted.measurements],
     logs: [...logs, ...planted.logs],
-    witnessRowIDs: planted.witnessRowIDs
+    witnessRowIDs: planted.witnessRowIDs,
+    witnessGroups: planted.witnessGroups,
+    mismatchedPlotRowIDs: planted.mismatchedPlotRowIDs
   };
 }

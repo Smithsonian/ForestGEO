@@ -15,8 +15,18 @@ import {
   replaceFixture,
   resolveEquivalenceSeeds,
   setGroupConcatMaxLen,
+  ATTRIBUTES_ONLY_TOKEN,
+  DECOY_PLOT_ID,
+  FIRST_CENSUS_ID,
+  MAIN_PLOT_ID,
+  WITNESS_ERROR_STEM_TAGS,
+  WITNESS_NON_ERROR_STEM_TAG,
+  WITNESS_NON_ERROR_TREE_TAG,
+  WITNESS_SAME_BATCH_ERROR_TREE_TAGS,
+  WITNESS_SAME_BATCH_NON_ERROR_TREE_TAG,
   WITNESS_TREE_TAGS,
-  type ExplorerFixture
+  type ExplorerFixture,
+  type FixtureMeasurement
 } from '../integration/helpers/errorsexplorerfixtures';
 
 vi.mock('mysql2/promise', () => ({ default: { createConnection: vi.fn() } }));
@@ -35,6 +45,9 @@ const STEM_TAG_COLUMN_LENGTH = 10;
 const SPECIES_CODE_COLUMN_LENGTH = 25;
 const UPLOAD_BATCH_COLUMN_LENGTH = 36;
 const RAW_CODES_COLUMN_LENGTH = 255;
+const ATTRIBUTES_COLUMN_LENGTH = 255;
+const SPECIES_NAME_COLUMN_LENGTH = 64;
+const MIN_DISTINCT_COLUMN_VALUES = 50;
 const OTHER_SEED = 545;
 const FIRST_SEED = 544;
 
@@ -321,6 +334,10 @@ describe('seed selection and group_concat_max_len', () => {
     expect(() => resolveEquivalenceSeeds('1.5')).toThrow(RangeError);
   });
 
+  it.each([['544,,4242'], ['544,'], [',544'], [' , '], ['544, ,4242']])('rejects the empty seed entry in %j instead of reading it as seed 0', rawList => {
+    expect(() => resolveEquivalenceSeeds(rawList)).toThrow(RangeError);
+  });
+
   it('sets the session variable to the given byte count and refuses a non-positive one', async () => {
     const calls: string[] = [];
     const connection = fakeConnection('explorer', calls);
@@ -352,7 +369,9 @@ describe('generateEquivalenceFixture', () => {
     expect(new Set(logKeys).size).toBe(logKeys.length);
     expect(new Set(typeKeys).size).toBe(typeKeys.length);
     expect(fixture.logs.every(log => measurementIDs.has(log.measurementID) && errorIDs.has(log.errorID))).toBe(true);
-    expect(fixture.measurements.every(row => censusByID.get(row.censusID)?.plotID === row.plotID)).toBe(true);
+    expect(fixture.measurements.filter(row => censusByID.get(row.censusID)?.plotID !== row.plotID).map(row => row.coreMeasurementID)).toEqual(
+      fixture.mismatchedPlotRowIDs
+    );
     expect(fixture.validations.every(validation => validationCodes.has(String(validation.validationID)))).toBe(true);
     expect(new Set(fixture.validations.map(validation => validation.procedureName)).size).toBe(fixture.validations.length);
     expect(fixture.measurements.every(row => (row.treeTag ?? '').length <= TREE_TAG_COLUMN_LENGTH)).toBe(true);
@@ -360,6 +379,39 @@ describe('generateEquivalenceFixture', () => {
     expect(fixture.measurements.every(row => (row.speciesCode ?? '').length <= SPECIES_CODE_COLUMN_LENGTH)).toBe(true);
     expect(fixture.measurements.every(row => (row.uploadBatchID ?? '').length <= UPLOAD_BATCH_COLUMN_LENGTH)).toBe(true);
     expect(fixture.measurements.every(row => (row.rawCodes ?? '').length <= RAW_CODES_COLUMN_LENGTH)).toBe(true);
+    expect(fixture.measurements.every(row => (row.attributes ?? '').length <= ATTRIBUTES_COLUMN_LENGTH)).toBe(true);
+    expect(fixture.measurements.every(row => (row.speciesName ?? '').length <= SPECIES_NAME_COLUMN_LENGTH)).toBe(true);
+  });
+
+  it('fills the nine display columns with values that differ by row and by column', () => {
+    const distinctValues = (pick: (row: FixtureMeasurement) => unknown) => new Set(fixture.measurements.map(row => JSON.stringify(pick(row)))).size;
+    const columns: Array<[string, (row: FixtureMeasurement) => unknown]> = [
+      ['treeID', row => row.treeID],
+      ['stemPlotX', row => row.stemPlotX],
+      ['stemPlotY', row => row.stemPlotY],
+      ['speciesName', row => row.speciesName],
+      ['subspeciesName', row => row.subspeciesName],
+      ['userDefinedFields', row => row.userDefinedFields]
+    ];
+    columns.forEach(([name, pick]) => expect(distinctValues(pick), `${name} must differ across rows`).toBeGreaterThan(MIN_DISTINCT_COLUMN_VALUES));
+    expect(distinctValues(row => row.quadratID)).toBeGreaterThan(1);
+    expect(distinctValues(row => row.speciesID)).toBeGreaterThan(1);
+    expect(distinctValues(row => row.attributes)).toBeGreaterThan(1);
+    expect(fixture.measurements.some(row => row.subspeciesName === null)).toBe(true);
+    expect(fixture.measurements.every(row => row.stemPlotX !== row.stemPlotY && row.speciesName !== row.subspeciesName)).toBe(true);
+    expect(fixture.measurements.every(row => row.quadratID !== null && row.userDefinedFields !== null)).toBe(true);
+    expect(fixture.measurements.filter(row => row.attributes === ATTRIBUTES_ONLY_TOKEN)).toHaveLength(1);
+  });
+
+  it('plants one row whose summary plot differs from its census and shares its tag pair with a plot-1 pair', () => {
+    const [mismatchedID] = fixture.mismatchedPlotRowIDs;
+    const mismatched = fixture.measurements.find(row => row.coreMeasurementID === mismatchedID);
+    const mates = fixture.measurements.filter(
+      row => row.plotID === MAIN_PLOT_ID && row.censusID === mismatched?.censusID && row.treeTag === mismatched?.treeTag && row.stemTag === mismatched?.stemTag
+    );
+    expect(mismatched?.plotID).toBe(DECOY_PLOT_ID);
+    expect(mismatched?.censusID).toBe(FIRST_CENSUS_ID);
+    expect(mates.length).toBeGreaterThanOrEqual(2);
   });
 
   it('holds the three censuses at the planned sizes plus the planted rows', () => {
@@ -370,10 +422,27 @@ describe('generateEquivalenceFixture', () => {
     expect(fixture.censuses.map(census => census.plotCensusNumber)).toEqual([null, null, null]);
   });
 
-  it('plants the witness group with tags that differ only by case or accent, and the semicolon message type', () => {
-    const witnessRows = fixture.measurements.filter(row => fixture.witnessRowIDs.includes(row.coreMeasurementID));
-    expect(witnessRows.map(row => row.treeTag)).toEqual([...WITNESS_TREE_TAGS]);
-    expect(new Set(witnessRows.map(row => row.stemTag)).size).toBe(1);
+  it('plants three witness groups whose spellings differ only by case or accent, each with a non-error member', () => {
+    const rowsOf = (ids: number[]) => ids.map(id => fixture.measurements.find(row => row.coreMeasurementID === id) as FixtureMeasurement);
+    const errorIDs = new Set(fixture.logs.filter(log => !log.isResolved).map(log => log.measurementID));
+    const { treeTagVariants, stemTagVariants, sameBatchVariants } = fixture.witnessGroups;
+    const hasUnresolvedLog = (row: FixtureMeasurement) => errorIDs.has(row.coreMeasurementID);
+
+    expect(rowsOf(treeTagVariants).map(row => row.treeTag)).toEqual([...WITNESS_TREE_TAGS, WITNESS_NON_ERROR_TREE_TAG]);
+    expect(new Set(rowsOf(treeTagVariants).map(row => row.stemTag)).size).toBe(1);
+    expect(rowsOf(stemTagVariants).map(row => row.stemTag)).toEqual([...WITNESS_ERROR_STEM_TAGS, WITNESS_NON_ERROR_STEM_TAG]);
+    expect(new Set(rowsOf(stemTagVariants).map(row => row.treeTag)).size).toBe(1);
+    expect(rowsOf(sameBatchVariants).map(row => row.treeTag)).toEqual([...WITNESS_SAME_BATCH_ERROR_TREE_TAGS, WITNESS_SAME_BATCH_NON_ERROR_TREE_TAG]);
+    expect(new Set(rowsOf(sameBatchVariants).map(row => row.speciesCode)).size).toBe(sameBatchVariants.length);
+    expect(new Set(rowsOf(sameBatchVariants).map(row => `${row.uploadFileID}/${row.uploadBatchID}`)).size).toBe(1);
+    expect(rowsOf(treeTagVariants).map(hasUnresolvedLog)).toEqual([true, true, true, false]);
+    expect(rowsOf(stemTagVariants).map(hasUnresolvedLog)).toEqual([true, true, false]);
+    expect(rowsOf(sameBatchVariants).map(hasUnresolvedLog)).toEqual([true, true, false]);
+    expect(treeTagVariants.length).toBe(WITNESS_TREE_TAGS.length + 1);
+    expect(fixture.witnessRowIDs).toEqual([...treeTagVariants, ...stemTagVariants, ...sameBatchVariants]);
+  });
+
+  it('plants the semicolon message type', () => {
     expect(fixture.errorTypes.find(type => type.errorID === FIXTURE_ERROR_TYPE_IDS.semicolonMessage)?.message).toContain(';');
   });
 });
@@ -404,6 +473,15 @@ describe('replaceFixture', () => {
         rawCodes: null,
         stemLocalX: 1.5,
         stemLocalY: null,
+        quadratID: 301,
+        treeID: 100007,
+        speciesID: 5007,
+        speciesName: 'Genus 7',
+        subspeciesName: null,
+        stemPlotX: 1.125,
+        stemPlotY: '2.5',
+        attributes: 'fluted',
+        userDefinedFields: { ordinal: 7 },
         description: null,
         uploadFileID: null,
         uploadBatchID: null
@@ -455,7 +533,34 @@ describe('replaceFixture', () => {
       'measurement_error_log'
     ]);
     expect(inserted.find(statement => statement.sql.includes('measurementssummary'))?.params).toEqual([
-      [[7, null, 1, 1, 'T1', '1', 'AAA', 'Q01', 1.5, null, '2020-03-01', 12.5, null, null, null]]
+      [
+        [
+          7,
+          null,
+          1,
+          1,
+          'T1',
+          '1',
+          'AAA',
+          'Q01',
+          1.5,
+          null,
+          '2020-03-01',
+          12.5,
+          null,
+          null,
+          null,
+          301,
+          100007,
+          5007,
+          'Genus 7',
+          null,
+          1.125,
+          '2.5',
+          'fluted',
+          '{"ordinal":7}'
+        ]
+      ]
     ]);
     expect(inserted.find(statement => statement.sql.includes('coremeasurements'))?.params).toEqual([
       [[7, 1, 7, false, '2020-03-01', 12.5, null, null, null, null, true]]
@@ -530,6 +635,47 @@ describe('createRecordingExecutor', () => {
 
     expect(observedStatementCounts).toEqual([2]);
     expect(executor.statements).toHaveLength(3);
+  });
+
+  it('refuses a second hook for a label whose first hook has not fired, leaving the first in place', async () => {
+    const executor = createRecordingExecutor(fakeTarget([]) as never);
+    const fired: string[] = [];
+    executor.afterStatementOnce('/* errors-explorer:totals */', async () => {
+      fired.push('first');
+    });
+
+    expect(() =>
+      executor.afterStatementOnce('/* errors-explorer:totals */', async () => {
+        fired.push('second');
+      })
+    ).toThrow('already registered');
+    await executor.executeQuery(LABELLED_SELECT, [1]);
+
+    expect(fired).toEqual(['first']);
+  });
+
+  it('accepts a new hook for a label once the earlier hook has fired', async () => {
+    const executor = createRecordingExecutor(fakeTarget([]) as never);
+    const fired: string[] = [];
+    executor.afterStatementOnce('/* errors-explorer:totals */', async () => void fired.push('first'));
+    await executor.executeQuery(LABELLED_SELECT, [1]);
+    executor.afterStatementOnce('/* errors-explorer:totals */', async () => void fired.push('second'));
+    await executor.executeQuery(LABELLED_SELECT, [2]);
+    expect(fired).toEqual(['first', 'second']);
+  });
+
+  it('assertAllHooksFired names every hook that never fired and passes once they all have', async () => {
+    const executor = createRecordingExecutor(fakeTarget([]) as never);
+    expect(() => executor.assertAllHooksFired()).not.toThrow();
+    executor.afterStatementOnce('/* errors-explorer:totals */', async () => undefined);
+    executor.afterStatementOnce('/* errors-explorer:page */', async () => undefined);
+    await executor.executeQuery(LABELLED_SELECT, [1]);
+
+    expect(() => executor.assertAllHooksFired()).toThrow('/* errors-explorer:page */');
+    expect(() => executor.assertAllHooksFired()).not.toThrow('totals');
+
+    await executor.executeQuery('/* errors-explorer:page */\nSELECT 1');
+    expect(() => executor.assertAllHooksFired()).not.toThrow();
   });
 
   it('propagates a hook failure to the caller of the statement that triggered it', async () => {
