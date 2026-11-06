@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo } from 'react';
 import {
+  computeDbhChangePercent,
   toErrorTypeIdentity,
   type ErrorExplorerColumnFilter,
   type ErrorExplorerFilters,
@@ -58,9 +59,29 @@ export async function postErrorsExplorerQuery(body: ErrorExplorerQueryRequest, s
   return data as ErrorExplorerQueryResponse;
 }
 
+/** What a grid shows about a row depends on its error type, so another grid's copy of the same row keeps its own values. */
+const ERROR_TYPE_VIEW_FIELDS = [
+  'primaryErrorMessage',
+  'errorMessages',
+  'errorSources',
+  'errorFields',
+  'errorCodes',
+  'errorCount',
+  'contradictionTypes',
+  'contradictionType',
+  'contradictionGroupKey',
+  'relatedMeasurementIDs',
+  'priorCensusID',
+  'priorDBH',
+  'priorHOM',
+  'homChanged'
+] as const satisfies ReadonlyArray<keyof ErrorExplorerRow>;
+
 /** Today's syncEditedRowLocally merge (errorsexplorer.tsx:294-300): keeps uploaded codes unless the edit changed them. */
 export function mergeEditedRow(existingRow: ErrorExplorerRow, updatedRow: ErrorExplorerRow): ErrorExplorerRow {
-  return { ...existingRow, ...updatedRow, rawCodes: updatedRow.rawCodes ?? existingRow.rawCodes };
+  const errorTypeView = Object.fromEntries(ERROR_TYPE_VIEW_FIELDS.map(field => [field, existingRow[field]]));
+  const merged = { ...existingRow, ...updatedRow, ...errorTypeView, rawCodes: updatedRow.rawCodes ?? existingRow.rawCodes } as ErrorExplorerRow;
+  return { ...merged, dbhChangePercent: computeDbhChangePercent(merged.priorDBH, merged.measuredDBH) };
 }
 
 export interface UseErrorsExplorerRowsArgs {

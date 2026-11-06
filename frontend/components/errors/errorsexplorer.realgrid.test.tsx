@@ -1085,3 +1085,73 @@ describe('the Filtered-to chip in No grouping', () => {
     expect(screen.getByRole('button', { name: VIEW_ERRORS_TEXT.removeFilter })).toBeDisabled();
   });
 });
+
+describe('an edit made in one group patches the same measurement in the other groups', () => {
+  const DBH_CHANGE_CODE = '1';
+  const DBH_CHANGE_MESSAGE = 'DBH growth exceeds maximum rate of 65 mm';
+  const DBH_CHANGE_LABEL = `${DBH_CHANGE_MESSAGE} rows`;
+  const PRIOR_DBH = 10;
+  const CURRENT_DBH = 12;
+  const DBH_CHANGE_PERCENT = 20;
+  const DBH_CHANGE_FACET: ErrorTypeFacet = {
+    source: 'validation',
+    code: DBH_CHANGE_CODE,
+    message: DBH_CHANGE_MESSAGE,
+    fields: ['measuredDBH'],
+    count: 1,
+    hasContradiction: false
+  };
+  const DBH_CHANGE_ROW = explorerRow(101, {
+    errorCodes: [DBH_CHANGE_CODE],
+    primaryErrorMessage: DBH_CHANGE_MESSAGE,
+    errorMessages: [DBH_CHANGE_MESSAGE],
+    errorFields: ['measuredDBH'],
+    measuredDBH: CURRENT_DBH,
+    priorDBH: PRIOR_DBH,
+    dbhChangePercent: DBH_CHANGE_PERCENT
+  });
+
+  const SPECIES_ROW_SAME_DBH = { ...VALIDATION_ROW, measuredDBH: CURRENT_DBH };
+
+  function cellText(grid: HTMLElement, rowID: number, field: string): string {
+    return grid.querySelector(`[data-id="${rowID}"] [data-field="${field}"]`)?.textContent ?? '';
+  }
+
+  it("keeps the other group's Prior DBH and Change while the saved row is refreshed", async () => {
+    const user = userEvent.setup();
+    const heldQuery = holdResponses(() => rowsQuery());
+    let holdReads = false;
+    const respondByGroup: FetchRoute['respond'] = request =>
+      (request.body?.errorType as { code?: string } | undefined)?.code === DBH_CHANGE_CODE
+        ? jsonResponse({ rows: [DBH_CHANGE_ROW], totalRows: 1 })
+        : jsonResponse({ rows: [SPECIES_ROW_SAME_DBH, SECOND_CENSUS_ROW], totalRows: 2 });
+    installPageFetch(
+      defaultRoutes({
+        facets: () => jsonResponse(facetsResponse([VALIDATION_FACET, DBH_CHANGE_FACET], { affectedMeasurements: 2, errorTypeCount: 2 })),
+        preview: () => jsonResponse(INFO_PLAN),
+        query: request => (holdReads ? heldQuery.route(request) : respondByGroup(request))
+      })
+    );
+    render(<PageWithSidebarStandIn />);
+    const speciesGroup = await findLoadedGrid(GROUP_LABEL);
+    await user.click(groupToggle(new RegExp(DBH_CHANGE_MESSAGE)));
+    const dbhGroup = await findLoadedGrid(DBH_CHANGE_LABEL);
+    const priorBefore = cellText(dbhGroup, 101, 'priorDBH');
+    const changeBefore = cellText(dbhGroup, 101, 'dbhChangePercent');
+    expect(priorBefore, 'the DBH group shows the prior DBH before the edit').not.toBe('');
+    expect(changeBefore, 'the DBH group shows the change before the edit').not.toBe('');
+
+    await startEdit(user, speciesGroup, 101);
+    holdReads = true;
+    await changeTagAndSave(user, speciesGroup, 101);
+    await waitFor(() => expect(heldQuery.held.resolvers.length, 'the refresh reads are held').toBeGreaterThan(0));
+    await waitFor(() => expect(cellText(dbhGroup, 101, 'treeTag'), 'the edit reached the other group').toBe(EDITED_TAG));
+
+    const priorAfter = cellText(dbhGroup, 101, 'priorDBH');
+    const changeAfter = cellText(dbhGroup, 101, 'dbhChangePercent');
+    console.log('[view-errors patch other group]', JSON.stringify({ priorBefore, priorAfter, changeBefore, changeAfter }));
+    expect(priorAfter, "the edit does not blank the other group's Prior DBH").toBe(priorBefore);
+    expect(changeAfter, "the edit does not blank the other group's Change").toBe(changeBefore);
+    await act(async () => heldQuery.held.release());
+  });
+});
