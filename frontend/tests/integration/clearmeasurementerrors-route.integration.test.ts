@@ -6,6 +6,8 @@ import { setupTestDatabase, teardownTestDatabase, type TestDatabaseConfig } from
 
 const AUTH_USER_EMAIL = 'integration-runner@forestgeo.test';
 const TEST_TRANSACTION_ID_PREFIX = 'clear-route-transaction-';
+const AUTH_POLL_URL = 'https://auth.forestgeo.test/poll';
+const HTTP_STATUS_OK = 200;
 
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null,
@@ -177,6 +179,11 @@ describe('POST /api/validations/clearmeasurementerrors against real MySQL', () =
     plotID = setup.testData.plots[0].plotID;
     censusID = setup.testData.census[0].censusID;
     sharedState.connection = connection;
+    vi.stubEnv('AUTH_FUNCTIONS_POLL_URL', AUTH_POLL_URL);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ userStatus: 'global', allowedSites: [] }), { status: HTTP_STATUS_OK }))
+    );
 
     const [quadrats] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE PlotID = ? LIMIT 1', [plotID]);
     quadratID = Number(quadrats[0].QuadratID);
@@ -202,6 +209,8 @@ describe('POST /api/validations/clearmeasurementerrors against real MySQL', () =
   }, 90000);
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     sharedState.connection = null;
     sharedState.activeTransactionID = null;
     sharedState.failOnce = null;

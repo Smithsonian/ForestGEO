@@ -9,7 +9,7 @@ import { HTTPResponses } from '@/config/macros';
 import { CLEAR_MEASUREMENT_ERRORS_CODES } from '@/config/errorsexplorer';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { fromBody, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
-import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
+import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError, SessionExpiredError } from '@/config/editplan/authorization';
 import { ScopeLockHeldError } from '@/config/editplan/apply';
 import { assertCanEditMeasurementScope, assertNoActiveMeasurementScopeConflict, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
@@ -36,6 +36,7 @@ const ClearBody = z
 const RESPONSE_TEXT = {
   invalidRequest: 'Invalid clear request',
   pendingUser: 'Pending users cannot clear validation errors',
+  sessionExpired: 'Your session is no longer authorized to clear validation errors',
   scopeForbidden: 'This plot or census is outside your scope',
   scopeBusy: 'An upload or validation run is active for this census',
   notInScope: 'Measurement not found in this plot and census',
@@ -82,6 +83,7 @@ async function handler(request: NextRequest, _context: RouteContext) {
 
   const cm = ConnectionManager.getInstance();
   const scope = { schema: input.schema, plotID: input.plotID, censusID: input.censusID };
+  const assertAuthorizationFresh = createFreshAuthorizationCheck(session, scope);
   let transactionID: string | undefined;
   let commitStarted = false;
   try {
@@ -96,6 +98,9 @@ async function handler(request: NextRequest, _context: RouteContext) {
     );
     if (!scopeLockAcquired) throw new ScopeLockHeldError('scope locked');
     await assertNoActiveMeasurementScopeConflict(cm, scope, transactionID);
+    // Re-read role and sites from the authority under the lock and before the first write, as edits/apply does,
+    // so a user demoted or removed after sign-in cannot clear until their session expires.
+    await assertAuthorizationFresh();
     const { clearedErrorCount } = await clearUnresolvedValidationErrors(cm, input, transactionID);
     await refreshMeasurementViewsForCoreMeasurements(cm, input.schema, [input.measurementID], transactionID);
     commitStarted = true;
@@ -107,6 +112,8 @@ async function handler(request: NextRequest, _context: RouteContext) {
       ailogger.error('Clear validation errors: COMMIT outcome unknown; not retrying', error);
       return respond(RESPONSE_TEXT.commitUnknown, TRANSACTION_COMMIT_OUTCOME_UNKNOWN_CODE, HTTPResponses.INTERNAL_SERVER_ERROR);
     }
+    if (error instanceof SessionExpiredError)
+      return respond(RESPONSE_TEXT.sessionExpired, CLEAR_MEASUREMENT_ERRORS_CODES.sessionExpired, HTTPResponses.UNAUTHORIZED);
     if (error instanceof ScopeAccessError) return respond(RESPONSE_TEXT.scopeForbidden, CLEAR_MEASUREMENT_ERRORS_CODES.scopeForbidden, HTTPResponses.FORBIDDEN);
     if (error instanceof ScopeBusyError || error instanceof ScopeLockHeldError)
       return respond(RESPONSE_TEXT.scopeBusy, CLEAR_MEASUREMENT_ERRORS_CODES.scopeBusy, HTTPResponses.LOCKED);
