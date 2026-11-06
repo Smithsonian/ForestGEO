@@ -132,7 +132,9 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
     () => ({ filters, errorType, page: paginationModel.page, pageSize: paginationModel.pageSize, sortModel, columnFilters }),
     [filters, errorType, paginationModel.page, paginationModel.pageSize, sortModel, columnFilters]
   );
-  const rowsResult = useErrorsExplorerRows({ readScope, readScopeKey, query, enabled: true, gated: rowEdit.isReadScopeGated });
+  // The infinite hook only changes mode through onToggle, so this mirrors it and keeps the page read from running beside the chunk read.
+  const [infiniteRequested, setInfiniteRequested] = useState(false);
+  const rowsResult = useErrorsExplorerRows({ readScope, readScopeKey, query, enabled: !infiniteRequested, gated: rowEdit.isReadScopeGated });
 
   // The infinite hook fetches on a mode change, a reset key, load-more, retry and refresh; the gate is read at call time
   // and again after the await, so no entry point reads a stale view and a response that lands gated is dropped (P2-2).
@@ -301,7 +303,10 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
   const infiniteDescriptor = useMemo(
     () => ({
       enabled: isInfiniteOn,
-      onToggle: (next: boolean) => infinite.setMode(next ? INFINITE_MODE : PAGINATED_MODE),
+      onToggle: (next: boolean) => {
+        setInfiniteRequested(next);
+        infinite.setMode(next ? INFINITE_MODE : PAGINATED_MODE);
+      },
       loadedCount: infinite.rows.length,
       totalRows: infinite.totalRows,
       isLoadingMore: infinite.isLoadingMore,

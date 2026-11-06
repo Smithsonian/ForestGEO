@@ -1155,3 +1155,29 @@ describe('an edit made in one group patches the same measurement in the other gr
     await act(async () => heldQuery.held.release());
   });
 });
+
+describe('the flat grid in infinite mode', () => {
+  it('reads each sort once, not once as a page and once as a chunk', async () => {
+    const user = userEvent.setup();
+    const network = installPageFetch(defaultRoutes());
+    render(<PageWithSidebarStandIn />);
+    await findLoadedGrid(GROUP_LABEL);
+    await chooseNoGrouping(user);
+    const flat = await findLoadedGrid(FLAT_LABEL);
+    await switchFlatGridToInfinite();
+    const flatReads = () => network.bodiesFor(ROUTES.query).filter(body => body?.errorType === undefined);
+    await waitFor(() => expect(flatReads().filter(body => body?.pageSize === INFINITE_DEFAULT_CHUNK)).toHaveLength(1));
+    const readsBeforeSort = flatReads().length;
+
+    await user.click(within(flat).getByRole('columnheader', { name: /Tree Tag/ }));
+    await act(async () => new Promise(resolve => setTimeout(resolve, GATE_QUIET_MS)));
+
+    const readsForSort = flatReads().slice(readsBeforeSort);
+    console.log(
+      '[view-errors infinite sort reads]',
+      JSON.stringify(readsForSort.map(body => ({ page: body?.page, pageSize: body?.pageSize, sort: body?.sortModel })))
+    );
+    expect(readsForSort, 'one read for the sort').toHaveLength(1);
+    expect(readsForSort[0]?.pageSize, 'and it is the infinite chunk').toBe(INFINITE_DEFAULT_CHUNK);
+  });
+});
