@@ -13,6 +13,12 @@ import { useErrorsExplorerRowEdit } from '@/app/hooks/useerrorsexplorerrowedit';
 import ErrorRowDetailsPanel from '@/components/errors/errorrowdetailspanel';
 import ErrorsExplorerGrid, { type ErrorsExplorerGridHandle, type ErrorsExplorerGridModels } from '@/components/errors/errorsexplorergrid';
 import { buildGroupColumnVisibility } from '@/components/errors/errorsexplorercolumns';
+import CssBaseline from '@mui/joy/CssBaseline';
+import { CssVarsProvider as JoyCssVarsProvider } from '@mui/joy/styles';
+import { THEME_ID as MATERIAL_THEME_ID, ThemeProvider as MaterialCssVarsProvider } from '@mui/material/styles';
+import { materialDarkTheme } from '@/components/themeregistry/themeregistry';
+import appTheme from '@/components/themeregistry/theme';
+import ErrorTypeGroup, { type ErrorTypeGroupProps } from '@/components/errors/errortypegroup';
 
 const PHONE_VIEWPORT = { width: 375, height: 667 };
 const DESKTOP_VIEWPORT = { width: 1440, height: 1020 };
@@ -21,6 +27,13 @@ const SUBPIXEL_TOLERANCE_PX = 1;
 const QUERY_ENDPOINT_PATTERN = '**/api/errors/explorer/query';
 const DETAILS_SHEET_TEST_ID = 'error-row-details-sheet';
 const ACTIONS_FIELD = 'actions';
+const EDITABLE_FIELD = 'treeTag';
+const ACTIVE_MEASUREMENTS = 1000;
+const EXPECTED_COUNT_TEXT = '100 rows';
+const EDIT_STATE_ACTION_COUNT = 3;
+const EDITING_ROW_SELECTOR = '.MuiDataGrid-row--editing';
+const HEADER_PADDING_PX = 16;
+const GROUP_HEADER_RIGHT_EDGE_TOLERANCE_PX = 4;
 const GROUP_GRID_KEY = 'group:layout';
 const FLAT_GRID_KEY = 'flat:layout';
 const READ_SCOPE: ErrorsExplorerReadScope = { schema: 'forestgeo_testing', plotID: 1, censusID: 5, censusIDs: [5] };
@@ -87,7 +100,7 @@ function selectPageSize(pageSize: number) {
   cy.get('[role="option"]').contains(String(pageSize)).click();
 }
 
-function GridHarness({ variant }: { variant: 'group' | 'flat' }) {
+function useGridHarness(variant: 'group' | 'flat') {
   const grids = useRef(new Map<string, ErrorsExplorerGridHandle>());
   const readScopeKey = buildReadScopeKey(READ_SCOPE);
   const rowEdit = useErrorsExplorerRowEdit({
@@ -109,32 +122,72 @@ function GridHarness({ variant }: { variant: 'group' | 'flat' }) {
     if (handle) grids.current.set(gridKey, handle);
     else grids.current.delete(gridKey);
   }, []);
+  const onOpenDetails = useCallback(() => undefined, []);
+  const gridProps: ErrorTypeGroupProps['gridProps'] = {
+    readScope: READ_SCOPE,
+    readScopeKey,
+    filters: DEFAULT_ERROR_EXPLORER_FILTERS,
+    models,
+    onModelsChange: setModels,
+    canEditRows: true,
+    canEditSpeciesCode: false,
+    codeOptions: [],
+    censusList: undefined,
+    rowEdit,
+    onOpenDetails,
+    registerGrid: register
+  };
+  return { rowEdit, gridProps };
+}
+
+function GridHarness({ variant }: { variant: 'group' | 'flat' }) {
+  const { gridProps } = useGridHarness(variant);
+  const isGroup = variant === 'group';
   const noFaultedFields = useCallback(() => new Set<string>(), []);
   const errorLabelFor = useCallback((row: ErrorExplorerRow) => row.errorMessages[0] ?? '', []);
-  const onOpenDetails = useCallback(() => undefined, []);
   const errorType = useMemo(() => (isGroup ? FACET : undefined), [isGroup]);
   return (
     <ErrorsExplorerGrid
+      {...gridProps}
       gridKey={isGroup ? GROUP_GRID_KEY : FLAT_GRID_KEY}
       ariaLabel={isGroup ? `${FACET.code} rows` : 'Measurement Errors'}
       variant={variant}
-      readScope={READ_SCOPE}
-      readScopeKey={readScopeKey}
-      filters={DEFAULT_ERROR_EXPLORER_FILTERS}
       errorType={errorType}
-      models={models}
-      onModelsChange={setModels}
-      canEditRows
-      canEditSpeciesCode={false}
-      codeOptions={[]}
       faultedFieldsFor={noFaultedFields}
       errorLabelFor={errorLabelFor}
-      censusList={undefined}
-      rowEdit={rowEdit}
-      onOpenDetails={onOpenDetails}
-      registerGrid={register}
     />
   );
+}
+
+function GroupHarness() {
+  const { rowEdit, gridProps } = useGridHarness('group');
+  return (
+    <ErrorTypeGroup
+      facet={FACET}
+      gridKey={GROUP_GRID_KEY}
+      expanded
+      onToggle={() => undefined}
+      collapseDisabledReason={rowEdit.reasons.owningGrid(GROUP_GRID_KEY)}
+      activeMeasurements={ACTIVE_MEASUREMENTS}
+      gridProps={gridProps}
+    />
+  );
+}
+
+function mountInAppTheme(node: React.ReactNode) {
+  cy.mount(
+    <MaterialCssVarsProvider theme={{ [MATERIAL_THEME_ID]: materialDarkTheme }}>
+      <JoyCssVarsProvider theme={appTheme} defaultMode="dark" defaultColorScheme="dark">
+        <CssBaseline />
+        {node}
+      </JoyCssVarsProvider>
+    </MaterialCssVarsProvider>
+  );
+}
+
+function openFirstRowForEditing() {
+  cy.get(`.MuiDataGrid-row [data-field="${EDITABLE_FIELD}"]`).first().dblclick();
+  cy.get(EDITING_ROW_SELECTOR).should('have.length', 1);
 }
 
 describe('View Errors layout in a real browser', () => {
@@ -171,6 +224,56 @@ describe('View Errors layout in a real browser', () => {
       cy.wrap($header, { log: false }).find('.MuiDataGrid-menuIcon').should('be.visible');
     });
     cy.get(`[role="columnheader"][data-field="${ACTIONS_FIELD}"] .MuiDataGrid-menuIcon button`).should('be.visible');
+  });
+
+  it('keeps every Actions icon inside the cell and the Actions title untruncated while a row is open', () => {
+    cy.viewport(DESKTOP_VIEWPORT.width, DESKTOP_VIEWPORT.height);
+    mountInAppTheme(<GridHarness variant="group" />);
+    openFirstRowForEditing();
+    cy.get(`${EDITING_ROW_SELECTOR} [data-field="${ACTIONS_FIELD}"] button`).should('have.length', EDIT_STATE_ACTION_COUNT);
+    cy.get(`${EDITING_ROW_SELECTOR} [data-field="${ACTIONS_FIELD}"]`).should($cell => {
+      const cellBox = $cell[0].getBoundingClientRect();
+      $cell.find('button').each((index, button) => {
+        const buttonBox = button.getBoundingClientRect();
+        Cypress.log({
+          name: 'view-errors',
+          message: `[view-errors actions icon ${index}] ${buttonBox.left}..${buttonBox.right}px in cell ${cellBox.left}..${cellBox.right}px`
+        });
+        expect(buttonBox.left, `icon ${index} left edge`).to.be.at.least(cellBox.left - SUBPIXEL_TOLERANCE_PX);
+        expect(buttonBox.right, `icon ${index} right edge`).to.be.at.most(cellBox.right + SUBPIXEL_TOLERANCE_PX);
+      });
+    });
+    cy.get(`[role="columnheader"][data-field="${ACTIONS_FIELD}"]`).should($header => {
+      const title = $header.find('.MuiDataGrid-columnHeaderTitle')[0];
+      const menuButton = $header.find('.MuiDataGrid-menuIcon')[0];
+      const titleTextRight = title.getBoundingClientRect().left + title.scrollWidth;
+      const menuButtonLeft = menuButton.getBoundingClientRect().left;
+      Cypress.log({ name: 'view-errors', message: `[view-errors actions title] text ends at ${titleTextRight}px, menu button starts at ${menuButtonLeft}px` });
+      expect(titleTextRight, 'Actions title ends before its menu button').to.be.at.most(menuButtonLeft + SUBPIXEL_TOLERANCE_PX);
+      expect(title.scrollWidth, 'Actions title is not truncated').to.be.at.most(title.clientWidth);
+    });
+  });
+
+  it('keeps the group row count at the right edge of the header whether or not the page is locked', () => {
+    cy.viewport(DESKTOP_VIEWPORT.width, DESKTOP_VIEWPORT.height);
+    mountInAppTheme(<GroupHarness />);
+    cy.get('.MuiDataGrid-row').should('have.length.greaterThan', 0);
+    const countRightGap = ($toggle: JQuery<HTMLElement>) => {
+      const count = $toggle.find(`:contains("${EXPECTED_COUNT_TEXT}")`).last()[0];
+      return $toggle.closest('h2')[0].getBoundingClientRect().right - count.getBoundingClientRect().right;
+    };
+    cy.get('h2 button[aria-expanded]').should($toggle => {
+      const gap = countRightGap($toggle);
+      Cypress.log({ name: 'view-errors', message: `[view-errors group count unlocked] ${gap}px from the heading's right edge` });
+      expect(gap, 'unlocked gap').to.be.at.most(GROUP_HEADER_RIGHT_EDGE_TOLERANCE_PX + HEADER_PADDING_PX);
+    });
+    openFirstRowForEditing();
+    cy.get('h2 button[aria-expanded]').should('be.disabled');
+    cy.get('h2 button[aria-expanded]').should($toggle => {
+      const gap = countRightGap($toggle);
+      Cypress.log({ name: 'view-errors', message: `[view-errors group count locked] ${gap}px from the heading's right edge` });
+      expect(gap, 'locked gap').to.be.at.most(GROUP_HEADER_RIGHT_EDGE_TOLERANCE_PX + HEADER_PADDING_PX);
+    });
   });
 
   it('caps a group grid at its maximum height and virtualizes 100 rows', () => {

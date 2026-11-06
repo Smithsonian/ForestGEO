@@ -261,6 +261,17 @@ describe('text helpers', () => {
     expect(formatContradictionCaption(2, 1)).toBe('2 duplicate tag/stem · 1 same-batch species');
   });
 
+  it.each([
+    { affected: 21, active: 1088, errorTypes: 1, expected: '21 of 1,088 active measurements have an unresolved error · 1 error type' },
+    { affected: 21, active: 1088, errorTypes: 2, expected: '21 of 1,088 active measurements have an unresolved error · 2 error types' },
+    { affected: 0, active: 1088, errorTypes: 0, expected: '0 of 1,088 active measurements have an unresolved error · 0 error types' },
+    { affected: 1, active: 1088, errorTypes: 1, expected: '1 of 1,088 active measurements has an unresolved error · 1 error type' },
+    { affected: 1, active: 1, errorTypes: 1, expected: '1 of 1 active measurement has an unresolved error · 1 error type' },
+    { affected: 0, active: 1, errorTypes: 0, expected: '0 of 1 active measurement have an unresolved error · 0 error types' }
+  ])('agrees the facts line with its counts: $affected of $active active, $errorTypes types', ({ affected, active, errorTypes, expected }) => {
+    expect(formatViewErrorsFactsLine(affected, active, errorTypes)).toBe(expected);
+  });
+
   it('has a hint only for the four codes on the board', () => {
     expect(errorTypeHintFor({ source: 'validation', code: '14' })).not.toBeNull();
     expect(errorTypeHintFor({ source: 'ingestion', code: 'COORDINATE_DRIFT' })).not.toBeNull();

@@ -53,7 +53,7 @@ export default function ErrorTypeGroup({ facet, gridKey, expanded, onToggle, col
 
   return (
     <Sheet variant="outlined" sx={{ borderRadius: 'md', p: 1 }}>
-      <Typography component="h2" level="title-md">
+      <Typography component="h2" level="title-md" sx={{ '& > span': { width: '100%' } }}>
         <LockedControl reason={collapseLocked ? collapseDisabledReason : null}>
           <Button
             variant="plain"

@@ -748,7 +748,10 @@ export const ERROR_TILE_TEXT = {
 } as const;
 
 export function formatViewErrorsFactsLine(affected: number, active: number, errorTypes: number): string {
-  return `${formatCount(affected)} of ${formatCount(active)} active measurements have an unresolved error · ${formatCount(errorTypes)} error types`;
+  const activeNoun = active === 1 ? 'measurement' : 'measurements';
+  const affectedVerb = affected === 1 ? 'has' : 'have';
+  const errorTypeNoun = errorTypes === 1 ? 'type' : 'types';
+  return `${formatCount(affected)} of ${formatCount(active)} active ${activeNoun} ${affectedVerb} an unresolved error · ${formatCount(errorTypes)} error ${errorTypeNoun}`;
 }
 
 export function formatAffectedTileUnit(active: number): string {

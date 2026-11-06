@@ -46,7 +46,7 @@ import {
 export const ERRORS_ACTIONS_FIELD = 'actions';
 export const ERRORS_LABEL_FIELD = 'errors';
 export const FAULTED_CELL_CLASS = 'errors-explorer-faulted-cell';
-const EDITOR_ACTIONS_WIDTH = 112;
+const EDITOR_ACTIONS_WIDTH = 160;
 const READ_ONLY_ACTIONS_WIDTH = 80;
 const PREVIEW_LINES = 2;
 const COORDINATE_FRACTION_DIGITS = 2;
