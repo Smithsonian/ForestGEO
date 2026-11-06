@@ -72,7 +72,7 @@ export function getFilterStorageKey(schema?: string, plotID?: number, censusID?:
 }
 
 function defaultFilters(): ErrorExplorerFilters {
-  return { ...DEFAULT_ERROR_EXPLORER_FILTERS, presetId: undefined };
+  return { ...DEFAULT_ERROR_EXPLORER_FILTERS };
 }
 
 function groupGridKey(facet: ErrorTypeFacet): string {
@@ -227,7 +227,7 @@ export default function ErrorsExplorer() {
     if (deepLink?.filters) {
       if (deepLink.appliedStorageKey === null || deepLink.appliedStorageKey === storageKey) {
         deepLink.appliedStorageKey = storageKey;
-        setFilters({ ...deepLink.filters, presetId: undefined });
+        setFilters(deepLink.filters);
         return;
       }
       deepLink.filters = null;

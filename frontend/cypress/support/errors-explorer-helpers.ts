@@ -65,43 +65,8 @@ function filterRows(rows: ErrorExplorerRow[], filters: ErrorExplorerFilters) {
   });
 }
 
-function summarizeRows(rows: ErrorExplorerRow[]): ErrorExplorerQueryResponse['summary'] {
+function deriveFacets(): ErrorExplorerFacetsResponse {
   return {
-    total: rows.length,
-    validation: rows.filter(row => row.errorSources.includes('validation')).length,
-    ingestion: rows.filter(row => row.errorSources.includes('ingestion')).length,
-    contradictions: rows.filter(row => row.hasContradiction).length,
-    duplicateTagStem: rows.filter(row => getContradictionTypes(row).includes('duplicate_tag_stem')).length,
-    sameBatchConflict: rows.filter(row => getContradictionTypes(row).includes('same_batch_conflict')).length
-  };
-}
-
-function deriveFacets(rows: ErrorExplorerRow[]): ErrorExplorerFacetsResponse {
-  const messageCounts = new Map<string, number>();
-  const fieldCounts = new Map<string, number>();
-
-  rows.forEach(row => {
-    row.errorMessages.forEach(message => {
-      messageCounts.set(message, (messageCounts.get(message) ?? 0) + 1);
-    });
-
-    row.errorFields.forEach(field => {
-      fieldCounts.set(field, (fieldCounts.get(field) ?? 0) + 1);
-    });
-  });
-
-  return {
-    messages: Array.from(messageCounts.entries()).map(([value, count]) => ({ value, count })),
-    fields: Array.from(fieldCounts.entries()).map(([value, count]) => ({ value, count })),
-    sourceCounts: {
-      validation: rows.filter(row => row.errorSources.includes('validation')).length,
-      ingestion: rows.filter(row => row.errorSources.includes('ingestion')).length
-    },
-    contradictionCounts: {
-      duplicateTagStem: rows.filter(row => getContradictionTypes(row).includes('duplicate_tag_stem')).length,
-      sameBatchConflict: rows.filter(row => getContradictionTypes(row).includes('same_batch_conflict')).length
-    },
-    totalMeasurements: rows.length,
     errorTypes: [],
     censusTotals: EMPTY_ERROR_CENSUS_TOTALS
   };
@@ -191,8 +156,7 @@ export function buildErrorsExplorerQueryResponse(rows: ErrorExplorerRow[], reque
 
   return {
     rows: filteredRows.slice(start, end),
-    totalRows: filteredRows.length,
-    summary: summarizeRows(filteredRows)
+    totalRows: filteredRows.length
   };
 }
 
@@ -240,12 +204,7 @@ export function mockErrorsExplorerApi({
   }).as('fetchErrorsExplorerRows');
 
   cy.intercept('POST', '**/api/errors/explorer/facets', req => {
-    const request = req.body as ErrorExplorerQueryRequest;
-    const filteredRows = filterRows(currentRows, request.filters);
-    req.reply({
-      statusCode: 200,
-      body: facets ?? deriveFacets(filteredRows)
-    });
+    req.reply({ statusCode: 200, body: facets ?? deriveFacets() });
   }).as('fetchErrorFacets');
 
   cy.intercept('GET', '**/api/errors/explorer/details/**', req => {

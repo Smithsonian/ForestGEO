@@ -26,7 +26,6 @@ export interface ErrorExplorerFilters {
   contradictionOnly: boolean;
   contradictionTypes: ContradictionType[];
   quickSearch: string;
-  presetId?: string;
 }
 
 export interface ErrorExplorerQueryRequest {
@@ -91,34 +90,12 @@ export interface ErrorExplorerRow extends MeasurementsSummaryRDS {
   dbhChangePercent: number | null;
 }
 
-export interface ErrorExplorerSummary {
-  total: number;
-  validation: number;
-  ingestion: number;
-  contradictions: number;
-  duplicateTagStem: number;
-  sameBatchConflict: number;
-}
-
 export interface ErrorExplorerQueryResponse {
   rows: ErrorExplorerRow[];
   totalRows: number;
-  summary: ErrorExplorerSummary;
 }
 
 export interface ErrorExplorerFacetsResponse {
-  messages: ErrorFacetOption[];
-  fields: ErrorFacetOption[];
-  sourceCounts: {
-    validation: number;
-    ingestion: number;
-  };
-  contradictionCounts: {
-    duplicateTagStem: number;
-    sameBatchConflict: number;
-  };
-  /** Distinct measurements in scope after the facet filters; sourceCounts can overlap. */
-  totalMeasurements: number;
   /** Identities among the page-matching errors of the rows the query would return (spec Data → Facets). */
   errorTypes: ErrorTypeFacet[];
   /** Census totals: every grouped row, ignoring the filters. */
@@ -345,8 +322,7 @@ export const DEFAULT_ERROR_EXPLORER_FILTERS: ErrorExplorerFilters = {
   affectedFields: [],
   contradictionOnly: false,
   contradictionTypes: [],
-  quickSearch: '',
-  presetId: 'all_errors'
+  quickSearch: ''
 };
 
 export const ERRORS_PAGE_PATH = '/measurementshub/errors';
@@ -362,95 +338,18 @@ export const ERRORS_EXPLORER_VIEW_ALL_HREF = `${ERRORS_PAGE_PATH}?${new URLSearc
 
 /**
  * Filters a View Errors deep link asks for, or null for a plain visit (which
- * restores the saved filters). `message` wins over `view=all`. A message link
- * clears presetId, as picking a message by hand does, so no preset chip claims
- * to be active. `searchParams` is null outside the app router.
+ * restores the saved filters). `message` wins over `view=all`. `searchParams` is null outside the app router.
  */
 export function resolveErrorsExplorerDeepLinkFilters(searchParams: Pick<URLSearchParams, 'get'> | null): ErrorExplorerFilters | null {
   const message = searchParams?.get(ERRORS_EXPLORER_MESSAGE_PARAM);
   if (message && message.trim().length > 0 && message.length <= MAX_ERROR_EXPLORER_FILTER_STRING_LENGTH) {
-    return { ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages: [message], presetId: undefined };
+    return { ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages: [message] };
   }
   if (searchParams?.get(ERRORS_EXPLORER_VIEW_PARAM) === ERRORS_EXPLORER_VIEW_ALL) {
     return { ...DEFAULT_ERROR_EXPLORER_FILTERS };
   }
   return null;
 }
-
-export const ERROR_EXPLORER_PRESETS = [
-  {
-    id: 'all_errors',
-    label: 'All Errors',
-    filters: {
-      source: 'all',
-      exactMessages: [],
-      affectedFields: [],
-      contradictionOnly: false,
-      contradictionTypes: [],
-      quickSearch: ''
-    } satisfies ErrorExplorerFilters
-  },
-  {
-    id: 'validation_only',
-    label: 'Validation Only',
-    filters: {
-      source: 'validation',
-      exactMessages: [],
-      affectedFields: [],
-      contradictionOnly: false,
-      contradictionTypes: [],
-      quickSearch: ''
-    } satisfies ErrorExplorerFilters
-  },
-  {
-    id: 'ingestion_only',
-    label: 'Ingestion Only',
-    filters: {
-      source: 'ingestion',
-      exactMessages: [],
-      affectedFields: [],
-      contradictionOnly: false,
-      contradictionTypes: [],
-      quickSearch: ''
-    } satisfies ErrorExplorerFilters
-  },
-  {
-    id: 'contradictions',
-    label: 'Contradictions',
-    filters: {
-      source: 'all',
-      exactMessages: [],
-      affectedFields: [],
-      contradictionOnly: true,
-      contradictionTypes: [],
-      quickSearch: ''
-    } satisfies ErrorExplorerFilters
-  },
-  {
-    id: 'duplicate_tag_stem',
-    label: 'Duplicate Tag/Stem',
-    filters: {
-      source: 'all',
-      exactMessages: [],
-      affectedFields: [],
-      contradictionOnly: true,
-      contradictionTypes: ['duplicate_tag_stem'],
-      quickSearch: ''
-    } satisfies ErrorExplorerFilters
-  },
-  {
-    id: 'same_batch_conflict',
-    label: 'Same-Batch Conflicts',
-    filters: {
-      source: 'all',
-      exactMessages: [],
-      affectedFields: [],
-      contradictionOnly: true,
-      contradictionTypes: ['same_batch_conflict'],
-      quickSearch: ''
-    } satisfies ErrorExplorerFilters
-  }
-] as const;
 
 export const INGESTION_ERROR_FIELD_MAP: Record<string, string[]> = {
   MISSING_FIELD_TREETAG: ['treeTag'],

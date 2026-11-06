@@ -137,7 +137,7 @@ function defaultRoutes(overrides: Partial<Record<keyof typeof ROUTES, FetchRoute
       jsonResponse(facetsResponse([VALIDATION_FACET, FALLBACK_FACET], { affectedMeasurements: 3, errorTypeCount: 2, ingestion: 1, failedMeasurements: 1 })),
     query: request => {
       const rows = rowsFor((request.body?.errorType as { code?: string } | undefined)?.code);
-      return jsonResponse({ rows, totalRows: rows.length, summary: {} });
+      return jsonResponse({ rows, totalRows: rows.length });
     },
     details: request => {
       const id = Number(/details\/(\d+)/.exec(request.url)?.[1]);
@@ -241,7 +241,7 @@ describe('Show control and census totals', () => {
       defaultRoutes({
         query: request => {
           const rows = (request.body?.columnFilters as unknown[] | undefined)?.length ? [] : rowsFor(undefined);
-          return jsonResponse({ rows, totalRows: rows.length, summary: {} });
+          return jsonResponse({ rows, totalRows: rows.length });
         }
       })
     );
@@ -662,7 +662,7 @@ describe('Error-type groups', () => {
     await mountPage(
       defaultRoutes({
         facets: () => jsonResponse(facetsResponse([dbhChange])),
-        query: () => jsonResponse({ rows: [priorRow], totalRows: 1, summary: {} })
+        query: () => jsonResponse({ rows: [priorRow], totalRows: 1 })
       }),
       { awaitGroupGrid: false }
     );
@@ -783,7 +783,7 @@ describe('Rows marked invalid with no error logged (D-h)', () => {
         query: request => {
           const code = (request.body?.errorType as { code?: string } | undefined)?.code;
           const rows = code === FALLBACK_ERROR_CODE ? [FAILED_FALLBACK_ROW] : rowsFor(code);
-          return jsonResponse({ rows, totalRows: rows.length, summary: {} });
+          return jsonResponse({ rows, totalRows: rows.length });
         },
         details: () =>
           jsonResponse({
@@ -870,7 +870,7 @@ describe('Details sheet', () => {
         query: request => {
           const filtered = (request.body?.columnFilters as unknown[] | undefined)?.length;
           const rows = filtered ? [VALIDATION_ROW] : rowsFor(undefined);
-          return jsonResponse({ rows, totalRows: rows.length, summary: {} });
+          return jsonResponse({ rows, totalRows: rows.length });
         }
       })
     );
@@ -1002,7 +1002,7 @@ describe('View rebuild recovery, continued (P3-2, P3-4)', () => {
         query: request => {
           if (state.queryFails) return jsonResponse({ error: 'Query exploded' }, 500);
           const rows = rowsFor((request.body?.errorType as { code?: string } | undefined)?.code);
-          return jsonResponse({ rows, totalRows: rows.length, summary: {} });
+          return jsonResponse({ rows, totalRows: rows.length });
         },
         ...options.routes
       })
@@ -1108,7 +1108,7 @@ describe('Per-unit load state', () => {
         query: request => {
           const code = (request.body?.errorType as { code?: string } | undefined)?.code;
           if (code === VALIDATION_FACET.code) return jsonResponse({ error: 'Query exploded' }, 500);
-          return jsonResponse({ rows: [explorerRow(301)], totalRows: 1, summary: {} });
+          return jsonResponse({ rows: [explorerRow(301)], totalRows: 1 });
         }
       }),
       { awaitRows: false }
@@ -1232,7 +1232,7 @@ describe('Save outcomes', () => {
         query: request => {
           if (state.queryFails) return jsonResponse({ error: 'Query exploded' }, 500);
           const rows = rowsFor((request.body?.errorType as { code?: string } | undefined)?.code);
-          return jsonResponse({ rows, totalRows: rows.length, summary: {} });
+          return jsonResponse({ rows, totalRows: rows.length });
         }
       })
     );

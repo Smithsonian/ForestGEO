@@ -129,7 +129,7 @@ describe('stored filters (P1-1)', () => {
     });
     const restored = parseStoredErrorExplorerFilters(stored);
     console.log('[view-errors restore]', JSON.stringify(restored));
-    expect(restored).toEqual({ ...DEFAULT_ERROR_EXPLORER_FILTERS, presetId: undefined, source: 'validation', quickSearch: 'T1', exactMessages: ['m'] });
+    expect(restored).toEqual({ ...DEFAULT_ERROR_EXPLORER_FILTERS, source: 'validation', quickSearch: 'T1', exactMessages: ['m'] });
   });
 
   it.each([
@@ -140,7 +140,7 @@ describe('stored filters (P1-1)', () => {
     ['a JSON array', '[]'],
     ['nothing stored', null]
   ])('restores the defaults for %s', (_label, stored) => {
-    expect(parseStoredErrorExplorerFilters(stored)).toEqual({ ...DEFAULT_ERROR_EXPLORER_FILTERS, presetId: undefined });
+    expect(parseStoredErrorExplorerFilters(stored)).toEqual(DEFAULT_ERROR_EXPLORER_FILTERS);
   });
 
   it('restores validation + contradictions only as Show → Contradictions', () => {

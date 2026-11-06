@@ -81,9 +81,9 @@ describe('View Errors deep-link contract (#547)', () => {
     expect(ERRORS_EXPLORER_VIEW_ALL_HREF).toBe(`${ERRORS_PAGE_PATH}?${ERRORS_EXPLORER_VIEW_PARAM}=${ERRORS_EXPLORER_VIEW_ALL}`);
   });
 
-  it('filters to exactly one message, clearing the preset like a manual message pick', () => {
+  it('filters to exactly one message and leaves every other filter at its default', () => {
     const filters = resolveErrorsExplorerDeepLinkFilters(new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: AWKWARD_MESSAGE }));
-    expect(filters).toEqual({ ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages: [AWKWARD_MESSAGE], presetId: undefined });
+    expect(filters).toEqual({ ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages: [AWKWARD_MESSAGE] });
   });
 
   it('prefers message when both parameters are present', () => {

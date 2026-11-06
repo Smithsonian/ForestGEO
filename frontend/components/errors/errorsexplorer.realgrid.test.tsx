@@ -80,7 +80,7 @@ function rowsFor(): ErrorExplorerRow[] {
 
 function rowsQuery() {
   const rows = rowsFor();
-  return jsonResponse({ rows, totalRows: rows.length, summary: {} });
+  return jsonResponse({ rows, totalRows: rows.length });
 }
 
 function defaultRoutes(overrides: Partial<Record<keyof typeof ROUTES, FetchRoute['respond']>> = {}): FetchRoute[] {
@@ -199,7 +199,7 @@ function pagedQuery(rows: ErrorExplorerRow[]): FetchRoute['respond'] {
   return request => {
     const pageIndex = Number(request.body?.page ?? 0);
     const pageSize = Number(request.body?.pageSize ?? GROUP_PAGE_SIZE);
-    return jsonResponse({ rows: rows.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize), totalRows: rows.length, summary: {} });
+    return jsonResponse({ rows: rows.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize), totalRows: rows.length });
   };
 }
 
@@ -437,7 +437,7 @@ describe('the page edit lock with the real grid (D-g, D-i, P2-4, P2-8, P2-13)', 
         facets: () => jsonResponse(facetsResponse([VALIDATION_FACET, DRIFT_FACET], { affectedMeasurements: 2, errorTypeCount: 2, ingestion: 1 })),
         query: request =>
           (request.body?.errorType as { code?: string } | undefined)?.code === DRIFT_FACET.code
-            ? jsonResponse({ rows: [VALIDATION_ROW], totalRows: 1, summary: {} })
+            ? jsonResponse({ rows: [VALIDATION_ROW], totalRows: 1 })
             : rowsQuery()
       })
     );
@@ -494,7 +494,7 @@ describe('the page edit lock with the real grid (D-g, D-i, P2-4, P2-8, P2-13)', 
         },
         query: () => {
           const rows = applied ? [SECOND_CENSUS_ROW] : rowsFor();
-          return jsonResponse({ rows, totalRows: rows.length, summary: {} });
+          return jsonResponse({ rows, totalRows: rows.length });
         }
       })
     );

@@ -123,7 +123,6 @@ describe('Errors Explorer', () => {
       expect(interception.request.body.filters.source).to.equal('all');
       expect(interception.request.body.filters.contradictionOnly).to.equal(false);
       expect(interception.request.body.filters.quickSearch).to.equal('');
-      expect(interception.request.body.filters.presetId).to.equal('all_errors');
     });
 
     openRowDetails('Invalid species reference');

@@ -506,19 +506,6 @@ function sortRows(a: GroupedErrorRow, b: GroupedErrorRow): number {
   return aID - bID;
 }
 
-function buildSummary(rows: GroupedErrorRow[], filters: ErrorExplorerFilters): ErrorExplorerQueryResponse['summary'] {
-  const filteredRows = rows.filter(row => rowMatchesFilters(row, materializeMatchingErrors(row, filters), filters));
-
-  return {
-    total: filteredRows.length,
-    validation: filteredRows.filter(row => materializeMatchingErrors(row, filters).some(error => error.source === 'validation')).length,
-    ingestion: filteredRows.filter(row => materializeMatchingErrors(row, filters).some(error => error.source === 'ingestion')).length,
-    contradictions: filteredRows.filter(row => row.baseRow.hasContradiction).length,
-    duplicateTagStem: filteredRows.filter(row => row.baseRow.contradictionTypes.includes('duplicate_tag_stem')).length,
-    sameBatchConflict: filteredRows.filter(row => row.baseRow.contradictionTypes.includes('same_batch_conflict')).length
-  };
-}
-
 interface GroupedErrorRowsOptions {
   /** Contradictions annotate rows that are already in the error set; they never add or remove one. */
   withContradictions: boolean;
@@ -587,8 +574,7 @@ export async function queryErrorExplorer(connectionManager: ExplorerConnection, 
 
   return {
     rows: filteredPairs.slice(start, start + request.pageSize).map(pair => pair.display),
-    totalRows: filteredPairs.length,
-    summary: buildSummary(pageMatchingRows, request.filters)
+    totalRows: filteredPairs.length
   };
 }
 
@@ -745,39 +731,8 @@ export async function buildErrorExplorerFacets(
     connectionManager.executeQuery(activeCountQuery.sql, activeCountQuery.params)
   ]);
   const allRows = Array.from(groupedRows.values());
-  const scopedRows = allRows.filter(row => {
-    if (request.filters.source !== 'all' && !row.allErrors.some(error => error.source === request.filters.source)) {
-      return false;
-    }
-    if (request.filters.contradictionOnly && !row.baseRow.hasContradiction) {
-      return false;
-    }
-    if (request.filters.contradictionTypes.length > 0 && !row.baseRow.contradictionTypes.some(type => request.filters.contradictionTypes.includes(type))) {
-      return false;
-    }
-    return matchesQuickSearch(row.baseRow, row.allErrors, request.filters.quickSearch);
-  });
-
-  const fieldCounts = new Map<string, number>();
-
-  scopedRows.forEach(row => {
-    const fieldSet = new Set<string>();
-    row.allErrors.forEach(error => error.fields.forEach(field => fieldSet.add(field)));
-    fieldSet.forEach(field => fieldCounts.set(field, (fieldCounts.get(field) ?? 0) + 1));
-  });
 
   return {
-    messages: sortFacetOptions(countMeasurementsPerMessage(scopedRows).entries()),
-    fields: sortFacetOptions(fieldCounts.entries()),
-    sourceCounts: {
-      validation: scopedRows.filter(row => row.allErrors.some(error => error.source === 'validation')).length,
-      ingestion: scopedRows.filter(row => row.allErrors.some(error => error.source === 'ingestion')).length
-    },
-    contradictionCounts: {
-      duplicateTagStem: scopedRows.filter(row => row.baseRow.contradictionTypes.includes('duplicate_tag_stem')).length,
-      sameBatchConflict: scopedRows.filter(row => row.baseRow.contradictionTypes.includes('same_batch_conflict')).length
-    },
-    totalMeasurements: scopedRows.length,
     errorTypes: buildErrorTypeFacets(allRows, request.filters),
     censusTotals: buildCensusTotals(allRows, readActiveMeasurementCount(activeRows))
   };

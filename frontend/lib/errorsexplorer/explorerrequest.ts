@@ -50,7 +50,7 @@ const scopeShape = {
   plotID: z.coerce.number().int().positive(),
   censusID: z.coerce.number().int().positive(),
   censusIDs: z.array(z.coerce.number().int().positive()).max(MAX_ERROR_EXPLORER_CENSUS_IDS).optional().default([]),
-  // prefault, not default: zod 4 returns a .default() value unparsed, which would carry presetId through.
+  // prefault, not default: zod 4 returns a .default() value unparsed, so the filter defaults must be parsed through the schema.
   filters: errorExplorerFiltersSchema.prefault({})
 };
 
@@ -160,7 +160,7 @@ const storedFiltersSchema = z.object({
 });
 
 function defaultFilters(): ErrorExplorerFilters {
-  return { ...DEFAULT_ERROR_EXPLORER_FILTERS, presetId: undefined };
+  return { ...DEFAULT_ERROR_EXPLORER_FILTERS };
 }
 
 function readStoredJson(stored: string): unknown {

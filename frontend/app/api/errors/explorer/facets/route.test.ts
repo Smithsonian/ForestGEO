@@ -41,7 +41,7 @@ describe('POST /api/errors/explorer/facets', () => {
     vi.clearAllMocks();
   });
 
-  it('returns message and field facets scoped to the current census', async () => {
+  it('returns error-type identities and census totals scoped to the current census', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const rawErrorRows = [
       {
@@ -136,13 +136,21 @@ describe('POST /api/errors/explorer/facets', () => {
 
     expect(response.status).toBe(HTTPResponses.OK);
     const body = await response.json();
-    expect(body.messages).toEqual(
+    console.log('[view-errors facets identities]', JSON.stringify({ errorTypes: body.errorTypes, censusTotals: body.censusTotals }));
+    expect(Object.keys(body).sort(), 'the facets response is exactly errorTypes and censusTotals').toEqual(['censusTotals', 'errorTypes']);
+    expect(body.errorTypes).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ value: 'Duplicate tree/stem tag', count: 1 }),
-        expect.objectContaining({ value: 'Conflicting duplicate TreeTag/StemTag rows detected in upload batch', count: 1 })
+        expect.objectContaining({ source: 'validation', code: '5', message: 'Duplicate tree/stem tag', count: 1 }),
+        expect.objectContaining({
+          source: 'ingestion',
+          code: 'DUPLICATE_TAG_CONFLICT',
+          message: 'Conflicting duplicate TreeTag/StemTag rows detected in upload batch',
+          count: 1
+        })
       ])
     );
-    expect(body.fields).toEqual(expect.arrayContaining([expect.objectContaining({ value: 'treeTag', count: 2 })]));
+    expect(body.errorTypes.flatMap((identity: { fields: string[] }) => identity.fields)).toEqual(expect.arrayContaining(['treeTag', 'stemTag']));
+    expect(body.censusTotals).toEqual(expect.objectContaining({ affectedMeasurements: 2, validation: 1, ingestion: 1, errorTypeCount: 2 }));
   });
 
   it('reports one distinct measurement when a row carries two error messages (#547)', async () => {
@@ -207,9 +215,9 @@ describe('POST /api/errors/explorer/facets', () => {
 
     expect(response.status).toBe(HTTPResponses.OK);
     const body = await response.json();
-    console.log('[#547 facets total]', JSON.stringify({ totalMeasurements: body.totalMeasurements, messages: body.messages }));
-    expect(body.messages.map((option: { value: string }) => option.value).sort()).toEqual([SECOND_MESSAGE, FIRST_MESSAGE].sort());
-    expect(body.totalMeasurements, 'two messages on one measurement are one affected measurement').toBe(1);
+    console.log('[#547 facets total]', JSON.stringify({ censusTotals: body.censusTotals, errorTypes: body.errorTypes }));
+    expect(body.errorTypes.map((identity: { message: string }) => identity.message).sort()).toEqual([SECOND_MESSAGE, FIRST_MESSAGE].sort());
+    expect(body.censusTotals.affectedMeasurements, 'two messages on one measurement are one affected measurement').toBe(1);
   });
 });
 

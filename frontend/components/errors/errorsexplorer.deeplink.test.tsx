@@ -91,7 +91,7 @@ function installStorage(): void {
 
 function saveFilters(censusID: number, exactMessages: string[]): void {
   const key = getFilterStorageKey(TEST_SCHEMA, TEST_PLOT_ID, censusID) as string;
-  window.localStorage.setItem(key, JSON.stringify({ ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages, presetId: undefined }));
+  window.localStorage.setItem(key, JSON.stringify({ ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages }));
 }
 
 function savedFilters(censusID: number): ErrorExplorerFilters {
@@ -134,11 +134,7 @@ describe('ErrorsExplorer deep links (#547)', () => {
       if (url.includes(QUERY_ENDPOINT)) {
         return {
           ok: true,
-          json: async () => ({
-            rows: [],
-            totalRows: 0,
-            summary: { total: 0, validation: 0, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-          })
+          json: async () => ({ rows: [], totalRows: 0 })
         } as Response;
       }
       if (url.includes(FACETS_ENDPOINT)) {

@@ -17,7 +17,7 @@ const ROW = { id: 101, coreMeasurementID: 101, censusID: 6, measuredDBH: 10, att
 describe('useErrorsExplorerRows', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
-    fetchMock = vi.fn(async () => new Response(JSON.stringify({ rows: [ROW], totalRows: 1, summary: {} }), { status: 200 }));
+    fetchMock = vi.fn(async () => new Response(JSON.stringify({ rows: [ROW], totalRows: 1 }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
   });
   afterEach(() => vi.unstubAllGlobals());

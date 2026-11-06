@@ -222,7 +222,7 @@ describe('ErrorsExplorerGrid with the real DataGrid', () => {
       if (String(input).includes('/api/errors/explorer/query')) {
         const body = JSON.parse(String(init?.body));
         const rows = ROWS_BY_CODE[body.errorType?.code ?? '1'] ?? [];
-        return new Response(JSON.stringify({ rows, totalRows: rows.length, summary: {} }), { status: 200 });
+        return new Response(JSON.stringify({ rows, totalRows: rows.length }), { status: 200 });
       }
       return new Response('{}', { status: 200 });
     });

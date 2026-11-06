@@ -145,7 +145,6 @@ const TEST_PLAN_HASH_REFRESH = 'b'.repeat(64);
 const GROUP_GRID = 'example error rows';
 const FLAT_GRID = VIEW_ERRORS_TEXT.flatGridLabel;
 const INFINITE_CHUNK_SIZE = 100;
-const QUERY_SUMMARY = { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 };
 
 const GRID_ROW: Record<string, unknown> = {
   id: TEST_CORE_MEASUREMENT_ID,
@@ -381,7 +380,7 @@ function explorerFetch({ rows, totals, respond }: ExplorerFetchOptions = {}) {
     const override = respond?.(url, init);
     if (override) return override;
     const servedRows = rows ?? queryRows;
-    if (ROUTES.query.test(url)) return jsonResponse({ rows: servedRows, totalRows: servedRows.length, summary: QUERY_SUMMARY });
+    if (ROUTES.query.test(url)) return jsonResponse({ rows: servedRows, totalRows: servedRows.length });
     if (ROUTES.facets.test(url)) {
       const facets = servedRows.length > 0 ? [facetOf(servedRows[0] as unknown as ErrorExplorerRow, servedRows.length)] : [];
       return jsonResponse(facetsResponse(facets, totals));
@@ -898,7 +897,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       explorerFetch({
         respond: (url, init) => {
           if (!(ROUTES.query.test(url) || ROUTES.facets.test(url)) || !matchesNothing(init)) return undefined;
-          return ROUTES.query.test(url) ? jsonResponse({ rows: [], totalRows: 0, summary: QUERY_SUMMARY }) : jsonResponse(facetsResponse([]));
+          return ROUTES.query.test(url) ? jsonResponse({ rows: [], totalRows: 0 }) : jsonResponse(facetsResponse([]));
         }
       })
     );

@@ -440,17 +440,15 @@ describe('GET /api/censusoverview/summary (#547)', () => {
       console.log('[#547 contradictions] overview', JSON.stringify(summary.errorOverview));
       console.log(
         '[#547 contradictions] errors page',
-        JSON.stringify({ total: errorsPageFacets.totalMeasurements, contradictions: errorsPageFacets.contradictionCounts })
+        JSON.stringify({ censusTotals: errorsPageFacets.censusTotals, errorTypes: errorsPageFacets.errorTypes })
       );
 
-      expect(errorsPageFacets.contradictionCounts.duplicateTagStem, 'the Errors page must see the duplicate-tag contradiction').toBe(
-        DUPLICATE_TAG_ROW_IDS.length
-      );
-      expect(errorsPageFacets.contradictionCounts.sameBatchConflict, 'the Errors page must see the same-batch contradiction').toBe(SAME_BATCH_ROW_IDS.length);
+      expect(errorsPageFacets.censusTotals.duplicateTagStem, 'the Errors page must see the duplicate-tag contradiction').toBe(DUPLICATE_TAG_ROW_IDS.length);
+      expect(errorsPageFacets.censusTotals.sameBatchConflict, 'the Errors page must see the same-batch contradiction').toBe(SAME_BATCH_ROW_IDS.length);
       expect(response.status).toBe(HTTPResponses.OK);
-      expect(summary.errorOverview.affectedMeasurements).toBe(errorsPageFacets.totalMeasurements);
+      expect(summary.errorOverview.affectedMeasurements).toBe(errorsPageFacets.censusTotals.affectedMeasurements);
       expect(summary.errorOverview.topErrorTypes).toEqual(
-        errorsPageFacets.messages.slice(0, TOP_ERROR_TYPE_LIMIT).map(({ value, count }) => ({ message: value, count }))
+        errorsPageFacets.errorTypes.slice(0, TOP_ERROR_TYPE_LIMIT).map(({ message, count }) => ({ message, count }))
       );
       expect(overviewQueryCount, 'the overview skips the contradiction queries the Errors page runs').toBe(ONE_RAW_ERRORS_QUERY_PER_CENSUS);
     } finally {

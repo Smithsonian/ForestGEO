@@ -192,9 +192,19 @@ describe('POST /api/errors/explorer/query', () => {
     expect(body.rows[0].errorMessages).toContain('Duplicate tree/stem tag');
     expect(body.rows[0].errorSources).toEqual(expect.arrayContaining(['validation', 'ingestion']));
     expect(body.rows[0].relatedMeasurementIDs).toEqual([102]);
-    expect(body.summary.contradictions).toBe(2);
-    expect(body.summary.duplicateTagStem).toBe(2);
-    expect(body.summary.sameBatchConflict).toBe(2);
+    const rowsWithType = (type: string) => body.rows.filter((row: { contradictionTypes: string[] }) => row.contradictionTypes.includes(type)).length;
+    console.log(
+      '[view-errors query contradiction flags]',
+      JSON.stringify({
+        withContradiction: body.rows.filter((row: { hasContradiction: boolean }) => row.hasContradiction).length,
+        duplicateTagStem: rowsWithType('duplicate_tag_stem'),
+        sameBatchConflict: rowsWithType('same_batch_conflict')
+      })
+    );
+    expect(body.rows.filter((row: { hasContradiction: boolean }) => row.hasContradiction)).toHaveLength(2);
+    expect(rowsWithType('duplicate_tag_stem')).toBe(2);
+    expect(rowsWithType('same_batch_conflict')).toBe(2);
+    expect(body).not.toHaveProperty('summary');
   });
 
   it('surfaces overlapping contradiction rows in same-batch filters', async () => {
