@@ -11,15 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // row set, fixed in StyledDataGridMock.
 configure({ asyncUtilTimeout: 5000 });
 
-import {
-  ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS,
-  formatErrorComparison,
-  formatOptionalMeasurement,
-  getUploadedCodesValue,
-  hasCodesMismatch,
-  joinCodesArray,
-  parseCodesString
-} from './errorsexplorer';
+import { ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS } from './errorsexplorer';
+import { formatErrorComparison, formatOptionalMeasurement, getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorcodes';
 import type { ApplyResult, EditPlan } from '@/config/editplan/types';
 import type { UseEditPreviewFlowReturn } from '@/app/hooks/useEditPreviewFlow';
 import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
