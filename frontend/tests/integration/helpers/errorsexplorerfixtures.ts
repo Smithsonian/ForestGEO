@@ -56,6 +56,11 @@ export const WITNESS_ERROR_STEM_TAGS = ['Sa', 'sA'] as const;
 export const WITNESS_NON_ERROR_STEM_TAG = 'SA';
 export const WITNESS_SAME_BATCH_ERROR_TREE_TAGS = ['Sb1', 'sb1'] as const;
 export const WITNESS_SAME_BATCH_NON_ERROR_TREE_TAG = 'SB1';
+export const SINGLE_ERROR_TREE_TAG_PAIR = ['Ab2', 'aB2'] as const;
+export const SINGLE_ERROR_STEM_PAIR_TREE_TAG = 'Wst2';
+export const SINGLE_ERROR_STEM_TAG_PAIR = ['Sd', 'sD'] as const;
+export const SINGLE_ERROR_SAME_BATCH_PAIR = ['Sb2', 'sb2'] as const;
+export const SAME_BATCH_PLOT_MISMATCH_TREE_TAG = 'S2';
 export const ATTRIBUTES_ONLY_TOKEN = 'buttressed';
 export const SEARCH_PAIR_TREE_TAG = 'T12';
 export const SEARCH_PAIR_STEM_TAG = '1';
@@ -134,6 +139,10 @@ export interface WitnessGroups {
   treeTagVariants: number[];
   stemTagVariants: number[];
   sameBatchVariants: number[];
+  /** Each pair is [error member, non-error member]. */
+  singleErrorTreeTagPair: number[];
+  singleErrorStemTagPair: number[];
+  singleErrorSameBatchPair: number[];
 }
 export interface GeneratedFixture extends ExplorerFixture {
   seed: number;
@@ -487,6 +496,7 @@ function blankGroupKeys(value: unknown, rowIDs: ReadonlySet<number>): unknown {
 }
 
 async function groupKeysAreEqualUnderCollation(connection: Connection, actualKey: unknown, expectedKey: unknown): Promise<boolean> {
+  if (actualKey === expectedKey) return true;
   if (actualKey === null || expectedKey === null) return actualKey === expectedKey;
   const [rows] = await connection.query(COLLATION_EQUALITY_SQL, [actualKey, expectedKey]);
   return (rows as Array<{ same: number }>)[0].same === 1;
@@ -798,21 +808,49 @@ function plantedRows(): PlantedRows {
     speciesCode: SAME_BATCH_VARIANT_SPECIES[WITNESS_SAME_BATCH_ERROR_TREE_TAGS.length],
     ...sameBatch
   });
-  const mismatchedPlotRowID = plant({ plotID: DECOY_PLOT_ID, treeTag: PLOT_MISMATCH_TREE_TAG, stemTag: PLOT_MISMATCH_STEM_TAG }, [ET.tagMismatch]);
+  const [singleErrorTreeTag, singleErrorTreeTagMate] = SINGLE_ERROR_TREE_TAG_PAIR;
+  const [singleErrorStemTag, singleErrorStemTagMate] = SINGLE_ERROR_STEM_TAG_PAIR;
+  const [singleErrorSameBatchTag, singleErrorSameBatchMate] = SINGLE_ERROR_SAME_BATCH_PAIR;
+  const singleErrorTreeTagPair = [
+    plant({ treeTag: singleErrorTreeTag, stemTag: WITNESS_STEM_TAG }, [ET.tagMismatch]),
+    plant({ treeTag: singleErrorTreeTagMate, stemTag: WITNESS_STEM_TAG })
+  ];
+  const singleErrorStemTagPair = [
+    plant({ treeTag: SINGLE_ERROR_STEM_PAIR_TREE_TAG, stemTag: singleErrorStemTag }, [ET.tagMismatch]),
+    plant({ treeTag: SINGLE_ERROR_STEM_PAIR_TREE_TAG, stemTag: singleErrorStemTagMate })
+  ];
+  const singleErrorSameBatchPair = [
+    plant({ treeTag: singleErrorSameBatchTag, stemTag: '1', speciesCode: 'AAA', ...sameBatch }, [ET.invalidSpecies]),
+    plant({ treeTag: singleErrorSameBatchMate, stemTag: '2', speciesCode: 'BBB', ...sameBatch })
+  ];
+  const mismatchedPlotRowIDs = [
+    plant({ plotID: DECOY_PLOT_ID, treeTag: PLOT_MISMATCH_TREE_TAG, stemTag: PLOT_MISMATCH_STEM_TAG }, [ET.tagMismatch]),
+    plant({ plotID: DECOY_PLOT_ID, treeTag: SAME_BATCH_PLOT_MISMATCH_TREE_TAG, stemTag: '1', speciesCode: 'BBB', ...sameBatch }, [ET.tagMismatch])
+  ];
   plant({ treeTag: 'A1', stemTag: '1', attributes: ATTRIBUTES_ONLY_TOKEN }, [ET.fallbackFields]);
   plant({ treeTag: SEARCH_PAIR_TREE_TAG, stemTag: SEARCH_PAIR_STEM_TAG }, [ET.fallbackFields]);
 
   const witnessGroups: WitnessGroups = {
     treeTagVariants: [...witnessTreeErrorRowIDs, witnessTreeNonErrorRowID],
     stemTagVariants: [...witnessStemErrorRowIDs, witnessStemNonErrorRowID],
-    sameBatchVariants: [...witnessSameBatchErrorRowIDs, witnessSameBatchNonErrorRowID]
+    sameBatchVariants: [...witnessSameBatchErrorRowIDs, witnessSameBatchNonErrorRowID],
+    singleErrorTreeTagPair,
+    singleErrorStemTagPair,
+    singleErrorSameBatchPair
   };
   return {
     measurements,
     logs,
-    witnessRowIDs: [...witnessGroups.treeTagVariants, ...witnessGroups.stemTagVariants, ...witnessGroups.sameBatchVariants],
+    witnessRowIDs: [
+      ...witnessGroups.treeTagVariants,
+      ...witnessGroups.stemTagVariants,
+      ...witnessGroups.sameBatchVariants,
+      ...witnessGroups.singleErrorTreeTagPair,
+      ...witnessGroups.singleErrorStemTagPair,
+      ...witnessGroups.singleErrorSameBatchPair
+    ],
     witnessGroups,
-    mismatchedPlotRowIDs: [mismatchedPlotRowID]
+    mismatchedPlotRowIDs
   };
 }
 

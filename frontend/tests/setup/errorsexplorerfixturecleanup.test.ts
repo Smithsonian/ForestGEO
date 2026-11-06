@@ -16,6 +16,11 @@ import {
   resolveEquivalenceSeeds,
   setGroupConcatMaxLen,
   ATTRIBUTES_ONLY_TOKEN,
+  SINGLE_ERROR_STEM_PAIR_TREE_TAG,
+  SINGLE_ERROR_STEM_TAG_PAIR,
+  SINGLE_ERROR_TREE_TAG_PAIR,
+  SINGLE_ERROR_SAME_BATCH_PAIR,
+  SAME_BATCH_PLOT_MISMATCH_TREE_TAG,
   DECOY_PLOT_ID,
   FIRST_CENSUS_ID,
   MAIN_PLOT_ID,
@@ -414,6 +419,19 @@ describe('generateEquivalenceFixture', () => {
     expect(mates.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('plants a second plot-2 row that shares an agreeing same-batch group with plot 1 and would make it conflict', () => {
+    const [, sameBatchMismatchedID] = fixture.mismatchedPlotRowIDs;
+    const mismatched = fixture.measurements.find(row => row.coreMeasurementID === sameBatchMismatchedID) as FixtureMeasurement;
+    const mates = fixture.measurements.filter(
+      row => row.plotID === MAIN_PLOT_ID && row.censusID === mismatched.censusID && row.treeTag === SAME_BATCH_PLOT_MISMATCH_TREE_TAG && row.isActive
+    );
+    expect(fixture.mismatchedPlotRowIDs).toHaveLength(2);
+    expect(mismatched).toMatchObject({ plotID: DECOY_PLOT_ID, censusID: FIRST_CENSUS_ID, isActive: true, speciesCode: 'BBB', stemTag: '1' });
+    expect(mates.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(mates.map(row => (row.speciesCode ?? '').toLowerCase()))).toEqual(new Set(['aaa']));
+    expect(mates.every(row => row.uploadFileID === mismatched.uploadFileID && row.uploadBatchID === mismatched.uploadBatchID)).toBe(true);
+  });
+
   it('holds the three censuses at the planned sizes plus the planted rows', () => {
     const countIn = (censusID: number) => fixture.measurements.filter(row => row.censusID === censusID).length;
     expect(countIn(1)).toBeGreaterThanOrEqual(260);
@@ -425,7 +443,8 @@ describe('generateEquivalenceFixture', () => {
   it('plants three witness groups whose spellings differ only by case or accent, each with a non-error member', () => {
     const rowsOf = (ids: number[]) => ids.map(id => fixture.measurements.find(row => row.coreMeasurementID === id) as FixtureMeasurement);
     const errorIDs = new Set(fixture.logs.filter(log => !log.isResolved).map(log => log.measurementID));
-    const { treeTagVariants, stemTagVariants, sameBatchVariants } = fixture.witnessGroups;
+    const { treeTagVariants, stemTagVariants, sameBatchVariants, singleErrorTreeTagPair, singleErrorStemTagPair, singleErrorSameBatchPair } =
+      fixture.witnessGroups;
     const hasUnresolvedLog = (row: FixtureMeasurement) => errorIDs.has(row.coreMeasurementID);
 
     expect(rowsOf(treeTagVariants).map(row => row.treeTag)).toEqual([...WITNESS_TREE_TAGS, WITNESS_NON_ERROR_TREE_TAG]);
@@ -439,7 +458,26 @@ describe('generateEquivalenceFixture', () => {
     expect(rowsOf(stemTagVariants).map(hasUnresolvedLog)).toEqual([true, true, false]);
     expect(rowsOf(sameBatchVariants).map(hasUnresolvedLog)).toEqual([true, true, false]);
     expect(treeTagVariants.length).toBe(WITNESS_TREE_TAGS.length + 1);
-    expect(fixture.witnessRowIDs).toEqual([...treeTagVariants, ...stemTagVariants, ...sameBatchVariants]);
+    expect(rowsOf(singleErrorTreeTagPair).map(row => row.treeTag)).toEqual([...SINGLE_ERROR_TREE_TAG_PAIR]);
+    expect(new Set(rowsOf(singleErrorTreeTagPair).map(row => row.stemTag)).size).toBe(1);
+    expect(rowsOf(singleErrorStemTagPair).map(row => row.stemTag)).toEqual([...SINGLE_ERROR_STEM_TAG_PAIR]);
+    expect(new Set(rowsOf(singleErrorStemTagPair).map(row => row.treeTag))).toEqual(new Set([SINGLE_ERROR_STEM_PAIR_TREE_TAG]));
+    expect(rowsOf(singleErrorSameBatchPair).map(row => row.treeTag)).toEqual([...SINGLE_ERROR_SAME_BATCH_PAIR]);
+    expect(rowsOf(singleErrorSameBatchPair).map(row => [row.speciesCode, row.stemTag, row.uploadFileID, row.uploadBatchID])).toEqual([
+      ['AAA', '1', 'file-a', 'batch-1'],
+      ['BBB', '2', 'file-a', 'batch-1']
+    ]);
+    [singleErrorTreeTagPair, singleErrorStemTagPair, singleErrorSameBatchPair].forEach(pair => {
+      expect(rowsOf(pair).map(hasUnresolvedLog)).toEqual([true, false]);
+    });
+    expect(fixture.witnessRowIDs).toEqual([
+      ...treeTagVariants,
+      ...stemTagVariants,
+      ...sameBatchVariants,
+      ...singleErrorTreeTagPair,
+      ...singleErrorStemTagPair,
+      ...singleErrorSameBatchPair
+    ]);
   });
 
   it('plants the semicolon message type', () => {
@@ -746,6 +784,27 @@ describe('expectExplorerEqual', () => {
     const connection = collationConnection(1);
     await expectExplorerEqual(connection as never, context, rowWithKey(1, 'k'), rowWithKey(1, 'k'), witnessIDs);
     expect(connection.query).not.toHaveBeenCalled();
+  });
+
+  it('does not ask the database about a witness key that is byte-identical on both sides, and asks about one that is not', async () => {
+    const connection = collationConnection(1);
+    await expectExplorerEqual(
+      connection as never,
+      context,
+      rowWithKey(WITNESS_ID, 'duplicate:1:Ab1:1'),
+      rowWithKey(WITNESS_ID, 'duplicate:1:Ab1:1'),
+      witnessIDs
+    );
+    expect(connection.query).not.toHaveBeenCalled();
+
+    await expectExplorerEqual(
+      connection as never,
+      context,
+      rowWithKey(WITNESS_ID, 'duplicate:1:Ab1:1'),
+      rowWithKey(WITNESS_ID, 'duplicate:1:aB1:1'),
+      witnessIDs
+    );
+    expect(connection.query).toHaveBeenCalledTimes(1);
   });
 
   it('rejects with the seed, scenario, page, path and both values on a mismatch', async () => {

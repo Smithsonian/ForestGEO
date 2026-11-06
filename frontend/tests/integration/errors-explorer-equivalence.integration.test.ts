@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   ERROR_EXPLORER_PRESETS,
   type ContradictionType,
@@ -37,6 +37,10 @@ import {
   WITNESS_STEM_TAG,
   WITNESS_STEM_VARIANT_TREE_TAG,
   WITNESS_TREE_TAGS,
+  SINGLE_ERROR_SAME_BATCH_PAIR,
+  SINGLE_ERROR_STEM_PAIR_TREE_TAG,
+  SINGLE_ERROR_STEM_TAG_PAIR,
+  SINGLE_ERROR_TREE_TAG_PAIR,
   type FixtureDatabase,
   type FixtureMeasurement,
   type GeneratedFixture
@@ -375,28 +379,45 @@ const COVERAGE_CASES: readonly CoverageCase[] = [
     isCovered: context => variantGroupIsFlagged(context, context.fixture.witnessGroups.sameBatchVariants, SAME_BATCH)
   },
   {
-    name: 'a row of another plot sharing a tag pair with a duplicate pair, left out of that pair',
+    name: 'a duplicate pair of case-variant tree tags with exactly one error member',
+    isCovered: context => variantGroupIsFlagged(context, context.fixture.witnessGroups.singleErrorTreeTagPair, DUPLICATE)
+  },
+  {
+    name: 'a duplicate pair of case-variant stem tags with exactly one error member',
+    isCovered: context => variantGroupIsFlagged(context, context.fixture.witnessGroups.singleErrorStemTagPair, DUPLICATE)
+  },
+  {
+    name: 'a same-batch pair of case-variant tree tags with conflicting species and exactly one error member',
+    isCovered: context => variantGroupIsFlagged(context, context.fixture.witnessGroups.singleErrorSameBatchPair, SAME_BATCH)
+  },
+  {
+    name: 'rows of another plot that share a duplicate pair and an agreeing same-batch group with plot 1, left out of both',
     isCovered: context =>
-      context.fixture.mismatchedPlotRowIDs.some(mismatchedID => {
-        const mismatched = context.measurementByID.get(mismatchedID);
-        const pair = context.fixture.measurements.filter(
-          row =>
-            row.plotID === MAIN_PLOT_ID && row.censusID === mismatched?.censusID && row.treeTag === mismatched?.treeTag && row.stemTag === mismatched?.stemTag
-        );
-        return (
-          mismatched !== undefined &&
-          mismatched.plotID !== MAIN_PLOT_ID &&
-          !context.rowIDs.has(mismatchedID) &&
-          pair.length >= 2 &&
-          pair.every(
-            member =>
-              flagsOf(context, member).includes(DUPLICATE) && !context.rowByID.get(member.coreMeasurementID)?.relatedMeasurementIDs.includes(mismatchedID)
-          )
-        );
-      })
+      context.fixture.mismatchedPlotRowIDs.length > 0 &&
+      context.fixture.mismatchedPlotRowIDs.every(mismatchedID => isLeftOutOfPlotOneGroups(context, mismatchedID))
   },
   { name: 'an error row whose Attributes alone carry the search token', isCovered: ({ rows }) => rows.some(row => row.attributes === ATTRIBUTES_ONLY_TOKEN) }
 ];
+
+function isLeftOutOfPlotOneGroups(context: CoverageContext, mismatchedID: number): boolean {
+  const mismatched = context.measurementByID.get(mismatchedID);
+  if (mismatched === undefined || mismatched.plotID === MAIN_PLOT_ID || context.rowIDs.has(mismatchedID)) return false;
+  const plotOneRows = context.fixture.measurements.filter(
+    row => row.plotID === MAIN_PLOT_ID && row.censusID === mismatched.censusID && row.treeTag === mismatched.treeTag
+  );
+  const neverRelated = plotOneRows.every(member => !context.rowByID.get(member.coreMeasurementID)?.relatedMeasurementIDs.includes(mismatchedID));
+  if (mismatched.uploadFileID === null) {
+    const pair = plotOneRows.filter(row => row.stemTag === mismatched.stemTag);
+    return pair.length >= 2 && pair.every(member => flagsOf(context, member).includes(DUPLICATE)) && neverRelated;
+  }
+  const sameBatchMates = plotOneRows.filter(row => row.uploadFileID === mismatched.uploadFileID && row.uploadBatchID === mismatched.uploadBatchID);
+  return (
+    sameBatchMates.length >= 2 &&
+    new Set(sameBatchMates.map(row => (row.speciesCode ?? '').toLowerCase())).size === 1 &&
+    sameBatchMates.every(member => !flagsOf(context, member).includes(SAME_BATCH)) &&
+    neverRelated
+  );
+}
 
 function variantGroupIsFlagged(context: CoverageContext, groupIDs: number[], flag: ContradictionType): boolean {
   const errorMemberIDs = groupIDs.slice(0, -1);
@@ -548,6 +569,30 @@ describe('errors explorer: frozen oracle against production on generated data', 
           spellings: [...WITNESS_SAME_BATCH_ERROR_TREE_TAGS, WITNESS_SAME_BATCH_NON_ERROR_TREE_TAG],
           keyFor: (spelling: string) => `${sameBatchPrefix}:${spelling}`,
           foreignKey: `${sameBatchPrefix}:${FOREIGN_TAG_SPELLING}`
+        },
+        {
+          name: 'tree-tag spellings with one error member',
+          ids: fixture.witnessGroups.singleErrorTreeTagPair,
+          expectedFlag: DUPLICATE,
+          spellings: [...SINGLE_ERROR_TREE_TAG_PAIR],
+          keyFor: (spelling: string) => `duplicate:${FIRST_CENSUS_ID}:${spelling}:${WITNESS_STEM_TAG}`,
+          foreignKey: `duplicate:${FIRST_CENSUS_ID}:${FOREIGN_TAG_SPELLING}:${WITNESS_STEM_TAG}`
+        },
+        {
+          name: 'stem-tag spellings with one error member',
+          ids: fixture.witnessGroups.singleErrorStemTagPair,
+          expectedFlag: DUPLICATE,
+          spellings: [...SINGLE_ERROR_STEM_TAG_PAIR],
+          keyFor: (spelling: string) => `duplicate:${FIRST_CENSUS_ID}:${SINGLE_ERROR_STEM_PAIR_TREE_TAG}:${spelling}`,
+          foreignKey: `duplicate:${FIRST_CENSUS_ID}:${SINGLE_ERROR_STEM_PAIR_TREE_TAG}:${FOREIGN_STEM_SPELLING}`
+        },
+        {
+          name: 'same-batch tree-tag spellings with one error member',
+          ids: fixture.witnessGroups.singleErrorSameBatchPair,
+          expectedFlag: SAME_BATCH,
+          spellings: [...SINGLE_ERROR_SAME_BATCH_PAIR],
+          keyFor: (spelling: string) => `${sameBatchPrefix}:${spelling}`,
+          foreignKey: `${sameBatchPrefix}:${FOREIGN_TAG_SPELLING}`
         }
       ];
     };
@@ -575,13 +620,19 @@ describe('errors explorer: frozen oracle against production on generated data', 
 
     it('every case or accent spelling of a witness group key is accepted on the real connection, a different tag is rejected', async () => {
       const whole = await oracleWholeList(SCOPES[0], DEFAULT_FILTERS);
+      const collationQuery = vi.spyOn(explorerConnection(), 'query');
       for (const family of witnessFamilies()) {
         const groupRowIDs = new Set(family.ids.slice(0, -1));
+        const collationCallsAtFamilyStart = collationQuery.mock.calls.length;
         expect(whole.rows.filter(row => groupRowIDs.has(Number(row.coreMeasurementID)))).toHaveLength(groupRowIDs.size);
         for (const spelling of family.spellings) {
           const rewritten = withGroupKey(whole, groupRowIDs, family.keyFor(spelling));
           await expectExplorerEqual(explorerConnection(), { seed, scenario: `${family.name}: key rewritten to ${spelling}` }, rewritten, whole, witnessIDs());
         }
+        expect(
+          collationQuery.mock.calls.length - collationCallsAtFamilyStart,
+          `${family.name}: byte-different spellings must be sent to MySQL`
+        ).toBeGreaterThan(0);
         const foreign = withGroupKey(whole, groupRowIDs, family.foreignKey);
         const error = await expectExplorerEqual(
           explorerConnection(),
@@ -597,6 +648,18 @@ describe('errors explorer: frozen oracle against production on generated data', 
         expect(error, `${family.name}: a key for another tag must be rejected`).not.toBeNull();
         expect(error?.message).toContain('contradictionGroupKey of row');
       }
+    });
+
+    it('plot scopes: plot 2 on census 1 holds exactly the mismatched-plot rows, plot 1 on census 3 is empty, plot 2 on census 3 is not', async () => {
+      const [plotTwoOnFirstCensus, plotOneOnOtherCensus, plotTwoOnOwnCensus] = [PLOT_SCOPES[2], PLOT_SCOPES[1], PLOT_SCOPES[0]];
+      const found = await oracleWholeList(plotTwoOnFirstCensus, DEFAULT_FILTERS);
+      const empty = await oracleWholeList(plotOneOnOtherCensus, DEFAULT_FILTERS);
+      const own = await oracleWholeList(plotTwoOnOwnCensus, DEFAULT_FILTERS);
+      console.log(`[plot scopes] seed=${seed} plot2/census1=${found.totalRows} plot1/census3=${empty.totalRows} plot2/census3=${own.totalRows}`);
+
+      expect(found.rows.map(row => Number(row.coreMeasurementID)).sort((a, b) => a - b)).toEqual([...fixture.mismatchedPlotRowIDs].sort((a, b) => a - b));
+      expect(empty.totalRows).toBe(0);
+      expect(own.totalRows).toBeGreaterThan(0);
     });
 
     it('the comparison fails when production differs from the oracle', async () => {
@@ -775,7 +838,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
             .slice(0, NON_ERROR_ID_COUNT)
             .map(row => row.coreMeasurementID);
           const otherPlotID = fixture.measurements.find(row => row.censusID === DECOY_CENSUS_ID)?.coreMeasurementID as number;
-          const measurementIDs = [...errorSetIDs, ...nonErrorIDs, otherPlotID, ...IRREGULAR_MEASUREMENT_IDS];
+          const measurementIDs = [...errorSetIDs, ...nonErrorIDs, otherPlotID, ...fixture.mismatchedPlotRowIDs, ...IRREGULAR_MEASUREMENT_IDS];
           const activeTypes: Array<ContradictionType | undefined> = [undefined, DUPLICATE, SAME_BATCH];
           console.log(`[details] seed=${seed} errorSetIDs=${errorSetIDs.length} nonErrorIDs=${nonErrorIDs.length} otherPlotID=${otherPlotID}`);
           expect(nonErrorIDs).toHaveLength(NON_ERROR_ID_COUNT);
@@ -807,7 +870,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
             ...PRESET_FILTERS,
             { label: 'semicolon message', filters: oracleFilters({ exactMessages: [FIXTURE_MESSAGES.semicolonMessage] }), sweepWithSearch: false, axes: [] }
           ];
-          for (const scope of SCOPES) {
+          for (const scope of [...SCOPES, ...PLOT_SCOPES]) {
             const censusArgument = scopeCensusArgument(scope);
             for (const { label, filters } of exportFilters) {
               apiCalls += 2;
@@ -826,12 +889,13 @@ describe('errors explorer: frozen oracle against production on generated data', 
       SEED_TEST_TIMEOUT_MS
     );
 
-    it('every filter axis value and every search value selects rows somewhere, so no comparison is between two empty lists', () => {
+    it('every filter axis value and search value was recorded, and each selects rows in at least one scope except the matches-nothing control', () => {
       const emptyAxes = [...axisMaxima.entries()].filter(([axis, maximum]) => maximum === 0 && axis !== MATCHES_NOTHING_AXIS).map(([axis]) => axis);
+      const expectedAxes = [...new Set([...FILTER_GRID.flatMap(named => named.axes), ...QUICK_SEARCH_VALUES.map(value => `search:${value}`)])].sort();
       console.log(`[axes] seed=${seed} axisValues=${axisMaxima.size} maxima=${JSON.stringify(Object.fromEntries(axisMaxima))}`);
       console.log(`[no-log] seed=${seed} oracle totalRows per no-log fallback set: ${JSON.stringify(Object.fromEntries(noLogTotals))}`);
 
-      expect(axisMaxima.size, 'the query and quick-search tests must have recorded the axes first').toBeGreaterThan(QUICK_SEARCH_VALUES.length);
+      expect([...axisMaxima.keys()].sort(), 'the query and quick-search tests must have recorded exactly the expected axes').toEqual(expectedAxes);
       expect(axisMaxima.get(MATCHES_NOTHING_AXIS), 'the matches-nothing control must stay empty').toBe(0);
       expect(axisMaxima.get(NO_LOG_AXIS), 'the no-log fallback message needs a positive oracle count').toBeGreaterThan(0);
       expect(emptyAxes).toEqual([]);
