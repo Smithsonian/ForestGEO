@@ -305,6 +305,7 @@ export default function ErrorsExplorer() {
 
   const [sheetState, setSheetState] = useState<DetailsSheetState | null>(null);
   const sheet = sheetState?.scopeKey === readScopeKey ? sheetState : null;
+  if (sheetState !== null && sheet === null) setSheetState(null);
   const detailsKey = sheet ? `details|${readScopeKey}|${sheet.mutationScope.censusID}|${sheet.row.measurementID}` : null;
   const sheetGated = sheet !== null && rowEdit.isMutationScopeGated(sheet.mutationScope);
   const details = useErrorsExplorerRequest<ErrorExplorerDetailsResponse>({

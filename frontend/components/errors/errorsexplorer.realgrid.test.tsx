@@ -786,6 +786,54 @@ describe('a census change during an edit (P2-4, P2-8, A4)', () => {
   });
 });
 
+describe('the details sheet across a census round trip (P2-3)', () => {
+  const BACK_TO_FIRST_CENSUS = 'Back to the first census (sidebar stand-in)';
+
+  /** A closed Drawer stays in the DOM, hidden from the accessibility tree; an open one is the page's dialog. */
+  const openSheet = () => screen.queryByRole('dialog');
+
+  function PageWithCensusRoundTrip() {
+    const [, force] = React.useReducer((count: number) => count + 1, 0);
+    const switchTo = (censusIDs: number[]) => () => {
+      page.censusIDs = censusIDs;
+      force();
+    };
+    return (
+      <>
+        <button type="button" onClick={switchTo(SWITCHED_CENSUS_IDS)}>
+          {SIDEBAR_STAND_IN}
+        </button>
+        <button type="button" onClick={switchTo([FIRST_CENSUS_ID, SECOND_CENSUS_ID])}>
+          {BACK_TO_FIRST_CENSUS}
+        </button>
+        <ErrorsExplorer />
+      </>
+    );
+  }
+
+  it('does not reopen a sheet that the census change closed when the user returns to the census it was opened in', async () => {
+    const user = userEvent.setup();
+    installPageFetch(defaultRoutes());
+    render(<PageWithCensusRoundTrip />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await user.click(rowAction(grid, 101, 'Details'));
+    await waitFor(() => expect(openSheet(), 'the sheet is open in census A').not.toBeNull());
+
+    // The open sheet is modal, so the sidebar stand-in is aria-hidden behind it; the census switch still arrives from outside the page.
+    fireEvent.click(screen.getByRole('button', { name: SIDEBAR_STAND_IN, hidden: true }));
+    await findLoadedGrid(GROUP_LABEL);
+    await waitFor(() => expect(openSheet(), 'census B shows no sheet').toBeNull());
+
+    await user.click(screen.getByRole('button', { name: BACK_TO_FIRST_CENSUS }));
+    // hidden: a sheet that wrongly reopens would put the grid behind a modal and out of the accessibility tree.
+    await screen.findByRole('grid', { name: GROUP_LABEL, hidden: true });
+    await act(async () => new Promise(resolve => setTimeout(resolve, STAND_IN_SETTLE_MS)));
+
+    console.log('[view-errors sheet round trip]', JSON.stringify({ sheetOpen: openSheet() !== null }));
+    expect(openSheet(), 'back in census A the sheet stays closed until Details is chosen').toBeNull();
+  });
+});
+
 describe('read gates by scope with the real grid (P2-2)', () => {
   it('sends no flat infinite read while gated, a sort included, and re-reads once after Retry refresh', async () => {
     const user = userEvent.setup();
