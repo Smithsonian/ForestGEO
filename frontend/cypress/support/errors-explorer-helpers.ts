@@ -130,7 +130,8 @@ function buildRelatedRow(row: ErrorExplorerRow): RelatedContradictionRow {
     uploadBatchID: row.uploadBatchID,
     primaryErrorMessage: row.primaryErrorMessage,
     errorCount: row.errorCount,
-    errorMessages: row.errorMessages
+    errorMessages: row.errorMessages,
+    inErrorSet: true
   };
 }
 

@@ -1,3 +1,4 @@
+import { formatCount } from '@/config/censusoverview';
 import type { MeasurementsSummaryRDS } from '@/lib/db/definitions/views';
 
 export type ErrorExplorerSource = 'all' | 'validation' | 'ingestion';
@@ -128,12 +129,201 @@ export interface RelatedContradictionRow {
   primaryErrorMessage?: string;
   errorCount?: number;
   errorMessages?: string[];
+  /** false for a contradiction partner with no unresolved error (no details row exists for it); Task 11 returns those. */
+  inErrorSet: boolean;
 }
 
 export interface ErrorExplorerDetailsResponse {
   row: ErrorExplorerRow | null;
   allErrors: ErrorDetailRecord[];
   relatedRows: RelatedContradictionRow[];
+}
+
+// ── Shared with View Data (specs 2026-11-04: View Errors "The shared panel", View Data "Details panel") ──
+
+export const ERROR_SOURCE = { validation: 'validation', ingestion: 'ingestion' } as const satisfies Record<string, Exclude<ErrorExplorerSource, 'all'>>;
+
+/** The synthetic occurrence _shared.ts gives an IsValidated = FALSE row that has no unresolved log entry. */
+export const FALLBACK_ERROR_CODE = 'failed_no_log';
+export const FALLBACK_ERROR_MESSAGE = 'Measurement is marked invalid but has no unresolved error log entry.';
+export const MARKED_INVALID_NO_ERROR_LOGGED_LABEL = 'Marked invalid, no error logged';
+
+export const CLEAR_VALIDATION_ERRORS_ENDPOINT = '/api/validations/clearmeasurementerrors';
+export const CLEAR_VALIDATION_ERRORS_SUCCESS = 'Validation errors cleared. The row is pending until validations run again.';
+export const CLEAR_VALIDATION_ERRORS_FAILED_MESSAGE = "Couldn't clear the validation errors. Nothing changed.";
+export const CLEAR_UNCONFIRMED_MESSAGE = 'Could not confirm whether the validation errors were cleared.';
+/** r3 (View Data R2): the row had nothing left to clear, so nothing changed; the page re-reads it. */
+export const CLEAR_NOTHING_TO_CLEAR_MESSAGE = "Nothing to clear: this row's errors were already resolved.";
+export const CLEAR_MEASUREMENT_ERRORS_CODES = {
+  invalidRequest: 'INVALID_CLEAR_REQUEST',
+  pendingUser: 'PENDING_USER_FORBIDDEN',
+  scopeForbidden: 'SCOPE_FORBIDDEN',
+  scopeBusy: 'SCOPE_BUSY',
+  notInScope: 'MEASUREMENT_NOT_IN_SCOPE',
+  failedRow: 'FAILED_MEASUREMENT_NOT_CLEARABLE',
+  nothingToClear: 'NOTHING_TO_CLEAR',
+  failed: 'CLEAR_VALIDATION_ERRORS_FAILED'
+} as const;
+
+/** D-f: keyed by the exact stored message. Filters, identity and deep links keep the stored text. */
+export const ERROR_TYPE_DISPLAY_LABELS: ReadonlyMap<string, string> = new Map([
+  ['Flagged;Different species', 'Different species'],
+  ['Flagged;Flagged;Different quadrats', 'Different quadrats'],
+  ['Duplicate tree (and stem) tag found in census;Duplicate stem (and tree) tag found in census', 'Duplicate tree and stem tag in census'],
+  ['Invalid DBH;Invalid HOM;DEAD-state attribute(s)', 'Measured, but coded dead'],
+  ['Missing DBH;Missing HOM;LIVE-state attribute(s)', 'Not measured, but coded alive'],
+  [FALLBACK_ERROR_MESSAGE, MARKED_INVALID_NO_ERROR_LOGGED_LABEL]
+]);
+
+export function formatErrorTypeLabel(message: string): string {
+  return ERROR_TYPE_DISPLAY_LABELS.get(message) ?? message;
+}
+
+export function isMarkedInvalidWithoutLoggedError(errors: ReadonlyArray<Pick<ErrorDetailRecord, 'source' | 'code'>>): boolean {
+  return errors.length === 1 && errors[0].source === ERROR_SOURCE.ingestion && errors[0].code === FALLBACK_ERROR_CODE;
+}
+
+export interface ClearValidationErrorsEligibility {
+  isLinkedToStem: boolean;
+  hasUnresolvedValidationError: boolean;
+  markedInvalidWithoutLoggedError: boolean;
+}
+
+/** The Clear route refuses unlinked rows with 409, so this never offers what the route rejects. */
+export function canClearValidationErrors({
+  isLinkedToStem,
+  hasUnresolvedValidationError,
+  markedInvalidWithoutLoggedError
+}: ClearValidationErrorsEligibility): boolean {
+  return isLinkedToStem && (hasUnresolvedValidationError || markedInvalidWithoutLoggedError);
+}
+
+/** The always-present input of the shared details panel; each page builds it from its own grid row. */
+export interface DetailsPanelRow {
+  measurementID: number;
+  treeTag: string | null;
+  stemTag: string | null;
+  quadratName: string | null;
+  speciesCode: string | null;
+  measurementDate: string | null;
+  isLinkedToStem: boolean;
+  markedInvalidWithoutLoggedError: boolean;
+}
+
+export type ErrorSourceKind = Exclude<ErrorExplorerSource, 'all'>;
+
+export interface ErrorTypeIdentity {
+  source: ErrorSourceKind;
+  code: string;
+  /** The stored message, never the display label. */
+  message: string;
+}
+
+export const ERROR_DETAILS_SHEET_WIDTH = 440;
+
+// DBH change (spec Error-type groups → Change; P5-1 moved the code set here from _shared.ts).
+export const DBH_CHANGE_VALIDATION_CODES: ReadonlySet<string> = new Set(['1', '2']);
+export const DBH_CHANGE_PERCENT_FRACTION_DIGITS = 1;
+const PERCENT_SCALE = 100;
+const DBH_DISPLAY_FRACTION_DIGITS = 2;
+const POSITIVE_SIGN = '+';
+const NEGATIVE_SIGN = '−';
+const PERCENT_SUFFIX = '%';
+
+/** null/undefined/blank and non-finite values are blank; DECIMAL columns arrive as strings (mysql2 without decimalNumbers). */
+export function toFiniteNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' && value.trim().length === 0) return null;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+export function computeDbhChangePercent(prior: unknown, now: unknown): number | null {
+  const priorValue = toFiniteNumberOrNull(prior);
+  const nowValue = toFiniteNumberOrNull(now);
+  if (priorValue === null || nowValue === null || priorValue === 0) return null;
+  const roundingFactor = 10 ** DBH_CHANGE_PERCENT_FRACTION_DIGITS;
+  return Math.round(((nowValue - priorValue) / priorValue) * PERCENT_SCALE * roundingFactor) / roundingFactor;
+}
+
+export function formatDbhChange(percent: number | null | undefined): string {
+  if (percent === null || percent === undefined) return '';
+  const sign = percent > 0 ? POSITIVE_SIGN : percent < 0 ? NEGATIVE_SIGN : '';
+  return `${sign}${Math.abs(percent).toFixed(DBH_CHANGE_PERCENT_FRACTION_DIGITS)}${PERCENT_SUFFIX}`;
+}
+
+export function formatDbhChangeFact(priorDBH: number, priorCensusNumber: number | null, currentDBH: unknown, percent: number | null): string {
+  const current = toFiniteNumberOrNull(currentDBH);
+  const priorPlace = priorCensusNumber === null ? 'the previous census' : `Census ${priorCensusNumber}`;
+  const now = current === null ? '—' : current.toFixed(DBH_DISPLAY_FRACTION_DIGITS);
+  const change = percent === null ? '' : `, a change of ${formatDbhChange(percent)}`;
+  return `DBH went from ${priorDBH.toFixed(DBH_DISPLAY_FRACTION_DIGITS)} in ${priorPlace} to ${now}${change}`;
+}
+
+function errorTypeCodeKey({ source, code }: Pick<ErrorTypeIdentity, 'source' | 'code'>): string {
+  return `${source}:${code}`;
+}
+
+export const ATTRIBUTES_PAGE_PATH = '/fixeddatainput/attributes';
+const ATTRIBUTE_CODE_ERROR_TYPES: ReadonlySet<string> = new Set(['validation:14']);
+
+export function isAttributeCodeErrorType(identity: Pick<ErrorTypeIdentity, 'source' | 'code'>): boolean {
+  return ATTRIBUTE_CODE_ERROR_TYPES.has(errorTypeCodeKey(identity));
+}
+
+export const EDIT_LOCK_TOOLTIPS = {
+  editing: "Save or cancel the row you're editing first",
+  saving: 'Wait for your edit to finish saving'
+} as const;
+
+export const EDIT_THIS_ROW_UNAVAILABLE_TOOLTIP = 'Open this row from its group to edit it';
+
+export const DETAILS_SHEET_TEXT = {
+  closeDetails: 'Close details',
+  editThisRow: 'Edit this row',
+  clearValidationErrors: 'Clear validation errors',
+  openAttributes: 'Open Attributes →',
+  noUnresolvedErrors: 'No unresolved errors',
+  rowResolved: 'This row has no unresolved errors any more.',
+  loadFailed: "Couldn't load these details.",
+  compareTitle: 'Compare with the other row',
+  inspectRow: 'Inspect this row',
+  codesHeading: 'Codes',
+  uploadedCodes: 'Uploaded',
+  materializedCodes: 'Materialized',
+  retry: 'Retry',
+  rowsStale: 'These rows may be out of date.',
+  validationChip: 'Validation',
+  ingestionChip: 'Ingestion',
+  unavailable: '—'
+} as const;
+
+export function formatMeasurementHeading(measurementID: number): string {
+  return `Measurement ${measurementID}`;
+}
+
+export function formatTreeStemLine(treeTag: string | null, stemTag: string | null): string {
+  return `Tree ${treeTag ?? DETAILS_SHEET_TEXT.unavailable} · Stem ${stemTag ?? DETAILS_SHEET_TEXT.unavailable}`;
+}
+
+export function formatQuadratLine(quadratName: string | null, speciesCode: string | null, measurementDate: string | null): string {
+  return [
+    `Quadrat ${quadratName ?? DETAILS_SHEET_TEXT.unavailable}`,
+    speciesCode ?? DETAILS_SHEET_TEXT.unavailable,
+    measurementDate ?? DETAILS_SHEET_TEXT.unavailable
+  ].join(' · ');
+}
+
+export function formatUnresolvedErrorsHeading(count: number): string {
+  return `${formatCount(count)} unresolved ${count === 1 ? 'error' : 'errors'}`;
+}
+
+export function formatFieldsDiffer(differing: number, total: number): string {
+  return `${differing} of ${total} fields differ`;
+}
+
+export function formatOpenRow(measurementID: number): string {
+  return `Open row ${measurementID}`;
 }
 
 export const DEFAULT_ERROR_EXPLORER_FILTERS: ErrorExplorerFilters = {
