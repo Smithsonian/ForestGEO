@@ -170,6 +170,18 @@ export function formatErrorTypeLabel(message: string): string {
   return ERROR_TYPE_DISPLAY_LABELS.get(message) ?? message;
 }
 
+/**
+ * ErrorCodes emitted only by hardcoded bulk-ingestion SQL (Stage 10 soft validations, storedprocedures.sql:3418/3457)
+ * with no corresponding `sitespecificvalidations` Definition: no validation run can recompute them, so clearing or
+ * resolving validation errors must leave them in place. They are stored with the validation source.
+ */
+export const INGESTION_STAGE_ERROR_CODES = ['20', '21'] as const;
+
+/** A validation-source error a validation run can recreate, which Clear may therefore delete. */
+export function isClearableValidationError(error: Pick<ErrorDetailRecord, 'source' | 'code'>): boolean {
+  return error.source === ERROR_SOURCE.validation && !(INGESTION_STAGE_ERROR_CODES as readonly string[]).includes(error.code);
+}
+
 export function isMarkedInvalidWithoutLoggedError(errors: ReadonlyArray<Pick<ErrorDetailRecord, 'source' | 'code'>>): boolean {
   return errors.length === 1 && errors[0].source === ERROR_SOURCE.ingestion && errors[0].code === FALLBACK_ERROR_CODE;
 }

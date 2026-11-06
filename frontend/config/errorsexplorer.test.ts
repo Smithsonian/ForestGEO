@@ -6,6 +6,8 @@ import {
   buildErrorsExplorerMessageHref,
   buildErrorTypeKey,
   canClearValidationErrors,
+  INGESTION_STAGE_ERROR_CODES,
+  isClearableValidationError,
   computeDbhChangePercent,
   DBH_CHANGE_VALIDATION_CODES,
   DEFAULT_ERROR_EXPLORER_FILTERS,
@@ -300,5 +302,22 @@ describe('deep-link bound', () => {
     const pastBound = `${atBound}m`;
     expect(resolveErrorsExplorerDeepLinkFilters(new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: atBound }))?.exactMessages).toEqual([atBound]);
     expect(resolveErrorsExplorerDeepLinkFilters(new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: pastBound }))).toBeNull();
+  });
+});
+
+describe('isClearableValidationError (ingestion-stage flags stay, stage 6 finding 3)', () => {
+  it.each([
+    [{ source: 'validation', code: '1' }, true],
+    [{ source: 'validation', code: '14' }, true],
+    [{ source: 'validation', code: '20' }, false],
+    [{ source: 'validation', code: '21' }, false],
+    [{ source: 'ingestion', code: 'INVALID_SPECIES' }, false],
+    [{ source: 'ingestion', code: '1' }, false]
+  ] as const)('%j → %s', (error, expected) => {
+    expect(isClearableValidationError(error)).toBe(expected);
+  });
+
+  it('keeps the ingestion-stage code list the Clear route and the correction writer both exclude', () => {
+    expect([...INGESTION_STAGE_ERROR_CODES]).toEqual(['20', '21']);
   });
 });

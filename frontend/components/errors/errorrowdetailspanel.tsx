@@ -20,6 +20,7 @@ import {
   formatTreeStemLine,
   formatUnresolvedErrorsHeading,
   isAttributeCodeErrorType,
+  isClearableValidationError,
   isMarkedInvalidWithoutLoggedError,
   MARKED_INVALID_NO_ERROR_LOGGED_LABEL,
   type DetailsPanelRow,
@@ -134,7 +135,7 @@ export default function ErrorRowDetailsPanel(props: ErrorRowDetailsPanelProps) {
     row !== null &&
     canClearValidationErrors({
       isLinkedToStem: row.isLinkedToStem,
-      hasUnresolvedValidationError: allErrors.some(error => error.source === ERROR_SOURCE.validation),
+      hasUnresolvedValidationError: allErrors.some(isClearableValidationError),
       markedInvalidWithoutLoggedError: isFallback
     });
   const detailRow = errorDetails?.row ?? null;
