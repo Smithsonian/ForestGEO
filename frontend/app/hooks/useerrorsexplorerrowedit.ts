@@ -126,6 +126,7 @@ export function useErrorsExplorerRowEdit({ readScope, readScopeKey, refreshAllRe
   const cancelPendingOperationRef = useRef(editFlow.cancelPendingOperation);
   cancelPendingOperationRef.current = editFlow.cancelPendingOperation;
   const isMountedRef = useRef(true);
+  const unmountedOwnerOperationIDRef = useRef<number | null>(null);
 
   const ownsPageContinuation = useCallback(
     (operation: RowEditLock) => isMountedRef.current && pageContinuationRef.current?.operationID === operation.operationID,
@@ -184,6 +185,7 @@ export function useErrorsExplorerRowEdit({ readScope, readScopeKey, refreshAllRe
   const handleGridUnmount = useCallback(
     (gridKey: string) => {
       const current = lockRef.current;
+      if (current?.gridKey === gridKey) unmountedOwnerOperationIDRef.current = current.operationID;
       if (!current || current.gridKey !== gridKey || current.readScopeKey !== readScopeKeyRef.current) return;
       if (current.phase === 'editing') setLock(null);
       else if (current.phase === 'refreshing') startReadRefresh();
@@ -256,12 +258,14 @@ export function useErrorsExplorerRowEdit({ readScope, readScopeKey, refreshAllRe
         } catch (error: unknown) {
           const stillLocked = isSameOperation(lockRef.current, lockAtSave);
           const detached = !ownsPageContinuation(lockAtSave);
+          const ownerUnmounted = unmountedOwnerOperationIDRef.current === lockAtSave.operationID;
           if (stillLocked && detached) {
             setLock(null);
             if (isMountedRef.current) showPageAlertRef.current(VIEW_ERRORS_ALERTS.editCancelledByCensusChange(lockAtSave.treeTag, lockAtSave.stemTag));
-          } else if (stillLocked) {
-            setLock({ ...lockAtSave, phase: 'editing' });
+            throw new EditOperationCancelledError();
           }
+          if (stillLocked && ownerUnmounted) setLock(null);
+          else if (stillLocked) setLock({ ...lockAtSave, phase: 'editing' });
           throw error instanceof EditOperationCancelledError ? error : toError(error);
         }
         return completeCommittedSave(lockAtSave, editedRow, originalRow, applyResult);

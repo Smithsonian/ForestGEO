@@ -163,8 +163,20 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
   displayedRowsRef.current = displayedRows;
   const findRow = useCallback((rowID: number) => displayedRowsRef.current.find(row => Number(row.id) === rowID), []);
 
+  // MUI's pending processRowUpdate rejection still reports "back to Edit" after this grid is gone; that must take no lock.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const applyRowModes = useCallback(
-    (nextModel: GridRowModesModel) => setRowModesModel(rowEdit.handleRowModesModelChange(gridKey, nextModel, findRow)),
+    (nextModel: GridRowModesModel) => {
+      if (!isMountedRef.current) return;
+      setRowModesModel(rowEdit.handleRowModesModelChange(gridKey, nextModel, findRow));
+    },
     [findRow, gridKey, rowEdit, setRowModesModel]
   );
 

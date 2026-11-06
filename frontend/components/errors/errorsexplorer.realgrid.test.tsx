@@ -283,6 +283,26 @@ async function findLoadedGrid(name: string): Promise<HTMLElement> {
   return grid;
 }
 
+const UNMOUNT_SETTLE_MS = 400;
+
+/** A real fetch rejects with an AbortError when its signal aborts; a response that never settles hides every `.catch` downstream. */
+const rejectOnAbort: FetchRoute['respond'] = request =>
+  new Promise<Response>((_, reject) => {
+    request.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+  });
+
+/** After a census change the page the user lands on must accept an edit and its page controls must work. */
+async function expectNewCensusUnlocked() {
+  const newGrid = await findLoadedGrid(GROUP_LABEL);
+  await act(async () => new Promise(resolve => setTimeout(resolve, UNMOUNT_SETTLE_MS)));
+  const showDisabled = showButtons().map(button => (button as HTMLButtonElement).disabled);
+  const editState = rowAction(newGrid, 101, 'Edit').getAttribute('aria-disabled');
+  console.log('[view-errors new census controls]', JSON.stringify({ showDisabled, editState }));
+  expect(showDisabled.some(Boolean), 'Show is enabled in the new census').toBe(false);
+  expect(screen.getByRole('textbox', { name: VIEW_ERRORS_TEXT.searchLabel })).toBeEnabled();
+  expect(editState, 'Edit is offered in the new census').not.toBe('true');
+}
+
 function groupFooter(grid: HTMLElement): HTMLElement {
   return grid.closest('[data-testid^="errors-grid-"]')?.querySelector('[data-testid="custom-grid-pagination"]') as HTMLElement;
 }
@@ -587,9 +607,9 @@ describe('a census change during an edit (P2-4, P2-8, A4)', () => {
     expect(network.bodiesFor(ROUTES.preview)).toHaveLength(0);
   });
 
-  it('aborts a preview in flight: no dialog, no apply, the not-saved notice', async () => {
+  it('aborts a preview in flight: no dialog, no apply, the not-saved notice, and the new census is not left locked', async () => {
     const user = userEvent.setup();
-    const network = installPageFetch(defaultRoutes({ preview: () => new Promise(() => undefined) }));
+    const network = installPageFetch(defaultRoutes({ preview: rejectOnAbort }));
     render(<PageWithSidebarStandIn />);
     const grid = await findLoadedGrid(GROUP_LABEL);
     await startEdit(user, grid, 101);
@@ -602,6 +622,62 @@ describe('a census change during an edit (P2-4, P2-8, A4)', () => {
     expect(preview?.signal?.aborted, 'the preview request is aborted').toBe(true);
     expect(screen.queryByTestId('edit-preview-apply')).toBeNull();
     expect(network.bodiesFor(ROUTES.apply)).toHaveLength(0);
+    await expectNewCensusUnlocked();
+  });
+
+  it('does not lock the new census when a detached apply fails after the census change, and keeps the not-saved notice', async () => {
+    const user = userEvent.setup();
+    const failingApply = holdResponses(() => jsonResponse({ error: 'apply exploded' }, 500));
+    installPageFetch(defaultRoutes({ preview: () => jsonResponse(INFO_PLAN), apply: failingApply.route }));
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    await startEdit(user, grid, 101);
+    await changeTagAndSave(user, grid, 101);
+    await waitFor(() => expect(failingApply.held.resolvers).toHaveLength(1));
+    await user.click(screen.getByRole('button', { name: SIDEBAR_STAND_IN }));
+    await act(async () => failingApply.held.release());
+    await waitFor(() => expect(screen.queryByTestId('errors-explorer-page-alert')).not.toBeNull());
+    await act(async () => new Promise(resolve => setTimeout(resolve, UNMOUNT_SETTLE_MS)));
+    const alertText = screen.getByTestId('errors-explorer-page-alert').textContent;
+    console.log('[view-errors detached apply failure]', alertText);
+    expect(alertText, 'the not-saved notice is not overwritten by the generic save failure').toContain(
+      VIEW_ERRORS_ALERTS.editCancelledByCensusChange('T-101', 'S-1')
+    );
+    await expectNewCensusUnlocked();
+  });
+
+  it('does not lock the page when the group of an open dialog leaves the facets, then the dialog is cancelled', async () => {
+    const user = userEvent.setup();
+    let dropGroup = false;
+    let holdFacets = false;
+    const heldFacets = holdResponses(() =>
+      jsonResponse(facetsResponse(dropGroup ? [DRIFT_FACET] : [VALIDATION_FACET], { affectedMeasurements: 2, errorTypeCount: 1 }))
+    );
+    installPageFetch(
+      defaultRoutes({
+        facets: request =>
+          holdFacets ? heldFacets.route(request) : jsonResponse(facetsResponse([VALIDATION_FACET], { affectedMeasurements: 2, errorTypeCount: 1 })),
+        query: driftOr(rowsQuery)
+      })
+    );
+    render(<PageWithSidebarStandIn />);
+    const grid = await findLoadedGrid(GROUP_LABEL);
+    holdFacets = true;
+    fireEvent.change(screen.getByLabelText(VIEW_ERRORS_TEXT.searchLabel), { target: { value: 'T' } });
+    await waitFor(() => expect(heldFacets.held.resolvers.length).toBeGreaterThan(0));
+    await startEdit(user, grid, 101);
+    await changeTagAndSave(user, grid, 101);
+    await screen.findByTestId('edit-preview-cancel');
+    dropGroup = true;
+    holdFacets = false;
+    await act(async () => heldFacets.held.release());
+    await waitFor(() => expect(screen.queryByRole('grid', { name: GROUP_LABEL }), 'the edited group left the facets').toBeNull());
+    await user.click(screen.getByTestId('edit-preview-cancel'));
+    await act(async () => new Promise(resolve => setTimeout(resolve, UNMOUNT_SETTLE_MS)));
+    const showDisabled = showButtons().map(button => (button as HTMLButtonElement).disabled);
+    console.log('[view-errors group left during dialog]', JSON.stringify({ showDisabled }));
+    expect(showDisabled.some(Boolean), 'Show is enabled: no lock is held for a row that is gone').toBe(false);
+    expect(screen.getByRole('textbox', { name: VIEW_ERRORS_TEXT.searchLabel })).toBeEnabled();
   });
 
   it("completes an apply in flight: the undo toast carries the operation's census and no read goes to the old scope", async () => {
