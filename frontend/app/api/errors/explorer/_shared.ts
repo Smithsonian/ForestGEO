@@ -2,6 +2,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import {
   ContradictionType,
   dedupeNumbers,
+  DBH_CHANGE_VALIDATION_CODES,
   dedupeStrings,
   ERROR_SOURCE,
   ErrorComparisonContext,
@@ -105,8 +106,6 @@ function getOccurrenceFields(source: 'validation' | 'ingestion', errorCode: stri
   }
   return INGESTION_ERROR_FIELD_MAP[errorCode] ?? [];
 }
-
-const DBH_CHANGE_VALIDATION_CODES = new Set(['1', '2']);
 
 function buildComparison(rawRow: RawErrorOccurrenceRow): ErrorComparisonContext | null {
   if (rawRow.ErrorSource !== 'validation' || !DBH_CHANGE_VALIDATION_CODES.has(String(rawRow.ErrorCode))) return null;
@@ -355,6 +354,8 @@ function groupErrorRows(rawRows: RawErrorOccurrenceRow[], contradictionMap: Map<
         errorFields: detailRecord.fields,
         errorCodes: [String(rawRow.ErrorCode)],
         errorCount: 1,
+        totalErrorCount: 1,
+        dbhChangePercent: null,
         hasContradiction: contradictions.length > 0,
         contradictionTypes: visibleContradictions.contradictionTypes,
         contradictionType: visibleContradictions.primaryType,
@@ -380,6 +381,7 @@ function groupErrorRows(rawRows: RawErrorOccurrenceRow[], contradictionMap: Map<
     existing.baseRow.errorFields = dedupeStrings([...existing.baseRow.errorFields, ...detailRecord.fields]);
     existing.baseRow.errorCodes = dedupeStrings([...existing.baseRow.errorCodes, String(rawRow.ErrorCode)]);
     existing.baseRow.errorCount = existing.baseRow.errorMessages.length;
+    existing.baseRow.totalErrorCount = existing.allErrors.length;
   });
 
   return grouped;

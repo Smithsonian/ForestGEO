@@ -169,6 +169,8 @@ export function buildErrorsExplorerRow(overrides: Partial<ErrorExplorerRow> = {}
     errorFields: overrides.errorFields ?? ['speciesCode'],
     errorCodes: overrides.errorCodes ?? ['INVALID_SPECIES'],
     errorCount: overrides.errorCount ?? 1,
+    totalErrorCount: overrides.totalErrorCount ?? overrides.errorCount ?? 1,
+    dbhChangePercent: overrides.dbhChangePercent ?? null,
     hasContradiction: overrides.hasContradiction ?? false,
     contradictionTypes: overrides.contradictionTypes ?? (contradictionType ? [contradictionType] : []),
     contradictionType,

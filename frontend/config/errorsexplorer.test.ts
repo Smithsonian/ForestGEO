@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
+import { getGridNumericOperators, getGridStringOperators } from '@mui/x-data-grid';
 import {
+  applyShowValue,
   buildErrorsExplorerMessageHref,
+  buildErrorTypeKey,
   canClearValidationErrors,
   computeDbhChangePercent,
   DBH_CHANGE_VALIDATION_CODES,
   DEFAULT_ERROR_EXPLORER_FILTERS,
+  ERROR_EXPLORER_COLUMN_FIELDS,
+  ERROR_EXPLORER_NUMBER_FIELDS,
+  ERROR_EXPLORER_NUMBER_OPERATORS,
+  ERROR_EXPLORER_TEXT_FIELDS,
+  ERROR_EXPLORER_TEXT_OPERATORS,
   ERROR_SOURCE,
+  errorTypeHintFor,
   ERRORS_EXPLORER_MESSAGE_PARAM,
   ERRORS_EXPLORER_VIEW_ALL,
   ERRORS_EXPLORER_VIEW_ALL_HREF,
@@ -14,12 +23,17 @@ import {
   ERRORS_PAGE_PATH,
   FALLBACK_ERROR_CODE,
   FALLBACK_ERROR_MESSAGE,
+  formatContradictionCaption,
   formatDbhChange,
   formatErrorTypeLabel,
+  formatViewErrorsFactsLine,
   INGESTION_ERROR_FIELD_MAP,
+  isErrorExplorerNumberField,
   isMarkedInvalidWithoutLoggedError,
   MARKED_INVALID_NO_ERROR_LOGGED_LABEL,
-  resolveErrorsExplorerDeepLinkFilters
+  MAX_ERROR_EXPLORER_FILTER_STRING_LENGTH,
+  resolveErrorsExplorerDeepLinkFilters,
+  resolveShowValue
 } from './errorsexplorer';
 
 describe('INGESTION_ERROR_FIELD_MAP', () => {
@@ -192,5 +206,79 @@ describe('formatDbhChange', () => {
 describe('DBH-change codes', () => {
   it('keeps the DBH-change codes in config, where the client can read them', () => {
     expect(Array.from(DBH_CHANGE_VALIDATION_CODES).sort()).toEqual(['1', '2']);
+  });
+});
+
+describe('error-type identity', () => {
+  it('keys two codes that share a message apart', () => {
+    const shared = 'Same text';
+    const a = buildErrorTypeKey({ source: 'ingestion', code: 'A', message: shared });
+    const b = buildErrorTypeKey({ source: 'ingestion', code: 'B', message: shared });
+    const c = buildErrorTypeKey({ source: 'validation', code: 'A', message: shared });
+    console.log('[view-errors identity keys]', JSON.stringify([a, b, c]));
+    expect(new Set([a, b, c]).size).toBe(3);
+  });
+
+  it('cannot be confused by separators inside a message', () => {
+    expect(buildErrorTypeKey({ source: 'ingestion', code: 'A|B', message: 'C' })).not.toBe(
+      buildErrorTypeKey({ source: 'ingestion', code: 'A', message: 'B|C' })
+    );
+  });
+});
+
+describe('sortable and filterable allow-list', () => {
+  it('lists each column once and classifies it', () => {
+    expect(new Set(ERROR_EXPLORER_COLUMN_FIELDS).size).toBe(ERROR_EXPLORER_COLUMN_FIELDS.length);
+    ERROR_EXPLORER_TEXT_FIELDS.forEach(field => expect(isErrorExplorerNumberField(field), field).toBe(false));
+    ERROR_EXPLORER_NUMBER_FIELDS.forEach(field => expect(isErrorExplorerNumberField(field), field).toBe(true));
+  });
+
+  it("offers only operators MUI's own lists contain", () => {
+    const muiString = getGridStringOperators().map(operator => operator.value);
+    const muiNumber = getGridNumericOperators().map(operator => operator.value);
+    console.log('[view-errors operators]', JSON.stringify({ muiString, muiNumber }));
+    ERROR_EXPLORER_TEXT_OPERATORS.forEach(operator => expect(muiString, operator).toContain(operator));
+    ERROR_EXPLORER_NUMBER_OPERATORS.forEach(operator => expect(muiNumber, operator).toContain(operator));
+  });
+});
+
+describe('Show control mapping', () => {
+  it.each([
+    ['all', { source: 'all', contradictionOnly: false }],
+    ['validation', { source: 'validation', contradictionOnly: false }],
+    ['ingestion', { source: 'ingestion', contradictionOnly: false }],
+    ['contradictions', { source: 'all', contradictionOnly: true }]
+  ] as const)('%s ↔ %j', (value, expected) => {
+    const filters = applyShowValue(DEFAULT_ERROR_EXPLORER_FILTERS, value);
+    expect({ source: filters.source, contradictionOnly: filters.contradictionOnly }).toEqual(expected);
+    expect(resolveShowValue(filters)).toBe(value);
+  });
+});
+
+describe('text helpers', () => {
+  it('writes the facts line and the contradiction caption with census totals', () => {
+    expect(formatViewErrorsFactsLine(21, 1088, 4)).toBe('21 of 1,088 active measurements have an unresolved error · 4 error types');
+    expect(formatContradictionCaption(2, 1)).toBe('2 duplicate tag/stem · 1 same-batch species');
+  });
+
+  it('has a hint only for the four codes on the board', () => {
+    expect(errorTypeHintFor({ source: 'validation', code: '14' })).not.toBeNull();
+    expect(errorTypeHintFor({ source: 'ingestion', code: 'COORDINATE_DRIFT' })).not.toBeNull();
+    expect(errorTypeHintFor({ source: 'ingestion', code: 'INVALID_SPECIES' })).not.toBeNull();
+    expect(errorTypeHintFor({ source: 'validation', code: '21' })).not.toBeNull();
+    expect(errorTypeHintFor({ source: 'validation', code: '15' })).toBeNull();
+  });
+
+  it('maps DUPLICATE_TAG_STEMTAG to the tree and stem tag columns (P2-6)', () => {
+    expect(INGESTION_ERROR_FIELD_MAP.DUPLICATE_TAG_STEMTAG).toEqual(['treeTag', 'stemTag']);
+  });
+});
+
+describe('deep-link bound', () => {
+  it('accepts a message at the bound and ignores one past it', () => {
+    const atBound = 'm'.repeat(MAX_ERROR_EXPLORER_FILTER_STRING_LENGTH);
+    const pastBound = `${atBound}m`;
+    expect(resolveErrorsExplorerDeepLinkFilters(new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: atBound }))?.exactMessages).toEqual([atBound]);
+    expect(resolveErrorsExplorerDeepLinkFilters(new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: pastBound }))).toBeNull();
   });
 });
