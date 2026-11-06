@@ -6,7 +6,8 @@ import type { ContradictionType, ErrorExplorerFilters, ErrorExplorerRow } from '
 import { DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import {
   assertLocalOrRefuse,
-  openFixtureDatabase,
+  createFixtureDatabaseSession,
+  FIXTURE_HOOK_TIMEOUT_MS,
   replaceFixture,
   type ExplorerFixture,
   type FixtureDatabase,
@@ -301,18 +302,19 @@ describe('errors explorer route behaviour on real MySQL', () => {
   const connection = () => (fixtureDatabase as FixtureDatabase).setupConnection;
   const schema = () => (fixtureDatabase as FixtureDatabase).database;
 
+  const fixtureSession = createFixtureDatabaseSession(ROUTES_DATABASE);
+
   beforeAll(async () => {
     assertLocalOrRefuse();
-    fixtureDatabase = await openFixtureDatabase(ROUTES_DATABASE);
+    fixtureDatabase = await fixtureSession.open();
     sharedState.connection = fixtureDatabase.explorerConnection;
-  });
+  }, FIXTURE_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     sharedState.connection = null;
-    const opened = fixtureDatabase;
     fixtureDatabase = null;
-    await opened?.teardown();
-  });
+    await fixtureSession.close();
+  }, FIXTURE_HOOK_TIMEOUT_MS);
 
   describe('POST /api/errors/explorer/query', () => {
     it('returns grouped row-centric error data with contradiction links', async () => {

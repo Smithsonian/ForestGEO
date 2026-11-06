@@ -3,6 +3,7 @@ import mysql from 'mysql2/promise';
 import { loadSchema } from './local-db-setup';
 import {
   assertLocalOrRefuse,
+  createFixtureDatabaseSession,
   createRecordingExecutor,
   describeMismatch,
   EQUIVALENCE_GROUP_CONCAT_MAX_LEN,
@@ -132,6 +133,79 @@ describe('openFixtureDatabase success path', () => {
   it('refuses an unowned database name before opening any connection', async () => {
     await expect(openFixtureDatabase('production_schema')).rejects.toThrow('owned test database');
     expect(mysql.createConnection).not.toHaveBeenCalled();
+  });
+});
+
+describe('createFixtureDatabaseSession', () => {
+  const SETTLE_TURNS = 5;
+
+  async function letPendingWorkRun() {
+    for (let turn = 0; turn < SETTLE_TURNS; turn++) await new Promise(resolve => setImmediate(resolve));
+  }
+
+  it('close() called while open() is pending waits for it, then ends the explorer connection and drops the schema', async () => {
+    const calls: string[] = [];
+    queueConnections(fakeConnection('setup', calls), fakeConnection('explorer', calls));
+    let finishSchemaLoad: () => void = () => undefined;
+    vi.mocked(loadSchema).mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          finishSchemaLoad = resolve;
+        })
+    );
+    const session = createFixtureDatabaseSession(DATABASE);
+
+    const opening = session.open();
+    let closed = false;
+    const closing = session.close().then(() => {
+      closed = true;
+    });
+    await letPendingWorkRun();
+    console.log('[session pending] closed =', closed, 'cleanup calls =', cleanupCalls(calls));
+
+    expect(closed, 'close() must not settle while the open is still loading the schema').toBe(false);
+    expect(cleanupCalls(calls), 'nothing may be torn down while the open is pending').toEqual([]);
+
+    finishSchemaLoad();
+    await opening;
+    await closing;
+    console.log('[session closed] calls', calls);
+
+    expect(cleanupCalls(calls)).toEqual(['explorer.end', `setup.query ${DROP_STATEMENT}`, 'setup.end']);
+  });
+
+  it('close() after a rejected open() does not throw and does not tear down a second time', async () => {
+    const calls: string[] = [];
+    const schemaFailure = new Error('schema load sentinel');
+    queueConnections(fakeConnection('setup', calls));
+    vi.mocked(loadSchema).mockRejectedValueOnce(schemaFailure);
+    const session = createFixtureDatabaseSession(DATABASE);
+
+    const openError = await session.open().catch(caught => caught);
+    const callsAfterFailedOpen = cleanupCalls(calls);
+    await expect(session.close()).resolves.toBeUndefined();
+    console.log('[session rejected] open error', openError, 'cleanup calls', cleanupCalls(calls));
+
+    expect(openError).toBe(schemaFailure);
+    expect(callsAfterFailedOpen, 'the failed open cleans up by itself').toEqual([`setup.query ${DROP_STATEMENT}`, 'setup.end']);
+    expect(cleanupCalls(calls), 'close() must add no further DROP or end').toEqual(callsAfterFailedOpen);
+  });
+
+  it('close() without open() does nothing, and a second close() tears down only once', async () => {
+    const calls: string[] = [];
+    queueConnections(fakeConnection('setup', calls), fakeConnection('explorer', calls));
+    const session = createFixtureDatabaseSession(DATABASE);
+
+    await session.close();
+    expect(calls).toEqual([]);
+
+    await session.open();
+    await session.close();
+    const callsAfterFirstClose = cleanupCalls(calls);
+    await session.close();
+
+    expect(callsAfterFirstClose).toEqual(['explorer.end', `setup.query ${DROP_STATEMENT}`, 'setup.end']);
+    expect(cleanupCalls(calls)).toEqual(callsAfterFirstClose);
   });
 });
 

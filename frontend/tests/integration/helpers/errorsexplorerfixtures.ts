@@ -190,8 +190,9 @@ export async function setGroupConcatMaxLen(connection: Connection, bytes: number
 
 /**
  * createTestDatabaseStrict + loadSchema + the explorer connection. If any step throws, it ends the connections it opened and
- * drops the schema before rethrowing, so a failed beforeAll leaks nothing. Tests keep `let fixtureDatabase: FixtureDatabase | null = null`
- * and call `await fixtureDatabase?.teardown()` in afterAll.
+ * drops the schema before rethrowing. A step that is merely slow is not a throw: a vitest hook timeout abandons the pending
+ * promise without cancelling it, and the connections and schema it opens afterwards are only reachable through that promise.
+ * Test files therefore go through createFixtureDatabaseSession, whose close() awaits a pending open before tearing down.
  */
 export async function openFixtureDatabase(database: string): Promise<FixtureDatabase> {
   const setupConnection = await createTestDatabaseStrict({ ...DEFAULT_TEST_CONFIG, database });
@@ -219,6 +220,38 @@ export async function openFixtureDatabase(database: string): Promise<FixtureData
     setupConnection,
     explorerConnection: openedExplorerConnection,
     teardown: () => cleanupTimingConnections(openedExplorerConnection, setupConnection, database)
+  };
+}
+
+/** Above the 90 s vitest hookTimeout that setup overran at host load 18; setup itself takes about 2 s on an idle host. */
+export const FIXTURE_HOOK_TIMEOUT_MS = 5 * 60 * 1000;
+
+export interface FixtureDatabaseSession {
+  /** Starts openFixtureDatabase and remembers the pending promise so that close() can wait for it. */
+  open(): Promise<FixtureDatabase>;
+  /** Waits for a pending open, then tears down what it opened. A rejected open is not rethrown: it already cleaned up and its own hook reported it. */
+  close(): Promise<void>;
+}
+
+export function createFixtureDatabaseSession(database: string): FixtureDatabaseSession {
+  let pendingOpen: Promise<FixtureDatabase> | null = null;
+  return {
+    open: () => {
+      pendingOpen = openFixtureDatabase(database);
+      return pendingOpen;
+    },
+    close: async () => {
+      const opening = pendingOpen;
+      pendingOpen = null;
+      if (!opening) return;
+      let opened: FixtureDatabase;
+      try {
+        opened = await opening;
+      } catch {
+        return;
+      }
+      await opened.teardown();
+    }
   };
 }
 

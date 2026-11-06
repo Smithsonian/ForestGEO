@@ -25,7 +25,8 @@ import {
   FIXTURE_MESSAGES,
   generateEquivalenceFixture,
   MAIN_PLOT_ID,
-  openFixtureDatabase,
+  createFixtureDatabaseSession,
+  FIXTURE_HOOK_TIMEOUT_MS,
   replaceFixture,
   resolveEquivalenceSeeds,
   SECOND_CENSUS_ID,
@@ -452,16 +453,17 @@ function findUncoveredCases(fixture: GeneratedFixture, rows: ErrorExplorerRow[])
 describe('errors explorer: frozen oracle against production on generated data', () => {
   let fixtureDatabase: FixtureDatabase | null = null;
 
+  const fixtureSession = createFixtureDatabaseSession(EQUIVALENCE_DATABASE);
+
   beforeAll(async () => {
     assertLocalOrRefuse();
-    fixtureDatabase = await openFixtureDatabase(EQUIVALENCE_DATABASE);
-  });
+    fixtureDatabase = await fixtureSession.open();
+  }, FIXTURE_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
-    const opened = fixtureDatabase;
     fixtureDatabase = null;
-    await opened?.teardown();
-  });
+    await fixtureSession.close();
+  }, FIXTURE_HOOK_TIMEOUT_MS);
 
   describe.each(resolveEquivalenceSeeds())('seed %i', seed => {
     let fixture: GeneratedFixture;
