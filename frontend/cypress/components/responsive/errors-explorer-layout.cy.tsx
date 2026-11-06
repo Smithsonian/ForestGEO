@@ -3,7 +3,9 @@ import {
   buildReadScopeKey,
   DEFAULT_ERROR_EXPLORER_FILTERS,
   ERROR_GROUP_GRID_MAX_HEIGHT,
+  EDIT_LOCK_TOOLTIPS,
   ERRORS_FLAT_GRID_HEIGHT,
+  VIEW_ERRORS_TEXT,
   type DetailsPanelRow,
   type ErrorExplorerRow,
   type ErrorsExplorerReadScope,
@@ -19,6 +21,7 @@ import { THEME_ID as MATERIAL_THEME_ID, ThemeProvider as MaterialCssVarsProvider
 import { materialDarkTheme } from '@/components/themeregistry/themeregistry';
 import appTheme from '@/components/themeregistry/theme';
 import ErrorTypeGroup, { type ErrorTypeGroupProps } from '@/components/errors/errortypegroup';
+import ErrorTypeGroupList from '@/components/errors/errortypegrouplist';
 
 const PHONE_VIEWPORT = { width: 375, height: 667 };
 const DESKTOP_VIEWPORT = { width: 1440, height: 1020 };
@@ -36,6 +39,7 @@ const HEADER_PADDING_PX = 16;
 const GROUP_HEADER_RIGHT_EDGE_TOLERANCE_PX = 4;
 const GROUP_GRID_KEY = 'group:layout';
 const FLAT_GRID_KEY = 'flat:layout';
+const FILTERED_MESSAGE = 'Flagged;Different species';
 const READ_SCOPE: ErrorsExplorerReadScope = { schema: 'forestgeo_testing', plotID: 1, censusID: 5, censusIDs: [5] };
 const FACET: ErrorTypeFacet = {
   source: 'validation',
@@ -308,5 +312,29 @@ describe('View Errors layout in a real browser', () => {
     });
     cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom');
     cy.get('.MuiDataGrid-virtualScroller').its('0.scrollTop').should('be.greaterThan', 0);
+  });
+
+  it('lets a real pointer reach the locked Filtered-to remove icon so its lock tooltip can open', () => {
+    cy.viewport(DESKTOP_VIEWPORT.width, DESKTOP_VIEWPORT.height);
+    mountInAppTheme(
+      <ErrorTypeGroupList
+        errorTypes={[FACET]}
+        renderGroup={() => null}
+        exactMessages={[FILTERED_MESSAGE]}
+        onClearExactMessages={() => undefined}
+        clearDisabledReason={EDIT_LOCK_TOOLTIPS.editing}
+      />
+    );
+    cy.get(`button[aria-label="${VIEW_ERRORS_TEXT.removeFilter}"]`).should($removeIcon => {
+      const lockWrapper = $removeIcon[0].parentElement as HTMLElement;
+      const { left, top, width, height } = $removeIcon[0].getBoundingClientRect();
+      const elementUnderPointer = $removeIcon[0].ownerDocument.elementFromPoint(left + width / 2, top + height / 2);
+      Cypress.log({
+        name: 'view-errors',
+        message: `[view-errors filtered-to remove icon] element under the pointer: <${elementUnderPointer?.tagName.toLowerCase()} class="${elementUnderPointer?.className}">`
+      });
+      expect(elementUnderPointer, 'an element is under the icon centre').not.to.equal(null);
+      expect(lockWrapper.contains(elementUnderPointer), 'the lock tooltip wrapper (or its button) receives the pointer').to.equal(true);
+    });
   });
 });

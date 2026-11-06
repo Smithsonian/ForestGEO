@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Button, Chip, ChipDelete, Stack, Typography } from '@mui/joy';
+import { Box, Button, Chip, ChipDelete, Stack, Typography } from '@mui/joy';
 import { ERROR_TYPE_GROUP_INITIAL_LIMIT, formatErrorTypeLabel, formatShowMoreErrorTypes, VIEW_ERRORS_TEXT, type ErrorTypeFacet } from '@/config/errorsexplorer';
 import LockedControl from './lockedcontrol';
 
@@ -26,9 +26,11 @@ export default function ErrorTypeGroupList({ errorTypes, renderGroup, exactMessa
           <Chip
             variant="soft"
             endDecorator={
-              <LockedControl reason={clearDisabledReason}>
-                <ChipDelete aria-label={VIEW_ERRORS_TEXT.removeFilter} disabled={clearDisabledReason !== null} onDelete={onClearExactMessages} />
-              </LockedControl>
+              <Box component="span" sx={{ display: 'inherit', pointerEvents: 'auto' }}>
+                <LockedControl reason={clearDisabledReason}>
+                  <ChipDelete aria-label={VIEW_ERRORS_TEXT.removeFilter} disabled={clearDisabledReason !== null} onDelete={onClearExactMessages} />
+                </LockedControl>
+              </Box>
             }
           >
             {`${VIEW_ERRORS_TEXT.filteredToPrefix} ${exactMessages.map(formatErrorTypeLabel).join(LABEL_SEPARATOR)}`}
