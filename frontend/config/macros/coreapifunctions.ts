@@ -15,6 +15,8 @@ import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutat
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { trimReferenceTextFields } from '@/lib/reference-text';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
+import { getCensusDatesError } from '@/config/censuswindow';
+import { toCalendarDayString, type CalendarDayInput } from '@/config/dateformats';
 
 // Mapping from dataType to primary key column name
 const PRIMARY_KEY_MAP: Record<string, string> = {
@@ -391,6 +393,14 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         else if (typeof requestedChanges.Code === 'string' && requestedChanges.Code === '') throw new MutationRequestError('Attribute code cannot be blank');
       }
       const newRowData = { ...persistedBefore, ...requestedChanges };
+      if (dataType === 'census' && ('StartDate' in requestedChanges || 'EndDate' in requestedChanges)) {
+        const dateError = getCensusDatesError(newRowData.StartDate, newRowData.EndDate);
+        if (dateError) throw new MutationRequestError(dateError);
+        // A partial PATCH may leave one date as a mysql2 UTC-midnight Date. Serialize
+        // both as calendar days so SQL formatting cannot shift the untouched date.
+        newRowData.StartDate = toCalendarDayString(newRowData.StartDate as CalendarDayInput);
+        newRowData.EndDate = toCalendarDayString(newRowData.EndDate as CalendarDayInput);
+      }
       const { [demappedGridID]: updatedGridIDKey, ...remainingProperties } = newRowData;
 
       let dataToUpdate;
