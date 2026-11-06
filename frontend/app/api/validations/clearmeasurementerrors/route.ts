@@ -8,6 +8,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { CLEAR_MEASUREMENT_ERRORS_CODES } from '@/config/errorsexplorer';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { fromBody, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError, SessionExpiredError } from '@/config/editplan/authorization';
 import { ScopeLockHeldError } from '@/config/editplan/apply';
@@ -101,7 +102,8 @@ async function handler(request: NextRequest, _context: RouteContext) {
     // Re-read role and sites from the authority under the lock and before the first write, as edits/apply does,
     // so a user demoted or removed after sign-in cannot clear until their session expires.
     await assertAuthorizationFresh();
-    const { clearedErrorCount } = await clearUnresolvedValidationErrors(cm, input, transactionID);
+    const changedBy = authenticatedSessionIdentity(session.user);
+    const { clearedErrorCount } = await clearUnresolvedValidationErrors(cm, { ...input, changedBy }, transactionID);
     await refreshMeasurementViewsForCoreMeasurements(cm, input.schema, [input.measurementID], transactionID);
     commitStarted = true;
     await cm.commitTransaction(transactionID);

@@ -94,6 +94,9 @@ import { CLEAR_MEASUREMENT_ERRORS_CODES, DEFAULT_ERROR_EXPLORER_FILTERS } from '
 import { buildMeasurementScopeLockName } from '@/config/measurementscopelock';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { queryErrorExplorer } from '@/app/api/errors/explorer/_shared';
+import { queryRecentChanges } from '@/app/api/changes/explorer/_shared';
+import { DEFAULT_RECENT_CHANGES_FILTERS } from '@/config/recentchangesexplorer';
+import { computeDiff } from '@/config/changelogdiff';
 
 const HTTP_OK = 200;
 const HTTP_CONFLICT = 409;
@@ -107,13 +110,28 @@ const EXPLORER_PAGE_SIZE = 100;
 const ERROR_SOURCE_VALIDATION = 'validation';
 const ERROR_SOURCE_INGESTION = 'ingestion';
 const VALIDATION_CODE_ONLY_VALIDATION_ERROR = '14';
+const VALIDATION_CODE_PLOT_COORDINATES = '19';
+const VALIDATION_MESSAGE_ONLY_VALIDATION_ERROR = 'Invalid attribute code';
+const VALIDATION_MESSAGE_PLOT_COORDINATES = 'Validation ValidatePlotCoordinateConsistency';
+const RECENT_CHANGES_PAGE_SIZE = 50;
 const VALIDATION_CODE_INGESTION_STAGE = '20';
 const INGESTION_CODE_INVALID_SPECIES = 'INVALID_SPECIES';
 
 const MEASUREMENT_DATE = '2024-06-01';
 const STEM_BASE_GUID = 990_000;
 const STEM_TAG = '1';
-const SEED_OFFSETS = { fallback: 1, validation: 2, mixed: 3, atomic: 4, contended: 5, passed: 6, stageMixed: 7, stageOnly: 8 } as const;
+const SEED_OFFSETS = {
+  fallback: 1,
+  validation: 2,
+  mixed: 3,
+  atomic: 4,
+  contended: 5,
+  passed: 6,
+  stageMixed: 7,
+  stageOnly: 8,
+  audited: 9,
+  auditRollback: 10
+} as const;
 const TREE_TAGS = {
   fallback: 'CLR-FALLBACK',
   validation: 'CLR-VALID',
@@ -123,7 +141,9 @@ const TREE_TAGS = {
   contended: 'CLR-LOCKED',
   passed: 'CLR-PASSED',
   stageMixed: 'CLR-STAGE-MIXED',
-  stageOnly: 'CLR-STAGE-ONLY'
+  stageOnly: 'CLR-STAGE-ONLY',
+  audited: 'CLR-AUDITED',
+  auditRollback: 'CLR-AUDIT-ROLLBACK'
 } as const;
 
 interface SeededRows {
@@ -239,6 +259,14 @@ describe('POST /api/validations/clearmeasurementerrors against real MySQL', () =
     return Number(logs[0].n);
   }
 
+  async function changelogRowsFor(measurementID: number): Promise<RowDataPacket[]> {
+    const [changelog] = await connection.query<RowDataPacket[]>('SELECT * FROM unifiedchangelog WHERE TableName = ? AND RecordID = ? ORDER BY ChangeID', [
+      'coremeasurements',
+      String(measurementID)
+    ]);
+    return changelog;
+  }
+
   async function errorSetIDs(): Promise<number[]> {
     const query = await queryErrorExplorer(ConnectionManager.getInstance(), {
       schema,
@@ -297,6 +325,7 @@ describe('POST /api/validations/clearmeasurementerrors against real MySQL', () =
     const response = await clear(rows.failed);
     expect(response.status).toBe(HTTP_CONFLICT);
     expect(await logCount(rows.failed)).toBe(1);
+    expect(await changelogRowsFor(rows.failed), 'a refused clear leaves no audit row').toEqual([]);
   });
 
   it('refuses a row that already passed validation with 409 NOTHING_TO_CLEAR and leaves it passed (r3, R2)', async () => {
@@ -367,6 +396,78 @@ describe('POST /api/validations/clearmeasurementerrors against real MySQL', () =
     console.log('[view-errors clear atomicity]', JSON.stringify({ logs, core }));
     expect(logs, 'the DELETE must have rolled back').toBe(1);
     expect(Number(core.IsValidated)).toBe(IS_VALIDATED_FAILED);
+  });
+
+  it('records one unifiedchangelog row naming who cleared the row, its previous flag and the errors removed, and Recent Changes shows it', async () => {
+    const auditedRow = await seedLinkedRow(connection, censusID, quadratID, speciesID, TREE_TAGS.audited, SEED_OFFSETS.audited);
+    await logError(connection, auditedRow, ERROR_SOURCE_VALIDATION, VALIDATION_CODE_PLOT_COORDINATES);
+    await logError(connection, auditedRow, ERROR_SOURCE_VALIDATION, VALIDATION_CODE_ONLY_VALIDATION_ERROR);
+    await refreshMeasurementViewsForScope(ConnectionManager.getInstance(), schema, plotID, censusID);
+
+    const response = await clear(auditedRow);
+    const changelog = await changelogRowsFor(auditedRow);
+    console.log('[view-errors clear audit row]', response.status, JSON.stringify(changelog));
+
+    expect(response.status).toBe(HTTP_OK);
+    expect(changelog, 'exactly one audit row, and none from the cookie-scoped logger').toHaveLength(1);
+    const [stored] = changelog;
+    expect({
+      TableName: stored.TableName,
+      RecordID: stored.RecordID,
+      Operation: stored.Operation,
+      ChangedBy: stored.ChangedBy,
+      PlotID: stored.PlotID,
+      CensusID: stored.CensusID
+    }).toEqual({
+      TableName: 'coremeasurements',
+      RecordID: String(auditedRow),
+      Operation: 'UPDATE',
+      ChangedBy: AUTH_USER_EMAIL,
+      PlotID: plotID,
+      CensusID: censusID
+    });
+    expect(stored.ChangeTimestamp, 'the timestamp is stamped by the database').toBeInstanceOf(Date);
+    expect(stored.OldRowState).toEqual({
+      IsValidated: IS_VALIDATED_FAILED,
+      ValidationErrors: [
+        { ErrorCode: VALIDATION_CODE_ONLY_VALIDATION_ERROR, ErrorMessage: VALIDATION_MESSAGE_ONLY_VALIDATION_ERROR },
+        { ErrorCode: VALIDATION_CODE_PLOT_COORDINATES, ErrorMessage: VALIDATION_MESSAGE_PLOT_COORDINATES }
+      ]
+    });
+    expect(stored.NewRowState).toEqual({ IsValidated: null });
+
+    const recentChanges = await queryRecentChanges(
+      ConnectionManager.getInstance(),
+      schema,
+      plotID,
+      0,
+      RECENT_CHANGES_PAGE_SIZE,
+      DEFAULT_RECENT_CHANGES_FILTERS
+    );
+    const shown = recentChanges.items
+      .flatMap(item => (item.type === 'single' ? [item.entry] : item.entries))
+      .find(entry => entry.recordID === String(auditedRow));
+    console.log('[view-errors clear recent changes]', JSON.stringify(shown));
+    expect(shown, 'Recent Changes lists the Clear').toBeDefined();
+    expect(shown?.changedBy).toBe(AUTH_USER_EMAIL);
+    expect(shown?.oldRowState, 'the reader parses the stored object').toEqual(stored.OldRowState);
+    expect(shown?.newRowState).toEqual({ IsValidated: null });
+    expect(computeDiff(shown!.oldRowState, shown!.newRowState).map(difference => difference.field)).toEqual(['IsValidated', 'ValidationErrors']);
+  });
+
+  it('leaves no audit row, no deletion and the old flag when the audit insert fails', async () => {
+    const rollbackRow = await seedLinkedRow(connection, censusID, quadratID, speciesID, TREE_TAGS.auditRollback, SEED_OFFSETS.auditRollback);
+    await logError(connection, rollbackRow, ERROR_SOURCE_VALIDATION, VALIDATION_CODE_ONLY_VALIDATION_ERROR);
+    sharedState.failOnce = /unifiedchangelog/;
+    const response = await clear(rollbackRow);
+    const logs = await logCount(rollbackRow);
+    const core = await coreIsValidated(rollbackRow);
+    const changelog = await changelogRowsFor(rollbackRow);
+    console.log('[view-errors clear audit atomicity]', response.status, JSON.stringify({ logs, core, changelog }));
+    expect(response.status).toBe(HTTP_INTERNAL_SERVER_ERROR);
+    expect(logs, 'the DELETE must have rolled back').toBe(1);
+    expect(Number(core.IsValidated)).toBe(IS_VALIDATED_FAILED);
+    expect(changelog).toEqual([]);
   });
 
   it('answers 423 and changes nothing while another session holds the measurement-scope lock (P2-1)', async () => {
