@@ -18,13 +18,15 @@ import {
   ErrorCensusTotals,
   ErrorTypeFacet,
   ErrorTypeIdentity,
+  RelatedContradictionRow,
   buildErrorTypeKey,
   FALLBACK_ERROR_CODE,
   FALLBACK_ERROR_MESSAGE,
-  INGESTION_ERROR_FIELD_MAP
+  INGESTION_ERROR_FIELD_MAP,
+  toFiniteNumberOrNull
 } from '@/config/errorsexplorer';
 import { type ColumnValueRow, compareRowsBySortItem, matchesColumnFilter } from '@/lib/errorsexplorer/columnquery';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildActiveMeasurementCountQuery, readActiveMeasurementCount } from '@/lib/activemeasurementcount';
 
 type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
@@ -781,6 +783,68 @@ export async function buildErrorExplorerFacets(
   };
 }
 
+function buildRelatedRowsOutsideErrorSetQuery(schema: string, relatedCount: number): string {
+  return safeFormatQuery(
+    schema,
+    `SELECT ms.CoreMeasurementID AS RelatedCoreMeasurementID,
+            ms.TreeTag,
+            ms.StemTag,
+            ms.SpeciesCode,
+            ms.QuadratName,
+            ms.MeasurementDate,
+            ms.MeasuredDBH,
+            ms.MeasuredHOM,
+            ms.StemLocalX,
+            ms.StemLocalY,
+            ms.Description AS MeasurementDescription,
+            cm.UploadFileID,
+            cm.UploadBatchID
+     FROM ??.coremeasurements cm
+     JOIN ??.measurementssummary ms ON ms.CoreMeasurementID = cm.CoreMeasurementID
+     WHERE ms.PlotID = ?
+       AND ms.CensusID = ?
+       AND COALESCE(cm.IsActive, TRUE) = TRUE
+       AND cm.CoreMeasurementID IN (${buildInPlaceholders(relatedCount)})`
+  );
+}
+
+interface RelatedRowOutsideErrorSet {
+  RelatedCoreMeasurementID: number;
+  TreeTag?: string | null;
+  StemTag?: string | null;
+  SpeciesCode?: string | null;
+  QuadratName?: string | null;
+  MeasurementDate?: string | Date | null;
+  MeasuredDBH?: number | string | null;
+  MeasuredHOM?: number | string | null;
+  StemLocalX?: number | string | null;
+  StemLocalY?: number | string | null;
+  MeasurementDescription?: string | null;
+  UploadFileID?: string | null;
+  UploadBatchID?: string | null;
+}
+
+function toRelatedRowOutsideErrorSet(row: RelatedRowOutsideErrorSet): RelatedContradictionRow {
+  return {
+    coreMeasurementID: Number(row.RelatedCoreMeasurementID),
+    treeTag: row.TreeTag ?? undefined,
+    stemTag: row.StemTag ?? undefined,
+    speciesCode: row.SpeciesCode ?? undefined,
+    quadratName: row.QuadratName ?? undefined,
+    measurementDate: normalizeDate(row.MeasurementDate),
+    measuredDBH: toFiniteNumberOrNull(row.MeasuredDBH),
+    measuredHOM: toFiniteNumberOrNull(row.MeasuredHOM),
+    stemLocalX: toFiniteNumberOrNull(row.StemLocalX),
+    stemLocalY: toFiniteNumberOrNull(row.StemLocalY),
+    description: row.MeasurementDescription ?? null,
+    uploadFileID: row.UploadFileID ?? null,
+    uploadBatchID: row.UploadBatchID ?? null,
+    errorCount: 0,
+    errorMessages: [],
+    inErrorSet: false
+  };
+}
+
 export async function buildErrorExplorerDetails(
   connectionManager: ExplorerConnection,
   request: Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID'>,
@@ -807,28 +871,45 @@ export async function buildErrorExplorerDetails(
         )
       : dedupeNumbers(selected.contradictions.flatMap(contradiction => contradiction.relatedMeasurementIDs));
 
-  const relatedRows = relatedMeasurementIDs
-    .map(id => groupedRows.get(id))
-    .filter((row): row is GroupedErrorRow => Boolean(row))
-    .map(row => ({
-      coreMeasurementID: Number(row.baseRow.coreMeasurementID),
-      treeTag: row.baseRow.treeTag,
-      stemTag: row.baseRow.stemTag,
-      speciesCode: row.baseRow.speciesCode,
-      quadratName: row.baseRow.quadratName,
-      measurementDate: typeof row.baseRow.measurementDate === 'string' ? row.baseRow.measurementDate : normalizeDate(row.baseRow.measurementDate as any),
-      measuredDBH: row.baseRow.measuredDBH ?? null,
-      measuredHOM: row.baseRow.measuredHOM ?? null,
-      stemLocalX: row.baseRow.stemLocalX ?? null,
-      stemLocalY: row.baseRow.stemLocalY ?? null,
-      description: row.baseRow.description ?? null,
-      uploadFileID: row.baseRow.uploadFileID ?? null,
-      uploadBatchID: row.baseRow.uploadBatchID ?? null,
-      primaryErrorMessage: row.baseRow.primaryErrorMessage,
-      errorCount: row.allErrors.length,
-      errorMessages: dedupeStrings(row.allErrors.map(error => error.message)),
-      inErrorSet: true
-    }));
+  const outsideIDs = relatedMeasurementIDs.filter(id => !groupedRows.has(id));
+  const outsideRows =
+    outsideIDs.length > 0
+      ? ((await connectionManager.executeQuery(buildRelatedRowsOutsideErrorSetQuery(request.schema, outsideIDs.length), [
+          request.plotID,
+          request.censusID,
+          ...outsideIDs
+        ])) as RelatedRowOutsideErrorSet[])
+      : [];
+  const outsideByID = new Map(outsideRows.map(row => [Number(row.RelatedCoreMeasurementID), toRelatedRowOutsideErrorSet(row)]));
+
+  const relatedRows = relatedMeasurementIDs.flatMap((id): RelatedContradictionRow[] => {
+    const grouped = groupedRows.get(id);
+    if (!grouped) {
+      const outside = outsideByID.get(id);
+      return outside ? [outside] : [];
+    }
+    return [
+      {
+        coreMeasurementID: Number(grouped.baseRow.coreMeasurementID),
+        treeTag: grouped.baseRow.treeTag,
+        stemTag: grouped.baseRow.stemTag,
+        speciesCode: grouped.baseRow.speciesCode,
+        quadratName: grouped.baseRow.quadratName,
+        measurementDate: typeof grouped.baseRow.measurementDate === 'string' ? grouped.baseRow.measurementDate : normalizeDate(grouped.baseRow.measurementDate),
+        measuredDBH: grouped.baseRow.measuredDBH ?? null,
+        measuredHOM: grouped.baseRow.measuredHOM ?? null,
+        stemLocalX: grouped.baseRow.stemLocalX ?? null,
+        stemLocalY: grouped.baseRow.stemLocalY ?? null,
+        description: grouped.baseRow.description ?? null,
+        uploadFileID: grouped.baseRow.uploadFileID ?? null,
+        uploadBatchID: grouped.baseRow.uploadBatchID ?? null,
+        primaryErrorMessage: grouped.baseRow.primaryErrorMessage,
+        errorCount: grouped.allErrors.length,
+        errorMessages: dedupeStrings(grouped.allErrors.map(error => error.message)),
+        inErrorSet: true
+      }
+    ];
+  });
 
   return {
     row: toDisplayRow(
