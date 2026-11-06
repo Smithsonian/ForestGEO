@@ -40,16 +40,6 @@ END$$
 DELIMITER ;
 
 -- =============================================================================
--- Core Measurements Indexes
--- =============================================================================
-
--- Note: Some indexes already exist on coremeasurements from the table structure
--- Only add additional indexes that don't exist
-
-CALL add_index_if_not_exists('coremeasurements', 'idx_coremeasurements_census_plot', 'CensusID');
-CALL add_index_if_not_exists('coremeasurements', 'idx_coremeasurements_census_plot_validation', 'CensusID, IsValidated');
-
--- =============================================================================
 -- Stems Indexes
 -- =============================================================================
 

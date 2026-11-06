@@ -829,12 +829,6 @@ create table if not exists cmattributes
 create index idx_censusid
     on coremeasurements (CensusID);
 
-create index idx_cm_stem_cid_date_dbh_hom
-    on coremeasurements (StemGUID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM);
-
-create index idx_description
-    on coremeasurements (Description);
-
 create index idx_isvalidated
     on coremeasurements (IsValidated);
 
@@ -844,20 +838,11 @@ create index idx_measureddbh
 create index idx_measuredhom
     on coremeasurements (MeasuredHOM);
 
-create index idx_measurementdate
-    on coremeasurements (MeasurementDate);
-
-create index idx_stemid
-    on coremeasurements (StemGUID);
-
 create index ix_cm_cid_date_dbh_hom
     on coremeasurements (CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM);
 
 create index idx_cm_uploadbatch_census
     on coremeasurements (UploadBatchID, CensusID);
-
-create index idx_cm_census_active
-    on coremeasurements (CensusID, IsActive);
 
 create index idx_cm_census_validated_stem
     on coremeasurements (CensusID, IsValidated, IsActive, StemGUID);

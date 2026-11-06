@@ -72,6 +72,7 @@ ORDERED_MIGRATIONS=(
     "58_refresh_rawcodes_empty_token_handling.sql"
     "60_add_published_stemid.sql"
     "61_scope_postvalidation_last_run.sql"
+    "62_trim_coremeasurements_redundant_indexes.sql"
 )
 
 # ---------------------------------------------------------------------------
