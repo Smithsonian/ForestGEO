@@ -13,6 +13,7 @@ import {
   NO_LOG_ERROR_MESSAGE,
   NO_LOG_ERROR_SOURCE,
   NO_LOG_ERROR_TYPE_KEY,
+  SQL_TRUE,
   type ErrorSignatureRow,
   type ErrorTypeCatalogRow,
   type ErrorTypeKeyFilter,
@@ -23,7 +24,6 @@ const VALIDATION_ERROR_FIELD_FALLBACK_MAP: Record<string, string[]> = {
   '5': ['treeTag', 'stemTag'],
   '21': ['treeTag', 'speciesCode']
 };
-const SQL_TRUE = 1;
 const DUPLICATE_TAG_STEM: ContradictionType = 'duplicate_tag_stem';
 const SAME_BATCH_CONFLICT: ContradictionType = 'same_batch_conflict';
 const WHOLE_ID_TOKEN = /^\d+$/;
@@ -187,7 +187,7 @@ export function mergeSignatureRows(chunks: readonly ErrorSignatureRow[][]): Erro
   for (const row of chunks.flat()) {
     const key = signatureMergeKey(row);
     const existing = merged.get(key);
-    merged.set(key, existing ? { ...existing, MeasurementCount: Number(existing.MeasurementCount) + Number(row.MeasurementCount) } : { ...row });
+    merged.set(key, { ...row, MeasurementCount: Number(existing?.MeasurementCount ?? 0) + Number(row.MeasurementCount) });
   }
   return Array.from(merged.values());
 }

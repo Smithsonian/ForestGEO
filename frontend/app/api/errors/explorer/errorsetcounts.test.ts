@@ -24,7 +24,7 @@ import {
   type ErrorTypeCatalog,
   type WeightedErrorRow
 } from './errorsetcounts';
-import { NO_LOG_ERROR_MESSAGE, NO_LOG_ERROR_TYPE_KEY, type ErrorSignatureRow, type ErrorTypeCatalogRow } from './errorsetsql';
+import { NO_LOG_ERROR_MESSAGE, NO_LOG_ERROR_TYPE_KEY, SQL_FALSE, SQL_TRUE, type ErrorSignatureRow, type ErrorTypeCatalogRow } from './errorsetsql';
 
 const RANDOM_SEEDS = [544, 20261104, 4242];
 const MEASUREMENTS_PER_SEED = 300;
@@ -36,6 +36,7 @@ const MIN_GROUP_MEMBERS = 2;
 const MAX_EXTRA_GROUP_MEMBERS = 2;
 const MEMBER_ID_OVERSHOOT = 20;
 const SIGNATURE_CHUNK_COUNT = 2;
+const SINGLE_MEASUREMENT_WEIGHT = 1;
 
 const SCHEMA = 'forestgeo_testsite';
 const PLOT_ID = 1;
@@ -169,10 +170,10 @@ function fakeExecutor(generated: GeneratedErrorSet) {
 function collapseBySignature(grouped: Map<number, oracle.GroupedErrorRow>, generated: GeneratedErrorSet, catalog: ErrorTypeCatalog): WeightedErrorRow[] {
   const signatureRows: ErrorSignatureRow[] = Array.from(grouped.entries()).map(([measurementID, row]) => ({
     ErrorTypeKeys: (generated.typeKeysByMeasurement.get(measurementID) ?? []).join(','),
-    SignatureComplete: 1,
-    HasDuplicate: row.baseRow.contradictionTypes.includes('duplicate_tag_stem') ? 1 : 0,
-    HasSameBatch: row.baseRow.contradictionTypes.includes('same_batch_conflict') ? 1 : 0,
-    MeasurementCount: 1
+    SignatureComplete: SQL_TRUE,
+    HasDuplicate: row.baseRow.contradictionTypes.includes('duplicate_tag_stem') ? SQL_TRUE : SQL_FALSE,
+    HasSameBatch: row.baseRow.contradictionTypes.includes('same_batch_conflict') ? SQL_TRUE : SQL_FALSE,
+    MeasurementCount: SINGLE_MEASUREMENT_WEIGHT
   }));
   const chunkSize = Math.ceil(signatureRows.length / SIGNATURE_CHUNK_COUNT);
   const chunks = Array.from({ length: SIGNATURE_CHUNK_COUNT }, (_, chunkIndex) => signatureRows.slice(chunkIndex * chunkSize, (chunkIndex + 1) * chunkSize));
@@ -460,43 +461,53 @@ describe('error type key sets', () => {
 });
 
 describe('signature rows', () => {
-  const signature = (keys: string, complete: number, duplicate: number, sameBatch: number, count: number | string): ErrorSignatureRow => ({
+  interface SignatureOptions {
+    keys: string;
+    count: number | string;
+    complete?: boolean;
+    duplicate?: boolean;
+    sameBatch?: boolean;
+  }
+  const signature = ({ keys, count, complete = true, duplicate = false, sameBatch = false }: SignatureOptions): ErrorSignatureRow => ({
     ErrorTypeKeys: keys,
-    SignatureComplete: complete,
-    HasDuplicate: duplicate,
-    HasSameBatch: sameBatch,
+    SignatureComplete: complete ? SQL_TRUE : SQL_FALSE,
+    HasDuplicate: duplicate ? SQL_TRUE : SQL_FALSE,
+    HasSameBatch: sameBatch ? SQL_TRUE : SQL_FALSE,
     MeasurementCount: count
   });
 
   it('sums the counts of chunks that share keys, completeness and flags', () => {
-    const merged = mergeSignatureRows([[signature('1,2', 1, 0, 1, 4), signature('3', 1, 0, 0, '7')], [signature('1,2', 1, 0, 1, '6')]]);
+    const merged = mergeSignatureRows([
+      [signature({ keys: '1,2', sameBatch: true, count: 4 }), signature({ keys: '3', count: '7' })],
+      [signature({ keys: '1,2', sameBatch: true, count: '6' })]
+    ]);
 
     console.log('[signatures] merged', merged);
     expect(merged).toHaveLength(2);
-    expect(Number(merged.find(row => row.ErrorTypeKeys === '1,2')?.MeasurementCount)).toBe(10);
-    expect(Number(merged.find(row => row.ErrorTypeKeys === '3')?.MeasurementCount), 'an unmerged row keeps its SQL count type').toBe(7);
+    expect(merged.find(row => row.ErrorTypeKeys === '1,2')?.MeasurementCount).toBe(10);
+    expect(merged.find(row => row.ErrorTypeKeys === '3')?.MeasurementCount, 'a row that merges with nothing still gets a numeric count').toBe(7);
   });
 
   it('keeps a complete and an incomplete signature with the same text apart, and different flags apart', () => {
     const merged = mergeSignatureRows([
-      [signature('1,234', 1, 0, 0, 2)],
-      [signature('1,234', 0, 0, 0, 3)],
-      [signature('1,234', 1, 1, 0, 5), signature('1,234', 1, 0, 1, 11)]
+      [signature({ keys: '1,234', count: 2 })],
+      [signature({ keys: '1,234', complete: false, count: 3 })],
+      [signature({ keys: '1,234', duplicate: true, count: 5 }), signature({ keys: '1,234', sameBatch: true, count: 11 })]
     ]);
 
     expect(merged.map(row => [Number(row.SignatureComplete), Number(row.HasDuplicate), Number(row.HasSameBatch), Number(row.MeasurementCount)])).toEqual([
-      [1, 0, 0, 2],
-      [0, 0, 0, 3],
-      [1, 1, 0, 5],
-      [1, 0, 1, 11]
+      [SQL_TRUE, SQL_FALSE, SQL_FALSE, 2],
+      [SQL_FALSE, SQL_FALSE, SQL_FALSE, 3],
+      [SQL_TRUE, SQL_TRUE, SQL_FALSE, 5],
+      [SQL_TRUE, SQL_FALSE, SQL_TRUE, 11]
     ]);
     expect(hasIncompleteSignature(merged)).toBe(true);
-    expect(hasIncompleteSignature(merged.filter(row => Number(row.SignatureComplete) === 1))).toBe(false);
+    expect(hasIncompleteSignature(merged.filter(row => Number(row.SignatureComplete) === SQL_TRUE))).toBe(false);
   });
 
   it('does not mutate the rows it was given', () => {
-    const first = signature('1', 1, 0, 0, 1);
-    const second = signature('1', 1, 0, 0, 2);
+    const first = signature({ keys: '1', count: 1 });
+    const second = signature({ keys: '1', count: 2 });
 
     mergeSignatureRows([[first], [second]]);
 
@@ -507,7 +518,7 @@ describe('signature rows', () => {
   it('turns signature rows into weighted rows with decoded contradiction flags', () => {
     const catalog = buildErrorTypeCatalog(toCatalogRows(CATALOG_TYPES));
 
-    const weighted = toWeightedErrorRows([signature('0,2', 1, 1, 1, '9')], catalog);
+    const weighted = toWeightedErrorRows([signature({ keys: '0,2', duplicate: true, sameBatch: true, count: '9' })], catalog);
 
     expect(weighted).toHaveLength(1);
     expect(weighted[0].measurementCount).toBe(9);
@@ -518,7 +529,7 @@ describe('signature rows', () => {
 
   it('throws ErrorTypeCatalogMismatchError naming the keys the catalog does not list', () => {
     const catalog = buildErrorTypeCatalog(toCatalogRows(CATALOG_TYPES));
-    const rows = [signature('1,99', 1, 0, 0, 1), signature('98,1', 1, 0, 0, 1)];
+    const rows = [signature({ keys: '1,99', count: 1 }), signature({ keys: '98,1', count: 1 })];
 
     expect(findMissingErrorTypeKeys(rows, catalog)).toEqual([99, 98]);
     expect(() => toWeightedErrorRows(rows, catalog)).toThrow(ErrorTypeCatalogMismatchError);
@@ -527,8 +538,8 @@ describe('signature rows', () => {
 });
 
 describe('hasLocaleCompareTie', () => {
-  const NFC_E_ACUTE = 'é';
-  const NFD_E_ACUTE = 'é';
+  const NFC_E_ACUTE = '\u00e9';
+  const NFD_E_ACUTE = 'e\u0301';
 
   it('is true for NFC and NFD forms of one letter with equal counts', () => {
     expect(NFC_E_ACUTE.localeCompare(NFD_E_ACUTE), 'precondition: this runtime treats the two forms as equal').toBe(0);

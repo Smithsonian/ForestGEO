@@ -8,8 +8,8 @@ export const NO_LOG_ERROR_CODE = 'failed_no_log';
 export const NO_LOG_ERROR_MESSAGE = 'Measurement is marked invalid but has no unresolved error log entry.';
 export const LIST_SEPARATOR = ',';
 
-const SQL_TRUE = 1;
-const SQL_FALSE = 0;
+export const SQL_TRUE = 1;
+export const SQL_FALSE = 0;
 
 export const ERROR_EXPLORER_STATEMENT_LABELS = {
   catalog: '/* errors-explorer:catalog */',
