@@ -5,6 +5,7 @@ import { HTTPResponses } from '@/config/macros';
 import { GET, POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { UNSUPPORTED_LOGIC_OPERATOR_MESSAGE } from '@/components/processors/processormacros';
+import { VIEW_DATA_REQUEST_ERRORS } from '@/lib/viewdata/measurementssummaryquery';
 
 // ---------- Hoisted spies (usable inside vi.mock factories) ----------
 const mapperSpies = vi.hoisted(() => {
@@ -463,5 +464,114 @@ describe('logicOperator guard (SQL injection)', () => {
     expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
     expect(json).toEqual({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE });
     expect(exec).not.toHaveBeenCalled();
+  });
+});
+
+describe('Stem status filter on the measurements Form CSV export', () => {
+  const STEM_STATUS_SCHEMA = 'forestgeo_testing';
+  const EXPORT_PLOT_ID = '7';
+  const EXPORT_CENSUS_ID = '80';
+  const BASE_MEASUREMENTS_FILTER = { quickFilterValues: [], items: [], visible: ['valid', 'errors'], tss: [] };
+  const INJECTION_SHAPED_STATUS = "dead') OR 1=1 --";
+  const makeBodyRequest = (body: unknown) => ({ nextUrl: new URL('http://localhost:3000'), json: async () => body }) as any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function stubColumnsThenRows() {
+    const exec = vi
+      .spyOn((ConnectionManager as any).getInstance(), 'executeQuery')
+      .mockResolvedValueOnce([{ COLUMN_NAME: 'MeasuredDBH' }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn((ConnectionManager as any).getInstance(), 'closeConnection').mockResolvedValue(undefined);
+    return exec;
+  }
+
+  function exportMeasurements(filterModel: unknown) {
+    return GET(makeRequest(), makeProps('measurements', [STEM_STATUS_SCHEMA, EXPORT_PLOT_ID, EXPORT_CENSUS_ID, fm(filterModel)]));
+  }
+
+  it('restricts the export to rows carrying a dead effective code when Stem status is Dead', async () => {
+    const exec = stubColumnsThenRows();
+
+    const response = await exportMeasurements({ ...BASE_MEASUREMENTS_FILTER, stemStatus: ['dead'] });
+
+    const exportSql = exec.mock.calls[1]?.[0] as string;
+    console.log('[formdownload stemStatus] dead', response.status, 'queries', exec.mock.calls.length, 'sql has clause', exportSql?.includes('sf_attr'));
+    expect(response.status).toBe(HTTPResponses.OK);
+    expect(exportSql).toContain("sf_attr.Status IN ('dead')");
+    expect(exportSql).toContain('sf_ca.CoreMeasurementID = cm.CoreMeasurementID');
+    expect(exportSql).toContain(`FROM ${STEM_STATUS_SCHEMA}.cmattributes sf_ca`);
+    expect(exportSql).toContain('MAX(effective_attr.IsActive)');
+  });
+
+  it('ANDs the Stem status clause to the visible filter instead of widening it', async () => {
+    const exec = stubColumnsThenRows();
+
+    await exportMeasurements({ ...BASE_MEASUREMENTS_FILTER, stemStatus: ['dead', 'alive'] });
+
+    const exportSql = exec.mock.calls[1][0] as string;
+    expect(exportSql).toContain("sf_attr.Status IN ('dead', 'alive')");
+    expect(exportSql.indexOf('cm.IsValidated')).toBeLessThan(exportSql.indexOf('sf_attr.Status'));
+    expect(exportSql).toMatch(/AND EXISTS \(\s+SELECT 1 FROM forestgeo_testing\.cmattributes sf_ca/);
+  });
+
+  it('adds no Stem status clause when the filter model carries none', async () => {
+    const exec = stubColumnsThenRows();
+
+    const response = await exportMeasurements(BASE_MEASUREMENTS_FILTER);
+
+    expect(response.status).toBe(HTTPResponses.OK);
+    expect(exec.mock.calls[1][0] as string).not.toContain('sf_attr');
+  });
+
+  it('applies the Stem status clause when the filter model arrives in a POST body', async () => {
+    const exec = stubColumnsThenRows();
+
+    const response = await POST(
+      makeBodyRequest({ filterModel: { ...BASE_MEASUREMENTS_FILTER, stemStatus: ['dead'] } }),
+      makeProps('measurements', [STEM_STATUS_SCHEMA, EXPORT_PLOT_ID, EXPORT_CENSUS_ID])
+    );
+
+    expect(response.status).toBe(HTTPResponses.OK);
+    expect(exec.mock.calls[1][0] as string).toContain("sf_attr.Status IN ('dead')");
+  });
+
+  it.each([
+    ['an unknown status', ['zombie']],
+    ['an injection-shaped status', [INJECTION_SHAPED_STATUS]],
+    ['a non-string status', [7]],
+    ['a bare string instead of a list', 'dead']
+  ])('answers 400 and runs no query for %s', async (_label, stemStatus) => {
+    const exec = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
+
+    const response = await exportMeasurements({ ...BASE_MEASUREMENTS_FILTER, stemStatus });
+    const json = await response.json();
+
+    console.log('[formdownload stemStatus]', _label, response.status, JSON.stringify(json), 'queries', exec.mock.calls.length);
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(json).toEqual({ error: VIEW_DATA_REQUEST_ERRORS.unsupportedStemStatus });
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('leaves the other export branches untouched by a Stem status in the filter model', async () => {
+    const exec = vi
+      .spyOn((ConnectionManager as any).getInstance(), 'executeQuery')
+      .mockResolvedValueOnce([{ COLUMN_NAME: 'Code' }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn((ConnectionManager as any).getInstance(), 'closeConnection').mockResolvedValue(undefined);
+
+    const response = await GET(
+      makeRequest(),
+      makeProps('attributes', [STEM_STATUS_SCHEMA, EXPORT_PLOT_ID, EXPORT_CENSUS_ID, fm({ quickFilterValues: [], items: [], stemStatus: ['dead'] })])
+    );
+
+    expect(response.status).toBe(HTTPResponses.OK);
+    expect(exec.mock.calls[1][0] as string).not.toContain('sf_attr');
   });
 });
