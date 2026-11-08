@@ -326,6 +326,10 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     };
   }, [validationFaults]);
   const isAnyRowEditing = Object.values(rowModesModel).some(mode => mode?.mode === GridRowModes.Edit);
+
+  useEffect(() => {
+    if (!isAnyRowEditing) setIsSaveHighlighted(false);
+  }, [isAnyRowEditing]);
   const editPreviewLoadingMessage = 'Saving changes...';
 
   const editFlow = useEditPreviewFlow({

@@ -242,6 +242,31 @@ describe('MeasurementsCommons on the real DataGrid', () => {
     expect(await screen.findByRole('dialog', { name: 'Save confirmation' })).toBeInTheDocument();
   });
 
+  it('the Save highlight does not outlive the row edit: after Cancel, Enter in another row moves on and opens no Save confirmation', async () => {
+    const user = userEvent.setup();
+    currentRows = [ROW, SECOND_ROW];
+    await renderRealGrid('global', currentRows);
+    await user.dblClick(cellOf(0, 'treeTag'));
+    await waitFor(() => expect(cellOf(0, 'treeTag').querySelector('input')).not.toBeNull());
+    for (const expectedField of EXPECTED_ENTER_WALK) {
+      await user.keyboard('{Enter}');
+      await waitFor(() => expect(focusedField()).toBe(expectedField));
+    }
+    expect(screen.queryByRole('dialog', { name: 'Save confirmation' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole(ACTION_ITEM_ROLE, { name: VIEW_DATA_TEXT.cancelRow }));
+    await waitFor(() => expect(document.querySelectorAll('.MuiDataGrid-row--editing')).toHaveLength(0));
+    await user.dblClick(cellOf(1, 'treeTag'));
+    await waitFor(() => expect(cellOf(1, 'treeTag').querySelector('input')).not.toBeNull());
+    await user.keyboard('{Enter}');
+    const observed = {
+      focusedField: focusedField(),
+      editingRows: document.querySelectorAll('.MuiDataGrid-row--editing').length,
+      saveConfirmationOpen: screen.queryByRole('dialog', { name: 'Save confirmation' }) !== null
+    };
+    console.log('[real grid] first Enter in the next row after a Cancel', JSON.stringify(observed));
+    expect(observed).toEqual({ focusedField: 'stemTag', editingRows: 1, saveConfirmationOpen: false });
+  });
+
   it('Codes editor: Enter picks the highlighted option while its list is open, and walks on to Actions once it is closed', async () => {
     const user = userEvent.setup();
     await renderRealGrid('global');
