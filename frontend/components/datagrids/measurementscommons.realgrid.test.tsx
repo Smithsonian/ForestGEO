@@ -170,6 +170,19 @@ describe('MeasurementsCommons on the real DataGrid', () => {
     await waitFor(() => expect(cell('treeTag').querySelector('input')).not.toBeNull());
   });
 
+  it('puts no aria-pressed on the row action menu items, before or after the details sheet opens (axe aria-allowed-attr)', async () => {
+    const user = userEvent.setup();
+    await renderRealGrid('field crew');
+    const detailsItem = screen.getByRole(ACTION_ITEM_ROLE, { name: VIEW_DATA_TEXT.detailsFor('010203', '1') });
+    const actionItemsBeforeOpen = screen.getAllByRole(ACTION_ITEM_ROLE);
+    console.log('[real grid] action items before open', JSON.stringify(actionItemsBeforeOpen.map(item => item.getAttributeNames())));
+    for (const item of actionItemsBeforeOpen) expect(item.getAttributeNames(), `${item.getAttribute('aria-label')} before open`).not.toContain('aria-pressed');
+    await user.click(detailsItem);
+    await screen.findByTestId('error-row-details-sheet');
+    console.log('[real grid] Details item after open', JSON.stringify(detailsItem.getAttributeNames()));
+    expect(detailsItem.getAttributeNames(), 'Details after the sheet opened').not.toContain('aria-pressed');
+  });
+
   it('pending: a Details-only column and no way into edit mode', async () => {
     const user = userEvent.setup();
     await renderRealGrid('pending');

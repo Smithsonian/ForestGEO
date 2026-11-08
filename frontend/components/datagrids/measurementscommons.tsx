@@ -1144,16 +1144,10 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   );
 
   const getEnhancedCellAction = useCallback(
-    (
-      label: string,
-      tooltip: string,
-      icon: React.ReactElement,
-      onClick: React.MouseEventHandler<HTMLButtonElement>,
-      options: { disabled?: boolean; pressed?: boolean } = {}
-    ) => (
+    (label: string, tooltip: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>, options: { disabled?: boolean } = {}) => (
       <CellItemContainer>
         <Tooltip disableInteractive title={tooltip} arrow placement="top">
-          <GridActionsCellItem icon={icon} label={label} aria-label={tooltip} aria-pressed={options.pressed} onClick={onClick} disabled={options.disabled} />
+          <GridActionsCellItem icon={icon} label={label} aria-label={tooltip} onClick={onClick} disabled={options.disabled} />
         </Tooltip>
       </CellItemContainer>
     ),
@@ -1178,8 +1172,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
           'Details',
           VIEW_DATA_TEXT.detailsFor(String(row.treeTag ?? EMPTY_CELL_DISPLAY), String(row.stemTag ?? EMPTY_CELL_DISPLAY)),
           <InfoOutlinedIcon />,
-          () => openDetailsForRow(row),
-          { pressed: sheetTarget?.coreMeasurementID === Number(row.coreMeasurementID) }
+          () => openDetailsForRow(row)
         );
         if (!canEditRows) return [details];
 
@@ -1202,7 +1195,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         return [edit, details];
       }
     };
-  }, [canEditRows, isAnyRowEditing, rowModesModel, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, openDetailsForRow, sheetTarget]);
+  }, [canEditRows, isAnyRowEditing, rowModesModel, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, openDetailsForRow]);
 
   useEffect(() => {
     setSheetTarget(current => {
