@@ -149,6 +149,13 @@ describe('filter fields and stem statuses', () => {
     expectRequestError(() => validateViewDataRequest(malformed, undefined), message);
   });
 
+  it('returns the sort and the distinct stem statuses it parsed, so nothing parses them again', () => {
+    const parsed = validateViewDataRequest(filterModel({ stemStatus: ['dead', 'dead', 'alive'] }), [{ field: 'treeTag', sort: 'desc' }]);
+    console.log('[parsed request]', JSON.stringify(parsed));
+    expect(parsed).toEqual({ sort: { field: 'treeTag', sort: 'desc' }, stemStatuses: ['dead', 'alive'] });
+    expect(validateViewDataRequest(filterModel(), undefined)).toEqual({ sort: { field: 'measurementDate', sort: 'asc' }, stemStatuses: [] });
+  });
+
   it('accepts an empty visible list (shows nothing) and an absent visible, tss or quickFilterValues (no restriction), as before', () => {
     const absent = { items: [] } as unknown as ExtendedGridFilterModel;
     expect(() => validateViewDataRequest(filterModel({ visible: [] }), undefined)).not.toThrow();

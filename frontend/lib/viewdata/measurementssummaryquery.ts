@@ -140,15 +140,19 @@ function assertAbsentOrArrayOf(
   if (!Array.isArray(value) || !value.every(isAllowedEntry)) throw new ViewDataRequestError(message);
 }
 
-/** Validates everything a measurementssummary request carries before any SQL runs. */
-export function validateViewDataRequest(filterModel: ExtendedGridFilterModel, sortModel: unknown): void {
+export interface ParsedViewDataRequest {
+  sort: ViewDataSortItem;
+  stemStatuses: string[];
+}
+
+/** Validates everything a measurementssummary request carries before any SQL runs and returns the parts that need parsing. */
+export function validateViewDataRequest(filterModel: ExtendedGridFilterModel, sortModel: unknown): ParsedViewDataRequest {
   assertViewDataFilterItemsSupported(filterModel.items);
   assertViewDataLogicOperatorSupported(filterModel.logicOperator);
   assertAbsentOrArrayOf(filterModel.visible, entry => KNOWN_VISIBLE_FILTERS.has(entry), VIEW_DATA_REQUEST_ERRORS.unsupportedVisibleFilter);
   assertAbsentOrArrayOf(filterModel.tss, entry => KNOWN_TREE_STEM_STATES.has(entry), VIEW_DATA_REQUEST_ERRORS.unsupportedStemStateFilter);
   assertAbsentOrArrayOf(filterModel.quickFilterValues, entry => typeof entry === 'string', VIEW_DATA_REQUEST_ERRORS.unsupportedQuickFilter);
-  parseViewDataSortModel(sortModel);
-  parseViewDataStemStatusFilter(filterModel.stemStatus);
+  return { sort: parseViewDataSortModel(sortModel), stemStatuses: parseViewDataStemStatusFilter(filterModel.stemStatus) };
 }
 
 /** Rows without a tree-stem state (failed rows) would fail JSON_CONTAINS, so no clause when every state is selected. */
@@ -191,9 +195,8 @@ function formatSkeleton(schema: string, skeleton: string, values: Array<number |
  */
 export function buildMeasurementsSummaryPageQueries(input: MeasurementsSummaryPageQueryInput): MeasurementsSummaryPageQueries {
   const { schema, columns, filterModel, plotID, plotCensusNumber, page, pageSize } = input;
-  validateViewDataRequest(filterModel, input.sortModel);
-  const orderBy = buildViewDataOrderByClause(parseViewDataSortModel(input.sortModel));
-  const stemStatuses = parseViewDataStemStatusFilter(filterModel.stemStatus);
+  const { sort, stemStatuses } = validateViewDataRequest(filterModel, input.sortModel);
+  const orderBy = buildViewDataOrderByClause(sort);
 
   const searchStub = filterModel.quickFilterValues?.length ? buildSearchStub(columns, filterModel.quickFilterValues, MEASUREMENTS_SUMMARY_ALIAS) : '';
   const filterStub = filterModel.items?.length ? buildFilterModelStub(filterModel, MEASUREMENTS_SUMMARY_ALIAS) : '';
