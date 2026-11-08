@@ -14,6 +14,7 @@ import {
   describeMeasurementRow,
   EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE,
   EDIT_REVERTED_SNACKBAR_MESSAGE,
+  findPlotCensusNumberForCensusID,
   mergeMeasurementFilterModel,
   PENDING_VALIDATION_SNACKBAR_MESSAGE,
   RESET_THEN_VALIDATE_SNACKBAR_MESSAGE,
@@ -767,5 +768,25 @@ describe('toServerMeasurementFilterModel: View Data stem state and stem status t
     const base = { items: [], quickFilterValues: [], visible: ALL_VISIBLE, tss: ALL_TSS };
     expect(areExtendedFilterModelsEqual({ ...base, stemStatus: ['dead'] }, { ...base, stemStatus: ['alive'] })).toBe(false);
     expect(areExtendedFilterModelsEqual({ ...base, stemStatus: ['dead'] }, { ...base, stemStatus: ['dead'] })).toBe(true);
+  });
+});
+
+describe('findPlotCensusNumberForCensusID (DBH fact line, A10)', () => {
+  const CENSUS_LIST = [undefined, { plotCensusNumber: 3, censusIDs: [68, 69] }, { plotCensusNumber: 4, censusIDs: [70] }] as unknown as Parameters<
+    typeof findPlotCensusNumberForCensusID
+  >[0];
+
+  it.each([
+    [70, 4],
+    [69, 3],
+    [999, null]
+  ])('maps CensusID %s to plot census number %s, skipping missing entries', (censusID, expected) => {
+    const observed = findPlotCensusNumberForCensusID(CENSUS_LIST, censusID);
+    console.log('[findPlotCensusNumberForCensusID]', censusID, observed);
+    expect(observed).toBe(expected);
+  });
+
+  it('returns null when the census list has not loaded', () => {
+    expect(findPlotCensusNumberForCensusID(undefined, 70)).toBeNull();
   });
 });

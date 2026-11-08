@@ -18,6 +18,7 @@ import type { ApplyResult } from '@/config/editplan/types';
 import { formatMeasurementForDisplay } from '@/config/measurementdisplay';
 
 import { ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
+import type { OrgCensus } from '@/lib/db/definitions/timekeeping';
 
 export { NEW_ROW_ADDED_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
 
@@ -469,4 +470,10 @@ export function revertMeasurementEdit(scope: EditRevertRequest, effects: Measure
     notify: effects.notify,
     logError: effects.logError
   });
+}
+
+/** CensusID → plot census number from the org census list, skipping a list or entries that have not loaded (A10). */
+export function findPlotCensusNumberForCensusID(censusList: ReadonlyArray<OrgCensus> | undefined, censusID: number): number | null {
+  const match = censusList?.find(census => census?.censusIDs?.includes(censusID));
+  return match?.plotCensusNumber ?? null;
 }

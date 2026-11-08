@@ -22,7 +22,7 @@ import {
 } from '@mui/x-data-grid';
 import { Alert, Snackbar } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/DeleteOutlined';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import Box from '@mui/joy/Box';
@@ -34,7 +34,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  IconButton,
   Input,
   Modal,
   ModalDialog,
@@ -61,7 +60,7 @@ import { useForestQuery, queryKey, QueryNamespace, QueryScope, invalidateAfter }
 import { QueryError } from '@/lib/query/fetcher';
 import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import { useOrgCensusContext, useOrgCensusListContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useRouter } from 'next/navigation';
 import moment from 'moment';
 import {
@@ -78,7 +77,6 @@ import { bitToBoolean, HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
 import { useBackgroundValidationState } from '@/config/store/appstore';
-import ConfirmationDialog from '../client/modals/confirmationdialog';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
@@ -88,7 +86,7 @@ import { MeasurementsSummaryResult } from '@/lib/db/definitions/views';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/lib/db/definitions/core';
 import ValidationCore from '@/components/client/validationcore';
-import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
+import { CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
@@ -98,7 +96,7 @@ import { useDeleteAfterCancelGuard } from '@/components/datagrids/hooks/usedelet
 import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
-import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
+import { EditOperationCancelledError, useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast, { UndoRevertOutcome } from '@/components/editplan/undotoast';
 import { isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
@@ -111,7 +109,7 @@ import {
   runMeasurementEditSave,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
-  describeMeasurementRow,
+  findPlotCensusNumberForCensusID,
   NEW_ROW_ADDED_MESSAGE,
   revertMeasurementEdit,
   ROW_DELETED_MESSAGE,
@@ -126,9 +124,11 @@ import type { GridDensity } from '@mui/x-data-grid';
 import MeasurementsExportModal from '@/components/client/modals/measurementsexportmodal';
 import ViewDataGridToolbar, { nextViewDataDensity } from '@/components/viewdata/viewdatagridtoolbar';
 import type { ViewDataAboveGridControls } from '@/components/viewdata/viewdatacontrols';
+import ViewDataRowDetails, { type ViewDataSheetTarget } from '@/components/viewdata/viewdatarowdetails';
 import {
   ALL_TREE_STEM_STATES,
   canEditMeasurementRows,
+  EMPTY_CELL_DISPLAY,
   getViewDataShowOption,
   parseViewDataStateCounts,
   resolveInitialShowOption,
@@ -146,6 +146,7 @@ export const FILTER_APPLY_DEBOUNCE_MS = 500;
 const SEARCH_WORD_SEPARATOR = ' ';
 
 const NEGATIVE_DBH_INPUT_MESSAGE = 'DBH must be non-negative';
+const EMPTY_FAULTED_FIELDS: ReadonlySet<string> = new Set();
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -238,15 +239,10 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     actionType: '',
     actionId: null
   });
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [pendingDeleteRow, setPendingDeleteRow] = useState<GridRowModel | null>(null);
   const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
   const [isValidationOverrideModalOpen, setIsValidationOverrideModalOpen] = useState(false);
   const [isResetValidationModalOpen, setIsResetValidationModalOpen] = useState(false);
-  const [isSingleCMVErrorOpen, setIsSingleCMVErrorOpen] = useState(false);
   const [isResettingValidations, setIsResettingValidations] = useState(false);
-  const [cmvSelected, setCMVSelected] = useState(-1);
-  const [isClearingErrors, setIsClearingErrors] = useState(false);
   const [promiseArguments, setPromiseArguments] = useState<{
     resolve: (value: GridRowModel) => void;
     reject: (reason?: unknown) => void;
@@ -319,7 +315,14 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
   const useAutoMeasurementRowHeight = useMemo(() => shouldUseAutoMeasurementRowHeight(typeof navigator === 'undefined' ? undefined : navigator.userAgent), []);
 
-  const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
+  const [undoToastScope, setUndoToastScope] = useState<{ editOperationID: number; censusID: number } | null>(null);
+  const [sheetTarget, setSheetTarget] = useState<ViewDataSheetTarget | null>(null);
+  /** The census the page last settled on; a save compares it with the census it started in (A25). */
+  const previousCensusIDRef = useRef(activeCensusID);
+  const orgCensusList = useOrgCensusListContext();
+  const priorCensusNumberFor = useCallback((censusID: number) => findPlotCensusNumberForCensusID(orgCensusList, censusID), [orgCensusList]);
+  const canEditRows = !locked && canEditMeasurementRows(session?.user?.userStatus);
+  const isAnyRowEditing = Object.values(rowModesModel).some(mode => mode?.mode === GridRowModes.Edit);
   const editPreviewLoadingMessage = 'Saving changes...';
 
   const editFlow = useEditPreviewFlow({
@@ -901,40 +904,34 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       setSnackbar({ children: 'Error: missing CoreMeasurementID for edit', severity: 'error' });
       return Promise.reject(new Error('missing CoreMeasurementID'));
     }
+    const saveCensusID = activeCensusID ?? 0;
     return runMeasurementEditSave({
       coreMeasurementID,
       newRow,
       oldRow,
       beginEdit: editFlow.beginEdit,
       notify: (message, severity) => setSnackbar({ children: message, severity }),
-      onEditOperation: setUndoToastOperationID
+      onEditOperation: editOperationID => setUndoToastScope({ editOperationID, censusID: saveCensusID })
     });
   };
 
   const openConfirmationDialog = useCallback(
-    (actionType: 'save' | 'delete', actionId: GridRowId) => {
-      if (actionType === 'save') {
-        // A cell editor flagged an invalid value (e.g. negative DBH). MUI refuses to leave edit mode
-        // while any cell has an error, so don't open a confirmation that can never complete.
-        const editingCells = Object.values(apiRef.current?.state?.editRows?.[actionId] ?? {});
-        if (editingCells.some(cell => cell?.error)) {
-          setSnackbar({ children: 'Error: fix the highlighted invalid value before saving (DBH must be non-negative).', severity: 'error' });
-          return;
-        }
+    (actionType: 'save', actionId: GridRowId) => {
+      // A cell editor flagged an invalid value (e.g. negative DBH). MUI refuses to leave edit mode
+      // while any cell has an error, so don't open a confirmation that can never complete.
+      const editingCells = Object.values(apiRef.current?.state?.editRows?.[actionId] ?? {});
+      if (editingCells.some(cell => cell?.error)) {
+        setSnackbar({ children: 'Error: fix the highlighted invalid value before saving (DBH must be non-negative).', severity: 'error' });
+        return;
       }
       setPendingAction({ actionType, actionId });
       const row = rows.find(row => String(row.id) === String(actionId));
       if (row) {
-        if (actionType === 'delete') {
-          setPendingDeleteRow(row);
-          setIsDeleteDialogOpen(true);
-        } else {
-          setIsDialogOpen(true);
-          setRowModesModel(oldModel => ({
-            ...oldModel,
-            [actionId]: { mode: GridRowModes.View }
-          }));
-        }
+        setIsDialogOpen(true);
+        setRowModesModel(oldModel => ({
+          ...oldModel,
+          [actionId]: { mode: GridRowModes.View }
+        }));
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -943,21 +940,19 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
 
   const handleConfirmAction = async () => {
     setIsDialogOpen(false);
-    setIsDeleteDialogOpen(false);
-    setPendingDeleteRow(null);
-    if (pendingAction.actionType === 'save' && pendingAction.actionId !== null && promiseArguments) {
-      await performSaveAction(pendingAction.actionId);
-    } else if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
-      await performDeleteAction(pendingAction.actionId);
+    // A census change can settle this save while its apply is detached, and the new census can open its own
+    // Save Changes confirmation before the await returns: clear only the state this confirmation started with.
+    const confirmedAction = pendingAction;
+    const confirmedSave = promiseArguments;
+    if (confirmedAction.actionType === 'save' && confirmedAction.actionId !== null && confirmedSave) {
+      await performSaveAction(confirmedAction.actionId);
     }
-    setPendingAction({ actionType: '', actionId: null });
-    setPromiseArguments(null); // Clear promise arguments after handling
+    setPendingAction(current => (current === confirmedAction ? { actionType: '', actionId: null } : current));
+    setPromiseArguments(current => (current === confirmedSave ? null : current));
   };
 
   const handleCancelAction = () => {
     setIsDialogOpen(false);
-    setIsDeleteDialogOpen(false);
-    setPendingDeleteRow(null);
     if (promiseArguments) {
       promiseArguments.reject(new Error('Action cancelled by user'));
     }
@@ -965,8 +960,18 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     setPromiseArguments(null); // Clear promise arguments after handling
   };
 
+  const notifyEditNotSaved = useCallback(
+    (row: GridRowModel) =>
+      setSnackbar({
+        children: VIEW_DATA_TEXT.editNotSavedCensusChanged(String(row.treeTag ?? EMPTY_CELL_DISPLAY), String(row.stemTag ?? EMPTY_CELL_DISPLAY)),
+        severity: 'warning'
+      }),
+    [setSnackbar]
+  );
+
   const performSaveAction = async (id: GridRowId) => {
     if (locked || !promiseArguments) return;
+    const saveCensusID = activeCensusID;
     // New-row path uses the blocking overlay; the edit path's own Modal busy
     // state would otherwise be blocked from its Apply/Cancel clicks by it.
     const isLegacyCreate = promiseArguments.oldRow.isNew;
@@ -980,13 +985,28 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       promiseArguments.resolve(updatedRow);
     } catch (error: unknown) {
       promiseArguments.reject(error);
-      const wasCancelled = isMuiRowEditCancelled(error);
-      if (wasCancelled && !promiseArguments.oldRow.isNew) {
+      // A census change settles the pending save itself (see the census effect), so this reject is then a no-op.
+      const censusChangedDuringSave = previousCensusIDRef.current !== saveCensusID;
+      if (error instanceof EditOperationCancelledError) {
+        notifyEditNotSaved(promiseArguments.oldRow);
+      } else if (censusChangedDuringSave && !isMuiRowEditCancelled(error)) {
+        // A detached apply failed after the census changed; the hook calls no onError for it.
+        setSnackbar({ children: `Error: ${error instanceof Error ? error.message : String(error)}`, severity: 'error' });
+      }
+      const reenterEditMode =
+        isMuiRowEditCancelled(error) && !promiseArguments.oldRow.isNew && !censusChangedDuringSave && !(error instanceof EditOperationCancelledError);
+      if (reenterEditMode) {
         setRowModesModel(oldModel => ({
           ...oldModel,
           [id]: { mode: GridRowModes.Edit }
         }));
       }
+    }
+    if (previousCensusIDRef.current !== saveCensusID) {
+      // No read of the old scope after a census change (View Errors r4 P2-13); its cache entries are still invalidated.
+      if (isLegacyCreate) setLoading(false, editPreviewLoadingMessage);
+      await invalidateAfter('save-edit-plan', queryScope);
+      return;
     }
     const row = rows.find(row => String(row.id) === String(id));
     if (row?.isNew) {
@@ -1063,6 +1083,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         severity: 'success'
       });
       setRows(rows.filter(row => String(row.id) !== String(id)));
+      setSheetTarget(null);
       try {
         // destructive mutation — global overlay blocks UI for the duration of the API call
         setLoading(true, 'Refreshing Measurements Summary View...');
@@ -1074,6 +1095,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         setLoading(false);
       }
       await refetch();
+      await refreshCounts();
       await invalidateAfter('delete-measurement', queryScope);
     }
   };
@@ -1084,14 +1106,6 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       openConfirmationDialog('save', id);
     },
     [locked, openConfirmationDialog]
-  );
-
-  const handleDeleteClick = useCallback(
-    (id: GridRowId) => () => {
-      if (locked || isDeleteGuarded(id)) return;
-      openConfirmationDialog('delete', id);
-    },
-    [locked, openConfirmationDialog, isDeleteGuarded]
   );
 
   useEffect(() => {
@@ -1181,29 +1195,25 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   );
 
   const getEnhancedCellAction = useCallback(
-    (type: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>, disabled = false) => (
+    (
+      label: string,
+      tooltip: string,
+      icon: React.ReactElement,
+      onClick: React.MouseEventHandler<HTMLButtonElement>,
+      options: { disabled?: boolean; pressed?: boolean } = {}
+    ) => (
       <CellItemContainer>
-        <Tooltip
-          disableInteractive
-          title={
-            type === 'Save'
-              ? `Save your changes`
-              : type === 'Cancel'
-                ? `Cancel your changes`
-                : type === 'Edit'
-                  ? `Edit this row`
-                  : type === 'Delete'
-                    ? 'Delete this row'
-                    : undefined
-          }
-          arrow
-          placement="top"
-        >
-          <GridActionsCellItem icon={icon} label={type} onClick={onClick} disabled={disabled} />
+        <Tooltip disableInteractive title={tooltip} arrow placement="top">
+          <GridActionsCellItem icon={icon} label={label} aria-label={tooltip} aria-pressed={options.pressed} onClick={onClick} disabled={options.disabled} />
         </Tooltip>
       </CellItemContainer>
     ),
     []
+  );
+
+  const openDetailsForRow = useCallback(
+    (row: GridRowModel) => setSheetTarget({ coreMeasurementID: Number(row.coreMeasurementID), censusID: Number(row.censusID ?? activeCensusID), gridRow: row }),
+    [activeCensusID]
   );
 
   const getGridActionsColumn = useCallback((): GridColDef => {
@@ -1213,23 +1223,102 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       headerName: 'Actions',
       width: 100,
       cellClassName: 'actions',
-      getActions: ({ id }) => {
+      getActions: ({ id, row }) => {
         const isInEditMode = rowModesModel[id]?.mode === 'edit';
 
         if (isInEditMode) {
           return [
-            getEnhancedCellAction('Save', <SaveIcon />, handleSaveClick(id)),
-            getEnhancedCellAction('Cancel', <CancelIcon />, (e: React.MouseEvent<HTMLButtonElement>) => handleCancelClick(id, e))
+            getEnhancedCellAction('Save', VIEW_DATA_TEXT.saveRow, <SaveIcon />, handleSaveClick(id)),
+            getEnhancedCellAction('Cancel', VIEW_DATA_TEXT.cancelRow, <CancelIcon />, (e: React.MouseEvent<HTMLButtonElement>) => handleCancelClick(id, e))
           ];
         }
 
         return [
-          getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)),
-          getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id), isDeleteGuarded(id))
+          getEnhancedCellAction('Edit', VIEW_DATA_TEXT.editRow, <EditIcon />, handleEditClick(id)),
+          getEnhancedCellAction(
+            'Details',
+            VIEW_DATA_TEXT.detailsFor(String(row.treeTag ?? EMPTY_CELL_DISPLAY), String(row.stemTag ?? EMPTY_CELL_DISPLAY)),
+            <InfoOutlinedIcon />,
+            () => openDetailsForRow(row),
+            { pressed: sheetTarget?.coreMeasurementID === Number(row.coreMeasurementID) }
+          )
         ];
       }
     };
-  }, [rowModesModel, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, handleDeleteClick, isDeleteGuarded]);
+  }, [rowModesModel, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, openDetailsForRow, sheetTarget]);
+
+  useEffect(() => {
+    setSheetTarget(current => {
+      if (!current) return current;
+      const fresh = (gridRows as GridRowModel[]).find(row => Number(row.coreMeasurementID) === current.coreMeasurementID) ?? null;
+      return fresh === current.gridRow ? current : { ...current, gridRow: fresh };
+    });
+  }, [gridRows]);
+
+  useEffect(() => {
+    if (previousCensusIDRef.current === activeCensusID) return;
+    previousCensusIDRef.current = activeCensusID;
+    setRowModesModel(current => Object.fromEntries(Object.keys(current).map(id => [id, { mode: GridRowModes.View, ignoreModifications: true }])));
+    const pendingSave = promiseArguments;
+    if (pendingSave) {
+      // Settle with the unchanged row: MUI puts a row whose processRowUpdate promise rejects back into edit mode
+      // (useGridRowEditing.js:437-445). A no-op when the save has already settled.
+      pendingSave.resolve(pendingSave.oldRow);
+      // The "Save Changes" confirmation was open: nothing was sent.
+      if (isDialogOpen) notifyEditNotSaved(pendingSave.oldRow);
+      setIsDialogOpen(false);
+      setPendingAction({ actionType: '', actionId: null });
+      setPromiseArguments(null);
+    }
+    // 'cancelled-before-apply': beginEdit rejects with EditOperationCancelledError and performSaveAction reports it.
+    // 'detached-apply': the apply cannot be recalled; performSaveAction reports its result when it arrives (r4 P2-13).
+    editFlow.cancelPendingOperation();
+    setSheetTarget(null);
+    applyFilterChange({ items: [] });
+    flushFilterChange();
+    // Runs only on a census change and reads the save state of that render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCensusID]);
+
+  const findGridRow = useCallback(
+    (coreMeasurementID: number) => (gridRows as GridRowModel[]).find(row => Number(row.coreMeasurementID) === coreMeasurementID),
+    [gridRows]
+  );
+
+  const handleEditFromSheet = useCallback(
+    (coreMeasurementID: number) => {
+      const row = findGridRow(coreMeasurementID);
+      setSheetTarget(null);
+      if (!row) return;
+      handleEditClick(row.id)();
+      const rowIndex = apiRef.current?.getRowIndexRelativeToVisibleRows?.(row.id);
+      if (typeof rowIndex === 'number') apiRef.current?.scrollToIndexes({ rowIndex });
+    },
+    [findGridRow, handleEditClick, apiRef]
+  );
+
+  const handleDeleteFromSheet = useCallback(
+    async (coreMeasurementID: number) => {
+      const row = findGridRow(coreMeasurementID);
+      // R2-P2-8: the sheet also blocks Delete while it is stale or clearing; the grid adds the edit lock it owns.
+      if (!row || isDeleteGuarded(row.id) || isAnyRowEditing) return;
+      await performDeleteAction(row.id);
+    },
+    // performDeleteAction is redefined each render, as today.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [findGridRow, isDeleteGuarded, isAnyRowEditing, rows]
+  );
+
+  const handleCleared = useCallback(async () => {
+    // Strict, like the undo refresh chain: every read finishes, then the first failure is reported.
+    const reads = await Promise.allSettled([
+      runFetchPaginated({ strict: true }),
+      refreshCounts({ strict: true }),
+      isInfiniteOn ? infinite.refresh({ strict: true }) : Promise.resolve()
+    ]);
+    const failedRead = reads.find((read): read is PromiseRejectedResult => read.status === 'rejected');
+    if (failedRead) throw failedRead.reason;
+  }, [runFetchPaginated, refreshCounts, isInfiniteOn, infinite]);
 
   const validationStatusColumn: GridColDef = useMemo(
     () => ({
@@ -1244,15 +1333,8 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         let validationIcon, treeState;
         if (validationErrors[Number(params.row.coreMeasurementID)]) {
           validationIcon = (
-            <Tooltip title={`Click to review errors!`} size="md">
-              <IconButton
-                onClick={() => {
-                  setCMVSelected(params.row.coreMeasurementID ?? -1);
-                  setIsSingleCMVErrorOpen(true);
-                }}
-              >
-                <ErrorIcon color="error" />
-              </IconButton>
+            <Tooltip title="Validation errors" size="md">
+              <ErrorIcon color="error" />
             </Tooltip>
           );
         } else if (getMeasurementRowStatus(params.row) === 'ingestion-unresolved') {
@@ -1816,16 +1898,16 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
             onCancel={editFlow.cancelDialog}
           />
         )}
-        {undoToastOperationID !== null && (
+        {undoToastScope !== null && (
           <UndoToast
-            editOperationID={undoToastOperationID}
+            editOperationID={undoToastScope.editOperationID}
             onUndo={(confirmedPlanHash?: string): Promise<UndoRevertOutcome> =>
               revertMeasurementEdit(
                 {
                   schema: currentSite?.schemaName ?? '',
                   plotID: currentPlot?.plotID ?? 0,
-                  censusID: activeCensusID ?? 0,
-                  editOperationID: undoToastOperationID,
+                  censusID: undoToastScope.censusID,
+                  editOperationID: undoToastScope.editOperationID,
                   confirmedPlanHash
                 },
                 {
@@ -1838,7 +1920,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
                 }
               )
             }
-            onDismiss={() => setUndoToastOperationID(null)}
+            onDismiss={() => setUndoToastScope(null)}
           />
         )}
         {isExportOpen && (
@@ -1861,13 +1943,29 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         {/*    handleSave={handleConfirmAction}*/}
         {/*  />*/}
         {/*)}*/}
-        {isDeleteDialogOpen && (
-          <ConfirmationDialog
-            open={isDeleteDialogOpen}
-            onClose={handleCancelAction}
-            onConfirm={handleConfirmAction}
-            title="Confirm Deletion"
-            content={`Delete ${describeMeasurementRow(pendingDeleteRow)}? This action cannot be undone.`}
+        {sheetTarget && (
+          <ViewDataRowDetails
+            target={sheetTarget}
+            schema={currentSite.schemaName ?? ''}
+            plotID={currentPlot.plotID ?? 0}
+            plotCensusNumber={currentCensus.plotCensusNumber}
+            canEditRows={canEditRows}
+            isAnyRowEditing={isAnyRowEditing}
+            isDeleteGuarded={sheetTarget.gridRow ? isDeleteGuarded(sheetTarget.gridRow.id as GridRowId) : false}
+            faultedFields={EMPTY_FAULTED_FIELDS}
+            priorCensusNumberFor={priorCensusNumberFor}
+            onClose={() => setSheetTarget(null)}
+            onOpenRelatedRow={coreMeasurementID =>
+              setSheetTarget(current => ({
+                coreMeasurementID,
+                censusID: current?.censusID ?? Number(activeCensusID),
+                gridRow: findGridRow(coreMeasurementID) ?? null
+              }))
+            }
+            onEditRow={handleEditFromSheet}
+            onDeleteRow={handleDeleteFromSheet}
+            onCleared={handleCleared}
+            notify={(message, severity) => setSnackbar({ children: message, severity })}
           />
         )}
         {isValidationModalOpen && (
@@ -1931,98 +2029,6 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
                 </Button>
                 <Button disabled={isResettingValidations} onClick={async () => await handleCloseModal(setIsResetValidationModalOpen, false)}>
                   No
-                </Button>
-              </DialogActions>
-            </ModalDialog>
-          </Modal>
-        )}
-        {isSingleCMVErrorOpen && cmvSelected > 0 && (
-          <Modal open={isSingleCMVErrorOpen} onClose={() => {}}>
-            <ModalDialog role={'alertdialog'}>
-              <DialogTitle>Details</DialogTitle>
-              <DialogContent>
-                The following validation errors were found in this row:
-                <Stack direction={'column'} gap={1.5} sx={{ display: 'flex', flex: 1 }}>
-                  {validationErrors[cmvSelected].errors.map((err, index) => (
-                    <Stack key={index} direction={'column'} spacing={2} alignItems={'center'}>
-                      {err.validationPairs.map((vp, index) => (
-                        <Stack key={`${index}-stack`} direction={'row'}>
-                          <Chip key={`${index}-cr`}>{vp.criterion}</Chip>
-                          <ArrowRightAlt />
-                          <Chip key={`${index}-desc`}>{vp.description}</Chip>
-                        </Stack>
-                      ))}
-                    </Stack>
-                  ))}
-                </Stack>
-              </DialogContent>
-              <DialogActions>
-                <Button
-                  onClick={async () => {
-                    await handleCloseModal(setIsSingleCMVErrorOpen, false);
-                    setCMVSelected(-1);
-                  }}
-                >
-                  Close
-                </Button>
-                <Button
-                  onClick={async () => {
-                    setIsClearingErrors(true);
-                    try {
-                      const deleteResponse = await fetch(`/api/query`, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                          query: `DELETE mel
-                                  FROM ??.measurement_error_log mel
-                                         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
-                                  WHERE mel.MeasurementID = ?
-                                    AND me.ErrorSource = ?`,
-                          params: [currentSite?.schemaName, currentSite?.schemaName, cmvSelected, 'validation'],
-                          format: true
-                        })
-                      });
-
-                      if (!deleteResponse.ok) {
-                        throw new Error('Failed to delete validation errors');
-                      }
-
-                      const updateResponse = await fetch(`/api/query`, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                          query: `UPDATE ??.coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?`,
-                          params: [currentSite?.schemaName, cmvSelected],
-                          format: true
-                        })
-                      });
-
-                      if (!updateResponse.ok) {
-                        throw new Error('Failed to update validation status');
-                      }
-
-                      await fetchValidationErrors();
-                      await handleCloseModal(setIsSingleCMVErrorOpen, false);
-                      setCMVSelected(-1);
-
-                      setSnackbar({
-                        children: 'Validation errors cleared successfully',
-                        severity: 'success'
-                      });
-                    } catch (error: unknown) {
-                      const errorObj = error instanceof Error ? error : new Error(String(error));
-                      const message = errorObj.message || 'Unknown error';
-                      ailogger.error('Clear errors failed:', errorObj);
-                      setSnackbar({
-                        children: `Failed to clear errors: ${message}`,
-                        severity: 'error'
-                      });
-                    } finally {
-                      setIsClearingErrors(false);
-                    }
-                  }}
-                  disabled={isClearingErrors}
-                  startDecorator={isClearingErrors ? <CircularProgress size="sm" /> : undefined}
-                >
-                  {isClearingErrors ? 'Clearing...' : 'Clear Errors'}
                 </Button>
               </DialogActions>
             </ModalDialog>
