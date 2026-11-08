@@ -492,3 +492,11 @@ export function resolveEnterNavigationTarget(
   const nextField = visibleFields.slice(currentIndex + 1).find(field => field !== ACTIONS_FIELD && isFieldEditable(field));
   return nextField ? { kind: 'focusField', field: nextField } : { kind: 'highlightSave' };
 }
+
+const LEADING_SQL_CALC_FOUND_ROWS = /^(\s*SELECT\s+)SQL_CALC_FOUND_ROWS\s+/i;
+const TRAILING_PAGE_LIMIT = /\bLIMIT\s+\d+\s*,\s*\d+(?=\s*;?\s*$)/i;
+
+/** Only the clauses the server put at the two ends of the query: a search value can contain the same words. */
+export function toUnpaginatedExportQuery(finishedQuery: string): string {
+  return finishedQuery.replace(LEADING_SQL_CALC_FOUND_ROWS, '$1').replace(TRAILING_PAGE_LIMIT, '').trim();
+}

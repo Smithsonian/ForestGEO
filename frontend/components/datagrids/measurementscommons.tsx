@@ -104,7 +104,8 @@ import {
   resolveEnterNavigationTarget,
   selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
-  toServerMeasurementFilterModel
+  toServerMeasurementFilterModel,
+  toUnpaginatedExportQuery
 } from './measurementscommonsutils';
 import { buildMeasurementStateCountsSql } from '@/config/measurementstatefilters';
 import type { GridDensity } from '@mui/x-data-grid';
@@ -805,24 +806,18 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         currentCensus?.plotCensusNumber
       );
 
+      const { finishedQuery } = await (
+        await fetch(tempQuery, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filterModel: tempFilter })
+        })
+      ).json();
       const results: MeasurementsSummaryResult[] = await (
         await fetch(`/api/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            (
-              await (
-                await fetch(tempQuery, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ filterModel: tempFilter })
-                })
-              ).json()
-            ).finishedQuery
-              .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
-              .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
-              .trim()
-          )
+          body: JSON.stringify(toUnpaginatedExportQuery(finishedQuery))
         })
       ).json();
       const headers = Object.keys(results[0] ?? []).filter(header => !['CoreMeasurementID', 'SpeciesID', 'QuadratID', 'PlotID', 'CensusID'].includes(header));

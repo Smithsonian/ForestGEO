@@ -24,6 +24,7 @@ import {
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
   toServerMeasurementFilterModel,
+  toUnpaginatedExportQuery,
   UNDO_FAILED_SNACKBAR_MESSAGE,
   UNRESOLVED_ERRORS_SNACKBAR_MESSAGE,
   type MeasurementEditRevertEffects,
@@ -32,6 +33,7 @@ import {
 import { UNCONFIRMED_OUTCOME_MESSAGE, type EditRevertRequest } from '@/lib/editplan/requestrevert';
 import type { ApplyResult, EditPlan } from '@/config/editplan/types';
 import { HTTPResponses } from '@/config/macros';
+import { buildMeasurementsSummaryPageQueries } from '@/lib/viewdata/measurementssummaryquery';
 
 describe('MeasurementsCommons - Bug Fix Tests', () => {
   beforeEach(() => {
@@ -811,5 +813,58 @@ describe('resolveEnterNavigationTarget (Actions is now the first column)', () =>
 
   it('never targets the actions column even if it reports editable', () => {
     expect(resolveEnterNavigationTarget(['treeTag', 'actions'], 'treeTag', () => true)).toEqual({ kind: 'highlightSave' });
+  });
+});
+
+describe('toUnpaginatedExportQuery (the export strips only the page LIMIT the server appended)', () => {
+  const EXPORT_SCHEMA = 'forestgeo_testing';
+  const EXPORT_PAGE = 3;
+  const EXPORT_PAGE_SIZE = 25;
+  const PAGE_LIMIT = `LIMIT ${EXPORT_PAGE * EXPORT_PAGE_SIZE}, ${EXPORT_PAGE_SIZE}`;
+  const LIMIT_LOOKING_SEARCH = 'LIMIT 1, 2';
+  const exportQueryFor = (searchValue: string) =>
+    buildMeasurementsSummaryPageQueries({
+      schema: EXPORT_SCHEMA,
+      columns: ['treeTag', 'stemTag'],
+      filterModel: { items: [], quickFilterValues: [searchValue], visible: [], tss: [] },
+      sortModel: [],
+      plotID: 1,
+      plotCensusNumber: 1,
+      page: EXPORT_PAGE,
+      pageSize: EXPORT_PAGE_SIZE
+    }).exportQuery;
+
+  it('removes the trailing page LIMIT from the real export query', () => {
+    const exportQuery = exportQueryFor('010203');
+    const observed = toUnpaginatedExportQuery(exportQuery);
+    console.log('[export query] before', JSON.stringify(exportQuery.slice(-120)), 'after', JSON.stringify(observed.slice(-120)));
+    expect(exportQuery).toContain(PAGE_LIMIT);
+    expect(observed).not.toContain(PAGE_LIMIT);
+    expect(observed).toContain('ORDER BY');
+  });
+
+  it('keeps a search value that reads like a LIMIT clause, and still removes the page LIMIT', () => {
+    const exportQuery = exportQueryFor(LIMIT_LOOKING_SEARCH);
+    const observed = toUnpaginatedExportQuery(exportQuery);
+    console.log(
+      '[export query] search literal case',
+      JSON.stringify({
+        literalBefore: exportQuery.includes(LIMIT_LOOKING_SEARCH),
+        literalAfter: observed.includes(LIMIT_LOOKING_SEARCH),
+        pageLimitAfter: observed.includes(PAGE_LIMIT)
+      })
+    );
+    expect(exportQuery).toContain(LIMIT_LOOKING_SEARCH);
+    expect(observed).toContain(LIMIT_LOOKING_SEARCH);
+    expect(observed).not.toContain(PAGE_LIMIT);
+  });
+
+  it('keeps a search value that reads like SQL_CALC_FOUND_ROWS', () => {
+    const observed = toUnpaginatedExportQuery(exportQueryFor('SQL_CALC_FOUND_ROWS '));
+    expect(observed).toContain('SQL_CALC_FOUND_ROWS ');
+  });
+
+  it('removes a leading SQL_CALC_FOUND_ROWS from a legacy paginated query', () => {
+    expect(toUnpaginatedExportQuery('SELECT SQL_CALC_FOUND_ROWS * FROM t ORDER BY a LIMIT 0, 10;')).toBe('SELECT * FROM t ORDER BY a ;');
   });
 });
