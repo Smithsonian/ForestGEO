@@ -204,6 +204,13 @@ describe('measurementssummary branch on real MySQL', () => {
 
   it('sorts by status rank and pages stably', async () => {
     const full = await query({ sortModel: [{ field: 'measurementStatus', sort: 'asc' }] });
+    const returnedStatuses = full.map(row => ({ coreMeasurementID: row.coreMeasurementID, measurementStatus: row.measurementStatus }));
+    const knownStatuses = Object.keys(MEASUREMENT_STATUS_RANK);
+    console.log('[viewdata query] status rank sort input', JSON.stringify({ knownStatuses, returnedStatuses }));
+    expect(full.length).toBeGreaterThan(0);
+    for (const { coreMeasurementID, measurementStatus } of returnedStatuses) {
+      expect(knownStatuses, `row ${String(coreMeasurementID)} measurementStatus`).toContain(measurementStatus);
+    }
     const ranks = full.map(row => MEASUREMENT_STATUS_RANK[row.measurementStatus as keyof typeof MEASUREMENT_STATUS_RANK]);
     expect([...ranks].sort((a, b) => a - b)).toEqual(ranks);
     const paged: Array<Record<string, unknown>> = [];
