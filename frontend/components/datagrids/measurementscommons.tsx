@@ -311,8 +311,8 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   const [sheetTarget, setSheetTarget] = useState<ViewDataSheetTarget | null>(null);
   /** The census the page last settled on; a save compares it with the census it started in (A25). */
   const previousCensusIDRef = useRef(activeCensusID);
-  // The counts message must not replace this warning: the user would never learn the edit was dropped.
-  const editNotSavedSnackbarRef = useRef<typeof snackbar>(null);
+  // The counts re-read replaces only a counts message: an action's outcome (a delete, an unsaved edit) must stay readable.
+  const countsSnackbarRef = useRef<typeof snackbar>(null);
   const orgCensusList = useOrgCensusListContext();
   const priorCensusNumberFor = useCallback((censusID: number) => findPlotCensusNumberForCensusID(orgCensusList, censusID), [orgCensusList]);
   const canEditRows = !locked && canEditMeasurementRows(session?.user?.userStatus);
@@ -403,8 +403,10 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
           valid: counts.valid
         });
         if (snackbarByState) {
+          const previousCountsSnackbar = countsSnackbarRef.current;
           const countsSnackbar = { children: snackbarByState.message, severity: snackbarByState.severity };
-          setSnackbar(shown => (shown === editNotSavedSnackbarRef.current ? shown : countsSnackbar));
+          countsSnackbarRef.current = countsSnackbar;
+          setSnackbar(shown => (shown === null || shown === previousCountsSnackbar ? countsSnackbar : shown));
         }
       } catch (error: unknown) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
@@ -933,12 +935,10 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
 
   const notifyEditNotSaved = useCallback(
     (row: GridRowModel) => {
-      const editNotSavedSnackbar = {
+      setSnackbar({
         children: VIEW_DATA_TEXT.editNotSavedCensusChanged(String(row.treeTag ?? EMPTY_CELL_DISPLAY), String(row.stemTag ?? EMPTY_CELL_DISPLAY)),
-        severity: 'warning' as const
-      };
-      editNotSavedSnackbarRef.current = editNotSavedSnackbar;
-      setSnackbar(editNotSavedSnackbar);
+        severity: 'warning'
+      });
     },
     [setSnackbar]
   );

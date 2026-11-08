@@ -9,7 +9,7 @@ import ViewDataGridToolbar from '@/components/viewdata/viewdatagridtoolbar';
 import { VIEW_DATA_COLUMN_ORDER, VIEW_DATA_DEFAULT_HIDDEN_COLUMNS, VIEW_DATA_ROW_HEIGHT, VIEW_DATA_TEXT } from '@/config/viewdata';
 import { ALWAYS_VISIBLE_COLUMN_MENU_SX } from '@/config/styleddatagrid';
 import { CLEAR_VALIDATION_ERRORS_SUCCESS } from '@/config/errorsexplorer';
-import { ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE, UNRESOLVED_ERRORS_SNACKBAR_MESSAGE } from './measurementscommonsutils';
+import { PENDING_VALIDATION_SNACKBAR_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE, UNRESOLVED_ERRORS_SNACKBAR_MESSAGE } from './measurementscommonsutils';
 import { INFINITE_DEFAULT_CHUNK } from './hooks/useinfinitegridrows';
 import type { ViewDataRowDetailsProps } from '@/components/viewdata/viewdatarowdetails';
 import { HTTPResponses } from '@/config/macros';
@@ -531,6 +531,36 @@ describe('MeasurementsCommons View Data details sheet', () => {
     expect(viewRebuildRequests()).toHaveLength(1);
     expect(await screen.findByText(ROW_DELETED_MESSAGE)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Measurement 501' })).not.toBeInTheDocument());
+  });
+
+  it('keeps the Row deleted message on screen after the counts re-read settles, even when the counts have unresolved errors', async () => {
+    const user = userEvent.setup();
+    render(<MeasurementsGridHarness initialRows={[ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+    await waitFor(() => expect(ctx.grid).not.toBeNull());
+    await waitFor(() => expect(countRequests().length).toBeGreaterThan(0));
+    await openSheetForRow(user, ROW);
+    await user.click(await screen.findByRole('button', { name: VIEW_DATA_TEXT.deleteMeasurement }));
+    const countsBeforeDelete = countRequests().length;
+    await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.deleteConfirm }));
+    await waitFor(() => expect(countRequests().length).toBeGreaterThan(countsBeforeDelete));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+    });
+    const visibleAlerts = screen.queryAllByRole('alert').map(alert => alert.textContent);
+    console.log('[sheet] after delete with unresolved counts', JSON.stringify({ visibleAlerts, countsRequests: [countsBeforeDelete, countRequests().length] }));
+    expect(visibleAlerts).toEqual([ROW_DELETED_MESSAGE]);
+  });
+
+  it('still replaces a counts message with the newer counts message', async () => {
+    const PENDING_ONLY_COUNT = 5;
+    const { rerender } = render(<MeasurementsGridHarness initialRows={[ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+    expect(await screen.findByText(UNRESOLVED_ERRORS_SNACKBAR_MESSAGE(COUNTS_ROW.CountUnresolvedLogged))).toBeInTheDocument();
+    countsRow = { CountUnresolvedLogged: 0, CountFailedNoLog: 0, CountPending: PENDING_ONLY_COUNT, CountValid: 0 };
+    switchCensus(rerender);
+    await screen.findByText(PENDING_VALIDATION_SNACKBAR_MESSAGE(PENDING_ONLY_COUNT));
+    const visibleAlerts = screen.queryAllByRole('alert').map(alert => alert.textContent);
+    console.log('[counts snackbar] after the counts changed', JSON.stringify(visibleAlerts));
+    expect(visibleAlerts).toEqual([PENDING_VALIDATION_SNACKBAR_MESSAGE(PENDING_ONLY_COUNT)]);
   });
 
   describe('the sheet delete handler guards itself, even when the sheet is bypassed', () => {
