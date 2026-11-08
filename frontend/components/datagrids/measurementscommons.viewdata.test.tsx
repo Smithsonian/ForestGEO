@@ -280,15 +280,19 @@ describe('MeasurementsCommons View Data page controls', () => {
     const FilteredOverlay = (ctx.grid?.slots as { noRowsOverlay: React.ComponentType }).noRowsOverlay;
     render(<FilteredOverlay />);
     expect(screen.getByText(VIEW_DATA_TEXT.emptyFiltered)).toBeInTheDocument();
+    const columnFilterItems = () => (ctx.grid?.filterModel as { items: unknown[] }).items;
+    act(() => (ctx.grid?.onFilterModelChange as (model: unknown) => void)({ items: [{ id: 1, field: 'treeTag', operator: 'contains', value: 'x' }] }));
+    await waitFor(() => expect(columnFilterItems()).toHaveLength(1));
+    console.log('[page controls] before clear', JSON.stringify({ items: columnFilterItems() }));
     await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.clearFilters }));
     await waitFor(() => expect(latestControls().showOption).toBe('all'));
     console.log(
       '[page controls] after clear',
-      JSON.stringify({ show: latestControls().showOption, search: latestControls().searchText, items: (ctx.grid?.filterModel as { items: unknown[] }).items })
+      JSON.stringify({ show: latestControls().showOption, search: latestControls().searchText, items: columnFilterItems() })
     );
     expect(latestControls().searchText).toBe('');
     expect(latestControls().appliedSearchText).toBe('');
-    expect((ctx.grid?.filterModel as { items: unknown[] }).items).toEqual([]);
+    expect(columnFilterItems()).toEqual([]);
   });
 });
 
