@@ -288,7 +288,6 @@ export interface MeasurementsCommonsProps {
   gridType: string;
   gridColumns: GridColDef[];
   initialVisibleFilters?: VisibleFilter[];
-  showToolbarActions?: boolean;
   rows: GridRowsProp;
   setRows: Dispatch<SetStateAction<GridRowsProp>>;
   rowCount: number;

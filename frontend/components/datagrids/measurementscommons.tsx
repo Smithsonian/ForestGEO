@@ -197,11 +197,9 @@ export type ViewDataMeasurementsCommonsProps = MeasurementsCommonsProps & {
 
 function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsProps>) {
   const {
-    addNewRowToGrid,
     gridType,
     gridColumns,
     initialVisibleFilters,
-    showToolbarActions = true,
     rows = [],
     setRows,
     rowCount,
@@ -225,7 +223,6 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     emptyCensusAction
   } = props;
 
-  const [_newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
@@ -417,29 +414,6 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     },
     [currentSite, currentPlot, currentCensus, gridType]
   );
-
-  const handleAddNewRow = useCallback(async () => {
-    if (locked) {
-      return;
-    }
-    const newRowCount = rowCount + 1;
-    const calculatedNewLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
-    const existingLastPage = Math.ceil(rowCount / paginationModel.pageSize) - 1;
-    const isNewPageNeeded = newRowCount % paginationModel.pageSize === 1;
-
-    setIsNewRowAdded(true);
-    setShouldAddRowAfterFetch(isNewPageNeeded);
-    setNewLastPage(calculatedNewLastPage);
-
-    if (isNewPageNeeded) {
-      setPaginationModel({ ...paginationModel, page: calculatedNewLastPage });
-      addNewRowToGrid();
-    } else {
-      setPaginationModel({ ...paginationModel, page: existingLastPage });
-      addNewRowToGrid();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locked, rowCount, paginationModel, addNewRowToGrid]);
 
   const fetchUrl = React.useMemo(() => {
     if (!currentSite?.schemaName) return null;

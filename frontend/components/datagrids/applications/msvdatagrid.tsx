@@ -346,7 +346,6 @@ export default function MeasurementsSummaryViewDataGrid({
         gridType={MEASUREMENTS_SUMMARY_GRID_TYPE}
         gridColumns={MeasurementsSummaryViewGridColumns}
         initialVisibleFilters={initialVisibleFilters}
-        showToolbarActions={showToolbarActions}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}
