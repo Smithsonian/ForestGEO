@@ -203,7 +203,6 @@ function MeasurementsGridHarness({ enableInfiniteScroll = false }: { enableInfin
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={() => undefined}
-        dynamicButtons={[]}
         enableInfiniteScroll={enableInfiniteScroll}
       />
     </SWRConfig>
