@@ -942,3 +942,165 @@ export function generateEquivalenceFixture(seed: number): GeneratedFixture {
     mismatchedPlotRowIDs: planted.mismatchedPlotRowIDs
   };
 }
+
+// ---- signature and locale-tie fixtures (T14, spec Testing section 4) ----
+
+export const SIGNATURE_WITNESS_ERROR_IDS = { single: 1, triple: 234, quadruple: 2345 } as const;
+export const SIGNATURE_WITNESS_MEASUREMENT_IDS = { quadrupleCarrier: 101, tripleCarrier: 102 } as const;
+export const SIGNATURE_WITNESS_COMPLETE_LIMIT = 6;
+export const SIGNATURE_WITNESS_CUT_TO_OTHER_KEY_LIMIT = 5;
+export const SIGNATURE_WITNESS_CUT_INSIDE_KEY_LIMIT = 4;
+export const SIGNATURE_WITNESS_SHARED_KEYS = '1,234';
+
+export const MANY_TYPES_ERROR_COUNT = 40;
+export const MANY_TYPES_MEASUREMENT_ID = 101;
+export const MANY_TYPES_CUTTING_LIMIT = 64;
+
+export const DISTINCT_SIGNATURE_TYPE_COUNT = 14;
+export const DISTINCT_SIGNATURE_MEASUREMENT_COUNT = 10_500;
+export const FIXTURE_GENERATED_ROW_CODE = 'SIGNATURE_TYPE';
+
+export const LOCALE_TIE_NFC_TEXT = 'é tie';
+export const LOCALE_TIE_NFD_TEXT = 'é tie';
+export const LOCALE_TIE_NFC_FIELD = 'éField';
+export const LOCALE_TIE_NFD_FIELD = 'éField';
+export const LOCALE_TIE_MEASUREMENT_IDS = { carriesSecondType: 101, carriesFirstType: 102 } as const;
+
+const SIGNATURE_FIXTURE_CENSUS: FixtureCensus = { censusID: FIRST_CENSUS_ID, plotID: MAIN_PLOT_ID, plotCensusNumber: 1 };
+const SIGNATURE_FIXTURE_DATE = MEASUREMENT_DATES[0];
+const SIGNATURE_FIXTURE_DBH = 12.5;
+const SIGNATURE_FIXTURE_HOM = 1.3;
+
+function signatureFixtureMeasurement(coreMeasurementID: number): FixtureMeasurement {
+  return {
+    coreMeasurementID,
+    plotID: MAIN_PLOT_ID,
+    censusID: FIRST_CENSUS_ID,
+    isActive: true,
+    coreStemGUID: coreMeasurementID,
+    summaryStemGUID: coreMeasurementID,
+    coreIsValidated: true,
+    summaryIsValidated: true,
+    treeTag: `T${coreMeasurementID}`,
+    stemTag: '1',
+    speciesCode: 'AAA',
+    quadratName: 'Q01',
+    measurementDate: SIGNATURE_FIXTURE_DATE,
+    measuredDBH: SIGNATURE_FIXTURE_DBH,
+    measuredHOM: SIGNATURE_FIXTURE_HOM,
+    rawCodes: null,
+    stemLocalX: 1.5,
+    stemLocalY: 2.5,
+    ...displayColumnsFor(coreMeasurementID, null),
+    description: null,
+    uploadFileID: null,
+    uploadBatchID: null
+  };
+}
+
+function generatedErrorType(errorID: number): FixtureErrorType {
+  return { errorID, source: 'ingestion', code: `${FIXTURE_GENERATED_ROW_CODE}_${errorID}`, message: `Signature type ${errorID}` };
+}
+
+function signatureFixture(
+  errorTypes: FixtureErrorType[],
+  validations: FixtureValidation[],
+  carriers: ReadonlyArray<{ measurementID: number; errorIDs: number[] }>
+): ExplorerFixture {
+  return {
+    plotIDs: [MAIN_PLOT_ID],
+    censuses: [{ ...SIGNATURE_FIXTURE_CENSUS }],
+    errorTypes,
+    validations,
+    measurements: carriers.map(carrier => signatureFixtureMeasurement(carrier.measurementID)),
+    logs: carriers.flatMap(carrier => carrier.errorIDs.map(errorID => ({ measurementID: carrier.measurementID, errorID, isResolved: false })))
+  };
+}
+
+/** Types 1, 234 and 2345 (no 23): A carries {1, 2345}, B carries {1, 234}. A cut of one signature can look like a whole key of the other. */
+export function signatureWitnessFixture(): ExplorerFixture {
+  const ids = SIGNATURE_WITNESS_ERROR_IDS;
+  return signatureFixture(
+    [ids.single, ids.triple, ids.quadruple].map(generatedErrorType),
+    [],
+    [
+      { measurementID: SIGNATURE_WITNESS_MEASUREMENT_IDS.quadrupleCarrier, errorIDs: [ids.single, ids.quadruple] },
+      { measurementID: SIGNATURE_WITNESS_MEASUREMENT_IDS.tripleCarrier, errorIDs: [ids.single, ids.triple] }
+    ]
+  );
+}
+
+/** One measurement carrying error types 1..40. */
+export function manyTypesFixture(): ExplorerFixture {
+  const errorIDs = Array.from({ length: MANY_TYPES_ERROR_COUNT }, (_, index) => index + 1);
+  return signatureFixture(errorIDs.map(generatedErrorType), [], [{ measurementID: MANY_TYPES_MEASUREMENT_ID, errorIDs }]);
+}
+
+/** Two ingestion types whose messages are the NFC and NFD forms of one text; the measurement IDs run against the type IDs so the histogram and the oracle meet them in opposite orders. */
+export function localeTieMessageFixture(): ExplorerFixture {
+  const [firstTypeID, secondTypeID] = [1, 2];
+  return signatureFixture(
+    [
+      { errorID: firstTypeID, source: 'ingestion', code: `${FIXTURE_GENERATED_ROW_CODE}_${firstTypeID}`, message: LOCALE_TIE_NFC_TEXT },
+      { errorID: secondTypeID, source: 'ingestion', code: `${FIXTURE_GENERATED_ROW_CODE}_${secondTypeID}`, message: LOCALE_TIE_NFD_TEXT }
+    ],
+    [],
+    [
+      { measurementID: LOCALE_TIE_MEASUREMENT_IDS.carriesSecondType, errorIDs: [secondTypeID] },
+      { measurementID: LOCALE_TIE_MEASUREMENT_IDS.carriesFirstType, errorIDs: [firstTypeID] }
+    ]
+  );
+}
+
+/** Two validation types with distinct messages whose criteria are the NFC and NFD forms of one field name. */
+export function localeTieFieldFixture(): ExplorerFixture {
+  const [firstTypeID, secondTypeID] = [1, 2];
+  return signatureFixture(
+    [
+      { errorID: firstTypeID, source: 'validation', code: String(firstTypeID), message: 'Field tie first' },
+      { errorID: secondTypeID, source: 'validation', code: String(secondTypeID), message: 'Field tie second' }
+    ],
+    [
+      { validationID: firstTypeID, procedureName: 'ValidateFieldTieFirst', description: 'Field tie first', criteria: LOCALE_TIE_NFC_FIELD },
+      { validationID: secondTypeID, procedureName: 'ValidateFieldTieSecond', description: 'Field tie second', criteria: LOCALE_TIE_NFD_FIELD }
+    ],
+    [
+      { measurementID: LOCALE_TIE_MEASUREMENT_IDS.carriesSecondType, errorIDs: [secondTypeID] },
+      { measurementID: LOCALE_TIE_MEASUREMENT_IDS.carriesFirstType, errorIDs: [firstTypeID] }
+    ]
+  );
+}
+
+/** The 14 error types, the plot and the census; the measurements come from seedDistinctSignatureMeasurements. */
+export function distinctSignatureTypesFixture(): ExplorerFixture {
+  const errorIDs = Array.from({ length: DISTINCT_SIGNATURE_TYPE_COUNT }, (_, index) => index + 1);
+  return signatureFixture(errorIDs.map(generatedErrorType), [], []);
+}
+
+/**
+ * Measurement k (1..DISTINCT_SIGNATURE_MEASUREMENT_COUNT) carries the error types whose ID minus one is a set bit of k, so
+ * every measurement has a different non-empty type set. Run it after replaceFixture(distinctSignatureTypesFixture()).
+ */
+export async function seedDistinctSignatureMeasurements(connection: Connection): Promise<void> {
+  await connection.query(`SET SESSION cte_max_recursion_depth = ${DISTINCT_SIGNATURE_MEASUREMENT_COUNT}`);
+  await connection.query('SET FOREIGN_KEY_CHECKS = 0');
+  try {
+    const numbers = `WITH RECURSIVE numbers (k) AS (SELECT 1 UNION ALL SELECT k + 1 FROM numbers WHERE k < ${DISTINCT_SIGNATURE_MEASUREMENT_COUNT})`;
+    await connection.query(
+      `INSERT INTO coremeasurements (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       ${numbers} SELECT k, ?, k, 1, ?, ?, ?, 1 FROM numbers`,
+      [FIRST_CENSUS_ID, SIGNATURE_FIXTURE_DATE, SIGNATURE_FIXTURE_DBH, SIGNATURE_FIXTURE_HOM]
+    );
+    await connection.query(
+      `INSERT INTO measurementssummary (CoreMeasurementID, StemGUID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate, MeasuredDBH, MeasuredHOM, IsValidated)
+       ${numbers} SELECT k, k, ?, ?, CONCAT('K', k), '1', 'AAA', 'Q01', ?, ?, ?, 1 FROM numbers`,
+      [MAIN_PLOT_ID, FIRST_CENSUS_ID, SIGNATURE_FIXTURE_DATE, SIGNATURE_FIXTURE_DBH, SIGNATURE_FIXTURE_HOM]
+    );
+    await connection.query(
+      `INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
+       ${numbers} SELECT numbers.k, me.ErrorID, 0 FROM numbers JOIN measurement_errors me ON ((numbers.k >> (me.ErrorID - 1)) & 1) = 1`
+    );
+  } finally {
+    await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+  }
+}
