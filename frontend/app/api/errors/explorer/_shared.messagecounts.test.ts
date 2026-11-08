@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildErrorExplorerFacets, buildErrorMessageCounts } from './_shared';
 import { DEFAULT_ERROR_EXPLORER_FILTERS } from '@/config/errorsexplorer';
+import { ErrorTypeCatalogMismatchError } from './errorsetcounts';
 import {
   CENSUS_LIST_SIZE,
   ERROR_EXPLORER_STATEMENT_LABELS,
@@ -46,7 +47,7 @@ interface FakeMeasurement {
   hasSameBatch: boolean;
 }
 
-// 101 and 102 share a tree tag and stem tag; 201 and 202 were uploaded in one batch under one tree tag with different species; 103 is invalid without a log row.
+// Positions 1 and 2 share a tree tag and stem tag; positions 4 and 5 were uploaded in one batch under one tree tag with different species; position 3 is invalid without a log row.
 const MEASUREMENTS: FakeMeasurement[] = [
   { censusID: FIRST_CENSUS_ID, errorTypeKeys: [SHRINKAGE_ERROR_ID, MISSING_SPECIES_ERROR_ID], hasDuplicate: true, hasSameBatch: false },
   { censusID: FIRST_CENSUS_ID, errorTypeKeys: [SHRINKAGE_ERROR_ID], hasDuplicate: true, hasSameBatch: false },
@@ -78,13 +79,17 @@ function histogramRows(censusIDs: number[], withFlags: boolean): ErrorSignatureR
   return Array.from(countsBySignature.values());
 }
 
-function labelAnsweringConnection() {
+const CATALOG_WITHOUT_MISSING_SPECIES: ErrorTypeCatalogRow[] = CATALOG_ROWS.filter(row => row.ErrorID !== MISSING_SPECIES_ERROR_ID);
+
+/** The nth catalog statement is answered with catalogAnswers[n]; the last answer repeats for any later call. */
+function labelAnsweringConnection(catalogAnswers: ErrorTypeCatalogRow[][] = [CATALOG_ROWS]) {
   const executedLabels: Array<string | null> = [];
+  let catalogCalls = 0;
   const connection = {
     executeQuery: async (sql: string, params: unknown[]) => {
       const label = readStatementLabel(sql);
       executedLabels.push(label);
-      if (label === ERROR_EXPLORER_STATEMENT_LABELS.catalog) return CATALOG_ROWS;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.catalog) return catalogAnswers[Math.min(catalogCalls++, catalogAnswers.length - 1)];
       if (label === ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags) return histogramRows(censusIDsOf(params), true);
       if (label === ERROR_EXPLORER_STATEMENT_LABELS.histogramWithoutFlags) return histogramRows(censusIDsOf(params), false);
       throw new Error(`Unexpected statement in test (label ${label}): ${sql.slice(0, 80)}`);
@@ -156,7 +161,7 @@ describe('buildErrorMessageCounts', () => {
 
     const counts = await buildErrorMessageCounts(connection, { schema: SCHEMA, plotID: PLOT_ID, censusIDs: [FIRST_CENSUS_ID, SECOND_CENSUS_ID] });
 
-    expect(counts.totalMeasurements, 'measurement 101 has two errors but is one measurement').toBe(5);
+    expect(counts.totalMeasurements, 'the first measurement has two errors but is one measurement').toBe(5);
     expect(counts.messages).toEqual([
       { value: SHRINKAGE_MESSAGE, count: 3 },
       { value: MISSING_SPECIES_MESSAGE, count: 2 },
@@ -171,5 +176,79 @@ describe('buildErrorMessageCounts', () => {
 
     expect(counts).toEqual({ totalMeasurements: 0, messages: [] });
     expect(executedLabels).toHaveLength(0);
+  });
+
+  describe('when the histogram names an error type the first catalog read lacks', () => {
+    const censusIDs = [FIRST_CENSUS_ID, SECOND_CENSUS_ID];
+    const countCatalogStatements = (labels: Array<string | null>) => labels.filter(label => label === ERROR_EXPLORER_STATEMENT_LABELS.catalog).length;
+    const countsRequest = { schema: SCHEMA, plotID: PLOT_ID, censusIDs };
+    const facetsRequest = { schema: SCHEMA, plotID: PLOT_ID, censusID: FIRST_CENSUS_ID, censusIDs, filters: DEFAULT_ERROR_EXPLORER_FILTERS };
+    const labelsOtherThanCatalogAndHistogram = (labels: Array<string | null>) =>
+      labels.filter(
+        label =>
+          label !== ERROR_EXPLORER_STATEMENT_LABELS.catalog &&
+          label !== ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags &&
+          label !== ERROR_EXPLORER_STATEMENT_LABELS.histogramWithoutFlags
+      );
+
+    it('message counts re-read the catalog once and return the full-catalog result', async () => {
+      const expected = await buildErrorMessageCounts(labelAnsweringConnection().connection, countsRequest);
+      const { connection, executedLabels } = labelAnsweringConnection([CATALOG_WITHOUT_MISSING_SPECIES, CATALOG_ROWS]);
+
+      const counts = await buildErrorMessageCounts(connection, countsRequest);
+
+      console.log('[catalog re-read] message counts labels:', executedLabels, 'counts:', JSON.stringify(counts));
+      expect(countCatalogStatements(executedLabels), 'the catalog is read, then read again').toBe(2);
+      expect(
+        counts.messages.map(option => option.value),
+        'the type the first read lacked is named'
+      ).toContain(MISSING_SPECIES_MESSAGE);
+      expect(counts).toEqual(expected);
+    });
+
+    it('facets re-read the catalog once and return the full-catalog result', async () => {
+      const expected = await buildErrorExplorerFacets(labelAnsweringConnection().connection, facetsRequest);
+      const { connection, executedLabels } = labelAnsweringConnection([CATALOG_WITHOUT_MISSING_SPECIES, CATALOG_ROWS]);
+
+      const facets = await buildErrorExplorerFacets(connection, facetsRequest);
+
+      console.log('[catalog re-read] facets labels:', executedLabels, 'messages:', JSON.stringify(facets.messages));
+      expect(countCatalogStatements(executedLabels), 'the catalog is read, then read again').toBe(2);
+      expect(
+        facets.messages.map(option => option.value),
+        'the type the first read lacked is named'
+      ).toContain(MISSING_SPECIES_MESSAGE);
+      expect(facets).toEqual(expected);
+    });
+
+    it('message counts reject with ErrorTypeCatalogMismatchError when the type is still missing after the re-read, without a Node-path fallback', async () => {
+      const { connection, executedLabels } = labelAnsweringConnection([CATALOG_WITHOUT_MISSING_SPECIES]);
+
+      const outcome = await buildErrorMessageCounts(connection, countsRequest).then(
+        () => null,
+        (error: unknown) => error
+      );
+
+      console.log('[catalog mismatch] message counts labels:', executedLabels, 'error:', String(outcome));
+      expect(outcome).toBeInstanceOf(ErrorTypeCatalogMismatchError);
+      expect((outcome as ErrorTypeCatalogMismatchError).errorTypeKeys).toEqual([MISSING_SPECIES_ERROR_ID]);
+      expect(countCatalogStatements(executedLabels), 'one re-read, no more').toBe(2);
+      expect(labelsOtherThanCatalogAndHistogram(executedLabels), 'no Node-path statement ran').toEqual([]);
+    });
+
+    it('facets reject with ErrorTypeCatalogMismatchError when the type is still missing after the re-read, without a Node-path fallback', async () => {
+      const { connection, executedLabels } = labelAnsweringConnection([CATALOG_WITHOUT_MISSING_SPECIES]);
+
+      const outcome = await buildErrorExplorerFacets(connection, facetsRequest).then(
+        () => null,
+        (error: unknown) => error
+      );
+
+      console.log('[catalog mismatch] facets labels:', executedLabels, 'error:', String(outcome));
+      expect(outcome).toBeInstanceOf(ErrorTypeCatalogMismatchError);
+      expect((outcome as ErrorTypeCatalogMismatchError).errorTypeKeys).toEqual([MISSING_SPECIES_ERROR_ID]);
+      expect(countCatalogStatements(executedLabels), 'one re-read, no more').toBe(2);
+      expect(labelsOtherThanCatalogAndHistogram(executedLabels), 'no Node-path statement ran').toEqual([]);
+    });
   });
 });
