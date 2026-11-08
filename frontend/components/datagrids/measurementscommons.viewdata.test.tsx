@@ -8,7 +8,7 @@ import type { ViewDataAboveGridControls } from '@/components/viewdata/viewdataco
 import ViewDataGridToolbar from '@/components/viewdata/viewdatagridtoolbar';
 import { VIEW_DATA_COLUMN_ORDER, VIEW_DATA_DEFAULT_HIDDEN_COLUMNS, VIEW_DATA_ROW_HEIGHT, VIEW_DATA_TEXT } from '@/config/viewdata';
 import { ALWAYS_VISIBLE_COLUMN_MENU_SX } from '@/config/styleddatagrid';
-import { CLEAR_VALIDATION_ERRORS_SUCCESS, DETAILS_SHEET_TEXT, formatTreeStemLine } from '@/config/errorsexplorer';
+import { CLEAR_UNCONFIRMED_MESSAGE, CLEAR_VALIDATION_ERRORS_SUCCESS, DETAILS_SHEET_TEXT, formatTreeStemLine } from '@/config/errorsexplorer';
 import { PENDING_VALIDATION_SNACKBAR_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE, UNRESOLVED_ERRORS_SNACKBAR_MESSAGE } from './measurementscommonsutils';
 import { INFINITE_DEFAULT_CHUNK } from './hooks/useinfinitegridrows';
 import type { ViewDataRowDetailsProps } from '@/components/viewdata/viewdatarowdetails';
@@ -1239,6 +1239,92 @@ describe('MeasurementsCommons View Data details sheet', () => {
       expect(observed.codes).toBe(DEAD_CODE);
       expect(observed.stemStatusCell).toBe('Dead');
       expect(observed.validationCell).toBe(VIEW_DATA_TEXT.validationPending);
+    });
+  });
+
+  describe('closing the sheet around a Clear (stage 7 F6)', () => {
+    const INVALID_ROW = { ...ROW, measurementStatus: 'invalidNoLog' };
+    const CLEAR_REQUEST_LOST = Symbol('the Clear response never arrives');
+    const clearAnswers: Array<[string, typeof CLEAR_REQUEST_LOST | Response, string]> = [
+      ['cleared', respond({ clearedErrorCount: 1 }), CLEAR_VALIDATION_ERRORS_SUCCESS],
+      ['unconfirmed', CLEAR_REQUEST_LOST, CLEAR_UNCONFIRMED_MESSAGE]
+    ];
+    let clearSent: boolean;
+    let countsAnswer: 'hold' | 'fail' | 'ok';
+    let releaseCounts: ((response: Response) => void) | null;
+
+    function serveClear(clearAnswer: Response | typeof CLEAR_REQUEST_LOST) {
+      fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === CLEAR_ERRORS_URL) {
+          clearSent = true;
+          return clearAnswer === CLEAR_REQUEST_LOST ? Promise.reject(new TypeError('Failed to fetch')) : Promise.resolve(clearAnswer);
+        }
+        if (clearSent && url === QUERY_URL && String(init?.body ?? '').includes(COUNTS_MARKER)) {
+          if (countsAnswer === 'fail') return Promise.reject(new TypeError('Failed to fetch'));
+          if (countsAnswer === 'hold' && releaseCounts === null) return new Promise<Response>(resolve => (releaseCounts = resolve));
+        }
+        if (url.startsWith(GRID_URL_PREFIX)) return Promise.resolve(respond({ output: [INVALID_ROW], totalCount: 1 }));
+        return route(input, init);
+      });
+    }
+
+    const closeSheet = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByRole('button', { name: 'Close details' }));
+    const clearButton = () => screen.getByRole('button', { name: 'Clear validation errors' }) as HTMLButtonElement;
+
+    beforeEach(() => {
+      clearSent = false;
+      countsAnswer = 'ok';
+      releaseCounts = null;
+    });
+
+    it.each(clearAnswers)(
+      'dismissing the sheet while a %s Clear re-reads still posts the final notice once the re-read finishes',
+      async (_label, clearAnswer, notice) => {
+        const user = userEvent.setup();
+        countsAnswer = 'hold';
+        serveClear(clearAnswer);
+        render(<MeasurementsGridHarness initialRows={[INVALID_ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+        await waitFor(() => expect(ctx.grid).not.toBeNull());
+        await openSheetForRow(user, INVALID_ROW);
+        await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
+        await waitFor(() => expect(releaseCounts).not.toBeNull());
+        await closeSheet(user);
+        await waitFor(() => expect(screen.queryByRole('heading', { name: 'Measurement 501' })).not.toBeInTheDocument());
+        await act(async () => {
+          releaseCounts?.(respond([COUNTS_ROW]));
+          await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+        });
+        const alerts = screen.queryAllByRole('alert', { hidden: true }).map(alert => alert.textContent);
+        console.log('[sheet] dismissed during the Clear re-read', JSON.stringify({ expected: notice, alerts }));
+        expect(alerts).toEqual([notice]);
+      }
+    );
+
+    it('reopening the sheet after an unconfirmed Clear whose re-read failed keeps Clear disabled until a re-read succeeds', async () => {
+      const user = userEvent.setup();
+      countsAnswer = 'fail';
+      serveClear(CLEAR_REQUEST_LOST);
+      render(<MeasurementsGridHarness initialRows={[INVALID_ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await openSheetForRow(user, INVALID_ROW);
+      await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
+      expect(await screen.findByRole('button', { name: VIEW_DATA_TEXT.retryRefresh })).toBeInTheDocument();
+      expect(clearButton().disabled).toBe(true);
+      await closeSheet(user);
+      await waitFor(() => expect(screen.queryByRole('heading', { name: 'Measurement 501' })).not.toBeInTheDocument());
+      await user.click(screen.getByRole('button', { name: new RegExp(VIEW_DATA_TEXT.detailsFor(INVALID_ROW.treeTag, INVALID_ROW.stemTag)) }));
+      await screen.findByRole('heading', { name: 'Measurement 501' });
+      const afterReopen = {
+        clearDisabled: clearButton().disabled,
+        retryOffered: screen.queryByRole('button', { name: VIEW_DATA_TEXT.retryRefresh }) !== null
+      };
+      console.log('[sheet] reopened after an unconfirmed Clear with a failed re-read', JSON.stringify(afterReopen));
+      expect(afterReopen).toEqual({ clearDisabled: true, retryOffered: true });
+      countsAnswer = 'ok';
+      await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.retryRefresh }));
+      await waitFor(() => expect(screen.queryByRole('button', { name: VIEW_DATA_TEXT.retryRefresh })).not.toBeInTheDocument());
+      expect(clearButton().disabled).toBe(false);
     });
   });
 

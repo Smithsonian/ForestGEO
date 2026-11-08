@@ -30,6 +30,7 @@ import {
   VIEW_DATA_TEXT
 } from '@/config/viewdata';
 import { formatCalendarDate } from '@/config/dateformats';
+import { useIsMounted } from '@/app/hooks/useismounted';
 import { requestClearValidationErrors, type ClearValidationErrorsOutcome } from '@/lib/errorsexplorer/requestclearvalidationerrors';
 import ailogger from '@/ailogger';
 
@@ -79,6 +80,9 @@ export interface ViewDataRowDetailsProps {
   onDeleteRow: (coreMeasurementID: number) => Promise<void>;
   /** Strict re-read of the grid rows and counts; rejects when any read fails. */
   onCleared: () => Promise<void>;
+  /** Whether a failed re-read after a Clear still has to be redone for this measurement. The page keeps it, so closing the sheet does not lose it. */
+  refreshRequired: boolean;
+  onRefreshRequiredChange: (required: boolean) => void;
   notify: (message: string, severity: 'success' | 'error') => void;
 }
 
@@ -138,6 +142,8 @@ export default function ViewDataRowDetails({
   onEditRow,
   onDeleteRow,
   onCleared,
+  refreshRequired,
+  onRefreshRequiredChange,
   notify
 }: ViewDataRowDetailsProps) {
   const [details, setDetails] = useState<ErrorExplorerDetailsResponse | null>(null);
@@ -145,10 +151,11 @@ export default function ViewDataRowDetails({
   const [detailsRead, setDetailsRead] = useState<DetailsRead>({ state: 'idle', reloadToken: 0 });
   const [isClearing, setIsClearing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [readAfterClear, setReadAfterClear] = useState<ReadAfterClearState>('current');
+  const [readAfterClear, setReadAfterClear] = useState<ReadAfterClearState>(refreshRequired ? 'stale' : 'current');
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [clearedEveryError, setClearedEveryError] = useState(false);
   const refreshClearOutcomeRef = useRef<SentClearOutcome | null>(null);
+  const { isMountedRef } = useIsMounted();
 
   const gridRow = target?.gridRow ?? null;
   const lastKnownRow = target?.lastKnownRow ?? null;
@@ -175,8 +182,10 @@ export default function ViewDataRowDetails({
   useEffect(() => {
     setIsConfirmingDelete(false);
     setClearedEveryError(false);
-    setReadAfterClear('current');
+    setReadAfterClear(refreshRequired ? 'stale' : 'current');
     refreshClearOutcomeRef.current = null;
+    // Runs only when the target changes; refreshRequired is that target's value in the same render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coreMeasurementID, censusID]);
 
   useEffect(() => {
@@ -212,6 +221,7 @@ export default function ViewDataRowDetails({
 
   const finishRefresh = (result: RefreshResult) => {
     setReadAfterClear(result === 'ok' ? 'current' : 'stale');
+    onRefreshRequiredChange(result === 'failed');
     const notice = describeRefreshOutcome(refreshClearOutcomeRef.current, result);
     refreshClearOutcomeRef.current = null;
     if (notice) notify(notice.message, notice.severity);
@@ -225,6 +235,18 @@ export default function ViewDataRowDetails({
     // finishRefresh reads refs and the latest notify; the guard above makes this act once per refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readAfterClear, detailsRead, reloadToken]);
+
+  // The sheet can be dismissed while the details read of the same re-read is pending; that read is abandoned, so the re-read ends here.
+  const readAfterClearRef = useRef(readAfterClear);
+  readAfterClearRef.current = readAfterClear;
+  const finishRefreshRef = useRef(finishRefresh);
+  finishRefreshRef.current = finishRefresh;
+  useEffect(
+    () => () => {
+      if (readAfterClearRef.current === 'awaitingDetails') finishRefreshRef.current('ok');
+    },
+    []
+  );
 
   if (!target) return null;
 
@@ -253,6 +275,10 @@ export default function ViewDataRowDetails({
     } catch (error: unknown) {
       ailogger.error('[viewdata] re-read after clear failed', error instanceof Error ? error : new Error(String(error)));
       finishRefresh('failed');
+      return;
+    }
+    if (!isMountedRef.current) {
+      finishRefresh('ok');
       return;
     }
     setReadAfterClear('awaitingDetails');

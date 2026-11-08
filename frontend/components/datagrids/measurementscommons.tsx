@@ -307,6 +307,8 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
 
   const [undoToastScope, setUndoToastScope] = useState<{ editOperationID: number; censusID: number } | null>(null);
   const [sheetTarget, setSheetTarget] = useState<ViewDataSheetTarget | null>(null);
+  /** Measurements (census + measurement) whose Clear re-read failed; kept here so closing the sheet does not lose it. */
+  const [measurementsNeedingRefresh, setMeasurementsNeedingRefresh] = useState<ReadonlySet<string>>(new Set());
   /** The census the page last settled on; a save compares it with the census it started in (A25). */
   const previousCensusIDRef = useRef(activeCensusID);
   // The counts re-read replaces only a counts message: an action's outcome (a delete, an unsaved edit) must stay readable.
@@ -1278,6 +1280,16 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     [findGridRow, isDeleteGuarded, isAnyRowEditing, rows, infinite.removeRow]
   );
 
+  const sheetRefreshKey = sheetTarget ? `${sheetTarget.censusID}:${sheetTarget.coreMeasurementID}` : null;
+  const setRefreshRequired = (refreshKey: string, required: boolean) =>
+    setMeasurementsNeedingRefresh(current => {
+      if (current.has(refreshKey) === required) return current;
+      const next = new Set(current);
+      if (required) next.add(refreshKey);
+      else next.delete(refreshKey);
+      return next;
+    });
+
   const handleCleared = useCallback(async () => {
     // The sheet calls the handler of the render it was clicked in, so a Clear that finishes after a census switch lands here with the old census.
     if (previousCensusIDRef.current !== activeCensusID) return;
@@ -1775,6 +1787,8 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
             onEditRow={handleEditFromSheet}
             onDeleteRow={handleDeleteFromSheet}
             onCleared={handleCleared}
+            refreshRequired={sheetRefreshKey !== null && measurementsNeedingRefresh.has(sheetRefreshKey)}
+            onRefreshRequiredChange={required => sheetRefreshKey !== null && setRefreshRequired(sheetRefreshKey, required)}
             notify={(message, severity) => setSnackbar({ children: message, severity })}
           />
         )}
