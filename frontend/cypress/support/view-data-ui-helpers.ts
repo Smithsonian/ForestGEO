@@ -4,7 +4,8 @@ export const RESET_VALIDATION_MENU_ITEM = 'Reset all validation states';
 export const CLEAR_VALIDATION_ERRORS_BUTTON = 'Clear validation errors';
 export const CLEAR_SUCCESS_NOTICE = 'Validation errors cleared. The row is pending until validations run again.';
 export const CLEAR_FAILURE_NOTICE = "Couldn't clear the validation errors. Nothing changed.";
-export const ROW_RESOLVED_TEXT = 'This row has no unresolved errors any more.';
+export const STATUS_CHIPS_SELECTOR = '[data-testid="view-data-status-chips"]';
+export const PENDING_STATUS_TEXT = 'Pending';
 
 const DETAILS_BUTTON_SELECTOR = 'button[aria-label^="Details for tree"]';
 const CLOSE_DETAILS_SELECTOR = 'button[aria-label="Close details"]';

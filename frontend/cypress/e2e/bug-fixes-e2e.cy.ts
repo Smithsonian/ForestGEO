@@ -9,7 +9,8 @@ import {
   CLEAR_SUCCESS_NOTICE,
   CLEAR_VALIDATION_ERRORS_BUTTON,
   RESET_VALIDATION_MENU_ITEM,
-  ROW_RESOLVED_TEXT,
+  PENDING_STATUS_TEXT,
+  STATUS_CHIPS_SELECTOR,
   chooseMoreActionsItem,
   closeRowDetails,
   openRowDetails
@@ -159,7 +160,7 @@ describe('Measurement Hub Regression Contracts', () => {
     });
   });
 
-  it('clears the row through the clear endpoint, re-reads the grid, and leaves the sheet showing no unresolved errors', () => {
+  it('clears the row through the clear endpoint, re-reads the grid, and leaves the sheet showing Pending with no errors', () => {
     mockMeasurementHubWorkflowApi({
       summaryRows: [buildMeasurementsSummaryRow({ coreMeasurementID: 104, treeTag: 'TREE104', isValidated: false })],
       errorRows: [buildSpeciesErrorRow(104, 'TREE104')],
@@ -187,7 +188,8 @@ describe('Measurement Hub Regression Contracts', () => {
       });
     cy.contains(CLEAR_SUCCESS_NOTICE).should('be.visible');
     cy.wait('@fetchMeasurementHubSummaryRows');
-    cy.contains('[role="dialog"]', ROW_RESOLVED_TEXT).should('be.visible');
+    cy.get(`[role="dialog"] ${STATUS_CHIPS_SELECTOR}`).should('contain', PENDING_STATUS_TEXT);
+    cy.contains('[role="dialog"]', SPECIES_ERROR_MESSAGE).should('not.exist');
     cy.contains('[role="dialog"] button', CLEAR_VALIDATION_ERRORS_BUTTON).should('not.exist');
 
     closeRowDetails();

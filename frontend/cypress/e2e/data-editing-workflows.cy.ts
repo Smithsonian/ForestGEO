@@ -5,7 +5,8 @@ import {
   CLEAR_SUCCESS_NOTICE,
   CLEAR_VALIDATION_ERRORS_BUTTON,
   RESET_VALIDATION_MENU_ITEM,
-  ROW_RESOLVED_TEXT,
+  PENDING_STATUS_TEXT,
+  STATUS_CHIPS_SELECTOR,
   chooseMoreActionsItem,
   closeRowDetails,
   openRowDetails
@@ -83,7 +84,8 @@ describe('Data Editing Workflows', () => {
 
     cy.wait('@clearMeasurementErrors').its('request.body.measurementID').should('equal', 102);
     cy.contains(CLEAR_SUCCESS_NOTICE).should('be.visible');
-    cy.contains('[role="dialog"]', ROW_RESOLVED_TEXT).should('be.visible');
+    cy.get(`[role="dialog"] ${STATUS_CHIPS_SELECTOR}`).should('contain', PENDING_STATUS_TEXT);
+    cy.contains('[role="dialog"]', SPECIES_ERROR_MESSAGE).should('not.exist');
     closeRowDetails();
     cy.contains('[role="row"]', 'TREE102').should('contain', 'Pending');
   });
