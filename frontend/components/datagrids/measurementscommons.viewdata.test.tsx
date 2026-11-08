@@ -1302,6 +1302,7 @@ describe('MeasurementsCommons View Data details sheet', () => {
     let clearSent: boolean;
     let countsAnswer: 'hold' | 'fail' | 'ok';
     let releaseCounts: ((response: Response) => void) | null;
+    let failHeldCounts: ((reason: Error) => void) | null;
 
     function serveClear(clearAnswer: Response | typeof CLEAR_REQUEST_LOST) {
       fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
@@ -1312,7 +1313,12 @@ describe('MeasurementsCommons View Data details sheet', () => {
         }
         if (clearSent && url === QUERY_URL && String(init?.body ?? '').includes(COUNTS_MARKER)) {
           if (countsAnswer === 'fail') return Promise.reject(new TypeError('Failed to fetch'));
-          if (countsAnswer === 'hold' && releaseCounts === null) return new Promise<Response>(resolve => (releaseCounts = resolve));
+          if (countsAnswer === 'hold' && releaseCounts === null) {
+            return new Promise<Response>((resolve, reject) => {
+              releaseCounts = resolve;
+              failHeldCounts = reject;
+            });
+          }
         }
         if (url.startsWith(GRID_URL_PREFIX)) return Promise.resolve(respond({ output: [INVALID_ROW], totalCount: 1 }));
         return route(input, init);
@@ -1326,6 +1332,7 @@ describe('MeasurementsCommons View Data details sheet', () => {
       clearSent = false;
       countsAnswer = 'ok';
       releaseCounts = null;
+      failHeldCounts = null;
     });
 
     it.each(clearAnswers)(
@@ -1375,6 +1382,53 @@ describe('MeasurementsCommons View Data details sheet', () => {
       await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.retryRefresh }));
       await waitFor(() => expect(screen.queryByRole('button', { name: VIEW_DATA_TEXT.retryRefresh })).not.toBeInTheDocument());
       expect(clearButton().disabled).toBe(false);
+    });
+
+    it('reopening the same row while the previous Clear re-read is still pending keeps the row locked, and a failure of that re-read locks the open sheet behind Retry refresh', async () => {
+      const user = userEvent.setup();
+      countsAnswer = 'hold';
+      serveClear(CLEAR_REQUEST_LOST);
+      render(<MeasurementsGridHarness initialRows={[INVALID_ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await openSheetForRow(user, INVALID_ROW);
+      await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
+      await waitFor(() => expect(failHeldCounts).not.toBeNull());
+      await closeSheet(user);
+      await waitFor(() => expect(screen.queryByRole('heading', { name: 'Measurement 501' })).not.toBeInTheDocument());
+      await user.click(screen.getByRole('button', { name: new RegExp(VIEW_DATA_TEXT.detailsFor(INVALID_ROW.treeTag, INVALID_ROW.stemTag)) }));
+      await screen.findByRole('heading', { name: 'Measurement 501' });
+      const rowActionsDisabled = () => ({
+        edit: (screen.getByRole('button', { name: DETAILS_SHEET_TEXT.editThisRow }) as HTMLButtonElement).disabled,
+        clear: clearButton().disabled,
+        deleteRow: (screen.getByRole('button', { name: VIEW_DATA_TEXT.deleteMeasurement }) as HTMLButtonElement).disabled
+      });
+      const whileRereadPending = {
+        ...rowActionsDisabled(),
+        retryOffered: screen.queryByRole('button', { name: VIEW_DATA_TEXT.retryRefresh }) !== null
+      };
+      console.log('[sheet] reopened while the previous Clear re-read is pending', JSON.stringify(whileRereadPending));
+      expect(whileRereadPending).toEqual({ edit: true, clear: true, deleteRow: true, retryOffered: false });
+      await user.hover(clearButton().parentElement as HTMLElement);
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(VIEW_DATA_TEXT.refreshingAfterClear);
+
+      await act(async () => {
+        failHeldCounts?.(new TypeError('Failed to fetch'));
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+      const afterRereadFailed = {
+        ...rowActionsDisabled(),
+        retryOffered: screen.queryByRole('button', { name: VIEW_DATA_TEXT.retryRefresh }) !== null,
+        alerts: screen.queryAllByRole('alert', { hidden: true }).map(alert => alert.textContent)
+      };
+      console.log('[sheet] the previous Clear re-read failed under the reopened sheet', JSON.stringify(afterRereadFailed));
+      expect(afterRereadFailed).toMatchObject({ edit: true, clear: true, deleteRow: true, retryOffered: true });
+
+      countsAnswer = 'ok';
+      await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.retryRefresh }));
+      await waitFor(() => expect(screen.queryByRole('button', { name: VIEW_DATA_TEXT.retryRefresh })).not.toBeInTheDocument());
+      const afterRetry = rowActionsDisabled();
+      console.log('[sheet] after Retry refresh on the reopened sheet', JSON.stringify(afterRetry));
+      expect(afterRetry).toEqual({ edit: false, clear: false, deleteRow: false });
     });
   });
 

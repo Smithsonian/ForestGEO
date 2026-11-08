@@ -113,7 +113,7 @@ import type { GridDensity } from '@mui/x-data-grid';
 import MeasurementsExportModal from '@/components/client/modals/measurementsexportmodal';
 import ViewDataGridToolbar, { nextViewDataDensity } from '@/components/viewdata/viewdatagridtoolbar';
 import type { ViewDataAboveGridControls } from '@/components/viewdata/viewdatacontrols';
-import ViewDataRowDetails, { type ViewDataSheetTarget } from '@/components/viewdata/viewdatarowdetails';
+import ViewDataRowDetails, { type ClearRefreshState, type ViewDataSheetTarget } from '@/components/viewdata/viewdatarowdetails';
 import {
   ALL_TREE_STEM_STATES,
   buildRowFieldFaults,
@@ -308,7 +308,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   const [undoToastScope, setUndoToastScope] = useState<{ editOperationID: number; censusID: number } | null>(null);
   const [sheetTarget, setSheetTarget] = useState<ViewDataSheetTarget | null>(null);
   /** Measurements (census + measurement) whose Clear re-read failed; kept here so closing the sheet does not lose it. */
-  const [measurementsNeedingRefresh, setMeasurementsNeedingRefresh] = useState<ReadonlySet<string>>(new Set());
+  const [clearRefreshStates, setClearRefreshStates] = useState<ReadonlyMap<string, ClearRefreshState>>(new Map());
   /** The census the page last settled on; a save compares it with the census it started in (A25). */
   const previousCensusIDRef = useRef(activeCensusID);
   // The counts re-read replaces only a counts message: an action's outcome (a delete, an unsaved edit) must stay readable.
@@ -1281,12 +1281,12 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   );
 
   const sheetRefreshKey = sheetTarget ? `${sheetTarget.censusID}:${sheetTarget.coreMeasurementID}` : null;
-  const setRefreshRequired = (refreshKey: string, required: boolean) =>
-    setMeasurementsNeedingRefresh(current => {
-      if (current.has(refreshKey) === required) return current;
-      const next = new Set(current);
-      if (required) next.add(refreshKey);
-      else next.delete(refreshKey);
+  const setClearRefreshState = (refreshKey: string, state: ClearRefreshState) =>
+    setClearRefreshStates(current => {
+      if ((current.get(refreshKey) ?? 'current') === state) return current;
+      const next = new Map(current);
+      if (state === 'current') next.delete(refreshKey);
+      else next.set(refreshKey, state);
       return next;
     });
 
@@ -1789,8 +1789,8 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
             onEditRow={handleEditFromSheet}
             onDeleteRow={handleDeleteFromSheet}
             onCleared={handleCleared}
-            refreshRequired={sheetRefreshKey !== null && measurementsNeedingRefresh.has(sheetRefreshKey)}
-            onRefreshRequiredChange={required => sheetRefreshKey !== null && setRefreshRequired(sheetRefreshKey, required)}
+            refreshState={(sheetRefreshKey !== null && clearRefreshStates.get(sheetRefreshKey)) || 'current'}
+            onRefreshStateChange={state => sheetRefreshKey !== null && setClearRefreshState(sheetRefreshKey, state)}
             notify={(message, severity) => setSnackbar({ children: message, severity })}
           />
         )}

@@ -119,8 +119,8 @@ function baseProps(): ViewDataRowDetailsProps {
     onEditRow: vi.fn(),
     onDeleteRow: vi.fn(async () => undefined),
     onCleared: vi.fn(async () => undefined),
-    refreshRequired: false,
-    onRefreshRequiredChange: vi.fn(),
+    refreshState: 'current',
+    onRefreshStateChange: vi.fn(),
     notify: vi.fn()
   };
 }
@@ -375,10 +375,10 @@ describe('ViewDataRowDetails', () => {
     await waitFor(() => expect(props.notify).toHaveBeenCalled());
     console.log(
       '[row details] closed during the re-read',
-      JSON.stringify({ notify: notifyCalls(props.notify), required: (props.onRefreshRequiredChange as ReturnType<typeof vi.fn>).mock.calls })
+      JSON.stringify({ notify: notifyCalls(props.notify), refreshStates: (props.onRefreshStateChange as ReturnType<typeof vi.fn>).mock.calls })
     );
     expect(notifyCalls(props.notify)).toEqual([[CLEAR_VALIDATION_ERRORS_SUCCESS, 'success']]);
-    expect(props.onRefreshRequiredChange).toHaveBeenLastCalledWith(false);
+    expect(props.onRefreshStateChange).toHaveBeenLastCalledWith('current');
   });
 
   it('stage 7 F6: a sheet closed while the details re-read is pending ends the re-read with the outcome', async () => {
@@ -400,7 +400,7 @@ describe('ViewDataRowDetails', () => {
     view.unmount();
     console.log('[row details] closed while awaiting details', JSON.stringify({ detailsReads, notify: notifyCalls(props.notify) }));
     expect(notifyCalls(props.notify)).toEqual([[CLEAR_VALIDATION_ERRORS_SUCCESS, 'success']]);
-    expect(props.onRefreshRequiredChange).toHaveBeenLastCalledWith(false);
+    expect(props.onRefreshStateChange).toHaveBeenLastCalledWith('current');
   });
 
   it('stage 7 F6: reports a failed re-read as refresh-required, and a sheet opened while one is required starts locked behind Retry refresh', async () => {
@@ -409,16 +409,54 @@ describe('ViewDataRowDetails', () => {
     const first = renderDetails({ target: INVALID_NO_LOG_TARGET(), onCleared });
     await user.click(button(DETAILS_SHEET_TEXT.clearValidationErrors));
     expect(await screen.findByRole('button', { name: VIEW_DATA_TEXT.retryRefresh })).toBeInTheDocument();
-    expect(first.props.onRefreshRequiredChange).toHaveBeenLastCalledWith(true);
+    expect(first.props.onRefreshStateChange).toHaveBeenLastCalledWith('stale');
     first.view.unmount();
-    const reopened = renderDetails({ target: INVALID_NO_LOG_TARGET(), onCleared, refreshRequired: true });
+    const reopened = renderDetails({ target: INVALID_NO_LOG_TARGET(), onCleared, refreshState: 'stale' });
     const afterReopen = disabledState();
     console.log('[row details] opened while a re-read is required', JSON.stringify({ afterReopen }));
     expect(afterReopen).toEqual({ edit: true, clear: true, deleteRow: true });
     await user.click(button(VIEW_DATA_TEXT.retryRefresh));
     await waitFor(() => expect(screen.queryByRole('button', { name: VIEW_DATA_TEXT.retryRefresh })).not.toBeInTheDocument());
-    expect(reopened.props.onRefreshRequiredChange).toHaveBeenLastCalledWith(false);
+    expect(reopened.props.onRefreshStateChange).toHaveBeenLastCalledWith('current');
     expect(button(DETAILS_SHEET_TEXT.clearValidationErrors)).toBeEnabled();
+  });
+
+  it('stage 7 F6: tells the page a re-read is under way from the moment Clear starts it, not only when it ends', async () => {
+    const user = userEvent.setup();
+    let finishReread: () => void = () => undefined;
+    const onCleared = vi.fn(() => new Promise<void>(resolve => (finishReread = resolve)));
+    const { props } = renderDetails({ target: INVALID_NO_LOG_TARGET(), onCleared });
+    await user.click(button(DETAILS_SHEET_TEXT.clearValidationErrors));
+    await waitFor(() => expect(onCleared).toHaveBeenCalledTimes(1));
+    const reportedWhilePending = (props.onRefreshStateChange as ReturnType<typeof vi.fn>).mock.calls;
+    console.log('[row details] refresh states reported while the re-read is pending', JSON.stringify(reportedWhilePending));
+    expect(reportedWhilePending).toEqual([['refreshing']]);
+    finishReread();
+    await waitFor(() => expect(props.notify).toHaveBeenCalled());
+    expect((props.onRefreshStateChange as ReturnType<typeof vi.fn>).mock.calls).toEqual([['refreshing'], ['current']]);
+  });
+
+  it('stage 7 F6: an open sheet follows the page as a re-read it did not start becomes pending, fails and is retried', async () => {
+    const user = userEvent.setup();
+    const onCleared = vi.fn(async () => undefined);
+    const { props, view } = renderDetails({ target: INVALID_NO_LOG_TARGET(), onCleared });
+    const observed: Record<string, unknown> = { current: disabledState() };
+    view.rerender(<ViewDataRowDetails {...props} refreshState="refreshing" />);
+    observed.refreshing = { ...disabledState(), retryOffered: screen.queryByRole('button', { name: VIEW_DATA_TEXT.retryRefresh }) !== null };
+    await user.hover(button(DETAILS_SHEET_TEXT.clearValidationErrors).parentElement as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(VIEW_DATA_TEXT.refreshingAfterClear);
+    view.rerender(<ViewDataRowDetails {...props} refreshState="stale" />);
+    observed.stale = { ...disabledState(), retryOffered: screen.queryByRole('button', { name: VIEW_DATA_TEXT.retryRefresh }) !== null };
+    view.rerender(<ViewDataRowDetails {...props} refreshState="current" />);
+    observed.currentAgain = disabledState();
+    console.log('[row details] following the page refresh state', JSON.stringify(observed));
+    expect(observed).toEqual({
+      current: { edit: false, clear: false, deleteRow: false },
+      refreshing: { edit: true, clear: true, deleteRow: true, retryOffered: false },
+      stale: { edit: true, clear: true, deleteRow: true, retryOffered: true },
+      currentAgain: { edit: false, clear: false, deleteRow: false }
+    });
+    expect(onCleared).not.toHaveBeenCalled();
   });
 
   it('P3-2: when the details re-read fails while the grid re-read succeeds, Edit and Delete stay disabled behind Retry refresh and Clear is not offered', async () => {

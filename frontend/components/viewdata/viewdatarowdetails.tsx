@@ -45,6 +45,8 @@ type GridRowRecord = Record<string, unknown>;
 type DetailsLoadState = 'idle' | ErrorRowDetailsStatus;
 /** After a clear the shown rows may be stale until the grid re-read and, when the row still needs them, the details re-read succeed (A26). */
 type ReadAfterClearState = 'current' | 'refreshing' | 'awaitingDetails' | 'stale';
+/** What the page keeps per measurement across the sheet closing: a re-read after a Clear is under way, or failed and still has to be redone. */
+export type ClearRefreshState = Exclude<ReadAfterClearState, 'awaitingDetails'>;
 type RefreshResult = 'ok' | 'failed';
 /** The clears the sheet re-reads after: the row changed, may have changed, or was already resolved by someone else (409 NOTHING_TO_CLEAR). */
 type SentClearOutcome = Exclude<ClearValidationErrorsOutcome['status'], 'failed'> | 'nothingToClear';
@@ -80,9 +82,9 @@ export interface ViewDataRowDetailsProps {
   onDeleteRow: (coreMeasurementID: number) => Promise<void>;
   /** Strict re-read of the grid rows and counts; rejects when any read fails. */
   onCleared: () => Promise<void>;
-  /** Whether a failed re-read after a Clear still has to be redone for this measurement. The page keeps it, so closing the sheet does not lose it. */
-  refreshRequired: boolean;
-  onRefreshRequiredChange: (required: boolean) => void;
+  /** The page keeps it from the moment a re-read starts, so closing and reopening the sheet neither loses nor misses it, and the open sheet follows its changes. */
+  refreshState: ClearRefreshState;
+  onRefreshStateChange: (state: ClearRefreshState) => void;
   notify: (message: string, severity: 'success' | 'error') => void;
 }
 
@@ -142,8 +144,8 @@ export default function ViewDataRowDetails({
   onEditRow,
   onDeleteRow,
   onCleared,
-  refreshRequired,
-  onRefreshRequiredChange,
+  refreshState,
+  onRefreshStateChange,
   notify
 }: ViewDataRowDetailsProps) {
   const [details, setDetails] = useState<ErrorExplorerDetailsResponse | null>(null);
@@ -151,7 +153,7 @@ export default function ViewDataRowDetails({
   const [detailsRead, setDetailsRead] = useState<DetailsRead>({ state: 'idle', reloadToken: 0 });
   const [isClearing, setIsClearing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [readAfterClear, setReadAfterClear] = useState<ReadAfterClearState>(refreshRequired ? 'stale' : 'current');
+  const [readAfterClear, setReadAfterClear] = useState<ReadAfterClearState>(refreshState);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [clearedEveryError, setClearedEveryError] = useState(false);
   const refreshClearOutcomeRef = useRef<SentClearOutcome | null>(null);
@@ -182,11 +184,16 @@ export default function ViewDataRowDetails({
   useEffect(() => {
     setIsConfirmingDelete(false);
     setClearedEveryError(false);
-    setReadAfterClear(refreshRequired ? 'stale' : 'current');
+    setReadAfterClear(refreshState);
     refreshClearOutcomeRef.current = null;
-    // Runs only when the target changes; refreshRequired is that target's value in the same render.
+    // Runs only when the target changes; refreshState is that target's value in the same render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coreMeasurementID, censusID]);
+
+  // A re-read this sheet did not start (the previous instance's, still pending after a close and reopen) ends under it: follow the page.
+  useEffect(() => {
+    setReadAfterClear(current => (current === 'awaitingDetails' ? current : refreshState));
+  }, [refreshState]);
 
   useEffect(() => {
     if (isDeleteBlocked && !isDeleting) setIsConfirmingDelete(false);
@@ -221,7 +228,7 @@ export default function ViewDataRowDetails({
 
   const finishRefresh = (result: RefreshResult) => {
     setReadAfterClear(result === 'ok' ? 'current' : 'stale');
-    onRefreshRequiredChange(result === 'failed');
+    onRefreshStateChange(result === 'ok' ? 'current' : 'stale');
     const notice = describeRefreshOutcome(refreshClearOutcomeRef.current, result);
     refreshClearOutcomeRef.current = null;
     if (notice) notify(notice.message, notice.severity);
@@ -269,6 +276,7 @@ export default function ViewDataRowDetails({
   const rereadAfterClear = async (clearOutcome: SentClearOutcome | null) => {
     refreshClearOutcomeRef.current = clearOutcome;
     setReadAfterClear('refreshing');
+    onRefreshStateChange('refreshing');
     setReloadToken(token => token + 1);
     try {
       await onCleared();
