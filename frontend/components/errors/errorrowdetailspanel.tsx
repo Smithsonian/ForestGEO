@@ -28,10 +28,13 @@ import {
   type ErrorExplorerDetailsResponse,
   type RelatedContradictionRow
 } from '@/config/errorsexplorer';
+import { designTokens } from '@/config/design-tokens';
 import { getMaterializedCodesValue, getUploadedCodesValue, hasCodesMismatch, renderCodesChips } from './errorcodes';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { ErrorSourceChip } from './errorsourcechip';
 import LockedControl from './lockedcontrol';
+
+const DETAILS_SHEET_Z_INDEX = designTokens.zIndex.header + 1;
 
 export type ErrorRowDetailsStatus = 'loading' | 'ready' | 'error' | 'stale';
 
@@ -151,6 +154,7 @@ export default function ErrorRowDetailsPanel(props: ErrorRowDetailsPanelProps) {
       anchor="right"
       open={open}
       onClose={onClose}
+      sx={{ zIndex: DETAILS_SHEET_Z_INDEX }}
       slotProps={{
         content: { sx: { width: { xs: '100%', sm: ERROR_DETAILS_SHEET_WIDTH }, p: 2, gap: 1.5 }, 'data-testid': 'error-row-details-sheet' } as never
       }}

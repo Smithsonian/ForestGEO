@@ -4,6 +4,7 @@ import GlobalStyles from '@mui/joy/GlobalStyles';
 import Sheet from '@mui/joy/Sheet';
 import IconButton from '@mui/joy/IconButton';
 import MenuIcon from '@mui/icons-material/Menu';
+import { designTokens } from '@/config/design-tokens';
 import { toggleSidebar } from '@/config/utils';
 
 export default function Header({ onOpenSidebar = toggleSidebar, isSidebarOpen }: { onOpenSidebar?: () => void; isSidebarOpen?: boolean }) {
@@ -28,7 +29,7 @@ export default function Header({ onOpenSidebar = toggleSidebar, isSidebarOpen }:
         top: 0,
         width: '100vw',
         height: 'var(--Header-height)',
-        zIndex: 9995,
+        zIndex: designTokens.zIndex.header,
         p: 2,
         gap: 1,
         borderBottom: '1px solid',
