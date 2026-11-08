@@ -11,11 +11,19 @@ import {
   UnsupportedFilterLogicOperatorError
 } from '@/components/processors/processormacros';
 import { DELETE as coreApiDelete, PATCH as coreApiPatch, POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
-import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
+import {
+  attachMeasurementStatus,
+  buildMeasurementsSummaryPageQueries,
+  buildTreeStemStateClauseSql,
+  PAGINATED_QUERY_LIMIT_CLAUSE,
+  validateViewDataRequest,
+  ViewDataRequestError,
+  type ViewDataFilterModel
+} from '@/lib/viewdata/measurementssummaryquery';
 import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
 // Shape of the resolved catch-all params for this slug route; the re-exported
@@ -61,9 +69,6 @@ function isValidDataType(dataType: string): dataType is AllowedDataType {
   return ALLOWED_DATA_TYPES.includes(dataType as AllowedDataType);
 }
 
-// Whitelist of allowed TSS values for measurements filter (for future validation)
-const _ALLOWED_TSS_VALUES = ['multi stem', 'old tree', 'new recruit'] as const;
-
 function parseOptionalPositiveInt(value: string | undefined): number | undefined {
   if (!value || value === 'undefined') return undefined;
   const parsed = Number.parseInt(value, 10);
@@ -80,7 +85,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
   if (body.newRow) {
     return SINGLEPOST(request, props);
   } else {
-    const filterModel: ExtendedGridFilterModel = body.filterModel;
+    const filterModel: ViewDataFilterModel = body.filterModel;
     if (!params.slugs || params.slugs.length < 3) {
       return new NextResponse(JSON.stringify({ error: 'slugs not received: expected at least 3 (schema, page, pageSize)' }), {
         status: HTTPResponses.INVALID_REQUEST
@@ -115,6 +120,16 @@ async function postHandler(request: NextRequest, context: RouteContext) {
       return new NextResponse(JSON.stringify({ error: 'filterModel is empty - filter API should not have triggered' }), {
         status: HTTPResponses.INVALID_REQUEST
       });
+    }
+    if (params.dataType === 'measurementssummary') {
+      try {
+        validateViewDataRequest(filterModel, body.sortModel);
+      } catch (error) {
+        if (error instanceof ViewDataRequestError) {
+          return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+        }
+        throw error;
+      }
     }
     try {
       resolveFilterLogicOperatorSql(filterModel.logicOperator);
@@ -196,6 +211,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
       let searchStub = '';
       let filterStub = '';
       let countQuery = '';
+      let exportQuery = '';
       const countParams: (string | number | undefined)[] = [];
 
       switch (params.dataType) {
@@ -335,22 +351,31 @@ async function postHandler(request: NextRequest, context: RouteContext) {
           }
           queryParams.push(plotID, page * pageSize, pageSize);
           break;
-        case 'measurementssummary':
+        case 'measurementssummary': {
+          const viewDataQueries = buildMeasurementsSummaryPageQueries({
+            schema,
+            columns,
+            filterModel,
+            sortModel: body.sortModel,
+            plotID,
+            plotCensusNumber,
+            page,
+            pageSize
+          });
+          paginatedQuery = viewDataQueries.paginatedQuery;
+          countQuery = viewDataQueries.countQuery;
+          exportQuery = viewDataQueries.exportQuery;
+          queryParams.push(...viewDataQueries.queryParams);
+          countParams.push(...viewDataQueries.countParams);
+          break;
+        }
         case 'measurementssummary_staging':
         case 'measurementssummaryview':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'vft');
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'vft');
           {
             const visibleClause = buildMeasurementVisibleClauseSql(schema, 'vft', filterModel.visible);
-            const ALL_TSS_STATES = ['multi stem', 'old tree', 'new recruit'] as const;
-            const validTss = filterModel.tss.filter(tss => (ALL_TSS_STATES as readonly string[]).includes(tss));
-            // Rows without an assigned tree-stem-state (hard-fail ingestion rows carry NULL
-            // UserDefinedFields) would be excluded by JSON_CONTAINS. Skip the clause when every
-            // state is selected so those rows remain visible alongside state-carrying rows.
-            const tssClause =
-              validTss.length > 0 && validTss.length < ALL_TSS_STATES.length
-                ? ` AND (${validTss.map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
-                : ``;
+            const tssClause = buildTreeStemStateClauseSql(filterModel.tss);
             const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
             const sharedWhere = `
             WHERE vft.PlotID = ?
@@ -430,13 +455,14 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             status: HTTPResponses.INVALID_REQUEST
           });
       }
-      paginatedQuery += ` LIMIT ?, ?;`;
+      paginatedQuery += PAGINATED_QUERY_LIMIT_CLAUSE;
 
       // Route the schema identifier (?? placeholders) through safeFormatQuery before
       // the value-placeholder accounting below, so the remaining `?` count matches
       // queryParams/countParams exactly.
       paginatedQuery = safeFormatQuery(schema, paginatedQuery);
       countQuery = safeFormatQuery(schema, countQuery);
+      if (exportQuery) exportQuery = safeFormatQuery(schema, exportQuery + PAGINATED_QUERY_LIMIT_CLAUSE);
 
       if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
         ailogger.error(
@@ -456,6 +482,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             result.UserDefinedFields = JSON.parse(result.UserDefinedFields).treestemstate;
           } else result.UserDefinedFields = (result.UserDefinedFields as { treestemstate?: unknown }).treestemstate;
         }
+        if (params.dataType === 'measurementssummary') attachMeasurementStatus(result);
       });
       const totalRows = totalRowsResult[0].totalRows;
       if (updatedMeasurementsExist) {
@@ -469,7 +496,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
             deprecated: MapperFactory.getMapper<any, any>(params.dataType).mapData(filteredDeprecated),
             totalCount: totalRows,
-            finishedQuery: format(paginatedQuery, queryParams)
+            finishedQuery: format(exportQuery || paginatedQuery, queryParams)
           }),
           { status: HTTPResponses.OK }
         );
@@ -479,7 +506,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
             deprecated: undefined,
             totalCount: totalRows,
-            finishedQuery: format(paginatedQuery, queryParams)
+            finishedQuery: format(exportQuery || paginatedQuery, queryParams)
           }),
           { status: HTTPResponses.OK }
         );
