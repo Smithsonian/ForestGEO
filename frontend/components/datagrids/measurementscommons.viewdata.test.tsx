@@ -1176,6 +1176,72 @@ describe('MeasurementsCommons View Data details sheet', () => {
     });
   });
 
+  describe('saving Codes in infinite mode (stage 7 F4)', () => {
+    const ALIVE_CODE = 'A';
+    const DEAD_CODE = 'D';
+    const ROW_BEFORE_SAVE = { ...ROW, attributes: ALIVE_CODE, stemStatuses: 'alive', measurementStatus: 'passed' };
+    const ROW_ON_SERVER_AFTER_SAVE = { ...ROW_BEFORE_SAVE, attributes: DEAD_CODE, stemStatuses: 'dead', measurementStatus: 'pending' };
+
+    function renderedCell(field: string, row: Record<string, unknown>) {
+      const column = (ctx.grid?.columns as GridColDef[]).find(candidate => candidate.field === field) as GridColDef;
+      const value = column.valueGetter ? (column.valueGetter as (...args: unknown[]) => unknown)(undefined, row, column, undefined) : row[field];
+      const params = { row, value, field, formattedValue: value, id: row.id };
+      const cell = render(<div data-testid="rendered-cell">{column.renderCell?.(params as never)}</div>);
+      const text = screen.getByTestId('rendered-cell').textContent;
+      cell.unmount();
+      return text;
+    }
+
+    it('shows the Stem status and Validation the server holds after the save, not the ones the row had before', async () => {
+      const user = userEvent.setup();
+      let saved = false;
+      ctx.editPreviewFlow.beginEdit = async () => {
+        saved = true;
+        return { editOperationID: null };
+      };
+      fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).startsWith(GRID_URL_PREFIX))
+          return Promise.resolve(respond({ output: [saved ? ROW_ON_SERVER_AFTER_SAVE : ROW_BEFORE_SAVE], totalCount: 1 }));
+        return route(input, init);
+      });
+      render(<MeasurementsGridHarness initialRows={[ROW_BEFORE_SAVE]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} enableInfiniteScroll />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await turnInfiniteScrollOn();
+      const firstGridRow = () => (ctx.grid?.rows as Array<Record<string, unknown>>)[0];
+      expect(renderedCell('stemStatus', firstGridRow())).toBe('Alive');
+      act(() => (ctx.grid?.onRowModesModelChange as (model: unknown) => void)({ [ROW.id]: { mode: 'edit' } }));
+      await waitFor(() => expect((ctx.grid?.rowModesModel as Record<string, { mode: string }>)[ROW.id]?.mode).toBe('edit'));
+      const editingActions = renderRowActions(ROW_BEFORE_SAVE);
+      await user.click(within(editingActions.container).getByRole('button', { name: VIEW_DATA_TEXT.saveRow }));
+      let pendingSave: Promise<unknown> = Promise.resolve();
+      act(() => {
+        pendingSave = (ctx.grid?.processRowUpdate as (newRow: unknown, oldRow: unknown) => Promise<unknown>)(
+          { ...ROW_BEFORE_SAVE, attributes: DEAD_CODE },
+          ROW_BEFORE_SAVE
+        );
+      });
+      await user.click(await screen.findByRole('button', { name: 'Confirm save' }));
+      await act(async () => {
+        await pendingSave;
+      });
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+      const observed = {
+        saved,
+        gridRows: (ctx.grid?.rows as unknown[]).length,
+        codes: firstGridRow().attributes,
+        stemStatusCell: renderedCell('stemStatus', firstGridRow()),
+        validationCell: renderedCell('measurementStatus', firstGridRow())
+      };
+      console.log('[infinite save] cells after the save', JSON.stringify(observed));
+      expect(observed.gridRows).toBe(1);
+      expect(observed.codes).toBe(DEAD_CODE);
+      expect(observed.stemStatusCell).toBe('Dead');
+      expect(observed.validationCell).toBe(VIEW_DATA_TEXT.validationPending);
+    });
+  });
+
   describe('with the real edit flow (A25; View Errors Task 16)', () => {
     const PREVIEW_URL = '/api/edits/preview';
     const APPLY_URL = '/api/edits/apply';

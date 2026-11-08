@@ -1610,7 +1610,11 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
                 onRowEditStop={handleRowEditStop}
                 processRowUpdate={async (newRow, oldRow) => {
                   const result = await processRowUpdate(newRow, oldRow);
-                  if (isInfiniteOn) infinite.upsertRow(result);
+                  if (isInfiniteOn) {
+                    infinite.upsertRow(result);
+                    // The saved row keeps the Stem status and Validation it was loaded with, and the edit may have changed other rows too.
+                    void infinite.refresh();
+                  }
                   return result;
                 }}
                 loading={showGridLoading}
