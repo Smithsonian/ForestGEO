@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MeasurementsGridHarness } from './measurementscommons.harness';
 import { ALL_TREE_STEM_STATES, STEM_STATE_LABELS, VIEW_DATA_COLUMN_HEADERS, VIEW_DATA_SORTABLE_FIELDS, VIEW_DATA_TEXT } from '@/config/viewdata';
 import { HTTPResponses } from '@/config/macros';
+import { designTokens } from '@/config/design-tokens';
 
 const faultBuilds = vi.hoisted(() => ({ calls: 0 }));
 
@@ -194,6 +195,28 @@ describe('MeasurementsCommons on the real DataGrid', () => {
     await screen.findByTestId('error-row-details-sheet');
     console.log('[real grid] Details item after open', JSON.stringify(detailsItem.getAttributeNames()));
     expect(detailsItem.getAttributeNames(), 'Details after the sheet opened').not.toContain('aria-pressed');
+  });
+
+  it('stacks a notification above the details sheet, so a message raised while the sheet is open stays visible', async () => {
+    const user = userEvent.setup();
+    const fetchWithPendingRows = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/fixeddatafilter/')) return respond({ output: currentRows, totalCount: currentRows.length });
+      if (url.startsWith('/api/validations/validationerrordisplay')) return respond({ failed: [] });
+      if (url === '/api/query') return respond(String(init?.body ?? '').includes(ATTRIBUTES_QUERY_MARKER) ? ATTRIBUTE_ROWS : [{ CountPending: 1 }]);
+      return respond({});
+    });
+    vi.stubGlobal('fetch', fetchWithPendingRows);
+    await renderRealGrid('field crew');
+    const notification = await screen.findByText(/not yet validated/);
+    await user.click(screen.getByRole(ACTION_ITEM_ROLE, { name: VIEW_DATA_TEXT.detailsFor('010203', '1') }));
+    const sheetRoot = (await screen.findByTestId('error-row-details-sheet')).closest('[role="presentation"]') as HTMLElement;
+    const notificationRoot = notification.closest('.MuiSnackbar-root') as HTMLElement;
+    const sheetZIndex = Number(getComputedStyle(sheetRoot).zIndex);
+    const notificationZIndex = Number(getComputedStyle(notificationRoot).zIndex);
+    console.log(`[real grid] z-index: header ${designTokens.zIndex.header}, details sheet ${sheetZIndex}, notification ${notificationZIndex}`);
+    expect(sheetZIndex, 'the sheet must sit above the app header').toBeGreaterThan(designTokens.zIndex.header);
+    expect(notificationZIndex, 'the notification must sit above the sheet').toBeGreaterThan(sheetZIndex);
   });
 
   it('pending: a Details-only column and no way into edit mode', async () => {

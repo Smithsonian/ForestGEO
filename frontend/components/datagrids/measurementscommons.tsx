@@ -41,6 +41,7 @@ import {
   Tooltip,
   Typography
 } from '@mui/joy';
+import { designTokens } from '@/config/design-tokens';
 import { ALWAYS_VISIBLE_COLUMN_MENU_SX, StyledDataGrid } from '@/config/styleddatagrid';
 import { buildViewDataColumns, hideEmptyViewDataColumns } from '@/components/viewdata/viewdatacolumns';
 import {
@@ -1673,7 +1674,13 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
           )}
         </Box>
         {!!snackbar && (
-          <Snackbar open anchorOrigin={{ vertical: 'top', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
+          <Snackbar
+            open
+            anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+            onClose={handleCloseSnackbar}
+            autoHideDuration={6000}
+            sx={{ zIndex: designTokens.zIndex.notificationOverDetailsSheet }}
+          >
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
