@@ -179,6 +179,27 @@ function buildLookupRows(rows: GenericRow[], field: string, key: string) {
   }));
 }
 
+type MockMeasurementStatus = 'ingestionFailed' | 'unresolvedErrors' | 'invalidNoLog' | 'pending' | 'passed';
+
+function defaultMeasurementStatus(overrides: Record<string, any>): MockMeasurementStatus {
+  if (typeof overrides.measurementStatus === 'string') return overrides.measurementStatus as MockMeasurementStatus;
+  if (overrides.stemGUID === null) return 'ingestionFailed';
+  const isValidated = overrides.isValidated === undefined ? true : overrides.isValidated;
+  if (isValidated === null) return 'pending';
+  return isValidated ? 'passed' : 'invalidNoLog';
+}
+
+export function withViewDataStatus<Row extends Record<string, any>>(row: Row, rowIDsWithValidationFailures: ReadonlySet<number>): Row {
+  return rowIDsWithValidationFailures.has(Number(row.coreMeasurementID))
+    ? {
+        ...row,
+        measurementStatus: 'unresolvedErrors',
+        unresolvedErrorCount: row.unresolvedErrorCount ?? 1,
+        primaryErrorSource: row.primaryErrorSource ?? 'validation'
+      }
+    : row;
+}
+
 export function buildMeasurementsSummaryRow(overrides: Record<string, any> = {}) {
   const coreMeasurementID = Number(overrides.coreMeasurementID ?? overrides.id ?? 1);
 
@@ -207,6 +228,7 @@ export function buildMeasurementsSummaryRow(overrides: Record<string, any> = {})
     attributes: 'A',
     userDefinedFields: 'old tree',
     errors: '',
+    measurementStatus: defaultMeasurementStatus(overrides),
     ...overrides
   };
 }
@@ -469,8 +491,13 @@ export function mockMeasurementsSummaryApi<Row extends GenericRow>({
     });
   };
 
+  const invalidIDsFrom = (failures: Array<{ coreMeasurementID: number | string }>) => new Set(failures.map(failure => Number(failure.coreMeasurementID)));
+
   cy.intercept('POST', `**/api/fixeddatafilter/measurementssummary/${schema}/**`, req => {
-    replyWithPage(req, filteredRows(req));
+    replyWithPage(
+      req,
+      filteredRows(req).map(row => withViewDataStatus(row, invalidIDsFrom(state.validationFailures)))
+    );
   }).as('filterMeasurementsSummaryRows');
 
   cy.intercept('PATCH', `**/api/fixeddata/measurementssummary/${schema}/coreMeasurementID**`, req => {

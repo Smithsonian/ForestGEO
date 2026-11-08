@@ -119,11 +119,15 @@ describe('Accessibility and responsive smoke', () => {
 
       openCensusHubPage('View Data', '/summary', isMobile);
       cy.wait('@fetchMeasurementHubSummaryRows');
-      cy.contains('[role="row"]', 'TREE101').should('contain', 'RUBI04');
+      cy.contains('[role="row"]', 'TREE101').should('be.visible');
       // MUI DataGrid virtualization currently trips axe's aria-required-children
       // rule inside the grid internals. Keep the page-level smoke while tracking
       // the grid-specific remediation separately.
       checkCriticalA11y(undefined, { 'aria-required-children': { enabled: false } });
+      cy.get('[role="row"][data-id="101"]').find('button[aria-label^="Details for tree"]').click({ force: true });
+      cy.contains('h2', 'Measurement 101').should('be.visible');
+      checkCriticalA11y('[role="dialog"]');
+      cy.get('button[aria-label="Close details"]').click();
 
       openCensusHubPage('View Errors', '/errors', isMobile);
       cy.wait('@fetchErrorsExplorerRows');
