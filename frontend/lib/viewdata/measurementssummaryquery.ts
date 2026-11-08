@@ -1,4 +1,5 @@
 import type { GridFilterItem } from '@mui/x-data-grid';
+import { format } from 'mysql2/promise';
 import {
   buildFilterModelStub,
   buildSearchStub,
@@ -6,13 +7,15 @@ import {
   SUPPORTED_FILTER_OPERATORS,
   UnsupportedFilterLogicOperatorError
 } from '@/components/processors/processormacros';
-import type { ExtendedGridFilterModel, TSSFilter } from '@/config/datagridhelpers';
+import type { ExtendedGridFilterModel, TSSFilter, VisibleFilter } from '@/config/datagridhelpers';
 import { AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import {
   buildMeasurementRowSummaryProjectionSql,
   buildMeasurementVisibleClauseSql,
   buildStemStatusFilterClauseSql,
   MEASUREMENT_STATUS_RANK_COLUMN,
+  MEASUREMENT_STATUS_VISIBLE_BUCKET,
   measurementStatusFromRank
 } from '@/config/measurementstatefilters';
 import {
@@ -31,7 +34,10 @@ export const VIEW_DATA_REQUEST_ERRORS = {
   unsupportedFilterField: 'Unsupported filter field',
   unsupportedFilterOperator: 'Unsupported filter operator',
   unsupportedLogicOperator: 'Unsupported filter logic operator',
-  unsupportedStemStatus: 'Unsupported stem status'
+  unsupportedStemStatus: 'Unsupported stem status',
+  unsupportedVisibleFilter: 'Unsupported visibility filter',
+  unsupportedStemStateFilter: 'Unsupported stem state filter',
+  unsupportedQuickFilter: 'Unsupported quick filter'
 } as const;
 
 export class ViewDataRequestError extends Error {
@@ -40,9 +46,6 @@ export class ViewDataRequestError extends Error {
     this.name = 'ViewDataRequestError';
   }
 }
-
-/** ExtendedGridFilterModel plus the Stem status list Task 11 adds to it; `unknown` until parseViewDataStemStatusFilter has checked it. */
-export type ViewDataFilterModel = ExtendedGridFilterModel & { stemStatus?: unknown };
 
 type SortKind = 'text' | 'number' | 'date' | 'rank';
 
@@ -125,17 +128,32 @@ export function parseViewDataStemStatusFilter(value: unknown): string[] {
   return Array.from(new Set(value as string[]));
 }
 
+const KNOWN_VISIBLE_FILTERS: ReadonlySet<unknown> = new Set<VisibleFilter>(Object.values(MEASUREMENT_STATUS_VISIBLE_BUCKET));
+const KNOWN_TREE_STEM_STATES: ReadonlySet<unknown> = new Set<TSSFilter>(ALL_TREE_STEM_STATES);
+
+function assertAbsentOrArrayOf(
+  value: unknown,
+  isAllowedEntry: (entry: unknown) => boolean,
+  message: (typeof VIEW_DATA_REQUEST_ERRORS)[keyof typeof VIEW_DATA_REQUEST_ERRORS]
+) {
+  if (value === undefined || value === null) return;
+  if (!Array.isArray(value) || !value.every(isAllowedEntry)) throw new ViewDataRequestError(message);
+}
+
 /** Validates everything a measurementssummary request carries before any SQL runs. */
-export function validateViewDataRequest(filterModel: ViewDataFilterModel, sortModel: unknown): void {
+export function validateViewDataRequest(filterModel: ExtendedGridFilterModel, sortModel: unknown): void {
   assertViewDataFilterItemsSupported(filterModel.items);
   assertViewDataLogicOperatorSupported(filterModel.logicOperator);
+  assertAbsentOrArrayOf(filterModel.visible, entry => KNOWN_VISIBLE_FILTERS.has(entry), VIEW_DATA_REQUEST_ERRORS.unsupportedVisibleFilter);
+  assertAbsentOrArrayOf(filterModel.tss, entry => KNOWN_TREE_STEM_STATES.has(entry), VIEW_DATA_REQUEST_ERRORS.unsupportedStemStateFilter);
+  assertAbsentOrArrayOf(filterModel.quickFilterValues, entry => typeof entry === 'string', VIEW_DATA_REQUEST_ERRORS.unsupportedQuickFilter);
   parseViewDataSortModel(sortModel);
   parseViewDataStemStatusFilter(filterModel.stemStatus);
 }
 
 /** Rows without a tree-stem state (failed rows) would fail JSON_CONTAINS, so no clause when every state is selected. */
 export function buildTreeStemStateClauseSql(tss: readonly TSSFilter[] | undefined): string {
-  const selected = (tss ?? []).filter(state => (ALL_TREE_STEM_STATES as readonly string[]).includes(state));
+  const selected = Array.from(new Set((tss ?? []).filter(state => KNOWN_TREE_STEM_STATES.has(state))));
   if (selected.length === 0 || selected.length === ALL_TREE_STEM_STATES.length) return '';
   return ` AND (${selected.map(state => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${state}'), '$.treestemstate') = 1`).join(' OR ')})`;
 }
@@ -143,7 +161,7 @@ export function buildTreeStemStateClauseSql(tss: readonly TSSFilter[] | undefine
 export interface MeasurementsSummaryPageQueryInput {
   schema: string;
   columns: string[];
-  filterModel: ViewDataFilterModel;
+  filterModel: ExtendedGridFilterModel;
   sortModel: unknown;
   plotID: number | undefined;
   plotCensusNumber: number | undefined;
@@ -151,18 +169,25 @@ export interface MeasurementsSummaryPageQueryInput {
   pageSize: number;
 }
 
+/** Ready to execute: schema identifiers escaped and every number bound. */
 export interface MeasurementsSummaryPageQueries {
-  /** `??` still unformatted and no LIMIT; the route appends PAGINATED_QUERY_LIMIT_CLAUSE and calls safeFormatQuery. */
   paginatedQuery: string;
   countQuery: string;
+  /** The page's own LIMIT is bound too; ordered by date and without the row projection, for the CSV export. */
   exportQuery: string;
-  queryParams: Array<number | undefined>;
-  countParams: Array<number | undefined>;
+}
+
+function formatSkeleton(schema: string, skeleton: string, values: Array<number | undefined>): string {
+  return format(safeFormatQuery(schema, skeleton), values);
 }
 
 /**
  * The measurementssummary branch of fixeddatafilter. The caller must have checked `schema` with isValidSchema:
  * the state predicates in config/measurementstatefilters.ts interpolate it.
+ *
+ * The search and filter clauses embed already-escaped request values, so they are spliced in AFTER the skeleton
+ * around them is formatted: run through mysql2 format or safeFormatQuery, a literal `?` or `??` in a value
+ * would be consumed as a placeholder.
  */
 export function buildMeasurementsSummaryPageQueries(input: MeasurementsSummaryPageQueryInput): MeasurementsSummaryPageQueries {
   const { schema, columns, filterModel, plotID, plotCensusNumber, page, pageSize } = input;
@@ -177,26 +202,36 @@ export function buildMeasurementsSummaryPageQueries(input: MeasurementsSummaryPa
     .map(clause => ` AND (${clause})`)
     .join('\n              ');
 
-  const sharedFrom = `
+  const scopeValues = [plotID, plotID, plotCensusNumber];
+  const pageValues = [page * pageSize, pageSize];
+  const stateFilteredScope = `
             FROM ??.measurementssummary ${MEASUREMENTS_SUMMARY_ALIAS}
-              JOIN ??.census c ON ${MEASUREMENTS_SUMMARY_ALIAS}.PlotID = c.PlotID AND ${MEASUREMENTS_SUMMARY_ALIAS}.CensusID = c.CensusID`;
-  const sharedWhere = `
+              JOIN ??.census c ON ${MEASUREMENTS_SUMMARY_ALIAS}.PlotID = c.PlotID AND ${MEASUREMENTS_SUMMARY_ALIAS}.CensusID = c.CensusID
             WHERE ${MEASUREMENTS_SUMMARY_ALIAS}.PlotID = ?
               AND c.PlotID = ?
               AND c.PlotCensusNumber = ?
               ${buildMeasurementVisibleClauseSql(schema, MEASUREMENTS_SUMMARY_ALIAS, filterModel.visible)}
               ${buildTreeStemStateClauseSql(filterModel.tss)}
               ${buildStemStatusFilterClauseSql(schema, MEASUREMENTS_SUMMARY_ALIAS, stemStatuses)}
-              ${searchAndFilter}`;
+              `;
+
+  const assemble = (selectList: string, tail: string, tailValues: number[]) =>
+    formatSkeleton(schema, `SELECT ${selectList} ${stateFilteredScope}`, scopeValues) +
+    searchAndFilter +
+    (tail ? formatSkeleton(schema, tail, tailValues) : '');
 
   return {
-    paginatedQuery: `SELECT ${MEASUREMENTS_SUMMARY_ALIAS}.*, ${buildMeasurementRowSummaryProjectionSql(schema, MEASUREMENTS_SUMMARY_ALIAS)} ${sharedFrom} ${sharedWhere}
-            ${orderBy}`,
-    countQuery: `SELECT COUNT(*) as totalRows ${sharedFrom} ${sharedWhere}`,
-    exportQuery: `SELECT ${MEASUREMENTS_SUMMARY_ALIAS}.* ${sharedFrom} ${sharedWhere}
-            ORDER BY ${MEASUREMENTS_SUMMARY_ALIAS}.MeasurementDate ASC`,
-    queryParams: [plotID, plotID, plotCensusNumber, page * pageSize, pageSize],
-    countParams: [plotID, plotID, plotCensusNumber]
+    paginatedQuery: assemble(
+      `${MEASUREMENTS_SUMMARY_ALIAS}.*, ${buildMeasurementRowSummaryProjectionSql(schema, MEASUREMENTS_SUMMARY_ALIAS)}`,
+      `\n            ${orderBy}${PAGINATED_QUERY_LIMIT_CLAUSE}`,
+      pageValues
+    ),
+    countQuery: assemble('COUNT(*) as totalRows', '', []),
+    exportQuery: assemble(
+      `${MEASUREMENTS_SUMMARY_ALIAS}.*`,
+      `\n            ORDER BY ${MEASUREMENTS_SUMMARY_ALIAS}.MeasurementDate ASC${PAGINATED_QUERY_LIMIT_CLAUSE}`,
+      pageValues
+    )
   };
 }
 

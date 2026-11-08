@@ -2,15 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   assertViewDataFilterItemsSupported,
   buildMeasurementsSummaryPageQueries,
+  type MeasurementsSummaryPageQueryInput,
   buildTreeStemStateClauseSql,
   buildViewDataOrderByClause,
-  PAGINATED_QUERY_LIMIT_CLAUSE,
   parseViewDataSortModel,
   parseViewDataStemStatusFilter,
   validateViewDataRequest,
   VIEW_DATA_REQUEST_ERRORS,
-  ViewDataRequestError,
-  type ViewDataFilterModel
+  ViewDataRequestError
 } from './measurementssummaryquery';
 import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import { SUPPORTED_FILTER_OPERATORS } from '@/components/processors/processormacros';
@@ -21,11 +20,24 @@ const PLOT_ID = 3;
 const PLOT_CENSUS_NUMBER = 2;
 const PAGE = 1;
 const PAGE_SIZE = 25;
-const ALL_VISIBLE: ViewDataFilterModel['visible'] = ['errors', 'valid', 'pending'];
-const ALL_TSS: ViewDataFilterModel['tss'] = ['old tree', 'multi stem', 'new recruit'];
+const ALL_VISIBLE: ExtendedGridFilterModel['visible'] = ['errors', 'valid', 'pending'];
+const ALL_TSS: ExtendedGridFilterModel['tss'] = ['old tree', 'multi stem', 'new recruit'];
 
-function filterModel(overrides: Partial<ViewDataFilterModel> = {}): ViewDataFilterModel {
+function filterModel(overrides: Partial<ExtendedGridFilterModel> = {}): ExtendedGridFilterModel {
   return { items: [], quickFilterValues: [], visible: ALL_VISIBLE, tss: ALL_TSS, ...overrides };
+}
+
+function queryInput(): MeasurementsSummaryPageQueryInput {
+  return {
+    schema: SCHEMA,
+    columns: ['TreeTag'],
+    filterModel: filterModel(),
+    sortModel: undefined,
+    plotID: PLOT_ID,
+    plotCensusNumber: PLOT_CENSUS_NUMBER,
+    page: PAGE,
+    pageSize: PAGE_SIZE
+  };
 }
 
 function expectRequestError(run: () => unknown, message: string) {
@@ -121,6 +133,34 @@ describe('filter fields and stem statuses', () => {
     expectRequestError(() => parseViewDataStemStatusFilter('dead'), VIEW_DATA_REQUEST_ERRORS.unsupportedStemStatus);
   });
 
+  it.each([
+    ['visible is a string', { visible: 'errors' }, VIEW_DATA_REQUEST_ERRORS.unsupportedVisibleFilter],
+    ['visible holds an unknown entry', { visible: ['errors', 'bogus'] }, VIEW_DATA_REQUEST_ERRORS.unsupportedVisibleFilter],
+    ['visible holds a non-string', { visible: [1] }, VIEW_DATA_REQUEST_ERRORS.unsupportedVisibleFilter],
+    ['visible is an object', { visible: { 0: 'errors' } }, VIEW_DATA_REQUEST_ERRORS.unsupportedVisibleFilter],
+    ['tss is a string', { tss: 'old tree' }, VIEW_DATA_REQUEST_ERRORS.unsupportedStemStateFilter],
+    ['tss holds an unknown entry', { tss: ['old tree', "x') OR 1=1 --"] }, VIEW_DATA_REQUEST_ERRORS.unsupportedStemStateFilter],
+    ['quickFilterValues is a string', { quickFilterValues: 'abc' }, VIEW_DATA_REQUEST_ERRORS.unsupportedQuickFilter],
+    ['quickFilterValues holds a number', { quickFilterValues: ['abc', 7] }, VIEW_DATA_REQUEST_ERRORS.unsupportedQuickFilter],
+    ['quickFilterValues holds an object', { quickFilterValues: [{ toString: 'x' }] }, VIEW_DATA_REQUEST_ERRORS.unsupportedQuickFilter]
+  ])('rejects a malformed filter model where %s', (_label, overrides, message) => {
+    const malformed = { ...filterModel(), ...overrides } as unknown as ExtendedGridFilterModel;
+    console.log('[malformed filter model]', JSON.stringify(malformed));
+    expectRequestError(() => validateViewDataRequest(malformed, undefined), message);
+  });
+
+  it('accepts an empty visible list (shows nothing) and an absent visible, tss or quickFilterValues (no restriction), as before', () => {
+    const absent = { items: [] } as unknown as ExtendedGridFilterModel;
+    expect(() => validateViewDataRequest(filterModel({ visible: [] }), undefined)).not.toThrow();
+    expect(() => validateViewDataRequest(absent, undefined)).not.toThrow();
+  });
+
+  it('counts three copies of one state as one distinct state, not as every state selected', () => {
+    const clause = buildTreeStemStateClauseSql(['old tree', 'old tree', 'old tree']);
+    console.log('[tss] three copies of one state', clause);
+    expect(clause).toBe(" AND (JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1)");
+  });
+
   it('skips the tree-stem-state clause when every state is selected, as today', () => {
     expect(buildTreeStemStateClauseSql(ALL_TSS)).toBe('');
     expect(buildTreeStemStateClauseSql(['old tree'])).toBe(" AND (JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1)");
@@ -152,29 +192,72 @@ describe('buildMeasurementsSummaryPageQueries', () => {
   it('puts the projection, the Stem status clause and the status ORDER BY in the paginated query only', () => {
     expect(queries.paginatedQuery).toContain('AS MeasurementStatusRank');
     expect(queries.paginatedQuery).toContain("sf_attr.Status IN ('dead')");
-    expect(queries.paginatedQuery.trim().endsWith('ORDER BY MeasurementStatusRank ASC, vft.CoreMeasurementID ASC')).toBe(true);
+    expect(queries.paginatedQuery).toContain('ORDER BY MeasurementStatusRank ASC, vft.CoreMeasurementID ASC LIMIT 25, 25;');
     expect(queries.countQuery).not.toContain('MeasurementStatusRank');
     expect(queries.countQuery).toContain("sf_attr.Status IN ('dead')");
     expect(queries.exportQuery).not.toContain('MeasurementStatusRank');
-    expect(queries.exportQuery.trim().endsWith('ORDER BY vft.MeasurementDate ASC')).toBe(true);
+    expect(queries.exportQuery).toContain('ORDER BY vft.MeasurementDate ASC LIMIT 25, 25;');
   });
 
-  it('binds plot, plot, census number, offset and page size, matching the placeholders once the LIMIT clause is added', () => {
-    const countValuePlaceholders = (sql: string) => (sql.match(/(?<!\?)\?(?!\?)/g) ?? []).length;
-    const paginatedPlaceholders = countValuePlaceholders(queries.paginatedQuery + PAGINATED_QUERY_LIMIT_CLAUSE);
-    const countPlaceholders = countValuePlaceholders(queries.countQuery);
+  it('binds plot, plot, census number, offset and page size, leaving no placeholder behind', () => {
+    const unboundPlaceholders = (sql: string) => (sql.match(/\?/g) ?? []).length;
     console.log(
-      '[page queries] params',
-      JSON.stringify({ queryParams: queries.queryParams, countParams: queries.countParams, paginatedPlaceholders, countPlaceholders })
+      '[page queries] bound tails',
+      JSON.stringify({
+        paginated: queries.paginatedQuery.slice(-90),
+        export: queries.exportQuery.slice(-60),
+        unbound: [queries.paginatedQuery, queries.countQuery, queries.exportQuery].map(unboundPlaceholders)
+      })
     );
-    expect(queries.queryParams).toEqual([PLOT_ID, PLOT_ID, PLOT_CENSUS_NUMBER, PAGE * PAGE_SIZE, PAGE_SIZE]);
-    expect(queries.countParams).toEqual([PLOT_ID, PLOT_ID, PLOT_CENSUS_NUMBER]);
-    expect(paginatedPlaceholders).toBe(queries.queryParams.length);
-    expect(countPlaceholders).toBe(queries.countParams.length);
+    expect(queries.paginatedQuery).toContain(
+      `vft.PlotID = ${PLOT_ID}\n              AND c.PlotID = ${PLOT_ID}\n              AND c.PlotCensusNumber = ${PLOT_CENSUS_NUMBER}`
+    );
+    expect(queries.countQuery).toContain(`AND c.PlotCensusNumber = ${PLOT_CENSUS_NUMBER}`);
+    expect(queries.paginatedQuery.trim().endsWith(`vft.CoreMeasurementID ASC LIMIT ${PAGE * PAGE_SIZE}, ${PAGE_SIZE};`)).toBe(true);
+    expect(queries.exportQuery.trim().endsWith(`ORDER BY vft.MeasurementDate ASC LIMIT ${PAGE * PAGE_SIZE}, ${PAGE_SIZE};`)).toBe(true);
+    expect(queries.countQuery).not.toContain('LIMIT');
+    expect([queries.paginatedQuery, queries.countQuery, queries.exportQuery].map(unboundPlaceholders)).toEqual([0, 0, 0]);
   });
 
-  it('leaves the schema identifier as ?? for the route to format', () => {
-    expect(queries.paginatedQuery).toContain('FROM ??.measurementssummary vft');
-    expect(queries.paginatedQuery).toContain(`${SCHEMA}.measurement_error_log`);
+  it('formats the schema identifier itself, escaped', () => {
+    expect(queries.paginatedQuery).toContain(`FROM \`${SCHEMA}\`.measurementssummary vft`);
+    expect(queries.paginatedQuery).toContain(`JOIN \`${SCHEMA}\`.census c`);
+    expect(queries.paginatedQuery).not.toContain('??');
+  });
+
+  it('refuses a schema that is not a ForestGEO schema', () => {
+    expect(() => buildMeasurementsSummaryPageQueries({ ...queryInput(), schema: 'mysql`; DROP TABLE x; --' })).toThrow(/Invalid or unauthorized schema/);
+  });
+});
+
+describe('a literal ? or ?? in a search or filter value', () => {
+  const FILTER_VALUE = 'a?b';
+  const SEARCH_VALUE = 'x?y??z';
+
+  const queries = buildMeasurementsSummaryPageQueries({
+    ...queryInput(),
+    filterModel: filterModel({
+      quickFilterValues: [SEARCH_VALUE],
+      items: [{ field: 'speciesCode', operator: 'equals', value: FILTER_VALUE }]
+    })
+  });
+
+  it.each([
+    ['paginatedQuery', queries.paginatedQuery],
+    ['countQuery', queries.countQuery],
+    ['exportQuery', queries.exportQuery]
+  ])('%s keeps the escaped values intact and binds the real numbers', (name, sql) => {
+    const whereStart = sql.indexOf('WHERE');
+    console.log(`[literal ?] ${name}`, JSON.stringify({ where: sql.slice(whereStart).replace(/\s+/g, ' ').slice(-520) }));
+    expect(sql).toContain("`vft`.`SpeciesCode` = 'a?b'");
+    expect(sql).toContain("LIKE '%x?y??z%'");
+    expect(sql).toContain(`vft.PlotID = ${PLOT_ID}`);
+    expect(sql).toContain(`c.PlotCensusNumber = ${PLOT_CENSUS_NUMBER}`);
+    expect(sql).not.toContain('??.');
+  });
+
+  it('puts the real LIMIT numbers on the queries that page', () => {
+    expect(queries.paginatedQuery.trim().endsWith(`LIMIT ${PAGE * PAGE_SIZE}, ${PAGE_SIZE};`)).toBe(true);
+    expect(queries.exportQuery.trim().endsWith(`LIMIT ${PAGE * PAGE_SIZE}, ${PAGE_SIZE};`)).toBe(true);
   });
 });

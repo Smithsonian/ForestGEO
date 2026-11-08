@@ -4,6 +4,7 @@ import { HTTPResponses } from '@/config/macros';
 import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { UNSUPPORTED_LOGIC_OPERATOR_MESSAGE } from '@/components/processors/processormacros';
+import ailogger from '@/ailogger';
 
 // -------------------- hoisted spies (safe for vi.mock factories) --------------------
 const { mapDataSpy, singlePostSpy, filterStubSpy, searchStubSpy } = vi.hoisted(() => ({
@@ -457,7 +458,18 @@ describe('POST fixeddatafilter — measurementssummary (View Data)', () => {
       { filterModel: { ...SEARCH_AND_FILTER_MODEL, items: [{ field: 'stemState', operator: 'is', value: 'old tree' }] } },
       'Unsupported filter field'
     ],
-    ['an unknown stem status', 'vd_stemstatus', { filterModel: { ...SEARCH_AND_FILTER_MODEL, stemStatus: ['zombie'] } }, 'Unsupported stem status']
+    ['an unknown stem status', 'vd_stemstatus', { filterModel: { ...SEARCH_AND_FILTER_MODEL, stemStatus: ['zombie'] } }, 'Unsupported stem status'],
+    ['visible sent as a string', 'vd_sort', { filterModel: { ...SEARCH_AND_FILTER_MODEL, visible: 'errors' } }, 'Unsupported visibility filter'],
+    ['an unknown visible entry', 'vd_sort', { filterModel: { ...SEARCH_AND_FILTER_MODEL, visible: ['errors', 'bogus'] } }, 'Unsupported visibility filter'],
+    ['tss sent as a string', 'vd_sort', { filterModel: { ...SEARCH_AND_FILTER_MODEL, tss: 'old tree' } }, 'Unsupported stem state filter'],
+    ['an unknown tss entry', 'vd_sort', { filterModel: { ...SEARCH_AND_FILTER_MODEL, tss: ['old tree', 'bogus'] } }, 'Unsupported stem state filter'],
+    ['quickFilterValues sent as a string', 'vd_sort', { filterModel: { ...SEARCH_AND_FILTER_MODEL, quickFilterValues: 'abc' } }, 'Unsupported quick filter'],
+    [
+      'a non-string quickFilterValues entry',
+      'vd_sort',
+      { filterModel: { ...SEARCH_AND_FILTER_MODEL, quickFilterValues: ['abc', 7] } },
+      'Unsupported quick filter'
+    ]
   ])('returns 400 for %s and runs no SQL', async (_label, schemaName, body, message) => {
     const { res, json, exec } = await post('measurementssummary', schemaName, body);
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
@@ -514,10 +526,23 @@ describe('POST fixeddatafilter — measurementssummary (View Data)', () => {
     expect(json.finishedQuery).toMatch(/ORDER BY vft\.MeasurementDate ASC LIMIT \?, \?;/);
   });
 
-  it('ANDs a search with a filter for measurementssummary but not for the view (search fixture)', async () => {
-    const { paginatedSQL } = await post('measurementssummary', 'vd_search', { filterModel: SEARCH_AND_FILTER_MODEL });
-    expect(paginatedSQL).toMatch(/AND \(SEARCH_STUB\)/);
-    expect(paginatedSQL).toMatch(/AND \(FILTER_STUB\)/);
+  it('counts three copies of one tss state as one state: the stem state predicate stays', async () => {
+    const { res, paginatedSQL } = await post('measurementssummary', 'vd_search', {
+      filterModel: { ...SEARCH_AND_FILTER_MODEL, tss: ['old tree', 'old tree', 'old tree'] }
+    });
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(paginatedSQL).toContain("JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1");
+  });
+
+  it('warns about a rejected logic operator for measurementssummary as it does for every other data type', async () => {
+    const { res, json, exec } = await post('measurementssummary', 'vd_search', {
+      filterModel: { ...SEARCH_AND_FILTER_MODEL, logicOperator: ') OR (1=1) OR (' }
+    });
+    console.log('[fixeddatafilter] warn calls', JSON.stringify(vi.mocked(ailogger.warn).mock.calls));
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(json).toEqual({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE });
+    expect(exec).not.toHaveBeenCalled();
+    expect(ailogger.warn).toHaveBeenCalledWith('[fixeddatafilter API] rejected an unsupported filter logic operator for measurementssummary');
   });
 });
 

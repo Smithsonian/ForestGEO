@@ -22,8 +22,9 @@ import {
   PAGINATED_QUERY_LIMIT_CLAUSE,
   validateViewDataRequest,
   ViewDataRequestError,
-  type ViewDataFilterModel
+  type MeasurementsSummaryPageQueries
 } from '@/lib/viewdata/measurementssummaryquery';
+import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
 // Shape of the resolved catch-all params for this slug route; the re-exported
@@ -85,7 +86,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
   if (body.newRow) {
     return SINGLEPOST(request, props);
   } else {
-    const filterModel: ViewDataFilterModel = body.filterModel;
+    const filterModel: ExtendedGridFilterModel = body.filterModel;
     if (!params.slugs || params.slugs.length < 3) {
       return new NextResponse(JSON.stringify({ error: 'slugs not received: expected at least 3 (schema, page, pageSize)' }), {
         status: HTTPResponses.INVALID_REQUEST
@@ -121,6 +122,13 @@ async function postHandler(request: NextRequest, context: RouteContext) {
         status: HTTPResponses.INVALID_REQUEST
       });
     }
+    try {
+      resolveFilterLogicOperatorSql(filterModel.logicOperator);
+    } catch (error: unknown) {
+      if (!(error instanceof UnsupportedFilterLogicOperatorError)) throw error;
+      ailogger.warn(`[fixeddatafilter API] rejected an unsupported filter logic operator for ${params.dataType}`);
+      return new NextResponse(JSON.stringify({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE }), { status: HTTPResponses.INVALID_REQUEST });
+    }
     if (params.dataType === 'measurementssummary') {
       try {
         validateViewDataRequest(filterModel, body.sortModel);
@@ -130,13 +138,6 @@ async function postHandler(request: NextRequest, context: RouteContext) {
         }
         throw error;
       }
-    }
-    try {
-      resolveFilterLogicOperatorSql(filterModel.logicOperator);
-    } catch (error: unknown) {
-      if (!(error instanceof UnsupportedFilterLogicOperatorError)) throw error;
-      ailogger.warn(`[fixeddatafilter API] rejected an unsupported filter logic operator for ${params.dataType}`);
-      return new NextResponse(JSON.stringify({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE }), { status: HTTPResponses.INVALID_REQUEST });
     }
     const page = parseInt(pageParam);
     const pageSize = parseInt(pageSizeParam);
@@ -211,7 +212,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
       let searchStub = '';
       let filterStub = '';
       let countQuery = '';
-      let exportQuery = '';
+      let viewDataQueries: MeasurementsSummaryPageQueries | undefined;
       const countParams: (string | number | undefined)[] = [];
 
       switch (params.dataType) {
@@ -352,7 +353,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
           queryParams.push(plotID, page * pageSize, pageSize);
           break;
         case 'measurementssummary': {
-          const viewDataQueries = buildMeasurementsSummaryPageQueries({
+          viewDataQueries = buildMeasurementsSummaryPageQueries({
             schema,
             columns,
             filterModel,
@@ -362,11 +363,6 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             page,
             pageSize
           });
-          paginatedQuery = viewDataQueries.paginatedQuery;
-          countQuery = viewDataQueries.countQuery;
-          exportQuery = viewDataQueries.exportQuery;
-          queryParams.push(...viewDataQueries.queryParams);
-          countParams.push(...viewDataQueries.countParams);
           break;
         }
         case 'measurementssummary_staging':
@@ -455,26 +451,37 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             status: HTTPResponses.INVALID_REQUEST
           });
       }
-      paginatedQuery += PAGINATED_QUERY_LIMIT_CLAUSE;
+      let boundPaginatedQuery: string;
+      let boundCountQuery: string;
+      let finishedQuery: string;
+      if (viewDataQueries) {
+        boundPaginatedQuery = viewDataQueries.paginatedQuery;
+        boundCountQuery = viewDataQueries.countQuery;
+        finishedQuery = viewDataQueries.exportQuery;
+      } else {
+        paginatedQuery += PAGINATED_QUERY_LIMIT_CLAUSE;
 
-      // Route the schema identifier (?? placeholders) through safeFormatQuery before
-      // the value-placeholder accounting below, so the remaining `?` count matches
-      // queryParams/countParams exactly.
-      paginatedQuery = safeFormatQuery(schema, paginatedQuery);
-      countQuery = safeFormatQuery(schema, countQuery);
-      if (exportQuery) exportQuery = safeFormatQuery(schema, exportQuery + PAGINATED_QUERY_LIMIT_CLAUSE);
+        // Route the schema identifier (?? placeholders) through safeFormatQuery before
+        // the value-placeholder accounting below, so the remaining `?` count matches
+        // queryParams/countParams exactly.
+        paginatedQuery = safeFormatQuery(schema, paginatedQuery);
+        countQuery = safeFormatQuery(schema, countQuery);
 
-      if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
-        ailogger.error(
-          `Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`
-        );
-        return new NextResponse(JSON.stringify({ error: 'Query parameter mismatch - please contact support' }), {
-          status: HTTPResponses.INTERNAL_SERVER_ERROR
-        });
+        if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
+          ailogger.error(
+            `Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`
+          );
+          return new NextResponse(JSON.stringify({ error: 'Query parameter mismatch - please contact support' }), {
+            status: HTTPResponses.INTERNAL_SERVER_ERROR
+          });
+        }
+        boundPaginatedQuery = format(paginatedQuery, queryParams);
+        boundCountQuery = format(countQuery, countParams);
+        finishedQuery = boundPaginatedQuery;
       }
       const [paginatedResults, totalRowsResult] = await Promise.all([
-        connectionManager.executeQuery(format(paginatedQuery, queryParams)),
-        connectionManager.executeQuery(format(countQuery, countParams))
+        connectionManager.executeQuery(boundPaginatedQuery),
+        connectionManager.executeQuery(boundCountQuery)
       ]);
       paginatedResults.forEach((result: Record<string, unknown>) => {
         if (result.UserDefinedFields !== undefined && result.UserDefinedFields !== null) {
@@ -496,7 +503,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
             deprecated: MapperFactory.getMapper<any, any>(params.dataType).mapData(filteredDeprecated),
             totalCount: totalRows,
-            finishedQuery: format(exportQuery || paginatedQuery, queryParams)
+            finishedQuery
           }),
           { status: HTTPResponses.OK }
         );
@@ -506,7 +513,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
             deprecated: undefined,
             totalCount: totalRows,
-            finishedQuery: format(exportQuery || paginatedQuery, queryParams)
+            finishedQuery
           }),
           { status: HTTPResponses.OK }
         );
