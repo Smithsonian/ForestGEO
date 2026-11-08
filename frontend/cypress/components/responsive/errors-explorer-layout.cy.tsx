@@ -35,6 +35,8 @@ const ACTIVE_MEASUREMENTS = 1000;
 const EXPECTED_COUNT_TEXT = '100 rows';
 const EDIT_STATE_ACTION_COUNT = 3;
 const EDITING_ROW_SELECTOR = '.MuiDataGrid-row--editing';
+const GRID_OVERLAY_SELECTOR = '.MuiDataGrid-overlay';
+const EDIT_ENTRY_ATTEMPTS = 3;
 const HEADER_PADDING_PX = 16;
 const GROUP_HEADER_RIGHT_EDGE_TOLERANCE_PX = 4;
 const GROUP_GRID_KEY = 'group:layout';
@@ -189,9 +191,22 @@ function mountInAppTheme(node: React.ReactNode) {
   );
 }
 
-function openFirstRowForEditing() {
+function doubleClickFirstRowUntilEditing(attemptsLeft: number) {
   cy.get(`.MuiDataGrid-row [data-field="${EDITABLE_FIELD}"]`).first().dblclick();
-  cy.get(EDITING_ROW_SELECTOR).should('have.length', 1);
+  cy.get('body').then($body => {
+    if ($body.find(EDITING_ROW_SELECTOR).length > 0 || attemptsLeft <= 1) {
+      cy.get(EDITING_ROW_SELECTOR).should('have.length', 1);
+      return;
+    }
+    Cypress.log({ name: 'view-errors', message: `[view-errors edit entry] double-click did not open the row; ${attemptsLeft - 1} attempt(s) left` });
+    doubleClickFirstRowUntilEditing(attemptsLeft - 1);
+  });
+}
+
+function openFirstRowForEditing() {
+  cy.wait('@explorerQuery');
+  cy.get(GRID_OVERLAY_SELECTOR).should('not.exist');
+  doubleClickFirstRowUntilEditing(EDIT_ENTRY_ATTEMPTS);
 }
 
 describe('View Errors layout in a real browser', () => {
