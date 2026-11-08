@@ -319,6 +319,8 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   const [sheetTarget, setSheetTarget] = useState<ViewDataSheetTarget | null>(null);
   /** The census the page last settled on; a save compares it with the census it started in (A25). */
   const previousCensusIDRef = useRef(activeCensusID);
+  // The counts message must not replace this warning: the user would never learn the edit was dropped.
+  const editNotSavedSnackbarRef = useRef<typeof snackbar>(null);
   const orgCensusList = useOrgCensusListContext();
   const priorCensusNumberFor = useCallback((censusID: number) => findPlotCensusNumberForCensusID(orgCensusList, censusID), [orgCensusList]);
   const canEditRows = !locked && canEditMeasurementRows(session?.user?.userStatus);
@@ -397,7 +399,8 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
           valid: counts.valid
         });
         if (snackbarByState) {
-          setSnackbar({ children: snackbarByState.message, severity: snackbarByState.severity });
+          const countsSnackbar = { children: snackbarByState.message, severity: snackbarByState.severity };
+          setSnackbar(shown => (shown === editNotSavedSnackbarRef.current ? shown : countsSnackbar));
         }
       } catch (error: unknown) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
@@ -961,11 +964,14 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   };
 
   const notifyEditNotSaved = useCallback(
-    (row: GridRowModel) =>
-      setSnackbar({
+    (row: GridRowModel) => {
+      const editNotSavedSnackbar = {
         children: VIEW_DATA_TEXT.editNotSavedCensusChanged(String(row.treeTag ?? EMPTY_CELL_DISPLAY), String(row.stemTag ?? EMPTY_CELL_DISPLAY)),
-        severity: 'warning'
-      }),
+        severity: 'warning' as const
+      };
+      editNotSavedSnackbarRef.current = editNotSavedSnackbar;
+      setSnackbar(editNotSavedSnackbar);
+    },
     [setSnackbar]
   );
 

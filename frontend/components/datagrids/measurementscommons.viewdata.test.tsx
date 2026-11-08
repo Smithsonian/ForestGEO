@@ -137,7 +137,6 @@ const COUNTS_ROW = {
   LastMeasurementDate: '2024-06-09'
 };
 
-const NO_SNACKBAR_COUNTS_ROW = { CountUnresolvedLogged: 0, CountFailedNoLog: 0, CountPending: 0, CountValid: 0 };
 const fetchMock = vi.fn();
 let countsRow: Record<string, unknown> = COUNTS_ROW;
 const controlsLog: ViewDataAboveGridControls[] = [];
@@ -542,6 +541,28 @@ describe('MeasurementsCommons View Data details sheet', () => {
       return view;
     }
 
+    /** The census switch makes refreshCounts re-read; with COUNTS_ROW's unresolved errors it posts its own snackbar once it resolves. */
+    async function switchCensusAndSettleCountsReread(rerender: (ui: React.ReactElement) => void, rows: Array<Record<string, unknown>> = [ROW]) {
+      const countRequestsBeforeSwitch = countRequests().length;
+      switchCensus(rerender, rows);
+      await waitFor(() => expect(countRequests().length).toBeGreaterThan(countRequestsBeforeSwitch));
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+    }
+
+    const visibleSnackbarTexts = () => screen.queryAllByRole('alert').map(alert => alert.textContent);
+
+    /** Logs what the snackbar shows before asserting, so a replaced message is visible in the failure output. */
+    async function expectNotSavedMessage(label: string) {
+      try {
+        await screen.findByText(NOT_SAVED);
+      } finally {
+        console.log(`[census switch, real hook] snackbar: ${label}`, JSON.stringify({ expected: NOT_SAVED, visible: visibleSnackbarTexts() }));
+      }
+      expect(screen.getByText(NOT_SAVED)).toBeInTheDocument();
+    }
+
     /** The common end state after a census switch: nothing in edit mode, no dialog, the save settled with the unchanged row. */
     async function expectSwitchSettled(label: string, saveSettled: Promise<void>) {
       await saveSettled;
@@ -558,8 +579,6 @@ describe('MeasurementsCommons View Data details sheet', () => {
     }
 
     beforeEach(() => {
-      // COUNTS_ROW makes refreshCounts post its own snackbar on a census change, which would replace the not-saved message.
-      countsRow = NO_SNACKBAR_COUNTS_ROW;
       ctx.useRealEditPreviewFlow = true;
       ctx.session.data.user.userStatus = 'global';
       pendingPreview = null;
@@ -583,9 +602,9 @@ describe('MeasurementsCommons View Data details sheet', () => {
       const { rerender } = await renderWithRealHook();
       const { pendingSave } = await startEditAndOpenSaveConfirmation(user);
       const saveSettled = expect(pendingSave).resolves.toEqual(ROW);
-      switchCensus(rerender);
+      await switchCensusAndSettleCountsReread(rerender);
       const observed = await expectSwitchSettled('save confirmation open', saveSettled);
-      expect(await screen.findByText(NOT_SAVED)).toBeInTheDocument();
+      await expectNotSavedMessage('save confirmation open');
       console.log('[census switch, real hook] final check: save confirmation open', JSON.stringify(observed));
       expect(observed).toMatchObject({ previews: 0, applies: 0 });
     });
@@ -598,9 +617,9 @@ describe('MeasurementsCommons View Data details sheet', () => {
       const saveSettled = expect(pendingSave).resolves.toEqual(ROW);
       await confirmSave(user);
       await waitFor(() => expect(pendingPreview).not.toBeNull());
-      switchCensus(rerender);
+      await switchCensusAndSettleCountsReread(rerender);
       const observed = await expectSwitchSettled('preview in flight', saveSettled);
-      expect(await screen.findByText(NOT_SAVED)).toBeInTheDocument();
+      await expectNotSavedMessage('preview in flight');
       expect(pendingPreview?.signal?.aborted).toBe(true);
       console.log('[census switch, real hook] final check: preview in flight', JSON.stringify(observed));
       expect(observed).toMatchObject({ previews: 1, applies: 0 });
@@ -613,9 +632,9 @@ describe('MeasurementsCommons View Data details sheet', () => {
       const saveSettled = expect(pendingSave).resolves.toEqual(ROW);
       await confirmSave(user);
       expect(await screen.findByTestId('edit-preview-apply')).toBeInTheDocument();
-      switchCensus(rerender);
+      await switchCensusAndSettleCountsReread(rerender);
       const observed = await expectSwitchSettled('preview dialog open', saveSettled);
-      expect(await screen.findByText(NOT_SAVED)).toBeInTheDocument();
+      await expectNotSavedMessage('preview dialog open');
       expect(screen.queryByTestId('edit-preview-apply')).not.toBeInTheDocument();
       console.log('[census switch, real hook] final check: preview dialog open', JSON.stringify(observed));
       expect(observed).toMatchObject({ previews: 1, applies: 0 });
@@ -630,10 +649,10 @@ describe('MeasurementsCommons View Data details sheet', () => {
       await confirmSave(user);
       await user.click(await screen.findByTestId('edit-preview-apply'));
       await waitFor(() => expect(pendingApply).not.toBeNull());
-      switchCensus(rerender);
+      await switchCensusAndSettleCountsReread(rerender);
       await waitFor(() => expect(screen.queryByTestId('edit-preview-apply')).not.toBeInTheDocument());
       await act(async () => pendingApply?.settle(editJson({ freshPlan: WARNING_PLAN }, HASH_DRIFT_STATUS)));
-      expect(await screen.findByText(NOT_SAVED)).toBeInTheDocument();
+      await expectNotSavedMessage('apply in flight, then 409');
       const observed = await expectSwitchSettled('apply in flight, then 409', saveSettled);
       expect(screen.queryByTestId('edit-preview-apply')).not.toBeInTheDocument();
       console.log('[census switch, real hook] final check: apply in flight, then 409', JSON.stringify(observed));
@@ -649,7 +668,7 @@ describe('MeasurementsCommons View Data details sheet', () => {
       await confirmSave(user);
       await user.click(await screen.findByTestId('edit-preview-apply'));
       await waitFor(() => expect(pendingApply).not.toBeNull());
-      switchCensus(rerender);
+      await switchCensusAndSettleCountsReread(rerender);
       await act(async () => pendingApply?.settle(editJson(APPLY_RESULT)));
       expect(await screen.findByText(ROW_UPDATED_MESSAGE)).toBeInTheDocument();
       const observed = await expectSwitchSettled('apply in flight, then success', saveSettled);
@@ -677,14 +696,14 @@ describe('MeasurementsCommons View Data details sheet', () => {
       await confirmSave(user);
       await user.click(await screen.findByTestId('edit-preview-apply'));
       await waitFor(() => expect(pendingApply).not.toBeNull());
-      switchCensus(rerender, [CENSUS_B_ROW]);
+      await switchCensusAndSettleCountsReread(rerender, [CENSUS_B_ROW]);
       await waitFor(() => expect(screen.queryByTestId('edit-preview-apply')).not.toBeInTheDocument());
       await censusASettled;
       const { pendingSave: censusBSave } = await startEditAndOpenSaveConfirmation(user, CENSUS_B_ROW);
       const censusBSettled = expect(censusBSave).resolves.toMatchObject({ coreMeasurementID: CENSUS_B_ROW.coreMeasurementID });
       // Census A's detached apply answers only now, while census B's confirmation is open.
       await act(async () => pendingApply?.settle(editJson({ freshPlan: WARNING_PLAN }, HASH_DRIFT_STATUS)));
-      expect(await screen.findByText(NOT_SAVED)).toBeInTheDocument();
+      await expectNotSavedMessage('late census-A response');
       const afterLateResponse = {
         censusBConfirmationOpen: screen.queryByRole('dialog', { name: 'Save confirmation' }) !== null,
         applies: requestsTo(APPLY_URL).length
