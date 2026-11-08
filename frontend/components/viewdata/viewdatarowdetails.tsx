@@ -20,8 +20,10 @@ import {
 import {
   describeValidationCell,
   EMPTY_CELL_DISPLAY,
+  FAULT_FONT_WEIGHT,
   formatStemState,
   formatStemStatuses,
+  formatViewDataCellValue,
   toViewDataRowSummary,
   VIEW_DATA_MEASUREMENT_FIELDS,
   VIEW_DATA_TEXT
@@ -31,9 +33,6 @@ import { requestClearValidationErrors, type ClearValidationErrorsOutcome } from 
 import ailogger from '@/ailogger';
 
 const ERROR_DETAILS_ENDPOINT = '/api/errors/explorer/details';
-const NUMERIC_FIELDS: ReadonlySet<string> = new Set(['stemLocalX', 'stemLocalY', 'stemPlotX', 'stemPlotY', 'measuredDBH', 'measuredHOM']);
-const NUMERIC_FRACTION_DIGITS = 2;
-const FAULT_FONT_WEIGHT = 600;
 const STEM_STATUS_FIELD = 'stemStatus';
 const DATE_FIELD = 'measurementDate';
 const ABORT_ERROR_NAME = 'AbortError';
@@ -102,13 +101,8 @@ function describeRefreshOutcome(clearOutcome: SentClearOutcome | null, result: R
 }
 
 function formatMeasurementValue(field: string, value: unknown): string {
-  if (value === null || value === undefined || value === '') return EMPTY_CELL_DISPLAY;
-  if (field === DATE_FIELD) return formatCalendarDate(value as string);
-  if (NUMERIC_FIELDS.has(field)) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric.toFixed(NUMERIC_FRACTION_DIGITS) : String(value);
-  }
-  return String(value);
+  const formatted = formatViewDataCellValue(field, value);
+  return field === DATE_FIELD && formatted !== EMPTY_CELL_DISPLAY ? formatCalendarDate(value as string) : formatted;
 }
 
 function textOrNull(value: unknown): string | null {

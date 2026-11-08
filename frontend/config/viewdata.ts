@@ -252,6 +252,19 @@ export const VIEW_DATA_MEASUREMENT_FIELDS: ReadonlyArray<{ field: string; label:
 ];
 
 export const EMPTY_CELL_DISPLAY = '—';
+export const FAULT_FONT_WEIGHT = 600;
+export const NUMERIC_FRACTION_DIGITS = 2;
+export const VIEW_DATA_NUMERIC_FIELDS: ReadonlySet<string> = new Set(['stemLocalX', 'stemLocalY', 'stemPlotX', 'stemPlotY', 'measuredDBH', 'measuredHOM']);
+
+/** A cell's text in the grid and in the details sheet: a dash when blank, two decimals for the measurement number fields. */
+export function formatViewDataCellValue(field: string, value: unknown): string {
+  if (value === null || value === undefined || value === '') return EMPTY_CELL_DISPLAY;
+  if (VIEW_DATA_NUMERIC_FIELDS.has(field)) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric.toFixed(NUMERIC_FRACTION_DIGITS) : String(value);
+  }
+  return String(value);
+}
 
 // ---------------------------------------------------------------------------
 // Show control and counts

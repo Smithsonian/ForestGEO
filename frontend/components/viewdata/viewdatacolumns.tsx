@@ -24,8 +24,10 @@ import {
   ALL_TREE_STEM_STATES,
   describeValidationCell,
   EMPTY_CELL_DISPLAY,
+  FAULT_FONT_WEIGHT,
   formatStemState,
   formatStemStatuses,
+  formatViewDataCellValue,
   isViewDataFilterableField,
   isViewDataSortableField,
   parseStemStatuses,
@@ -42,9 +44,6 @@ import {
   type ViewDataFieldFaults
 } from '@/config/viewdata';
 
-const NUMERIC_FIELDS: ReadonlySet<string> = new Set(['stemLocalX', 'stemLocalY', 'stemPlotX', 'stemPlotY', 'measuredDBH', 'measuredHOM']);
-const NUMERIC_FRACTION_DIGITS = 2;
-const FAULT_FONT_WEIGHT = 600;
 const IS_OPERATOR = 'is';
 const NEVER_EDITABLE_FIELDS: ReadonlySet<string> = new Set([VIEW_DATA_FIELDS.measurementStatus, VIEW_DATA_FIELDS.stemState, VIEW_DATA_FIELDS.stemStatus]);
 const ALWAYS_SHOWN_FIELDS: ReadonlySet<string> = new Set([VIEW_DATA_FIELDS.actions, VIEW_DATA_FIELDS.measurementStatus]);
@@ -111,13 +110,7 @@ function formatCellText(field: string, params: GridRenderCellParams): string {
     const formatted = formatMeasurementDateCell(params.value);
     return formatted ? String(formatted) : EMPTY_CELL_DISPLAY;
   }
-  const value = params.value;
-  if (value === null || value === undefined || value === '') return EMPTY_CELL_DISPLAY;
-  if (NUMERIC_FIELDS.has(field)) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric.toFixed(NUMERIC_FRACTION_DIGITS) : String(value);
-  }
-  return String(value);
+  return formatViewDataCellValue(field, params.value);
 }
 
 function FaultableCell({

@@ -5,9 +5,11 @@ import {
   canEditMeasurementRows,
   describeValidationCell,
   describeViewDataValidationActions,
+  EMPTY_CELL_DISPLAY,
   formatMeasurementDateRange,
   formatStemState,
   formatStemStatuses,
+  formatViewDataCellValue,
   formatViewDataFactsLine,
   formatViewDataScopeLine,
   parseStemStatuses,
@@ -17,6 +19,7 @@ import {
   VIEW_DATA_COLUMN_ORDER,
   VIEW_DATA_DEFAULT_HIDDEN_COLUMNS,
   VIEW_DATA_FILTERABLE_FIELDS,
+  VIEW_DATA_NUMERIC_FIELDS,
   VIEW_DATA_SHOW_OPTIONS,
   VIEW_DATA_SORTABLE_FIELDS,
   VIEW_DATA_TEXT,
@@ -343,5 +346,27 @@ describe('column whitelists', () => {
     expect(VIEW_DATA_FILTERABLE_FIELDS).not.toContain('measurementStatus');
     expect(VIEW_DATA_FILTERABLE_FIELDS).not.toContain('stemState');
     expect(VIEW_DATA_FILTERABLE_FIELDS).not.toContain('stemStatus');
+  });
+});
+
+describe('formatViewDataCellValue (shared by the grid cells and the details sheet)', () => {
+  it.each([
+    ['a number field rounds to two decimals', 'measuredDBH', 12.3456, '12.35'],
+    ['a numeric string is formatted like a number', 'stemLocalX', '1.5', '1.50'],
+    ['a non-numeric value in a number field is shown as it came', 'measuredHOM', 'n/a', 'n/a'],
+    ['a text field is shown as it came', 'treeTag', '010203', '010203'],
+    ['a text field that looks numeric is not reformatted', 'quadratName', '0102', '0102'],
+    ['null is a dash', 'measuredDBH', null, EMPTY_CELL_DISPLAY],
+    ['undefined is a dash', 'treeTag', undefined, EMPTY_CELL_DISPLAY],
+    ['an empty string is a dash', 'speciesCode', '', EMPTY_CELL_DISPLAY],
+    ['zero is a value, not a dash', 'measuredDBH', 0, '0.00']
+  ])('%s', (_label, field, value, expected) => {
+    const formatted = formatViewDataCellValue(field, value);
+    console.log('[cell value]', JSON.stringify({ field, value, formatted }));
+    expect(formatted).toBe(expected);
+  });
+
+  it('formats exactly the six measurement number fields', () => {
+    expect([...VIEW_DATA_NUMERIC_FIELDS].sort()).toEqual(['measuredDBH', 'measuredHOM', 'stemLocalX', 'stemLocalY', 'stemPlotX', 'stemPlotY']);
   });
 });
