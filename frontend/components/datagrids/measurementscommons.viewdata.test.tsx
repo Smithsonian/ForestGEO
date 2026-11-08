@@ -1242,6 +1242,68 @@ describe('MeasurementsCommons View Data details sheet', () => {
     });
   });
 
+  describe('a save that settles after a census switch, in infinite mode', () => {
+    const NEW_CENSUS_URL_SUFFIX = `/${PLOT_ID}/${NEW_CENSUS_ID}`;
+    const INFINITE_CHUNK_SEGMENT = `/${INFINITE_DEFAULT_CHUNK}/`;
+
+    it("does not put the old census's row into the new census's list, and sends no extra infinite read", async () => {
+      const user = userEvent.setup();
+      let releaseSaveApply: () => void = () => undefined;
+      ctx.editPreviewFlow.beginEdit = () => new Promise(resolve => (releaseSaveApply = () => resolve({ editOperationID: null })));
+      let holdNewCensusInfiniteReads = false;
+      const heldNewCensusReads: Array<() => void> = [];
+      fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith(GRID_URL_PREFIX)) {
+          const isNewCensus = url.endsWith(NEW_CENSUS_URL_SUFFIX);
+          const answer = respond({ output: [isNewCensus ? CENSUS_B_ROW : ROW], totalCount: 1 });
+          if (holdNewCensusInfiniteReads && isNewCensus && url.includes(INFINITE_CHUNK_SEGMENT)) {
+            return new Promise<Response>(resolve => heldNewCensusReads.push(() => resolve(answer)));
+          }
+          return Promise.resolve(answer);
+        }
+        return route(input, init);
+      });
+      const view = render(<MeasurementsGridHarness initialRows={[ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} enableInfiniteScroll />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await turnInfiniteScrollOn();
+      const { pendingSave } = await startEditAndOpenSaveConfirmation(user);
+      const saveSettled = expect(pendingSave).resolves.toEqual(ROW);
+      await user.click(screen.getByRole('button', { name: 'Confirm save' }));
+
+      holdNewCensusInfiniteReads = true;
+      ctx.census = { plotCensusNumber: NEW_CENSUS_ID, dateRanges: [{ censusID: NEW_CENSUS_ID }] };
+      view.rerender(<MeasurementsGridHarness initialRows={[CENSUS_B_ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} enableInfiniteScroll />);
+      await saveSettled;
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+
+      const newCensusInfiniteReads = () =>
+        gridRequests().filter(request => request.url.includes(INFINITE_CHUNK_SEGMENT) && request.url.endsWith(NEW_CENSUS_URL_SUFFIX));
+      const observed = {
+        gridRowsWhileNewCensusReadIsHeld: (ctx.grid?.rows as Array<{ censusID: number; treeTag: string }>).map(row => `${row.censusID}:${row.treeTag}`),
+        newCensusInfiniteReads: newCensusInfiniteReads().length
+      };
+      console.log('[infinite save after a census switch] new census list', JSON.stringify(observed));
+      expect(observed.gridRowsWhileNewCensusReadIsHeld).toEqual([]);
+      expect(observed.newCensusInfiniteReads).toBe(1);
+
+      await act(async () => {
+        heldNewCensusReads.forEach(release => release());
+        releaseSaveApply();
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+      const afterRelease = (ctx.grid?.rows as Array<{ censusID: number; treeTag: string }>).map(row => `${row.censusID}:${row.treeTag}`);
+      console.log(
+        '[infinite save after a census switch] after the new census read answers',
+        JSON.stringify({ afterRelease, reads: newCensusInfiniteReads().length })
+      );
+      expect(afterRelease).toEqual([`${NEW_CENSUS_ID}:${CENSUS_B_ROW.treeTag}`]);
+      expect(newCensusInfiniteReads()).toHaveLength(1);
+    });
+  });
+
   describe('closing the sheet around a Clear (stage 7 F6)', () => {
     const INVALID_ROW = { ...ROW, measurementStatus: 'invalidNoLog' };
     const CLEAR_REQUEST_LOST = Symbol('the Clear response never arrives');

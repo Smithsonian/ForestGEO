@@ -1621,8 +1621,10 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
                 onRowModesModelChange={handleRowModesModelChange}
                 onRowEditStop={handleRowEditStop}
                 processRowUpdate={async (newRow, oldRow) => {
+                  const saveCensusID = activeCensusID;
                   const result = await processRowUpdate(newRow, oldRow);
-                  if (isInfiniteOn) {
+                  const censusChangedDuringSave = previousCensusIDRef.current !== saveCensusID;
+                  if (isInfiniteOn && !censusChangedDuringSave) {
                     infinite.upsertRow(result);
                     // The saved row keeps the Stem status and Validation it was loaded with, and the edit may have changed other rows too.
                     void infinite.refresh();
