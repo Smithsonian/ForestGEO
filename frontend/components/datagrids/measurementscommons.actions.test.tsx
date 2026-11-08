@@ -25,6 +25,8 @@ const GRID_COLUMNS: GridColDef[] = [{ field: 'treeTag', headerName: 'Tree Tag', 
 const DETAILS_ACTION_LABEL = 'Details';
 const SHEET_DELETE_LABEL = 'Delete';
 const SHEET_DELETE_CONFIRM_LABEL = 'Delete measurement';
+// One millisecond after the advance to GUARD_MS - 1 lands exactly on the guard's expiry.
+const GUARD_EXPIRY_BOUNDARY_STEP_MS = 1;
 const DELETE_URL_PREFIX = '/api/fixeddata/measurementssummary/testschema/';
 const FILTERED_GRID_URL_PREFIX = '/api/fixeddatafilter/';
 const VALIDATION_ERRORS_URL_PREFIX = '/api/validations/validationerrordisplay';
@@ -276,7 +278,7 @@ describe('MeasurementsCommons row actions: Delete right after Cancel (#525 item 
     const disabledRightAfterCancel = sheetDelete.hasAttribute('disabled');
     act(() => vi.advanceTimersByTime(DELETE_AFTER_CANCEL_GUARD_MS - 1));
     const disabledJustBeforeExpiry = screen.getByRole('button', { name: SHEET_DELETE_LABEL }).hasAttribute('disabled');
-    act(() => vi.advanceTimersByTime(DELETE_AFTER_CANCEL_GUARD_MS));
+    act(() => vi.advanceTimersByTime(GUARD_EXPIRY_BOUNDARY_STEP_MS));
     const disabledAtExpiry = screen.getByRole('button', { name: SHEET_DELETE_LABEL }).hasAttribute('disabled');
     console.log(`[#525 item 1] sheet Delete disabled: ${disabledRightAfterCancel} → ${disabledJustBeforeExpiry} → ${disabledAtExpiry}`);
     expect(disabledRightAfterCancel).toBe(true);
@@ -284,15 +286,21 @@ describe('MeasurementsCommons row actions: Delete right after Cancel (#525 item 
     expect(disabledAtExpiry).toBe(false);
   });
 
-  it('(b) a double-click on Cancel never reaches a delete: no confirmation, no DELETE request', async () => {
+  it('(b) a double-click on Cancel lands its second click on Details, so the sheet opens with Delete disabled: no confirmation, no DELETE request', async () => {
     const user = userEvent.setup();
     render(<MeasurementsGridHarness />);
     const cancelButton = await enterEditModeAndFindCancel();
     await user.dblClick(cancelButton);
+    const reusedNodeLabel = cancelButton.textContent;
+    const sheetDelete = await screen.findByRole('button', { name: SHEET_DELETE_LABEL });
     const deleteRequests = mockFetch.mock.calls.filter(
       ([url, init]) => String(url).startsWith(DELETE_URL_PREFIX) && (init as RequestInit | undefined)?.method === 'DELETE'
     );
-    console.log(`[#525 item 1] after double-click: confirm open ${Boolean(screen.queryByRole('alertdialog'))}, DELETE requests ${deleteRequests.length}`);
+    console.log(
+      `[#525 item 1] after double-click: node now reads "${reusedNodeLabel}", sheet Delete disabled ${sheetDelete.hasAttribute('disabled')}, confirm open ${Boolean(screen.queryByRole('alertdialog'))}, DELETE requests ${deleteRequests.length}`
+    );
+    expect(reusedNodeLabel).toBe(DETAILS_ACTION_LABEL);
+    expect(sheetDelete).toBeDisabled();
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(deleteRequests).toHaveLength(0);
   });

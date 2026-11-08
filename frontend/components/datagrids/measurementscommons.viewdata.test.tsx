@@ -9,8 +9,11 @@ import ViewDataGridToolbar from '@/components/viewdata/viewdatagridtoolbar';
 import { VIEW_DATA_COLUMN_ORDER, VIEW_DATA_DEFAULT_HIDDEN_COLUMNS, VIEW_DATA_ROW_HEIGHT, VIEW_DATA_TEXT } from '@/config/viewdata';
 import { ALWAYS_VISIBLE_COLUMN_MENU_SX } from '@/config/styleddatagrid';
 import { CLEAR_VALIDATION_ERRORS_SUCCESS } from '@/config/errorsexplorer';
-import { ROW_UPDATED_MESSAGE, UNRESOLVED_ERRORS_SNACKBAR_MESSAGE } from './measurementscommonsutils';
+import { ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE, UNRESOLVED_ERRORS_SNACKBAR_MESSAGE } from './measurementscommonsutils';
+import { INFINITE_DEFAULT_CHUNK } from './hooks/useinfinitegridrows';
+import type { ViewDataRowDetailsProps } from '@/components/viewdata/viewdatarowdetails';
 import { HTTPResponses } from '@/config/macros';
+import { MUI_ROW_EDIT_CANCELLED_MESSAGE } from '@/lib/muirowedit';
 
 const ctx = vi.hoisted(() => {
   const noop = () => undefined;
@@ -30,7 +33,8 @@ const ctx = vi.hoisted(() => {
     },
     censusList: [{ plotCensusNumber: 1, censusIDs: [1] }] as Array<{ plotCensusNumber: number; censusIDs: number[] } | undefined>,
     useRealEditPreviewFlow: false,
-    grid: null as null | Record<string, unknown>
+    grid: null as null | Record<string, unknown>,
+    sheetProps: null as null | ViewDataRowDetailsProps
   };
 });
 
@@ -64,6 +68,30 @@ vi.mock('@/app/hooks/useEditPreviewFlow', async importOriginal => {
     // so the hook call order is stable within a test.
     useEditPreviewFlow: (args: Parameters<typeof actual.useEditPreviewFlow>[0]) =>
       ctx.useRealEditPreviewFlow ? actual.useEditPreviewFlow(args) : ctx.editPreviewFlow
+  };
+});
+// Renders the real sheet and keeps its latest props, so a test can call a handler the sheet would have refused to call.
+vi.mock('@/components/viewdata/viewdatarowdetails', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/components/viewdata/viewdatarowdetails')>();
+  const RealSheet = actual.default;
+  return {
+    ...actual,
+    default: (props: ViewDataRowDetailsProps) => {
+      ctx.sheetProps = props;
+      return <RealSheet {...props} />;
+    }
+  };
+});
+// Renders the real sheet and keeps its latest props, so a test can call a handler the sheet would have refused to call.
+vi.mock('@/components/viewdata/viewdatarowdetails', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/components/viewdata/viewdatarowdetails')>();
+  const RealSheet = actual.default;
+  return {
+    ...actual,
+    default: (props: ViewDataRowDetailsProps) => {
+      ctx.sheetProps = props;
+      return <RealSheet {...props} />;
+    }
   };
 });
 vi.mock('@/components/datagrids/skipreentrydatamodal', () => ({
@@ -138,6 +166,16 @@ const COUNTS_ROW = {
   LastMeasurementDate: '2024-06-09'
 };
 
+const ZERO_COUNTS_ROW = { CountUnresolvedLogged: 0, CountFailedNoLog: 0, CountPending: 0, CountValid: 0 };
+const FIXED_DATA_URL_PREFIX = '/api/fixeddata/measurementssummary/testschema/';
+const REFRESH_VIEWS_URL_PREFIX = '/api/refreshviews';
+const CLEAR_ERRORS_URL = '/api/validations/clearmeasurementerrors';
+const VALIDATION_ERRORS_URL_PREFIX = '/api/validations/validationerrordisplay';
+const PLOT_ID = 1;
+const DELETE_METHOD = 'DELETE';
+const SERVER_ERROR_STATUS = 500;
+const LATE_READ_WAIT_MS = 100;
+
 const fetchMock = vi.fn();
 let countsRow: Record<string, unknown> = COUNTS_ROW;
 const controlsLog: ViewDataAboveGridControls[] = [];
@@ -165,6 +203,21 @@ const gridRequests = () =>
     .map(([url, init]) => ({ url: String(url), body: JSON.parse(String((init as RequestInit).body)) }));
 const countRequests = () =>
   fetchMock.mock.calls.filter(([url, init]) => String(url) === QUERY_URL && String((init as RequestInit | undefined)?.body ?? '').includes(COUNTS_MARKER));
+
+const deleteRequests = () =>
+  fetchMock.mock.calls.filter(([url, init]) => String(url).startsWith(FIXED_DATA_URL_PREFIX) && (init as RequestInit | undefined)?.method === DELETE_METHOD);
+const viewRebuildRequests = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith(REFRESH_VIEWS_URL_PREFIX));
+/** A read that belongs to one census: its grid page, its validation errors or its counts query. */
+const readsOfCensus = (plotCensusNumber: number) =>
+  fetchMock.mock.calls
+    .filter(([url, init]) => {
+      const requestUrl = String(url);
+      if (requestUrl.startsWith(GRID_URL_PREFIX)) return requestUrl.endsWith(`/${PLOT_ID}/${plotCensusNumber}`);
+      if (requestUrl.startsWith(VALIDATION_ERRORS_URL_PREFIX)) return requestUrl.includes(`censusPCNParam=${plotCensusNumber}`);
+      const body = String((init as RequestInit | undefined)?.body ?? '');
+      return requestUrl === QUERY_URL && body.includes(COUNTS_MARKER) && body.includes(`PlotCensusNumber = ${plotCensusNumber}`);
+    })
+    .map(([url, init]) => `${String(url)} ${String((init as RequestInit | undefined)?.method ?? 'GET')}`);
 
 describe('MeasurementsCommons View Data page controls', () => {
   beforeEach(() => {
@@ -302,6 +355,7 @@ describe('MeasurementsCommons View Data details sheet', () => {
     controlsLog.length = 0;
     countsRow = COUNTS_ROW;
     ctx.grid = null;
+    ctx.sheetProps = null;
     // Until Task 20 the Actions column still renders only for global / db admin sessions.
     ctx.session.data.user.userStatus = 'global';
     ctx.census = { plotCensusNumber: 1, dateRanges: [{ censusID: 1 }] };
@@ -393,6 +447,142 @@ describe('MeasurementsCommons View Data details sheet', () => {
     expect(await screen.findByRole('button', { name: VIEW_DATA_TEXT.retryRefresh })).toBeInTheDocument();
   });
 
+  async function openSheetForRow(user: ReturnType<typeof userEvent.setup>, row: typeof ROW) {
+    renderRowActions(row);
+    await user.click(screen.getByRole('button', { name: new RegExp(VIEW_DATA_TEXT.detailsFor(row.treeTag, row.stemTag)) }));
+    return screen.findByRole('heading', { name: `Measurement ${row.coreMeasurementID}` });
+  }
+
+  it('reports a failed ROWS re-read after a clear instead of swallowing it', async () => {
+    const user = userEvent.setup();
+    const invalidRow = { ...ROW, measurementStatus: 'invalidNoLog' };
+    let cleared = false;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === CLEAR_ERRORS_URL) {
+        cleared = true;
+        return Promise.resolve(respond({ clearedErrorCount: 0 }));
+      }
+      if (cleared && String(input).startsWith(GRID_URL_PREFIX)) {
+        return Promise.resolve({ ok: false, status: SERVER_ERROR_STATUS, json: async () => ({}) } as Response);
+      }
+      if (String(input).startsWith(GRID_URL_PREFIX)) return Promise.resolve(respond({ output: [invalidRow], totalCount: 1 }));
+      return route(input, init);
+    });
+    render(<MeasurementsGridHarness initialRows={[invalidRow]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+    await waitFor(() => expect(ctx.grid).not.toBeNull());
+    await openSheetForRow(user, invalidRow);
+    await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
+    console.log('[sheet] rows re-read failure, visible alerts', JSON.stringify(screen.queryAllByRole('alert').map(alert => alert.textContent)));
+    expect(await screen.findByText(VIEW_DATA_TEXT.clearRefreshFailed)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: VIEW_DATA_TEXT.retryRefresh })).toBeInTheDocument();
+  });
+
+  it('reports a failed infinite-rows re-read after a clear even though the paginated re-read succeeds', async () => {
+    const user = userEvent.setup();
+    const invalidRow = { ...ROW, measurementStatus: 'invalidNoLog' };
+    let cleared = false;
+    const infiniteChunkSegment = `/${INFINITE_DEFAULT_CHUNK}/`;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === CLEAR_ERRORS_URL) {
+        cleared = true;
+        return Promise.resolve(respond({ clearedErrorCount: 0 }));
+      }
+      if (String(input).startsWith(GRID_URL_PREFIX)) {
+        const isInfiniteRead = String(input).includes(infiniteChunkSegment);
+        if (cleared && isInfiniteRead) return Promise.resolve({ ok: false, status: SERVER_ERROR_STATUS, json: async () => ({}) } as Response);
+        return Promise.resolve(respond({ output: [invalidRow], totalCount: 1 }));
+      }
+      return route(input, init);
+    });
+    render(<MeasurementsGridHarness initialRows={[invalidRow]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} enableInfiniteScroll />);
+    await waitFor(() => expect(ctx.grid).not.toBeNull());
+    const pagination = (ctx.grid?.slots as { pagination: { infiniteScroll: { onToggle: (next: boolean) => void } } }).pagination;
+    act(() => pagination.infiniteScroll.onToggle(true));
+    await waitFor(() => expect(gridRequests().some(request => request.url.includes(infiniteChunkSegment))).toBe(true));
+    await waitFor(() => expect((ctx.grid?.slots as { pagination: { infiniteScroll: { enabled: boolean } } }).pagination.infiniteScroll.enabled).toBe(true));
+    await openSheetForRow(user, invalidRow);
+    await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
+    console.log('[sheet] infinite re-read failure, visible alerts', JSON.stringify(screen.queryAllByRole('alert').map(alert => alert.textContent)));
+    expect(await screen.findByText(VIEW_DATA_TEXT.clearRefreshFailed)).toBeInTheDocument();
+  });
+
+  it('deleting from the sheet closes it, sends the delete, rebuilds the view, re-reads the counts and says the row was deleted', async () => {
+    const user = userEvent.setup();
+    countsRow = ZERO_COUNTS_ROW;
+    render(<MeasurementsGridHarness initialRows={[ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+    await waitFor(() => expect(ctx.grid).not.toBeNull());
+    await waitFor(() => expect(countRequests().length).toBeGreaterThan(0));
+    await openSheetForRow(user, ROW);
+    await user.click(await screen.findByRole('button', { name: VIEW_DATA_TEXT.deleteMeasurement }));
+    const countsBeforeDelete = countRequests().length;
+    await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.deleteConfirm }));
+    await waitFor(() => expect(countRequests().length).toBeGreaterThan(countsBeforeDelete));
+    console.log(
+      '[sheet] after delete',
+      JSON.stringify({
+        deletes: deleteRequests().map(([url]) => String(url)),
+        rebuilds: viewRebuildRequests().map(([url]) => String(url)),
+        counts: [countsBeforeDelete, countRequests().length],
+        sheetOpen: screen.queryByRole('heading', { name: 'Measurement 501' }) !== null,
+        alerts: screen.queryAllByRole('alert').map(alert => alert.textContent)
+      })
+    );
+    expect(deleteRequests()).toHaveLength(1);
+    expect(viewRebuildRequests()).toHaveLength(1);
+    expect(await screen.findByText(ROW_DELETED_MESSAGE)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Measurement 501' })).not.toBeInTheDocument());
+  });
+
+  describe('the sheet delete handler guards itself, even when the sheet is bypassed', () => {
+    async function cancelEditOnRow(user: ReturnType<typeof userEvent.setup>, row: typeof ROW) {
+      act(() => (ctx.grid?.onRowModesModelChange as (model: unknown) => void)({ [row.id]: { mode: 'edit' } }));
+      await waitFor(() => expect((ctx.grid?.rowModesModel as Record<string, { mode: string }>)[row.id]?.mode).toBe('edit'));
+      const editingActions = renderRowActions(row);
+      await user.click(within(editingActions.container).getByRole('button', { name: VIEW_DATA_TEXT.cancelRow }));
+      await waitFor(() => expect((ctx.grid?.rowModesModel as Record<string, { mode: string }>)[row.id]?.mode).toBe('view'));
+    }
+
+    async function callSheetDelete() {
+      const sheetProps = ctx.sheetProps as ViewDataRowDetailsProps;
+      await act(async () => sheetProps.onDeleteRow(ROW.coreMeasurementID));
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+    }
+
+    it('refuses while a row is in edit mode', async () => {
+      const user = userEvent.setup();
+      render(<MeasurementsGridHarness initialRows={[ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await openSheetForRow(user, ROW);
+      act(() => (ctx.grid?.onRowModesModelChange as (model: unknown) => void)({ [ROW.id]: { mode: 'edit' } }));
+      await waitFor(() => expect(ctx.sheetProps?.isAnyRowEditing).toBe(true));
+      await callSheetDelete();
+      console.log(
+        '[sheet] delete during edit',
+        JSON.stringify({ deletes: deleteRequests().length, alerts: screen.queryAllByRole('alert').map(a => a.textContent) })
+      );
+      expect(deleteRequests()).toHaveLength(0);
+      expect(screen.queryByText(ROW_DELETED_MESSAGE)).not.toBeInTheDocument();
+    });
+
+    it('refuses inside the delete-after-Cancel guard window', async () => {
+      const user = userEvent.setup();
+      render(<MeasurementsGridHarness initialRows={[ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await cancelEditOnRow(user, ROW);
+      await openSheetForRow(user, ROW);
+      await waitFor(() => expect(ctx.sheetProps?.isDeleteGuarded).toBe(true));
+      await callSheetDelete();
+      console.log(
+        '[sheet] delete inside the guard window',
+        JSON.stringify({ deletes: deleteRequests().length, alerts: screen.queryAllByRole('alert').map(a => a.textContent) })
+      );
+      expect(deleteRequests()).toHaveLength(0);
+      expect(screen.queryByText(ROW_DELETED_MESSAGE)).not.toBeInTheDocument();
+    });
+  });
+
   it('passes a prior-census resolver built from the census list to the sheet', async () => {
     ctx.censusList = [{ plotCensusNumber: 4, censusIDs: [70] }];
     const user = userEvent.setup();
@@ -482,6 +672,31 @@ describe('MeasurementsCommons View Data details sheet', () => {
     expect((ctx.grid?.rowModesModel as Record<string, unknown>)[1]).toEqual({ mode: 'view', ignoreModifications: true });
   });
 
+  it('does not put the row back in edit mode when a MUI-style cancellation reaches a save after the census changed', async () => {
+    const user = userEvent.setup();
+    let rejectApply: (error: Error) => void = () => undefined;
+    ctx.editPreviewFlow.beginEdit = () =>
+      new Promise((_resolve, reject) => {
+        rejectApply = reject;
+      });
+    const { rerender } = render(<MeasurementsGridHarness initialRows={[ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+    await waitFor(() => expect(ctx.grid).not.toBeNull());
+    await startEditAndOpenSaveConfirmation(user);
+    await user.click(screen.getByRole('button', { name: 'Confirm save' }));
+    switchCensus(rerender);
+    await waitFor(() => expect((ctx.grid?.rowModesModel as Record<string, { mode: string }>)[ROW.id]?.mode).toBe('view'));
+    await act(async () => {
+      rejectApply(new Error(MUI_ROW_EDIT_CANCELLED_MESSAGE));
+      await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+    });
+    const observed = {
+      rowModes: ctx.grid?.rowModesModel,
+      alerts: screen.queryAllByRole('alert').map(alert => alert.textContent)
+    };
+    console.log('[census switch] after a late MUI cancellation', JSON.stringify(observed));
+    expect((ctx.grid?.rowModesModel as Record<string, { mode: string }>)[ROW.id]?.mode).toBe('view');
+  });
+
   describe('with the real edit flow (A25; View Errors Task 16)', () => {
     const PREVIEW_URL = '/api/edits/preview';
     const APPLY_URL = '/api/edits/apply';
@@ -514,6 +729,7 @@ describe('MeasurementsCommons View Data details sheet', () => {
       validationPending: false
     };
     const NOT_SAVED = VIEW_DATA_TEXT.editNotSavedCensusChanged(ROW.treeTag, ROW.stemTag);
+    const APPLY_FAILURE_TEXT = 'apply exploded on the server';
 
     interface PendingResponse {
       settle: (response: Response) => void;
@@ -686,6 +902,70 @@ describe('MeasurementsCommons View Data details sheet', () => {
       });
       console.log('[census switch, real hook] undo body', String(revertCall[1].body));
       expect(JSON.parse(String(revertCall[1].body))).toMatchObject({ censusID: OLD_CENSUS_ID, editOperationID: UNDO_EDIT_OPERATION_ID });
+    });
+
+    /** Starts a save in census A, holds its apply, switches to census B and returns once B's own re-read has settled. */
+    async function startDetachedApplyThenSwitchCensus() {
+      const user = userEvent.setup();
+      applyAnswer = init => holdResponse(init, pending => (pendingApply = pending));
+      const { rerender } = await renderWithRealHook();
+      const { pendingSave } = await startEditAndOpenSaveConfirmation(user);
+      const saveSettled = expect(pendingSave).resolves.toEqual(ROW);
+      await confirmSave(user);
+      await user.click(await screen.findByTestId('edit-preview-apply'));
+      await waitFor(() => expect(pendingApply).not.toBeNull());
+      await switchCensusAndSettleCountsReread(rerender);
+      return { saveSettled };
+    }
+
+    async function waitForLateReads() {
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+    }
+
+    it('a detached apply that succeeds after a census change sends no grid, counts or validation request to the old census', async () => {
+      const { saveSettled } = await startDetachedApplyThenSwitchCensus();
+      const oldCensusReadsBeforeApplyAnswers = readsOfCensus(OLD_CENSUS_ID);
+      await act(async () => pendingApply?.settle(editJson(APPLY_RESULT)));
+      expect(await screen.findByText(ROW_UPDATED_MESSAGE)).toBeInTheDocument();
+      await expectSwitchSettled('late success, old-census reads', saveSettled);
+      await waitForLateReads();
+      const oldCensusReadsAfterApplyAnswers = readsOfCensus(OLD_CENSUS_ID);
+      console.log(
+        '[census switch, real hook] old-census reads',
+        JSON.stringify({ before: oldCensusReadsBeforeApplyAnswers, after: oldCensusReadsAfterApplyAnswers, newCensus: readsOfCensus(NEW_CENSUS_ID) })
+      );
+      expect(oldCensusReadsAfterApplyAnswers).toEqual(oldCensusReadsBeforeApplyAnswers);
+      expect(readsOfCensus(NEW_CENSUS_ID).length).toBeGreaterThan(0);
+    });
+
+    it('a detached apply that answers 409 after a census change sends no grid, counts or validation request to the old census', async () => {
+      const { saveSettled } = await startDetachedApplyThenSwitchCensus();
+      const oldCensusReadsBeforeApplyAnswers = readsOfCensus(OLD_CENSUS_ID);
+      await act(async () => pendingApply?.settle(editJson({ freshPlan: WARNING_PLAN }, HASH_DRIFT_STATUS)));
+      await expectNotSavedMessage('late 409, old-census reads');
+      await expectSwitchSettled('late 409, old-census reads', saveSettled);
+      await waitForLateReads();
+      const oldCensusReadsAfterApplyAnswers = readsOfCensus(OLD_CENSUS_ID);
+      console.log(
+        '[census switch, real hook] old-census reads',
+        JSON.stringify({ before: oldCensusReadsBeforeApplyAnswers, after: oldCensusReadsAfterApplyAnswers, newCensus: readsOfCensus(NEW_CENSUS_ID) })
+      );
+      expect(oldCensusReadsAfterApplyAnswers).toEqual(oldCensusReadsBeforeApplyAnswers);
+    });
+
+    it('a detached apply that fails with a server error after a census change posts the error, and the row stays out of edit mode', async () => {
+      const { saveSettled } = await startDetachedApplyThenSwitchCensus();
+      await act(async () => pendingApply?.settle(new Response(APPLY_FAILURE_TEXT, { status: SERVER_ERROR_STATUS })));
+      try {
+        await screen.findByText(`Error: ${APPLY_FAILURE_TEXT}`);
+      } finally {
+        console.log('[census switch, real hook] server error snackbar', JSON.stringify({ visible: visibleSnackbarTexts(), rowsInEditMode: rowsInEditMode() }));
+      }
+      await expectSwitchSettled('late server error', saveSettled);
+      expect(screen.getByText(`Error: ${APPLY_FAILURE_TEXT}`)).toBeInTheDocument();
+      expect(screen.queryByText(ROW_UPDATED_MESSAGE)).not.toBeInTheDocument();
     });
 
     it("a late census-A apply response leaves census B's open Save Changes confirmation alone, and B then saves (R3-P2-2)", async () => {
