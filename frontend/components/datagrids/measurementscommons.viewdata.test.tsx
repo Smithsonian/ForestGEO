@@ -8,7 +8,7 @@ import type { ViewDataAboveGridControls } from '@/components/viewdata/viewdataco
 import ViewDataGridToolbar from '@/components/viewdata/viewdatagridtoolbar';
 import { VIEW_DATA_COLUMN_ORDER, VIEW_DATA_DEFAULT_HIDDEN_COLUMNS, VIEW_DATA_ROW_HEIGHT, VIEW_DATA_TEXT } from '@/config/viewdata';
 import { ALWAYS_VISIBLE_COLUMN_MENU_SX } from '@/config/styleddatagrid';
-import { CLEAR_VALIDATION_ERRORS_SUCCESS } from '@/config/errorsexplorer';
+import { CLEAR_VALIDATION_ERRORS_SUCCESS, DETAILS_SHEET_TEXT, formatTreeStemLine } from '@/config/errorsexplorer';
 import { PENDING_VALIDATION_SNACKBAR_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE, UNRESOLVED_ERRORS_SNACKBAR_MESSAGE } from './measurementscommonsutils';
 import { INFINITE_DEFAULT_CHUNK } from './hooks/useinfinitegridrows';
 import type { ViewDataRowDetailsProps } from '@/components/viewdata/viewdatarowdetails';
@@ -1096,6 +1096,83 @@ describe('MeasurementsCommons View Data details sheet', () => {
       const observed = observeCensusB('counts failed after the switch', readsBeforeRelease);
       expect(observed.alerts).not.toContain(VIEW_DATA_TEXT.clearRefreshFailed);
       expect(observed.stateCounts?.valid).toBe(CENSUS_B_COUNTS.CountValid);
+    });
+  });
+
+  describe('an open sheet whose row a Clear removes from the filtered page (stage 7 F3)', () => {
+    const ERROR_FILTER = JSON.stringify(['errors']);
+    const FLAGGED_MESSAGE = 'Flagged;Different species';
+    const FLAGGED_ROW = {
+      ...ROW,
+      measurementStatus: 'unresolvedErrors',
+      unresolvedErrorCount: 1,
+      primaryErrorMessage: FLAGGED_MESSAGE,
+      primaryErrorSource: 'validation'
+    };
+    const FLAGGED_DETAILS = {
+      row: {
+        ...FLAGGED_ROW,
+        id: FLAGGED_ROW.coreMeasurementID,
+        errorMessages: [FLAGGED_MESSAGE],
+        errorSources: ['validation'],
+        errorFields: ['treeTag'],
+        errorCodes: ['7'],
+        errorCount: 1,
+        hasContradiction: false,
+        contradictionTypes: [],
+        contradictionType: null,
+        contradictionGroupKey: null,
+        relatedMeasurementIDs: [],
+        isFailedRow: false
+      },
+      allErrors: [{ source: 'validation', code: '7', message: FLAGGED_MESSAGE, fields: ['treeTag'], comparison: null }],
+      relatedRows: []
+    };
+    const NO_ERRORS_DETAILS = { row: null, allErrors: [], relatedRows: [] };
+
+    it('keeps the tags, the Measurement section and the Pending chip, and keeps Edit and Delete off-page restricted', async () => {
+      const user = userEvent.setup();
+      let cleared = false;
+      fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === CLEAR_ERRORS_URL) {
+          cleared = true;
+          return Promise.resolve(respond({ clearedErrorCount: 1 }));
+        }
+        if (url.startsWith('/api/errors/explorer/details/')) return Promise.resolve(respond(cleared ? NO_ERRORS_DETAILS : FLAGGED_DETAILS));
+        if (url.startsWith(GRID_URL_PREFIX)) {
+          const showsErrorsOnly = JSON.stringify(JSON.parse(String(init?.body)).filterModel.visible) === ERROR_FILTER;
+          return Promise.resolve(respond({ output: showsErrorsOnly && !cleared ? [FLAGGED_ROW] : [], totalCount: showsErrorsOnly && !cleared ? 1 : 0 }));
+        }
+        return route(input, init);
+      });
+      render(<MeasurementsGridHarness initialRows={[FLAGGED_ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      act(() => latestControls().onShowOptionChange('withErrors'));
+      await waitFor(() => expect(gridRequests().some(request => JSON.stringify(request.body.filterModel.visible) === ERROR_FILTER)).toBe(true));
+      await openSheetForRow(user, FLAGGED_ROW);
+      await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
+      expect(await screen.findByText(CLEAR_VALIDATION_ERRORS_SUCCESS, undefined, { timeout: 3000 })).toBeInTheDocument();
+      await waitFor(() => expect((ctx.grid?.rows as unknown[]).length).toBe(0));
+      const statusChips = screen.queryByTestId('view-data-status-chips');
+      const observed = {
+        gridRows: (ctx.grid?.rows as unknown[]).length,
+        sheetGridRow: ctx.sheetProps?.target?.gridRow ?? null,
+        measurementSection: screen.queryByTestId('view-data-measurement-section') !== null,
+        tagLine: screen.queryByText(formatTreeStemLine(FLAGGED_ROW.treeTag, FLAGGED_ROW.stemTag))?.textContent ?? null,
+        dbhField: screen.queryByTestId('measurement-field-measuredDBH')?.textContent ?? null,
+        statusChips: statusChips?.textContent ?? null,
+        editDisabled: (screen.queryByRole('button', { name: DETAILS_SHEET_TEXT.editThisRow }) as HTMLButtonElement | null)?.disabled ?? 'not offered',
+        deleteDisabled: (screen.queryByRole('button', { name: VIEW_DATA_TEXT.deleteMeasurement }) as HTMLButtonElement | null)?.disabled ?? 'not offered'
+      };
+      console.log('[sheet] after a Clear under With errors', JSON.stringify(observed));
+      expect(observed.sheetGridRow).toBeNull();
+      expect(observed.measurementSection).toBe(true);
+      expect(observed.tagLine).toBe(formatTreeStemLine(FLAGGED_ROW.treeTag, FLAGGED_ROW.stemTag));
+      expect(observed.dbhField).toContain(String(FLAGGED_ROW.measuredDBH));
+      expect(observed.statusChips).toContain(VIEW_DATA_TEXT.validationPending);
+      expect(observed.editDisabled).toBe(true);
+      expect(observed.deleteDisabled).toBe(true);
     });
   });
 

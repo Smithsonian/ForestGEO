@@ -1173,7 +1173,8 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   );
 
   const openDetailsForRow = useCallback(
-    (row: GridRowModel) => setSheetTarget({ coreMeasurementID: Number(row.coreMeasurementID), censusID: Number(row.censusID ?? activeCensusID), gridRow: row }),
+    (row: GridRowModel) =>
+      setSheetTarget({ coreMeasurementID: Number(row.coreMeasurementID), censusID: Number(row.censusID ?? activeCensusID), gridRow: row, lastKnownRow: row }),
     [activeCensusID]
   );
 
@@ -1219,7 +1220,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     setSheetTarget(current => {
       if (!current) return current;
       const fresh = (gridRows as GridRowModel[]).find(row => Number(row.coreMeasurementID) === current.coreMeasurementID) ?? null;
-      return fresh === current.gridRow ? current : { ...current, gridRow: fresh };
+      return fresh === current.gridRow ? current : { ...current, gridRow: fresh, lastKnownRow: fresh ?? current.lastKnownRow ?? current.gridRow };
     });
   }, [gridRows]);
 
@@ -1758,13 +1759,15 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
             faultedFields={sheetFaultedFields}
             priorCensusNumberFor={priorCensusNumberFor}
             onClose={() => setSheetTarget(null)}
-            onOpenRelatedRow={coreMeasurementID =>
+            onOpenRelatedRow={coreMeasurementID => {
+              const relatedRow = findGridRow(coreMeasurementID) ?? null;
               setSheetTarget(current => ({
                 coreMeasurementID,
                 censusID: current?.censusID ?? Number(activeCensusID),
-                gridRow: findGridRow(coreMeasurementID) ?? null
-              }))
-            }
+                gridRow: relatedRow,
+                lastKnownRow: relatedRow
+              }));
+            }}
             onEditRow={handleEditFromSheet}
             onDeleteRow={handleDeleteFromSheet}
             onCleared={handleCleared}

@@ -323,6 +323,43 @@ describe('ViewDataRowDetails', () => {
     expect(notifyCalls(props.notify)).toEqual([[CLEAR_VALIDATION_ERRORS_SUCCESS, 'success']]);
   });
 
+  it('stage 7 F3: an off-page mixed row keeps its last known error status after a Clear, because the ingestion error is still there', async () => {
+    const user = userEvent.setup();
+    let detailsReads = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith(DETAILS_URL_PREFIX)) {
+        detailsReads += 1;
+        return json(HTTPResponses.OK, detailsReads === 1 ? mixedDetailsBeforeClear : mixedDetailsAfterClear);
+      }
+      if (url === CLEAR_VALIDATION_ERRORS_ENDPOINT) return json(HTTPResponses.OK, { clearedErrorCount: 1 });
+      return json(HTTPResponses.OK, {});
+    });
+    renderDetails({ target: { coreMeasurementID: MEASUREMENT_ID, censusID: ROW_CENSUS_ID, gridRow: null, lastKnownRow: MIXED_TARGET_ROW } });
+    expect(await screen.findByText(formatUnresolvedErrorsHeading(MIXED_ERROR_COUNT))).toBeInTheDocument();
+    await user.click(button(DETAILS_SHEET_TEXT.clearValidationErrors));
+    expect(await screen.findByText(formatUnresolvedErrorsHeading(REMAINING_ERROR_COUNT))).toBeInTheDocument();
+    const chipsText = screen.getByTestId(STATUS_CHIPS_TEST_ID).textContent;
+    console.log('[row details] off-page mixed row after clear', JSON.stringify({ chipsText, detailsReads }));
+    expect(chipsText).not.toContain(VIEW_DATA_TEXT.validationPending);
+    expect(screen.getByTestId('view-data-measurement-section')).toBeInTheDocument();
+  });
+
+  it('stage 7 F3: an off-page last known row fills the Measurement section and still offers no Edit or Delete', () => {
+    renderDetails({
+      target: { coreMeasurementID: MEASUREMENT_ID, censusID: ROW_CENSUS_ID, gridRow: null, lastKnownRow: { ...baseRow, measurementStatus: 'passed' } }
+    });
+    const observed = {
+      measurementSection: screen.queryByTestId('view-data-measurement-section') !== null,
+      stemStatus: screen.queryByTestId('measurement-field-stemStatus')?.textContent ?? null,
+      disabled: disabledState()
+    };
+    console.log('[row details] off-page last known row', JSON.stringify(observed));
+    expect(observed.measurementSection).toBe(true);
+    expect(observed.stemStatus).toContain('Alive');
+    expect(observed.disabled).toEqual({ edit: true, clear: 'not offered', deleteRow: true });
+  });
+
   it('P3-2: when the details re-read fails while the grid re-read succeeds, Edit and Delete stay disabled behind Retry refresh and Clear is not offered', async () => {
     const user = userEvent.setup();
     let detailsReads = 0;

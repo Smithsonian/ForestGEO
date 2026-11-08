@@ -13,6 +13,7 @@ import {
   CLEAR_UNCONFIRMED_MESSAGE,
   CLEAR_VALIDATION_ERRORS_FAILED_MESSAGE,
   CLEAR_VALIDATION_ERRORS_SUCCESS,
+  isClearableValidationError,
   type DetailsPanelRow,
   type ErrorExplorerDetailsResponse,
   type RelatedContradictionRow
@@ -58,6 +59,8 @@ export interface ViewDataSheetTarget {
   censusID: number;
   /** The row as loaded on the current grid page, or null for a related row that is not on it. */
   gridRow: GridRowRecord | null;
+  /** The row's data as the grid last held it. It outlives the row leaving the page (a Clear under a filter); it carries no right to edit or delete. */
+  lastKnownRow?: GridRowRecord | null;
 }
 
 export interface ViewDataRowDetailsProps {
@@ -85,6 +88,17 @@ class DetailsRequestError extends Error {
     this.name = 'DetailsRequestError';
   }
 }
+
+/** What the grid would show for a row whose last error a Clear deleted. */
+const CLEARED_ROW_FIELDS: GridRowRecord = {
+  measurementStatus: 'pending',
+  unresolvedErrorCount: 0,
+  primaryErrorMessage: null,
+  primaryErrorSource: null,
+  unresolvedErrorCodes: '',
+  unresolvedErrorMessages: '',
+  hasContradiction: false
+};
 
 /** [D1] Only rows in the error set can be opened; View Errors Task 11 marks the others inErrorSet: false. */
 const canOpenRelatedRow = (row: RelatedContradictionRow) => row.inErrorSet;
@@ -133,10 +147,13 @@ export default function ViewDataRowDetails({
   const [isDeleting, setIsDeleting] = useState(false);
   const [readAfterClear, setReadAfterClear] = useState<ReadAfterClearState>('current');
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [clearedEveryError, setClearedEveryError] = useState(false);
   const refreshClearOutcomeRef = useRef<SentClearOutcome | null>(null);
 
   const gridRow = target?.gridRow ?? null;
-  const summary = gridRow ? toViewDataRowSummary(gridRow) : null;
+  const lastKnownRow = target?.lastKnownRow ?? null;
+  const displayRow = gridRow ?? (lastKnownRow && clearedEveryError ? { ...lastKnownRow, ...CLEARED_ROW_FIELDS } : lastKnownRow);
+  const summary = displayRow ? toViewDataRowSummary(displayRow) : null;
   const needsDetails = Boolean(target) && (!summary || summary.measurementStatus === 'ingestionFailed' || summary.measurementStatus === 'unresolvedErrors');
   const coreMeasurementID = target?.coreMeasurementID ?? null;
   const censusID = target?.censusID ?? null;
@@ -157,6 +174,7 @@ export default function ViewDataRowDetails({
 
   useEffect(() => {
     setIsConfirmingDelete(false);
+    setClearedEveryError(false);
     setReadAfterClear('current');
     refreshClearOutcomeRef.current = null;
   }, [coreMeasurementID, censusID]);
@@ -210,7 +228,7 @@ export default function ViewDataRowDetails({
 
   if (!target) return null;
 
-  const sourceRow: GridRowRecord | null = gridRow ?? (details?.row as GridRowRecord | null | undefined) ?? null;
+  const sourceRow: GridRowRecord | null = displayRow ?? (details?.row as GridRowRecord | null | undefined) ?? null;
   const panelRow: DetailsPanelRow = {
     measurementID: target.coreMeasurementID,
     treeTag: textOrNull(sourceRow?.treeTag),
@@ -252,6 +270,7 @@ export default function ViewDataRowDetails({
       notify(CLEAR_VALIDATION_ERRORS_FAILED_MESSAGE, 'error');
       return;
     }
+    if (outcome.status === 'cleared') setClearedEveryError(!details || details.allErrors.every(isClearableValidationError));
     await rereadAfterClear(outcome.status);
   };
 
@@ -273,9 +292,9 @@ export default function ViewDataRowDetails({
       <Chip size="sm" variant="soft">
         {cell.text}
       </Chip>
-      {formatStemState(gridRow?.userDefinedFields) !== EMPTY_CELL_DISPLAY && (
+      {formatStemState(displayRow?.userDefinedFields) !== EMPTY_CELL_DISPLAY && (
         <Chip size="sm" variant="outlined">
-          {formatStemState(gridRow?.userDefinedFields)}
+          {formatStemState(displayRow?.userDefinedFields)}
         </Chip>
       )}
       {summary.stemStatuses.length > 0 && (
@@ -298,7 +317,7 @@ export default function ViewDataRowDetails({
     <Stack spacing={0.5} data-testid="view-data-measurement-section">
       {viewErrorsLink}
       <Typography level="title-sm">{VIEW_DATA_TEXT.measurementHeading}</Typography>
-      {VIEW_DATA_MEASUREMENT_FIELDS.filter(({ field }) => field !== STEM_STATUS_FIELD || gridRow).map(({ field, label }) => {
+      {VIEW_DATA_MEASUREMENT_FIELDS.filter(({ field }) => field !== STEM_STATUS_FIELD || displayRow).map(({ field, label }) => {
         const value = field === STEM_STATUS_FIELD ? formatStemStatuses(summary?.stemStatuses ?? []) : formatMeasurementValue(field, sourceRow[field]);
         const isFaulted = faultedFields.has(field);
         return (
