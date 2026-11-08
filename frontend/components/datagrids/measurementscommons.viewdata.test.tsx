@@ -852,6 +852,85 @@ describe('MeasurementsCommons View Data details sheet', () => {
     expect((ctx.grid?.rowModesModel as Record<string, { mode: string }>)[ROW.id]?.mode).toBe('view');
   });
 
+  describe('a Clear or Delete that finishes after a census switch', () => {
+    const INVALID_ROW = { ...ROW, measurementStatus: 'invalidNoLog' };
+    let releaseHeldResponse: (response: Response) => void;
+
+    /** Serves census 1 and census 2 their own grid page and holds the answer to one URL until the test releases it. */
+    function holdAnswerTo(isHeldRequest: (url: string, init?: RequestInit) => boolean) {
+      fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (isHeldRequest(url, init)) return new Promise<Response>(resolve => (releaseHeldResponse = resolve));
+        if (url.startsWith(GRID_URL_PREFIX)) {
+          const isNewCensus = url.endsWith(`/${PLOT_ID}/${NEW_CENSUS_ID}`);
+          return Promise.resolve(respond({ output: [isNewCensus ? CENSUS_B_ROW : INVALID_ROW], totalCount: 1 }));
+        }
+        return route(input, init);
+      });
+    }
+
+    async function startThenSwitchCensus(start: (user: ReturnType<typeof userEvent.setup>) => Promise<void>) {
+      const user = userEvent.setup();
+      const view = render(<MeasurementsGridHarness initialRows={[INVALID_ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await waitFor(() => expect(countRequests().length).toBeGreaterThan(0));
+      await openSheetForRow(user, INVALID_ROW);
+      await start(user);
+      const countsBeforeSwitch = countRequests().length;
+      switchCensus(view.rerender, [INVALID_ROW]);
+      await waitFor(() => expect(countRequests().length).toBeGreaterThan(countsBeforeSwitch));
+      await waitFor(() => expect((ctx.grid?.rows as Array<{ treeTag: string }>)[0]?.treeTag).toBe(CENSUS_B_ROW.treeTag));
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+    }
+
+    async function releaseAndWaitForLateReads(response: Response) {
+      await act(async () => {
+        releaseHeldResponse(response);
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+    }
+
+    const observeAfterRelease = (label: string, readsBeforeRelease: string[]) => {
+      const observed = {
+        oldCensusReads: { before: readsBeforeRelease, after: readsOfCensus(1) },
+        newCensusGridRows: (ctx.grid?.rows as Array<{ treeTag: string }>).map(row => row.treeTag),
+        alerts: screen.queryAllByRole('alert').map(alert => alert.textContent)
+      };
+      console.log(`[census switch] ${label}`, JSON.stringify(observed));
+      return observed;
+    };
+
+    it('a Clear that answers after the census switch re-reads nothing from the old census', async () => {
+      holdAnswerTo(url => url === CLEAR_ERRORS_URL);
+      await startThenSwitchCensus(async user => {
+        await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
+        await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === CLEAR_ERRORS_URL)).toBe(true));
+      });
+      const readsBeforeRelease = readsOfCensus(1);
+      await releaseAndWaitForLateReads(respond({ clearedErrorCount: 1 }));
+      const observed = observeAfterRelease('late Clear', readsBeforeRelease);
+      expect(observed.oldCensusReads.after).toEqual(readsBeforeRelease);
+      expect(observed.newCensusGridRows).toEqual([CENSUS_B_ROW.treeTag]);
+    });
+
+    it('a Delete that answers after the census switch re-reads nothing from the old census, keeps census B rows and still says the row was deleted', async () => {
+      holdAnswerTo((url, init) => url.startsWith(FIXED_DATA_URL_PREFIX) && init?.method === DELETE_METHOD);
+      await startThenSwitchCensus(async user => {
+        await user.click(await screen.findByRole('button', { name: VIEW_DATA_TEXT.deleteMeasurement }));
+        await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.deleteConfirm }));
+        await waitFor(() => expect(deleteRequests()).toHaveLength(1));
+      });
+      const readsBeforeRelease = readsOfCensus(1);
+      await releaseAndWaitForLateReads(respond({}));
+      const observed = observeAfterRelease('late Delete', readsBeforeRelease);
+      expect(observed.oldCensusReads.after).toEqual(readsBeforeRelease);
+      expect(observed.newCensusGridRows).toEqual([CENSUS_B_ROW.treeTag]);
+      expect(observed.alerts).toContain(ROW_DELETED_MESSAGE);
+    });
+  });
+
   describe('with the real edit flow (A25; View Errors Task 16)', () => {
     const PREVIEW_URL = '/api/edits/preview';
     const APPLY_URL = '/api/edits/apply';

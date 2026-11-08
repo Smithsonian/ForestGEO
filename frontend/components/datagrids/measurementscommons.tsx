@@ -993,6 +993,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       setSnackbar({ children: 'Error: The row to delete is no longer available', severity: 'error' });
       return;
     }
+    const deleteCensusID = activeCensusID;
     const deleteQuery = createDeleteQuery(currentSite.schemaName, gridType, getGridID(gridType), deletionID);
     let response: Response;
     setLoading(true, 'Deleting...');
@@ -1030,8 +1031,12 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         children: ROW_DELETED_MESSAGE,
         severity: 'success'
       });
-      setRows(rows.filter(row => String(row.id) !== String(id)));
-      infinite.removeRow(deletionID);
+      // The rows, counts and errors this closure holds belong to the census the delete started in.
+      const censusChangedDuringDelete = previousCensusIDRef.current !== deleteCensusID;
+      if (!censusChangedDuringDelete) {
+        setRows(rows.filter(row => String(row.id) !== String(id)));
+        infinite.removeRow(deletionID);
+      }
       setSheetTarget(null);
       try {
         // destructive mutation — global overlay blocks UI for the duration of the API call
@@ -1042,6 +1047,10 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         ailogger.error('Error refreshing measurements summary view:', errorObj);
       } finally {
         setLoading(false);
+      }
+      if (censusChangedDuringDelete) {
+        await invalidateAfter('delete-measurement', queryScope);
+        return;
       }
       await refetch();
       await refreshCounts();
@@ -1260,6 +1269,8 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   );
 
   const handleCleared = useCallback(async () => {
+    // The sheet calls the handler of the render it was clicked in, so a Clear that finishes after a census switch lands here with the old census.
+    if (previousCensusIDRef.current !== activeCensusID) return;
     // Strict, like the undo refresh chain: every read finishes, then the first failure is reported.
     const reads = await Promise.allSettled([
       runFetchPaginated({ strict: true }),
@@ -1268,7 +1279,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     ]);
     const failedRead = reads.find((read): read is PromiseRejectedResult => read.status === 'rejected');
     if (failedRead) throw failedRead.reason;
-  }, [runFetchPaginated, refreshCounts, isInfiniteOn, infinite]);
+  }, [runFetchPaginated, refreshCounts, isInfiniteOn, infinite, activeCensusID]);
 
   const attributeTooltips = useMemo(
     () =>
