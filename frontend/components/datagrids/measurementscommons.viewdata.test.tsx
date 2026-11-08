@@ -931,6 +931,174 @@ describe('MeasurementsCommons View Data details sheet', () => {
     });
   });
 
+  describe('post-Clear and post-Delete reads that are still in flight when the census switches (stage 7 F1)', () => {
+    const INVALID_ROW = { ...ROW, measurementStatus: 'invalidNoLog' };
+    const CENSUS_B_FAULTED_ROW = {
+      ...CENSUS_B_ROW,
+      measurementStatus: 'unresolvedErrors',
+      unresolvedErrorCount: 1,
+      primaryErrorMessage: 'Flagged;Different species',
+      primaryErrorSource: 'validation'
+    };
+    const CENSUS_A_COUNTS = { CountUnresolvedLogged: 0, CountFailedNoLog: 0, CountPending: 7, CountValid: 0 };
+    const CENSUS_B_COUNTS = { CountUnresolvedLogged: 0, CountFailedNoLog: 0, CountPending: 0, CountValid: 9 };
+    const CENSUS_B_VALIDATION_FAULTS = {
+      failed: [
+        {
+          coreMeasurementID: CENSUS_B_FAULTED_ROW.coreMeasurementID,
+          validationErrorIDs: [1],
+          descriptions: ['Flagged;Different species'],
+          criteria: ['treeTag']
+        }
+      ]
+    };
+    const NO_VALIDATION_FAULTS = { failed: [] };
+    const counted = (init: RequestInit | undefined, plotCensusNumber: number) =>
+      String(init?.body ?? '').includes(COUNTS_MARKER) && String(init?.body ?? '').includes(`PlotCensusNumber = ${plotCensusNumber}`);
+
+    interface HeldRead {
+      isHeld: (url: string, init?: RequestInit) => boolean;
+      release: ((response: Response) => void) | null;
+      fail: ((error: Error) => void) | null;
+    }
+    let heldReads: HeldRead[];
+    let armed: boolean;
+
+    /** Each census has its own grid page, counts and validation faults; an armed hold keeps back the first matching request. */
+    function serveTwoCensuses() {
+      fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const held = armed ? heldReads.find(read => read.release === null && read.isHeld(url, init)) : undefined;
+        if (held) {
+          return new Promise<Response>((resolve, reject) => {
+            held.release = resolve;
+            held.fail = reject;
+          });
+        }
+        if (url === CLEAR_ERRORS_URL) return Promise.resolve(respond({ clearedErrorCount: 1 }));
+        if (url.startsWith(GRID_URL_PREFIX)) {
+          const isNewCensus = url.endsWith(`/${PLOT_ID}/${NEW_CENSUS_ID}`);
+          return Promise.resolve(respond({ output: [isNewCensus ? CENSUS_B_FAULTED_ROW : INVALID_ROW], totalCount: 1 }));
+        }
+        if (url === QUERY_URL && String(init?.body ?? '').includes(COUNTS_MARKER)) {
+          return Promise.resolve(respond([counted(init, NEW_CENSUS_ID) ? CENSUS_B_COUNTS : CENSUS_A_COUNTS]));
+        }
+        if (url.startsWith(VALIDATION_ERRORS_URL_PREFIX)) {
+          return Promise.resolve(respond(url.includes(`censusPCNParam=${NEW_CENSUS_ID}`) ? CENSUS_B_VALIDATION_FAULTS : NO_VALIDATION_FAULTS));
+        }
+        return route(input, init);
+      });
+    }
+
+    const isCensusOneCounts = (url: string, init?: RequestInit) => url === QUERY_URL && counted(init, 1);
+    const isCensusOneValidation = (url: string) => url.startsWith(VALIDATION_ERRORS_URL_PREFIX) && url.includes('censusPCNParam=1');
+    const isViewRebuild = (url: string) => url.startsWith(REFRESH_VIEWS_URL_PREFIX);
+
+    function holdAndArm(...reads: HeldRead['isHeld'][]): HeldRead[] {
+      heldReads = reads.map(isHeld => ({ isHeld, release: null, fail: null }));
+      armed = true;
+      return heldReads;
+    }
+
+    async function switchToCensusB(view: ReturnType<typeof render>) {
+      switchCensus(view.rerender, [INVALID_ROW]);
+      await waitFor(() => expect(latestControls().stateCounts?.valid).toBe(CENSUS_B_COUNTS.CountValid));
+      await waitFor(() => expect((ctx.grid?.rows as Array<{ treeTag: string }>)[0]?.treeTag).toBe(CENSUS_B_ROW.treeTag));
+    }
+
+    async function releaseAndSettle(held: HeldRead, response: Response) {
+      await waitFor(() => expect(held.release).not.toBeNull());
+      await act(async () => {
+        held.release?.(response);
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+    }
+
+    function isTreeTagFaulted(row: Record<string, unknown>) {
+      const treeTagColumn = (ctx.grid?.columns as GridColDef[]).find(column => column.field === 'treeTag') as GridColDef;
+      const params = { row, value: row.treeTag, field: 'treeTag', formattedValue: row.treeTag, id: row.id };
+      const cell = render(<div>{treeTagColumn.renderCell?.(params as never)}</div>);
+      const faulted = screen.getByText(String(row.treeTag)).getAttribute('data-faulted') === 'true';
+      cell.unmount();
+      return faulted;
+    }
+
+    const observeCensusB = (label: string, oldCensusReadsBefore: string[]) => {
+      const observed = {
+        oldCensusReads: { before: oldCensusReadsBefore, after: readsOfCensus(1) },
+        stateCounts: latestControls().stateCounts,
+        censusBTreeTagFaulted: isTreeTagFaulted(CENSUS_B_FAULTED_ROW),
+        alerts: screen.queryAllByRole('alert', { hidden: true }).map(alert => alert.textContent)
+      };
+      console.log(`[census switch] ${label}`, JSON.stringify(observed));
+      return observed;
+    };
+
+    async function renderCensusAWithSheetOpen() {
+      const user = userEvent.setup();
+      const view = render(<MeasurementsGridHarness initialRows={[INVALID_ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await waitFor(() => expect(latestControls().stateCounts?.pending).toBe(CENSUS_A_COUNTS.CountPending));
+      await openSheetForRow(user, INVALID_ROW);
+      return { user, view };
+    }
+
+    beforeEach(() => {
+      armed = false;
+      heldReads = [];
+      serveTwoCensuses();
+    });
+
+    it('a Delete whose view rebuild finishes after the switch reads nothing more from the old census and keeps census B counts and faults', async () => {
+      const { user, view } = await renderCensusAWithSheetOpen();
+      const [rebuild] = holdAndArm(isViewRebuild);
+      await user.click(await screen.findByRole('button', { name: VIEW_DATA_TEXT.deleteMeasurement }));
+      await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.deleteConfirm }));
+      await waitFor(() => expect(viewRebuildRequests()).toHaveLength(1));
+      await switchToCensusB(view);
+      const readsBeforeRelease = readsOfCensus(1);
+      await releaseAndSettle(rebuild, respond({}));
+      const observed = observeCensusB('rebuild finished after the switch', readsBeforeRelease);
+      expect(observed.oldCensusReads.after).toEqual(readsBeforeRelease);
+      expect(observed.stateCounts?.valid).toBe(CENSUS_B_COUNTS.CountValid);
+      expect(observed.stateCounts?.pending).toBe(CENSUS_B_COUNTS.CountPending);
+      expect(observed.censusBTreeTagFaulted).toBe(true);
+    });
+
+    it('counts and validation reads of a Clear that answer after the switch are discarded: census B counts and faults survive', async () => {
+      const { user, view } = await renderCensusAWithSheetOpen();
+      const [countsRead, validationRead] = holdAndArm(isCensusOneCounts, isCensusOneValidation);
+      await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
+      await waitFor(() => expect(countsRead.release).not.toBeNull());
+      await waitFor(() => expect(validationRead.release).not.toBeNull());
+      await switchToCensusB(view);
+      const readsBeforeRelease = readsOfCensus(1);
+      await releaseAndSettle(countsRead, respond([CENSUS_A_COUNTS]));
+      await releaseAndSettle(validationRead, respond(NO_VALIDATION_FAULTS));
+      const observed = observeCensusB('counts and validation answered after the switch', readsBeforeRelease);
+      expect(observed.oldCensusReads.after).toEqual(readsBeforeRelease);
+      expect(observed.stateCounts?.valid).toBe(CENSUS_B_COUNTS.CountValid);
+      expect(observed.stateCounts?.pending).toBe(CENSUS_B_COUNTS.CountPending);
+      expect(observed.censusBTreeTagFaulted).toBe(true);
+    });
+
+    it('a census A counts read that fails after the switch reports nothing in census B', async () => {
+      const { user, view } = await renderCensusAWithSheetOpen();
+      const [countsRead] = holdAndArm(isCensusOneCounts);
+      await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
+      await waitFor(() => expect(countsRead.release).not.toBeNull());
+      await switchToCensusB(view);
+      const readsBeforeRelease = readsOfCensus(1);
+      await act(async () => {
+        countsRead.fail?.(new TypeError('Failed to fetch'));
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+      const observed = observeCensusB('counts failed after the switch', readsBeforeRelease);
+      expect(observed.alerts).not.toContain(VIEW_DATA_TEXT.clearRefreshFailed);
+      expect(observed.stateCounts?.valid).toBe(CENSUS_B_COUNTS.CountValid);
+    });
+  });
+
   describe('with the real edit flow (A25; View Errors Task 16)', () => {
     const PREVIEW_URL = '/api/edits/preview';
     const APPLY_URL = '/api/edits/apply';

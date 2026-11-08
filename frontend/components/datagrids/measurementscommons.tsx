@@ -377,6 +377,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   const refreshCounts = useCallback(
     async (options?: { strict?: boolean }) => {
       if (!currentSite?.schemaName || !currentPlot || !currentCensus) return;
+      const requestedCensusID = currentCensus.dateRanges?.[0]?.censusID;
 
       try {
         const stateCountsProjection = buildMeasurementStateCountsSql(currentSite.schemaName, 'vft');
@@ -395,6 +396,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         });
         if (!response.ok) throw new Error('measurementscommons failure. runquery execution for errorRowCount failed.');
         const data = await response.json();
+        if (previousCensusIDRef.current !== requestedCensusID) return;
         const counts = parseViewDataStateCounts(data[0]);
         setStateCounts(counts);
 
@@ -577,6 +579,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   // strict call (used only by the awaited undo refresh chain) can propagate it.
   const fetchValidationErrors = useCallback(
     async (options?: { strict?: boolean }) => {
+      const requestedCensusID = activeCensusID;
       try {
         const response = await fetch(
           `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}&plotIDParam=${currentPlot?.plotID ?? ''}&censusPCNParam=${currentCensus?.plotCensusNumber ?? ''}`
@@ -586,6 +589,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
           throw new Error(`Failed to fetch validation errors (${response.status}): ${errorBody}`);
         }
         const data = await response.json();
+        if (previousCensusIDRef.current !== requestedCensusID) return;
         const errorMap: ErrorMap = Array.isArray(data?.failed as CMError[])
           ? (data.failed as CMError[]).reduce<Record<number, CoreMeasurementError>>((acc, error) => {
               if (error.coreMeasurementID) {
@@ -628,7 +632,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         if (options?.strict) throw errorObj;
       }
     },
-    [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]
+    [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, activeCensusID]
   );
 
   // Promise.all settles as soon as either read rejects, leaving the other
@@ -1037,8 +1041,8 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         severity: 'success'
       });
       // The rows, counts and errors this closure holds belong to the census the delete started in.
-      const censusChangedDuringDelete = previousCensusIDRef.current !== deleteCensusID;
-      if (!censusChangedDuringDelete) {
+      const hasCensusChangedSinceDelete = () => previousCensusIDRef.current !== deleteCensusID;
+      if (!hasCensusChangedSinceDelete()) {
         setRows(rows.filter(row => String(row.id) !== String(id)));
         infinite.removeRow(deletionID);
       }
@@ -1053,12 +1057,12 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       } finally {
         setLoading(false);
       }
-      if (censusChangedDuringDelete) {
+      if (hasCensusChangedSinceDelete()) {
         await invalidateAfter('delete-measurement', queryScope);
         return;
       }
       await refetch();
-      await refreshCounts();
+      if (!hasCensusChangedSinceDelete()) await refreshCounts();
       await invalidateAfter('delete-measurement', queryScope);
     }
   };
@@ -1282,6 +1286,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       refreshCounts({ strict: true }),
       isInfiniteOn ? infinite.refresh({ strict: true }) : Promise.resolve()
     ]);
+    if (previousCensusIDRef.current !== activeCensusID) return;
     const failedRead = reads.find((read): read is PromiseRejectedResult => read.status === 'rejected');
     if (failedRead) throw failedRead.reason;
   }, [runFetchPaginated, refreshCounts, isInfiniteOn, infinite, activeCensusID]);
