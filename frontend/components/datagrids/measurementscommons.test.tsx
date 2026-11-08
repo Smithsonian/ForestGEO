@@ -17,6 +17,7 @@ import {
   findPlotCensusNumberForCensusID,
   mergeMeasurementFilterModel,
   PENDING_VALIDATION_SNACKBAR_MESSAGE,
+  resolveEnterNavigationTarget,
   RESET_THEN_VALIDATE_SNACKBAR_MESSAGE,
   revertMeasurementEdit,
   selectMeasurementStateSnackbar,
@@ -788,5 +789,27 @@ describe('findPlotCensusNumberForCensusID (DBH fact line, A10)', () => {
 
   it('returns null when the census list has not loaded', () => {
     expect(findPlotCensusNumberForCensusID(undefined, 70)).toBeNull();
+  });
+});
+
+describe('resolveEnterNavigationTarget (Actions is now the first column)', () => {
+  const VISIBLE = ['actions', 'measurementStatus', 'stemState', 'treeTag', 'stemTag', 'speciesCode', 'quadratName', 'measuredDBH'];
+  const EDITABLE_FOR_FIELD_CREW = new Set(['treeTag', 'stemTag', 'quadratName', 'measuredDBH']);
+  const isEditable = (field: string) => EDITABLE_FOR_FIELD_CREW.has(field);
+
+  it.each([
+    ['treeTag', { kind: 'focusField', field: 'stemTag' }],
+    ['stemTag', { kind: 'focusField', field: 'quadratName' }],
+    ['quadratName', { kind: 'focusField', field: 'measuredDBH' }],
+    ['measuredDBH', { kind: 'highlightSave' }],
+    ['measurementStatus', { kind: 'focusField', field: 'treeTag' }]
+  ])('from %s → %j', (current, expected) => {
+    const observed = resolveEnterNavigationTarget(VISIBLE, current, isEditable);
+    console.log('[enter navigation]', current, JSON.stringify(observed));
+    expect(observed).toEqual(expected);
+  });
+
+  it('never targets the actions column even if it reports editable', () => {
+    expect(resolveEnterNavigationTarget(['treeTag', 'actions'], 'treeTag', () => true)).toEqual({ kind: 'highlightSave' });
   });
 });

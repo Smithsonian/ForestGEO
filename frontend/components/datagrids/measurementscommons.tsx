@@ -18,6 +18,7 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridSortModel,
+  MuiEvent,
   useGridApiRef
 } from '@mui/x-data-grid';
 import { Alert, Snackbar } from '@mui/material';
@@ -29,7 +30,6 @@ import Box from '@mui/joy/Box';
 import {
   Autocomplete,
   Button,
-  Chip,
   CircularProgress,
   DialogActions,
   DialogContent,
@@ -41,19 +41,18 @@ import {
   Tooltip,
   Typography
 } from '@mui/joy';
-import { StyledDataGrid } from '@/config/styleddatagrid';
+import { ALWAYS_VISIBLE_COLUMN_MENU_SX, StyledDataGrid } from '@/config/styleddatagrid';
+import { buildViewDataColumns, hideEmptyViewDataColumns } from '@/components/viewdata/viewdatacolumns';
 import {
   CellItemContainer,
   createDeleteQuery,
   createPostPatchQuery,
   createQFFetchQuery,
   ExtendedGridFilterModel,
-  filterColumns,
   getColumnVisibilityModel,
   getGridID,
   MeasurementsCommonsProps,
   PendingAction,
-  sortRowsByMeasurementDate,
   VisibleFilter
 } from '@/config/datagridhelpers';
 import { useForestQuery, queryKey, QueryNamespace, QueryScope, invalidateAfter } from '@/lib/query';
@@ -63,16 +62,7 @@ import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/confi
 import { useOrgCensusContext, useOrgCensusListContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useRouter } from 'next/navigation';
 import moment from 'moment';
-import {
-  formatMeasurementDateCell,
-  formatMeasurementDateForCsv,
-  measurementDateToSaveString,
-  measurementDateValueGetter,
-  measurementDateValueSetter
-} from '@/components/datagrids/measurementdatecolumn';
-import CheckIcon from '@mui/icons-material/Check';
-import ErrorIcon from '@mui/icons-material/Error';
-import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import { formatMeasurementDateForCsv, measurementDateToSaveString } from '@/components/datagrids/measurementdatecolumn';
 import { bitToBoolean, HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
@@ -80,13 +70,12 @@ import { useBackgroundValidationState } from '@/config/store/appstore';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
-import { formatHeader, InputChip } from '@/components/client/datagridcolumns';
+import { InputChip } from '@/components/client/datagridcolumns';
 import ValidationOverrideModal from '@/components/client/modals/validationoverridemodal';
 import { MeasurementsSummaryResult } from '@/lib/db/definitions/views';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/lib/db/definitions/core';
 import ValidationCore from '@/components/client/validationcore';
-import { CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
@@ -94,12 +83,11 @@ import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegri
 import { useReloadOnFinishedUploadJob } from '@/components/datagrids/hooks/usereloadonfinisheduploadjob';
 import { useDeleteAfterCancelGuard } from '@/components/datagrids/hooks/usedeleteaftercancelguard';
 import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
-import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
 import { EditOperationCancelledError, useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast, { UndoRevertOutcome } from '@/components/editplan/undotoast';
-import { isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
+import { isFieldEditableByRole, isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
   areExtendedFilterModelsEqual,
@@ -113,13 +101,12 @@ import {
   NEW_ROW_ADDED_MESSAGE,
   revertMeasurementEdit,
   ROW_DELETED_MESSAGE,
+  resolveEnterNavigationTarget,
   selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
-  shouldUseAutoMeasurementRowHeight,
   toServerMeasurementFilterModel
 } from './measurementscommonsutils';
-import { buildMeasurementStateCountsSql, getMeasurementRowStatus } from '@/config/measurementstatefilters';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import { buildMeasurementStateCountsSql } from '@/config/measurementstatefilters';
 import type { GridDensity } from '@mui/x-data-grid';
 import MeasurementsExportModal from '@/components/client/modals/measurementsexportmodal';
 import ViewDataGridToolbar, { nextViewDataDensity } from '@/components/viewdata/viewdatagridtoolbar';
@@ -127,26 +114,30 @@ import type { ViewDataAboveGridControls } from '@/components/viewdata/viewdataco
 import ViewDataRowDetails, { type ViewDataSheetTarget } from '@/components/viewdata/viewdatarowdetails';
 import {
   ALL_TREE_STEM_STATES,
+  buildRowFieldFaults,
+  buildValidationFieldFaults,
   canEditMeasurementRows,
   EMPTY_CELL_DISPLAY,
   getViewDataShowOption,
   parseViewDataStateCounts,
   resolveInitialShowOption,
+  toViewDataRowSummary,
   totalActiveMeasurements,
+  VIEW_DATA_ACTIONS_COLUMN_WIDTH,
+  VIEW_DATA_DEFAULT_HIDDEN_COLUMNS,
+  VIEW_DATA_FIELDS,
+  VIEW_DATA_ROW_HEIGHT,
   VIEW_DATA_TEXT,
+  type ValidationFieldFaultsByMeasurement,
+  type ViewDataFieldFaults,
   type ViewDataShowOption,
   type ViewDataStateCounts
 } from '@/config/viewdata';
 
-// Stable reference to prevent infinite resize observer loop in MUI DataGrid
-const AUTO_ROW_HEIGHT = () => 'auto' as const;
-const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
-const FIREFOX_FIXED_ROW_HEIGHT = 112;
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
 const SEARCH_WORD_SEPARATOR = ' ';
 
 const NEGATIVE_DBH_INPUT_MESSAGE = 'DBH must be non-negative';
-const EMPTY_FAULTED_FIELDS: ReadonlySet<string> = new Set();
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -251,6 +242,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   } | null>(null);
   const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ErrorMap>({});
+  const [validationFaults, setValidationFaults] = useState<ValidationFieldFaultsByMeasurement>(new Map());
   const initialShowOption = resolveInitialShowOption(initialVisibleFilters);
   const [showOption, setShowOption] = useState<ViewDataShowOption>(initialShowOption);
   const [searchText, setSearchText] = useState('');
@@ -313,7 +305,6 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   const apiRef = useGridApiRef();
   const { markCancelled, isDeleteGuarded } = useDeleteAfterCancelGuard();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
-  const useAutoMeasurementRowHeight = useMemo(() => shouldUseAutoMeasurementRowHeight(typeof navigator === 'undefined' ? undefined : navigator.userAgent), []);
 
   const [undoToastScope, setUndoToastScope] = useState<{ editOperationID: number; censusID: number } | null>(null);
   const [sheetTarget, setSheetTarget] = useState<ViewDataSheetTarget | null>(null);
@@ -324,6 +315,18 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
   const orgCensusList = useOrgCensusListContext();
   const priorCensusNumberFor = useCallback((censusID: number) => findPlotCensusNumberForCensusID(orgCensusList, censusID), [orgCensusList]);
   const canEditRows = !locked && canEditMeasurementRows(session?.user?.userStatus);
+  const canEditSpeciesCode = canEditRows && isFieldEditableByRole('SpeciesCode', session?.user?.userStatus);
+  // MUI renders every cell of a row with the same row object: one fault map per row, not one per cell.
+  const faultsForRow = useMemo(() => {
+    const faultsByRow = new WeakMap<GridRowModel, ViewDataFieldFaults>();
+    return (row: GridRowModel): ViewDataFieldFaults => {
+      const cachedFaults = faultsByRow.get(row);
+      if (cachedFaults) return cachedFaults;
+      const faults = buildRowFieldFaults(toViewDataRowSummary(row), validationFaults.get(Number(row.coreMeasurementID)));
+      faultsByRow.set(row, faults);
+      return faults;
+    };
+  }, [validationFaults]);
   const isAnyRowEditing = Object.values(rowModesModel).some(mode => mode?.mode === GridRowModes.Edit);
   const editPreviewLoadingMessage = 'Saving changes...';
 
@@ -636,6 +639,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
             }, {})
           : {};
         setValidationErrors(errorMap);
+        setValidationFaults(buildValidationFieldFaults(Array.isArray(data?.failed) ? (data.failed as CMError[]) : []));
       } catch (error: unknown) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
         ailogger.error('Error fetching validation errors:', errorObj);
@@ -719,7 +723,6 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     loadAttributes();
   }, [loadAttributes]);
 
-  // helper functions for usage:
   const handleSortModelChange = useCallback(
     (newModel: GridSortModel) => {
       // Defer state updates to avoid "Cannot update a component while rendering" error
@@ -728,41 +731,11 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         // Guard against state updates before mount or after unmount
         if (!isMountedRef.current) return;
         if (areGridSortModelsEqual(sortModel, newModel)) return;
-
         setSortModel(newModel);
-
-        if (newModel.length > 0) {
-          const { field, sort } = newModel[0];
-          if (field === 'measurementDate') {
-            const sortedRows = sortRowsByMeasurementDate(rows, sort);
-            setRows(sortedRows);
-          }
-        }
+        setPaginationModel(prev => (prev.page === 0 ? prev : { ...prev, page: 0 }));
       });
     },
-    [rows, isMountedRef, setRows, sortModel]
-  );
-
-  const cellHasError = useCallback(
-    (colField: string, rowId: GridRowId) => {
-      const row = rows.find(row => rowId === row.id);
-      if (!row || !row.coreMeasurementID || !validationErrors[row.coreMeasurementID]) {
-        return false;
-      }
-      return validationErrors[Number(row.coreMeasurementID)].errors.find(error => error.validationPairs.find(vp => vp.criterion === colField));
-    },
-    [rows, validationErrors]
-  );
-
-  const rowHasError = useCallback(
-    (rowId: GridRowId) => {
-      const row = rows.find(row => rowId === row.id);
-      if (!row || !row.coreMeasurementID || !validationErrors[row.coreMeasurementID]) {
-        return false; // No errors for this row
-      }
-      return gridColumns.some(column => cellHasError(column.field, rowId));
-    },
-    [rows, validationErrors, gridColumns, cellHasError]
+    [isMountedRef, sortModel, setPaginationModel]
   );
 
   const fetchRowsForExport = async (visibility: VisibleFilter[], exportType: 'csv' | 'form') => {
@@ -1154,14 +1127,14 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
 
   const handleEditClick = useCallback(
     (id: GridRowId) => () => {
-      if (locked) return;
+      if (locked || isAnyRowEditing) return;
       const row = rows.find(r => r.id === id);
       if (row && handleSelectQuadrat) {
         handleSelectQuadrat(row.quadratID);
       }
       setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.Edit } });
     },
-    [locked, rows, handleSelectQuadrat, rowModesModel, setRowModesModel]
+    [locked, isAnyRowEditing, rows, handleSelectQuadrat, rowModesModel, setRowModesModel]
   );
 
   const handleCancelClick = useCallback(
@@ -1224,34 +1197,42 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
 
   const getGridActionsColumn = useCallback((): GridColDef => {
     return {
-      field: 'actions',
+      field: VIEW_DATA_FIELDS.actions,
       type: 'actions',
-      headerName: 'Actions',
-      width: 100,
+      headerName: canEditRows ? VIEW_DATA_TEXT.actionsHeader : VIEW_DATA_TEXT.detailsHeader,
+      width: canEditRows ? VIEW_DATA_ACTIONS_COLUMN_WIDTH.editor : VIEW_DATA_ACTIONS_COLUMN_WIDTH.readOnly,
+      hideable: false,
       cellClassName: 'actions',
       getActions: ({ id, row }) => {
-        const isInEditMode = rowModesModel[id]?.mode === 'edit';
+        const details = getEnhancedCellAction(
+          'Details',
+          VIEW_DATA_TEXT.detailsFor(String(row.treeTag ?? EMPTY_CELL_DISPLAY), String(row.stemTag ?? EMPTY_CELL_DISPLAY)),
+          <InfoOutlinedIcon />,
+          () => openDetailsForRow(row),
+          { pressed: sheetTarget?.coreMeasurementID === Number(row.coreMeasurementID) }
+        );
+        if (!canEditRows) return [details];
 
-        if (isInEditMode) {
+        if (rowModesModel[id]?.mode === GridRowModes.Edit) {
           return [
             getEnhancedCellAction('Save', VIEW_DATA_TEXT.saveRow, <SaveIcon />, handleSaveClick(id)),
             getEnhancedCellAction('Cancel', VIEW_DATA_TEXT.cancelRow, <CancelIcon />, (e: React.MouseEvent<HTMLButtonElement>) => handleCancelClick(id, e))
           ];
         }
 
-        return [
-          getEnhancedCellAction('Edit', VIEW_DATA_TEXT.editRow, <EditIcon />, handleEditClick(id)),
-          getEnhancedCellAction(
-            'Details',
-            VIEW_DATA_TEXT.detailsFor(String(row.treeTag ?? EMPTY_CELL_DISPLAY), String(row.stemTag ?? EMPTY_CELL_DISPLAY)),
-            <InfoOutlinedIcon />,
-            () => openDetailsForRow(row),
-            { pressed: sheetTarget?.coreMeasurementID === Number(row.coreMeasurementID) }
-          )
-        ];
+        const edit = getEnhancedCellAction(
+          'Edit',
+          isAnyRowEditing ? VIEW_DATA_TEXT.editLockTooltip : VIEW_DATA_TEXT.editRow,
+          <EditIcon />,
+          handleEditClick(id),
+          {
+            disabled: isAnyRowEditing
+          }
+        );
+        return [edit, details];
       }
     };
-  }, [rowModesModel, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, openDetailsForRow, sheetTarget]);
+  }, [canEditRows, isAnyRowEditing, rowModesModel, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, openDetailsForRow, sheetTarget]);
 
   useEffect(() => {
     setSheetTarget(current => {
@@ -1326,271 +1307,101 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     if (failedRead) throw failedRead.reason;
   }, [runFetchPaginated, refreshCounts, isInfiniteOn, infinite]);
 
-  const validationStatusColumn: GridColDef = useMemo(
-    () => ({
-      field: 'isValidated',
-      headerName: '',
-      headerAlign: 'center',
-      renderHeader: () => formatHeader('Stem', 'States'),
-      align: 'center',
-      width: 80,
-      filterable: false,
-      renderCell: (params: GridCellParams) => {
-        let validationIcon, treeState;
-        if (validationErrors[Number(params.row.coreMeasurementID)]) {
-          validationIcon = (
-            <Tooltip title="Validation errors" size="md">
-              <ErrorIcon color="error" />
-            </Tooltip>
-          );
-        } else if (getMeasurementRowStatus(params.row) === 'ingestion-unresolved') {
-          // StemGUID NULL = ingestion failure. Takes precedence over IsValidated so a stale
-          // IsValidated = 1 (e.g. from an earlier override) can never render as passed.
-          validationIcon = (
-            <Tooltip title="Ingestion failed - unresolved" size="md">
-              <WarningAmberIcon color="warning" />
-            </Tooltip>
-          );
-        } else if (params.row.isValidated === null) {
-          validationIcon = (
-            <Tooltip title="Pending Validation" size="md">
-              <HourglassEmptyIcon color="primary" />
-            </Tooltip>
-          );
-        } else if (params.row.isValidated) {
-          validationIcon = (
-            <Tooltip title="Passed Validation" size="md">
-              <CheckIcon color="success" />
-            </Tooltip>
-          );
-        }
-        switch (params.row.userDefinedFields) {
-          case 'new recruit':
-            treeState = (
-              <Tooltip title={'New Recruit'} arrow>
-                <Avatar size="sm" variant="soft" color="primary" alt={'new recruit avatar'}>
-                  <Grass />
-                </Avatar>
-              </Tooltip>
-            );
-            break;
-          case 'multi stem':
-            treeState = (
-              <Tooltip title={'Multi Stem'} arrow>
-                <Avatar size="sm" variant="soft" color="warning" alt={'multi stem avatar'}>
-                  <CallSplit />
-                </Avatar>
-              </Tooltip>
-            );
-            break;
-          case 'old tree':
-            treeState = (
-              <Tooltip title={'Old Tree'} arrow>
-                <Avatar size={'sm'} variant={'soft'} color={'neutral'} alt={'old tree avatar'}>
-                  <Forest />
-                </Avatar>
-              </Tooltip>
-            );
-            break;
-        }
-        return (
-          <Stack direction="row" spacing={1} alignItems="center">
-            {validationIcon}
-            {treeState}
-          </Stack>
-        );
-      }
-    }),
-    [validationErrors]
-  );
-
-  const measurementDateColumn: GridColDef = useMemo(
-    () => ({
-      field: 'measurementDate',
-      headerName: 'Date',
-      headerClassName: 'header',
-      headerAlign: 'center',
-      flex: 0.7,
-      sortable: true,
-      editable: true,
-      type: 'date',
-      renderHeader: () => (
-        <Box flexDirection={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-          <Typography level="title-lg">Date</Typography>
-          <Typography level="body-xs">YYYY-MM-DD</Typography>
-        </Box>
+  const attributeTooltips = useMemo(
+    () =>
+      new Map(
+        Array.from(attributesMap.entries()).map(([code, attribute]) => [
+          code,
+          [attribute.description && `Description: ${attribute.description}`, attribute.status && `Status: ${attribute.status}`].filter(Boolean).join('\n') ||
+            code
+        ])
       ),
-      // Rows carry the database DATE (UTC-midnight Date / ISO string); the editor works on a
-      // local-midnight picker Date. The getter/setter pair is the only crossing, so the picked
-      // day is the day shown, diffed, previewed and saved in every browser zone.
-      valueGetter: value => measurementDateValueGetter(value),
-      valueSetter: (value, row) => measurementDateValueSetter(value, row),
-      valueFormatter: value => formatMeasurementDateCell(value)
-    }),
-    []
+    [attributesMap]
   );
 
-  const getCellErrorMessages = useCallback(
-    (colField: string, coreMeasurementID: number) => {
-      const error = validationErrors[coreMeasurementID].errors;
-      if (!error || !Array.isArray(error)) {
-        return '';
-      }
-      return error.flatMap(errorDetail => errorDetail.validationPairs).find(vp => vp.criterion === colField)?.description || null;
-    },
-    [validationErrors]
+  const dataColumns = useMemo(
+    () =>
+      applyFilterToColumns(
+        gridColumns.map(column => {
+          if (column.field === 'attributes') {
+            column = {
+              ...column,
+              renderEditCell: (params: GridRenderEditCellParams) => <InputChip params={params} selectable={selectableAttributes} reload={setReloadAttrs} />
+            };
+          }
+          if (['measuredDBH', 'measuredHOM', 'stemLocalX', 'stemLocalY'].includes(column.field)) {
+            column = {
+              ...column,
+              renderEditCell: (params: GridRenderEditCellParams) => <EditMeasurements params={params} />
+            };
+          }
+          if (['quadratName', 'speciesCode', 'treeTag', 'stemTag'].includes(column.field)) {
+            column = {
+              ...column,
+              renderEditCell: (params: GridRenderEditCellParams) => (
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%', height: '100%' }}>
+                  <Autocomplete
+                    sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
+                    multiple={column.field === 'attributes'}
+                    variant={'soft'}
+                    autoSelect
+                    autoHighlight
+                    freeSolo={['treeTag', 'stemTag'].includes(column.field)}
+                    clearOnBlur={false}
+                    isOptionEqualToValue={(option, value) => option === value}
+                    options={[...getSelectableOptionsForField(selectableOpts, column.field)].sort((a, b) => a.localeCompare(b))}
+                    value={
+                      column.field === 'attributes'
+                        ? params.value
+                          ? (params.value ?? '').split(';').filter((s: string | any[]) => s.length > 0)
+                          : []
+                        : (params.value ?? '')
+                    }
+                    onChange={(_event, value) => {
+                      if (value) {
+                        params.api.setEditCellValue({
+                          id: params.id,
+                          field: params.field,
+                          value: column.field === 'attributes' && Array.isArray(value) ? value.join(';') : value
+                        });
+                      }
+                    }}
+                  />
+                </Box>
+              )
+            };
+          }
+          return column;
+        })
+      ),
+    [gridColumns, selectableAttributes, selectableOpts]
   );
 
-  const columns = useMemo(() => {
-    const commonColumns = gridColumns.map(column => {
-      if (column.field === 'attributes') {
-        column = {
-          ...column,
-          renderEditCell: (params: GridRenderEditCellParams) => <InputChip params={params} selectable={selectableAttributes} reload={setReloadAttrs} />
-        };
-      }
-      if (['measuredDBH', 'measuredHOM', 'stemLocalX', 'stemLocalY'].includes(column.field)) {
-        column = {
-          ...column,
-          renderEditCell: (params: GridRenderEditCellParams) => <EditMeasurements params={params} />
-        };
-      }
-      if (['quadratName', 'speciesCode', 'treeTag', 'stemTag'].includes(column.field)) {
-        column = {
-          ...column,
-          renderEditCell: (params: GridRenderEditCellParams) => (
-            <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%', height: '100%' }}>
-              <Autocomplete
-                sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
-                multiple={column.field === 'attributes'}
-                variant={'soft'}
-                autoSelect
-                autoHighlight
-                freeSolo={['treeTag', 'stemTag'].includes(column.field)}
-                clearOnBlur={false}
-                isOptionEqualToValue={(option, value) => option === value}
-                options={[...getSelectableOptionsForField(selectableOpts, column.field)].sort((a, b) => a.localeCompare(b))}
-                value={
-                  column.field === 'attributes'
-                    ? params.value
-                      ? (params.value ?? '').split(';').filter((s: string | any[]) => s.length > 0)
-                      : []
-                    : (params.value ?? '')
-                }
-                onChange={(_event, value) => {
-                  if (value) {
-                    params.api.setEditCellValue({
-                      id: params.id,
-                      field: params.field,
-                      value: column.field === 'attributes' && Array.isArray(value) ? value.join(';') : value
-                    });
-                  }
-                }}
-              />
-            </Box>
-          )
-        };
-      }
-      return {
-        ...column,
-        renderCell: (params: GridCellParams) => {
-          const value = typeof params.value === 'string' ? params.value : (params.value?.toString() ?? '');
-          const formattedValue = !isNaN(Number(value)) && value.includes('.') && value.split('.')[1].length > 2 ? Number(value).toFixed(2) : value;
-          const rowError = rowHasError(params.id);
-          const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, Number(params.row.coreMeasurementID)) : '';
+  const columns = useMemo(
+    () => buildViewDataColumns({ dataColumns, actionsColumn: getGridActionsColumn(), canEditRows, canEditSpeciesCode, faultsForRow, attributeTooltips }),
+    [dataColumns, getGridActionsColumn, canEditRows, canEditSpeciesCode, faultsForRow, attributeTooltips]
+  );
 
-          const isMeasurementField =
-            column.field === 'measuredDBH' || column.field === 'measuredHOM' || column.field.includes('X') || column.field.includes('Y');
-          const isAttributeField = column.field === 'attributes';
-          const attributeValues = column.field === 'attributes' && typeof params.value === 'string' ? params.value.replace(/\s+/g, '').split(';') : [];
+  const filteredColumns = useMemo(() => (hidingEmpty ? hideEmptyViewDataColumns(gridRows, columns) : columns), [gridRows, columns, hidingEmpty]);
 
-          function renderMeasurementDetails() {
-            return (
-              <Typography level="body-sm">{isMeasurementField && params.row[column.field] ? Number(params.row[column.field]).toFixed(2) : 'null'}</Typography>
-            );
-          }
+  const editableFields = useMemo(() => new Set(columns.filter(column => column.editable).map(column => column.field)), [columns]);
+  const isViewDataCellEditable = useCallback(
+    (field: string) => !locked && editableFields.has(field) && isFieldEditableOnSurface('measurementssummary', field),
+    [locked, editableFields]
+  );
 
-          function renderAttributeDetails() {
-            return attributeValues.map((value: string, index: number) => {
-              const attributeDetails = attributesMap.get(value);
-              const tooltipContent = attributeDetails
-                ? [
-                    attributeDetails.description && `Description: ${attributeDetails.description}`,
-                    attributeDetails.status && `Status: ${attributeDetails.status}`
-                  ]
-                    .filter(Boolean)
-                    .join('\n') || value
-                : value;
+  const initialColumnVisibility = useMemo(
+    () => ({ ...getColumnVisibilityModel(gridType), ...Object.fromEntries(VIEW_DATA_DEFAULT_HIDDEN_COLUMNS.map(field => [field, false])) }),
+    [gridType]
+  );
 
-              return (
-                <Tooltip key={index} title={tooltipContent} placement="top" variant="soft" size="sm">
-                  <Chip size={'sm'}>{value}</Chip>
-                </Tooltip>
-              );
-            });
-          }
-
-          return (
-            <Box
-              sx={{
-                display: 'flex',
-                flex: 1,
-                flexDirection: 'column',
-                marginY: 1.5,
-                width: '100%',
-                bgcolor: rowError ? 'warning.main' : undefined
-              }}
-            >
-              {isMeasurementField ? (
-                <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>{renderMeasurementDetails()}</Box>
-              ) : isAttributeField ? (
-                <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>{renderAttributeDetails()}</Box>
-              ) : (
-                <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{formattedValue}</Typography>
-              )}
-              {cellError !== '' && (
-                <Typography
-                  color="danger"
-                  variant="solid"
-                  sx={{
-                    fontSize: '0.75rem',
-                    mt: 1,
-                    whiteSpace: 'normal',
-                    lineHeight: 'normal'
-                  }}
-                >
-                  {cellError}
-                </Typography>
-              )}
-            </Box>
-          );
-        }
-      };
-    });
-    if (locked || (session?.user.userStatus !== 'global' && session?.user.userStatus !== 'db admin')) {
-      // permissions locking measurements view actions
-      return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns)];
-    }
-    return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns), getGridActionsColumn()];
-  }, [
-    gridColumns,
-    validationStatusColumn,
-    measurementDateColumn,
-    locked,
-    selectableAttributes,
-    selectableOpts,
-    cellHasError,
-    getCellErrorMessages,
-    rowHasError,
-    getGridActionsColumn,
-    session?.user.userStatus,
-    attributesMap
-  ]);
-
-  const filteredColumns = useMemo(() => {
-    if (hidingEmpty) return filterColumns(rows, columns);
-    return columns;
-  }, [rows, columns, hidingEmpty]);
+  const editingRow = (gridRows as GridRowModel[]).find(row => rowModesModel[row.id]?.mode === GridRowModes.Edit);
+  const toolbarCaption = editingRow
+    ? VIEW_DATA_TEXT.captionEditing(String(editingRow.treeTag ?? EMPTY_CELL_DISPLAY), String(editingRow.stemTag ?? EMPTY_CELL_DISPLAY))
+    : canEditRows
+      ? VIEW_DATA_TEXT.captionEditor
+      : null;
+  const sheetFaultedFields = useMemo(() => new Set(sheetTarget?.gridRow ? faultsForRow(sheetTarget.gridRow).keys() : []), [sheetTarget, faultsForRow]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1610,29 +1421,24 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     };
   }, []);
 
-  const handleEnterKeyNavigation = async (params: GridCellParams, event: React.KeyboardEvent) => {
-    event.defaultPrevented = true;
-    const columnIndex = filteredColumns.findIndex(col => col.field === params.field);
-    const isLastColumn = columnIndex === filteredColumns.length - 2;
-    const currentColumn = filteredColumns[columnIndex];
-
+  const handleEnterKeyNavigation = (params: GridCellParams, event: MuiEvent<React.KeyboardEvent>) => {
+    if (rowModesModel[params.id]?.mode !== GridRowModes.Edit) return;
+    // Stops MUI's own Enter handler from ending the row edit (useGridRowEditing publishes rowEditStop).
+    event.defaultMuiPrevented = true;
     if (isSaveHighlighted) {
-      openConfirmationDialog('save', params.id);
       setIsSaveHighlighted(false);
-    } else if (currentColumn.type === 'singleSelect') {
-      const cell = apiRef?.current?.getCellElement(params.id, params.field);
-      if (cell) {
-        const select = cell.querySelector('select');
-        if (select) {
-          select.focus();
-        }
-      }
-    } else if (isLastColumn) {
-      setIsSaveHighlighted(true);
-      apiRef?.current?.setCellFocus(params.id, 'actions');
-    } else {
-      apiRef?.current?.setCellFocus(params.id, filteredColumns[columnIndex + 1].field);
+      openConfirmationDialog('save', params.id);
+      return;
     }
+    const visibleFields = apiRef.current?.getVisibleColumns().map(column => column.field) ?? [];
+    const target = resolveEnterNavigationTarget(visibleFields, params.field, isViewDataCellEditable);
+    if (target.kind === 'highlightSave') {
+      setIsSaveHighlighted(true);
+      apiRef.current?.setCellFocus(params.id, VIEW_DATA_FIELDS.actions);
+      return;
+    }
+    apiRef.current?.setCellFocus(params.id, target.field);
+    apiRef.current?.getCellElement(params.id, target.field)?.querySelector<HTMLElement>('input')?.focus();
   };
 
   const handleFilterModelChange = useCallback((newFilterModel: GridFilterModel) => applyFilterChange(newFilterModel), [applyFilterChange]);
@@ -1799,13 +1605,12 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
               <StyledDataGrid
                 aria-label={getGridTypeLabel(gridType)}
                 apiRef={apiRef}
-                sx={{ width: '100%' }}
+                sx={{ width: '100%', ...ALWAYS_VISIBLE_COLUMN_MENU_SX }}
                 density={density}
                 rows={gridRows}
                 columns={filteredColumns}
                 editMode="row"
                 rowModesModel={rowModesModel}
-                disableColumnSelector
                 onRowModesModelChange={handleRowModesModelChange}
                 onRowEditStop={handleRowEditStop}
                 processRowUpdate={async (newRow, oldRow) => {
@@ -1815,6 +1620,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
                 }}
                 loading={showGridLoading}
                 paginationMode="server"
+                sortingMode="server"
                 filterMode="server"
                 onPaginationModelChange={newPaginationModel => {
                   if (arePaginationModelsEqual(paginationModel, newPaginationModel)) {
@@ -1833,9 +1639,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
                   });
                 }}
                 onCellKeyDown={(params, event) => {
-                  if (event.key === 'Enter') {
-                    handleEnterKeyNavigation(params, event).then(() => {});
-                  }
+                  if (event.key === 'Enter') handleEnterKeyNavigation(params, event);
                 }}
                 paginationModel={paginationModel}
                 rowCount={gridRowCount}
@@ -1848,7 +1652,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
                 ignoreDiacritics
                 initialState={{
                   columns: {
-                    columnVisibilityModel: getColumnVisibilityModel(gridType)
+                    columnVisibilityModel: initialColumnVisibility
                   }
                 }}
                 slots={{
@@ -1863,20 +1667,13 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
                       onCycleDensity: () => setDensity(current => nextViewDataDensity(current)),
                       hidingEmpty,
                       onToggleHidingEmpty: () => setHidingEmpty(current => !current),
-                      caption: !locked && canEditMeasurementRows(session?.user?.userStatus) ? VIEW_DATA_TEXT.captionEditor : null
+                      caption: toolbarCaption
                     }
                   }
                 }}
                 showToolbar
-                getEstimatedRowHeight={useAutoMeasurementRowHeight ? ESTIMATED_AUTO_ROW_HEIGHT : undefined}
-                getRowHeight={useAutoMeasurementRowHeight ? AUTO_ROW_HEIGHT : undefined}
-                rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
-                isCellEditable={params => {
-                  if (locked) return false;
-                  // Server allowlist is authoritative; keeps the grid in lockstep
-                  // with the server's rejectDisallowedFields check.
-                  return isFieldEditableOnSurface('measurementssummary', params.field);
-                }}
+                rowHeight={VIEW_DATA_ROW_HEIGHT}
+                isCellEditable={params => isViewDataCellEditable(params.field) && (!isAnyRowEditing || rowModesModel[params.id]?.mode === GridRowModes.Edit)}
               />
               <InfiniteGridScrollBridge
                 apiRef={apiRef}
@@ -1958,7 +1755,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
             canEditRows={canEditRows}
             isAnyRowEditing={isAnyRowEditing}
             isDeleteGuarded={sheetTarget.gridRow ? isDeleteGuarded(sheetTarget.gridRow.id as GridRowId) : false}
-            faultedFields={EMPTY_FAULTED_FIELDS}
+            faultedFields={sheetFaultedFields}
             priorCensusNumberFor={priorCensusNumberFor}
             onClose={() => setSheetTarget(null)}
             onOpenRelatedRow={coreMeasurementID =>

@@ -477,3 +477,18 @@ export function findPlotCensusNumberForCensusID(censusList: ReadonlyArray<OrgCen
   const match = censusList?.find(census => census?.censusIDs?.includes(censusID));
   return match?.plotCensusNumber ?? null;
 }
+
+const ACTIONS_FIELD = 'actions';
+
+export type EnterNavigationTarget = { kind: 'focusField'; field: string } | { kind: 'highlightSave' };
+
+/** Next visible editable field after the current one; Save once there is none. Works whatever the Actions column's position. */
+export function resolveEnterNavigationTarget(
+  visibleFields: readonly string[],
+  currentField: string,
+  isFieldEditable: (field: string) => boolean
+): EnterNavigationTarget {
+  const currentIndex = visibleFields.indexOf(currentField);
+  const nextField = visibleFields.slice(currentIndex + 1).find(field => field !== ACTIONS_FIELD && isFieldEditable(field));
+  return nextField ? { kind: 'focusField', field: nextField } : { kind: 'highlightSave' };
+}

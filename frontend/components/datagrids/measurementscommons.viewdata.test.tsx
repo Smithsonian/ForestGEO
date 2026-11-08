@@ -6,7 +6,8 @@ import type { GridColDef } from '@mui/x-data-grid';
 import { MeasurementsGridHarness } from './measurementscommons.harness';
 import type { ViewDataAboveGridControls } from '@/components/viewdata/viewdatacontrols';
 import ViewDataGridToolbar from '@/components/viewdata/viewdatagridtoolbar';
-import { VIEW_DATA_TEXT } from '@/config/viewdata';
+import { VIEW_DATA_COLUMN_ORDER, VIEW_DATA_DEFAULT_HIDDEN_COLUMNS, VIEW_DATA_ROW_HEIGHT, VIEW_DATA_TEXT } from '@/config/viewdata';
+import { ALWAYS_VISIBLE_COLUMN_MENU_SX } from '@/config/styleddatagrid';
 import { CLEAR_VALIDATION_ERRORS_SUCCESS } from '@/config/errorsexplorer';
 import { ROW_UPDATED_MESSAGE, UNRESOLVED_ERRORS_SNACKBAR_MESSAGE } from './measurementscommonsutils';
 import { HTTPResponses } from '@/config/macros';
@@ -723,5 +724,152 @@ describe('MeasurementsCommons View Data details sheet', () => {
       expect(censusBApplyBody).toMatchObject({ censusID: NEW_CENSUS_ID, targetID: CENSUS_B_ROW.coreMeasurementID });
       expect(await screen.findByText(ROW_UPDATED_MESSAGE)).toBeInTheDocument();
     });
+  });
+});
+
+describe('MeasurementsCommons View Data grid configuration', () => {
+  beforeEach(() => {
+    controlsLog.length = 0;
+    countsRow = COUNTS_ROW;
+    ctx.grid = null;
+    ctx.session.data.user.userStatus = 'field crew';
+    ctx.census = { plotCensusNumber: 1, dateRanges: [{ censusID: 1 }] };
+    fetchMock.mockImplementation(route);
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    ctx.session.data.user.userStatus = 'field crew';
+  });
+
+  const SUMMARY_COLUMNS_PROMISE = import('@/components/client/datagridcolumns').then(module => module.MeasurementsSummaryViewGridColumns);
+  const PENDING_DETAILS_COLUMN_WIDTH = 64;
+  const STARTING_PAGE = 2;
+  const DESCENDING_DATE_SORT = [{ field: 'measurementDate', sort: 'desc' }];
+
+  async function renderGrid(rows: Array<Record<string, unknown>> = [ROW], initialPage = 0) {
+    const columns = await SUMMARY_COLUMNS_PROMISE;
+    render(<MeasurementsGridHarness initialRows={rows} gridColumns={columns} renderAboveGrid={renderAboveGrid} initialPage={initialPage} />);
+    await waitFor(() => expect(ctx.grid).not.toBeNull());
+    return ctx.grid as Record<string, unknown>;
+  }
+
+  type ActionsColumn = GridColDef & { getActions: (params: { id: number; row: unknown }) => React.ReactNode[] };
+  const actionsColumnOfCurrentGrid = () => (ctx.grid?.columns as GridColDef[])[0] as ActionsColumn;
+  const SECOND_ROW = { ...ROW, id: 2, coreMeasurementID: 502, treeTag: '010204' };
+
+  it('configures server sorting, fixed 44 px rows, the column menu style and the column selector', async () => {
+    const grid = await renderGrid();
+    const hiddenFields = Object.entries((grid.initialState as { columns: { columnVisibilityModel: Record<string, boolean> } }).columns.columnVisibilityModel)
+      .filter(([, visible]) => !visible)
+      .map(([field]) => field);
+    const observed = {
+      sortingMode: grid.sortingMode,
+      rowHeight: grid.rowHeight,
+      getRowHeight: grid.getRowHeight,
+      getEstimatedRowHeight: grid.getEstimatedRowHeight,
+      disableColumnSelector: grid.disableColumnSelector,
+      firstColumn: (grid.columns as GridColDef[])[0].field,
+      hiddenFields
+    };
+    console.log('[grid config]', JSON.stringify(observed));
+    expect(observed).toMatchObject({
+      sortingMode: 'server',
+      rowHeight: VIEW_DATA_ROW_HEIGHT,
+      getRowHeight: undefined,
+      getEstimatedRowHeight: undefined,
+      disableColumnSelector: undefined,
+      firstColumn: 'actions'
+    });
+    expect(hiddenFields).toEqual(expect.arrayContaining([...VIEW_DATA_DEFAULT_HIDDEN_COLUMNS, 'coreMeasurementID']));
+    expect(Object.keys(grid.sx as Record<string, unknown>)).toEqual(expect.arrayContaining(Object.keys(ALWAYS_VISIBLE_COLUMN_MENU_SX)));
+  });
+
+  it('keeps the spec column order among the columns it shows', async () => {
+    const grid = await renderGrid();
+    const shown = (grid.columns as GridColDef[]).map(column => column.field);
+    const expectedOrder = VIEW_DATA_COLUMN_ORDER.filter(field => shown.includes(field));
+    const observed = shown.filter(field => (expectedOrder as readonly string[]).includes(field));
+    console.log('[column order]', JSON.stringify({ shown, observed }));
+    expect(observed).toEqual([...expectedOrder]);
+    expect(observed.length).toBeGreaterThan(1);
+  });
+
+  it('sends a header sort to the server, returns to page 0 and never reorders the rows itself', async () => {
+    const olderRow = { ...ROW, id: 3, coreMeasurementID: 503, measurementDate: '2024-06-10' };
+    const newerRow = { ...ROW, id: 4, coreMeasurementID: 504, measurementDate: '2024-06-20' };
+    const serverOrder = [olderRow.id, newerRow.id];
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).startsWith(GRID_URL_PREFIX) ? Promise.resolve(respond({ output: [olderRow, newerRow], totalCount: 2 })) : route(input, init)
+    );
+    const grid = await renderGrid([olderRow, newerRow], STARTING_PAGE);
+    expect(gridRequests().some(request => request.url.includes(`${GRID_URL_PREFIX}${STARTING_PAGE}/`))).toBe(true);
+    await act(async () => {
+      (grid.onSortModelChange as (model: unknown) => void)(DESCENDING_DATE_SORT);
+      await Promise.resolve();
+    });
+    const sortedRequest = () => gridRequests().find(request => JSON.stringify(request.body.sortModel) === JSON.stringify(DESCENDING_DATE_SORT));
+    await waitFor(() => expect(sortedRequest()).toBeDefined());
+    const rowOrder = (ctx.grid?.rows as Array<{ id: number }>).map(row => row.id);
+    console.log('[server sort] request', JSON.stringify(sortedRequest()), 'row order', JSON.stringify(rowOrder));
+    expect(sortedRequest()?.url).toContain(`${GRID_URL_PREFIX}0/`);
+    expect(rowOrder).toEqual(serverOrder);
+  });
+
+  it.each([
+    ['field crew', { treeTag: true, speciesCode: false }],
+    ['global', { treeTag: true, speciesCode: true }],
+    ['db admin', { treeTag: true, speciesCode: true }],
+    ['pending', { treeTag: false, speciesCode: false }]
+  ])('cell editability for %s', async (userStatus, expected) => {
+    ctx.session.data.user.userStatus = userStatus;
+    const grid = await renderGrid();
+    const isCellEditable = grid.isCellEditable as (params: { field: string; id: number }) => boolean;
+    const observed = { treeTag: isCellEditable({ field: 'treeTag', id: 1 }), speciesCode: isCellEditable({ field: 'speciesCode', id: 1 }) };
+    console.log('[editability]', userStatus, JSON.stringify(observed));
+    expect(observed).toEqual(expected);
+  });
+
+  it('gives a pending user a Details-only column', async () => {
+    ctx.session.data.user.userStatus = 'pending';
+    await renderGrid();
+    const actions = actionsColumnOfCurrentGrid();
+    render(<div>{actions.getActions({ id: 1, row: ROW })}</div>);
+    console.log('[pending actions]', JSON.stringify({ header: actions.headerName, width: actions.width }));
+    expect({ header: actions.headerName, width: actions.width }).toEqual({ header: VIEW_DATA_TEXT.detailsHeader, width: PENDING_DETAILS_COLUMN_WIDTH });
+    expect(screen.queryByRole('button', { name: VIEW_DATA_TEXT.editRow })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: VIEW_DATA_TEXT.detailsFor('010203', '1') })).toBeInTheDocument();
+  });
+
+  it("disables other rows' Edit with the lock tooltip and shows the editing caption while a row is edited", async () => {
+    const grid = await renderGrid([ROW, SECOND_ROW]);
+    act(() => (grid.onRowModesModelChange as (model: unknown) => void)({ 1: { mode: 'edit' } }));
+    const toolbarCaption = () => (ctx.grid?.slotProps as { toolbar: { viewDataToolbar: { caption: string } } }).toolbar.viewDataToolbar.caption;
+    await waitFor(() => expect(toolbarCaption()).toBe(VIEW_DATA_TEXT.captionEditing('010203', '1')));
+    render(<div data-testid="second-row">{actionsColumnOfCurrentGrid().getActions({ id: 2, row: SECOND_ROW })}</div>);
+    const lockedEdit = screen.getByRole('button', { name: VIEW_DATA_TEXT.editLockTooltip });
+    console.log('[edit lock] second row edit button', lockedEdit.outerHTML);
+    expect(lockedEdit).toHaveAttribute('data-disabled', 'true');
+  });
+
+  it('keeps native edit entry inside the one-row lock: no cell of another row is editable while a row is edited (A23)', async () => {
+    ctx.session.data.user.userStatus = 'global';
+    const grid = await renderGrid([ROW, SECOND_ROW]);
+    const editabilityOf = () => {
+      const isCellEditable = ctx.grid?.isCellEditable as (params: { field: string; id: number }) => boolean;
+      return {
+        row1TreeTag: isCellEditable({ field: 'treeTag', id: 1 }),
+        row2TreeTag: isCellEditable({ field: 'treeTag', id: 2 }),
+        row2Species: isCellEditable({ field: 'speciesCode', id: 2 })
+      };
+    };
+    const beforeEdit = editabilityOf();
+    act(() => (grid.onRowModesModelChange as (model: unknown) => void)({ 1: { mode: 'edit' } }));
+    await waitFor(() => expect((ctx.grid?.rowModesModel as Record<string, { mode: string }>)[1]?.mode).toBe('edit'));
+    const duringEdit = editabilityOf();
+    console.log('[one-row lock] isCellEditable', JSON.stringify({ beforeEdit, duringEdit }));
+    expect(beforeEdit).toEqual({ row1TreeTag: true, row2TreeTag: true, row2Species: true });
+    expect(duringEdit).toEqual({ row1TreeTag: true, row2TreeTag: false, row2Species: false });
   });
 });

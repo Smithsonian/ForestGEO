@@ -103,7 +103,8 @@ vi.mock('@mui/x-data-grid', async importOriginal => {
     )
   };
 });
-vi.mock('@/config/styleddatagrid', () => ({
+vi.mock('@/config/styleddatagrid', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/config/styleddatagrid')>()),
   StyledDataGrid: (props: {
     rows?: Array<{ id: number }>;
     columns?: GridColDef[];
