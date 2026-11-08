@@ -453,6 +453,14 @@ describe('MeasurementsCommons View Data details sheet', () => {
     return screen.findByRole('heading', { name: `Measurement ${row.coreMeasurementID}` });
   }
 
+  async function turnInfiniteScrollOn() {
+    const infiniteScroll = () =>
+      (ctx.grid?.slots as { pagination: { infiniteScroll: { onToggle: (next: boolean) => void; enabled: boolean } } }).pagination.infiniteScroll;
+    act(() => infiniteScroll().onToggle(true));
+    await waitFor(() => expect(gridRequests().some(request => request.url.includes(`/${INFINITE_DEFAULT_CHUNK}/`))).toBe(true));
+    await waitFor(() => expect(infiniteScroll().enabled).toBe(true));
+  }
+
   it('reports a failed ROWS re-read after a clear instead of swallowing it', async () => {
     const user = userEvent.setup();
     const invalidRow = { ...ROW, measurementStatus: 'invalidNoLog' };
@@ -496,10 +504,7 @@ describe('MeasurementsCommons View Data details sheet', () => {
     });
     render(<MeasurementsGridHarness initialRows={[invalidRow]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} enableInfiniteScroll />);
     await waitFor(() => expect(ctx.grid).not.toBeNull());
-    const pagination = (ctx.grid?.slots as { pagination: { infiniteScroll: { onToggle: (next: boolean) => void } } }).pagination;
-    act(() => pagination.infiniteScroll.onToggle(true));
-    await waitFor(() => expect(gridRequests().some(request => request.url.includes(infiniteChunkSegment))).toBe(true));
-    await waitFor(() => expect((ctx.grid?.slots as { pagination: { infiniteScroll: { enabled: boolean } } }).pagination.infiniteScroll.enabled).toBe(true));
+    await turnInfiniteScrollOn();
     await openSheetForRow(user, invalidRow);
     await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
     console.log('[sheet] infinite re-read failure, visible alerts', JSON.stringify(screen.queryAllByRole('alert').map(alert => alert.textContent)));
@@ -561,6 +566,126 @@ describe('MeasurementsCommons View Data details sheet', () => {
     const visibleAlerts = screen.queryAllByRole('alert').map(alert => alert.textContent);
     console.log('[counts snackbar] after the counts changed', JSON.stringify(visibleAlerts));
     expect(visibleAlerts).toEqual([PENDING_VALIDATION_SNACKBAR_MESSAGE(PENDING_ONLY_COUNT)]);
+  });
+
+  describe('deleting from the sheet: server failures and infinite scrolling', () => {
+    const BAD_GATEWAY_STATUS = 502;
+    const BAD_GATEWAY_HTML = '<html><body>502 Bad Gateway</body></html>';
+    const DELETE_FAILED_FALLBACK_MESSAGE = 'Error: Deletion failed';
+    const LOADED_ROW_COUNT = 12;
+    const PAGINATED_PAGE_SIZE = 10;
+    const loadedRows = Array.from({ length: LOADED_ROW_COUNT }, (_, index) => ({
+      ...ROW,
+      id: index + 1,
+      coreMeasurementID: 500 + index + 1,
+      treeTag: `0102${String(index + 1).padStart(2, '0')}`
+    }));
+    const lastLoadedRow = loadedRows[LOADED_ROW_COUNT - 1];
+    let serverRows: typeof loadedRows;
+
+    /** A server that pages like the real one and forgets a row once it is deleted. */
+    function serveRows(onDelete?: (init: RequestInit | undefined) => Response | null) {
+      fetchMock.mockImplementation((input: RequestInit | URL | string, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith(FIXED_DATA_URL_PREFIX) && init?.method === DELETE_METHOD) {
+          const failure = onDelete?.(init);
+          if (failure) return Promise.resolve(failure);
+          const deletedID = (JSON.parse(String(init.body)) as { newRow: { id: number } }).newRow.id;
+          serverRows = serverRows.filter(row => row.id !== deletedID);
+          return Promise.resolve(respond({}));
+        }
+        if (url.startsWith(GRID_URL_PREFIX)) {
+          const [page, pageSize] = url.slice(GRID_URL_PREFIX.length).split('/').map(Number);
+          return Promise.resolve(respond({ output: serverRows.slice(page * pageSize, (page + 1) * pageSize), totalCount: serverRows.length }));
+        }
+        return route(url, init);
+      });
+    }
+
+    const gridRowIDs = () => (ctx.grid?.rows as Array<{ id: number }>).map(row => row.id);
+
+    beforeEach(() => {
+      serverRows = loadedRows;
+      countsRow = ZERO_COUNTS_ROW;
+    });
+
+    it('reports a delete that fails with a non-JSON body instead of rejecting unhandled, and leaves the sheet open', async () => {
+      const user = userEvent.setup();
+      serveRows(() => new Response(BAD_GATEWAY_HTML, { status: BAD_GATEWAY_STATUS }));
+      render(<MeasurementsGridHarness initialRows={serverRows.slice(0, PAGINATED_PAGE_SIZE)} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await openSheetForRow(user, ROW);
+      await user.click(await screen.findByRole('button', { name: VIEW_DATA_TEXT.deleteMeasurement }));
+      await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.deleteConfirm }));
+      await waitFor(() => expect(deleteRequests()).toHaveLength(1));
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+      // The open sheet is modal and hides the rest of the page from the accessibility tree, the snackbar included.
+      const visibleAlerts = screen.queryAllByRole('alert', { hidden: true }).map(alert => alert.textContent);
+      console.log(
+        '[sheet] delete answered with an HTML 502',
+        JSON.stringify({ visibleAlerts, sheetOpen: screen.queryByRole('heading', { name: 'Measurement 501' }) !== null })
+      );
+      expect(visibleAlerts).toEqual([DELETE_FAILED_FALLBACK_MESSAGE]);
+      expect(screen.getByRole('heading', { name: 'Measurement 501' })).toBeInTheDocument();
+    });
+
+    it('infinite mode: deletes a loaded row that is past the first page of the paginated grid and removes it from the grid', async () => {
+      const user = userEvent.setup();
+      serveRows();
+      render(
+        <MeasurementsGridHarness
+          initialRows={serverRows.slice(0, PAGINATED_PAGE_SIZE)}
+          gridColumns={GRID_COLUMNS}
+          renderAboveGrid={renderAboveGrid}
+          enableInfiniteScroll
+        />
+      );
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await turnInfiniteScrollOn();
+      await waitFor(() => expect(gridRowIDs()).toContain(lastLoadedRow.id));
+      await openSheetForRow(user, lastLoadedRow);
+      await user.click(await screen.findByRole('button', { name: VIEW_DATA_TEXT.deleteMeasurement }));
+      await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.deleteConfirm }));
+      await waitFor(() => expect(screen.queryByRole('heading', { name: `Measurement ${lastLoadedRow.coreMeasurementID}` })).not.toBeInTheDocument());
+      console.log(
+        '[sheet] infinite delete of a row past the first page',
+        JSON.stringify({ deletes: deleteRequests().length, gridRowIDs: gridRowIDs(), alerts: screen.queryAllByRole('alert').map(alert => alert.textContent) })
+      );
+      expect(deleteRequests()).toHaveLength(1);
+      expect(screen.getByText(ROW_DELETED_MESSAGE)).toBeInTheDocument();
+      expect(gridRowIDs()).not.toContain(lastLoadedRow.id);
+      expect(gridRowIDs()).toHaveLength(LOADED_ROW_COUNT - 1);
+    });
+
+    it('infinite mode: a deleted first-page row leaves the grid at once, without waiting for any re-read', async () => {
+      const user = userEvent.setup();
+      serveRows();
+      render(
+        <MeasurementsGridHarness
+          initialRows={serverRows.slice(0, PAGINATED_PAGE_SIZE)}
+          gridColumns={GRID_COLUMNS}
+          renderAboveGrid={renderAboveGrid}
+          enableInfiniteScroll
+        />
+      );
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await turnInfiniteScrollOn();
+      await waitFor(() => expect(gridRowIDs()).toHaveLength(LOADED_ROW_COUNT));
+      const infiniteReadsBeforeDelete = gridRequests().filter(request => request.url.includes(`/${INFINITE_DEFAULT_CHUNK}/`)).length;
+      await openSheetForRow(user, ROW);
+      await user.click(await screen.findByRole('button', { name: VIEW_DATA_TEXT.deleteMeasurement }));
+      await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.deleteConfirm }));
+      await waitFor(() => expect(gridRowIDs()).not.toContain(ROW.id));
+      const infiniteReadsAfterDelete = gridRequests().filter(request => request.url.includes(`/${INFINITE_DEFAULT_CHUNK}/`)).length;
+      console.log(
+        '[sheet] infinite delete of a first-page row',
+        JSON.stringify({ gridRowIDs: gridRowIDs(), infiniteReads: [infiniteReadsBeforeDelete, infiniteReadsAfterDelete] })
+      );
+      expect(gridRowIDs()).toHaveLength(LOADED_ROW_COUNT - 1);
+      expect(infiniteReadsAfterDelete).toBe(infiniteReadsBeforeDelete);
+    });
   });
 
   describe('the sheet delete handler guards itself, even when the sheet is bypassed', () => {

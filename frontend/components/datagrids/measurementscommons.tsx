@@ -1013,7 +1013,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       setSnackbar({ children: 'Error: Site context not available', severity: 'error' });
       return;
     }
-    const deletionRow = rows.find(row => String(row.id) === String(id));
+    const deletionRow = (gridRows as GridRowModel[]).find(row => String(row.id) === String(id));
     const deletionID = deletionRow?.id;
     if (!deletionID) {
       setSnackbar({ children: 'Error: The row to delete is no longer available', severity: 'error' });
@@ -1038,7 +1038,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       setLoading(false);
     }
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json().catch(() => ({}));
       if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
         setSnackbar({
           children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`,
@@ -1057,6 +1057,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         severity: 'success'
       });
       setRows(rows.filter(row => String(row.id) !== String(id)));
+      infinite.removeRow(deletionID);
       setSheetTarget(null);
       try {
         // destructive mutation — global overlay blocks UI for the duration of the API call
@@ -1288,7 +1289,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     },
     // performDeleteAction is redefined each render, as today.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [findGridRow, isDeleteGuarded, isAnyRowEditing, rows]
+    [findGridRow, isDeleteGuarded, isAnyRowEditing, rows, infinite.removeRow]
   );
 
   const handleCleared = useCallback(async () => {
