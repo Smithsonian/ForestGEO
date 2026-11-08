@@ -150,6 +150,7 @@ export type TSSFilter = 'multi stem' | 'old tree' | 'new recruit';
 export interface ExtendedGridFilterModel extends GridFilterModel {
   visible: VisibleFilter[];
   tss: TSSFilter[];
+  stemStatus?: string[];
 }
 
 export interface RowControlBreakdown {

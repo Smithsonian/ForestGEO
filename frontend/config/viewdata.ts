@@ -1,6 +1,5 @@
 import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 import type { TSSFilter, VisibleFilter } from '@/config/datagridhelpers';
-import type { CMError } from '@/config/macros/uploadsystemmacros';
 import type { UserAuthRoles } from '@/config/macros';
 import { formatCalendarDate, parseCalendarDay, toCalendarDayString } from '@/config/dateformats';
 import { formatErrorTypeLabel, INGESTION_ERROR_FIELD_MAP, MARKED_INVALID_NO_ERROR_LOGGED_LABEL, type ErrorSourceKind } from '@/config/errorsexplorer';
@@ -462,6 +461,13 @@ export function describeValidationCell(summary: ViewDataRowSummary): ViewDataVal
   }
 }
 
+export interface ValidationFaultSource {
+  coreMeasurementID: number;
+  validationErrorIDs: number[];
+  descriptions: string[];
+  criteria: string[];
+}
+
 export type ValidationFieldFaultsByMeasurement = ReadonlyMap<number, ReadonlyMap<string, string>>;
 /** field → tooltip; null for an ingestion fault (the Validation cell carries its message). */
 export type ViewDataFieldFaults = ReadonlyMap<string, string | null>;
@@ -469,7 +475,7 @@ export type ViewDataFieldFaults = ReadonlyMap<string, string | null>;
 const CRITERIA_SEPARATOR = ';';
 const FAULT_TOOLTIP_SEPARATOR = '; ';
 
-export function buildValidationFieldFaults(failed: readonly CMError[]): ValidationFieldFaultsByMeasurement {
+export function buildValidationFieldFaults(failed: readonly ValidationFaultSource[]): ValidationFieldFaultsByMeasurement {
   const byMeasurement = new Map<number, Map<string, string>>();
   for (const error of failed) {
     if (!error.coreMeasurementID) continue;

@@ -3,6 +3,7 @@ import { GridLogicOperator } from '@mui/x-data-grid';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
   ALL_VALID_SNACKBAR_MESSAGE,
+  areExtendedFilterModelsEqual,
   areGridSortModelsEqual,
   buildEditableFieldsDiff,
   buildEditableFieldsDiffWithMetaForSurface,
@@ -713,5 +714,58 @@ describe('describeMeasurementRow: delete-confirmation wording (#524 item 6)', ()
 
   it('describes a null row generically', () => {
     expect(describeMeasurementRow(null)).toBe('this measurement');
+  });
+});
+
+describe('toServerMeasurementFilterModel: View Data stem state and stem status translation', () => {
+  const ALL_VISIBLE = ['errors', 'valid', 'pending'] as ('errors' | 'valid' | 'pending')[];
+  const ALL_TSS = ['old tree', 'multi stem', 'new recruit'] as ('old tree' | 'multi stem' | 'new recruit')[];
+
+  it('moves a stemState item into tss and out of items', () => {
+    const server = toServerMeasurementFilterModel({
+      items: [{ id: 1, field: 'stemState', operator: 'is', value: 'old tree' }],
+      quickFilterValues: [],
+      visible: ALL_VISIBLE,
+      tss: ALL_TSS
+    });
+    console.log('[translation] stemState', JSON.stringify(server));
+    expect(server.items).toEqual([]);
+    expect(server.tss).toEqual(['old tree']);
+    expect(server).not.toHaveProperty('stemStatus');
+  });
+
+  it('sends all three states when the stemState item has no value', () => {
+    const server = toServerMeasurementFilterModel({
+      items: [{ id: 1, field: 'stemState', operator: 'is', value: '' }],
+      quickFilterValues: [],
+      visible: ALL_VISIBLE,
+      tss: ALL_TSS
+    });
+    console.log('[translation] stemState empty', JSON.stringify(server));
+    expect(server.items).toEqual([]);
+    expect(server.tss).toEqual(ALL_TSS);
+  });
+
+  it('moves a stemStatus item into stemStatus and keeps other items', () => {
+    const server = toServerMeasurementFilterModel({
+      items: [
+        { id: 1, field: 'stemStatus', operator: 'is', value: 'dead' },
+        { id: 2, field: 'speciesCode', operator: 'equals', value: 'ACRU' }
+      ],
+      logicOperator: GridLogicOperator.And,
+      quickFilterValues: [],
+      visible: ALL_VISIBLE,
+      tss: ALL_TSS
+    });
+    console.log('[translation] stemStatus', JSON.stringify(server));
+    expect(server.items).toEqual([{ field: 'speciesCode', operator: 'equals', value: 'ACRU' }]);
+    expect(server.stemStatus).toEqual(['dead']);
+    expect(server).not.toHaveProperty('logicOperator');
+  });
+
+  it('treats models that differ only in stemStatus as different', () => {
+    const base = { items: [], quickFilterValues: [], visible: ALL_VISIBLE, tss: ALL_TSS };
+    expect(areExtendedFilterModelsEqual({ ...base, stemStatus: ['dead'] }, { ...base, stemStatus: ['alive'] })).toBe(false);
+    expect(areExtendedFilterModelsEqual({ ...base, stemStatus: ['dead'] }, { ...base, stemStatus: ['dead'] })).toBe(true);
   });
 });
