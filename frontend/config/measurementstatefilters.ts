@@ -1,4 +1,5 @@
 import { VisibleFilter } from '@/config/datagridhelpers';
+import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 
 export function buildMeasurementHasUnresolvedErrorsSql(schema: string, alias: string): string {
   return `EXISTS (
@@ -176,4 +177,145 @@ export function buildMeasurementVisibleClauseSql(schema: string, alias: string, 
   const visibleConditions = visibleFilters.map(visibleFilter => buildMeasurementVisibleConditionSql(schema, alias, visibleFilter));
 
   return visibleConditions.length > 0 ? ` AND (${visibleConditions.join(' OR ')})` : ' AND 1 = 0';
+}
+
+export const MEASUREMENT_STATUSES = ['ingestionFailed', 'unresolvedErrors', 'invalidNoLog', 'pending', 'passed'] as const;
+export type MeasurementStatus = (typeof MEASUREMENT_STATUSES)[number];
+
+export const MEASUREMENT_STATUS_RANK: Readonly<Record<MeasurementStatus, number>> = {
+  ingestionFailed: 0,
+  unresolvedErrors: 1,
+  invalidNoLog: 2,
+  pending: 3,
+  passed: 4
+};
+
+/** Each status lands in exactly one of buildMeasurementVisibleConditionSql's buckets. */
+export const MEASUREMENT_STATUS_VISIBLE_BUCKET: Readonly<Record<MeasurementStatus, VisibleFilter>> = {
+  ingestionFailed: 'errors',
+  unresolvedErrors: 'errors',
+  invalidNoLog: 'errors',
+  pending: 'pending',
+  passed: 'valid'
+};
+
+export const MEASUREMENT_STATUS_RANK_COLUMN = 'MeasurementStatusRank';
+export const UNRESOLVED_ERROR_CODES_SEPARATOR = ',';
+export const UNRESOLVED_ERROR_CODE_PART_SEPARATOR = ':';
+/** ASCII unit separator: never part of a stored error message. */
+export const UNRESOLVED_ERROR_MESSAGES_SEPARATOR = '\u001f';
+export const STEM_STATUSES_SEPARATOR = ',';
+
+export class UnknownAttributeStatusError extends Error {
+  constructor(readonly status: string) {
+    super(`Unknown attribute status: ${status}`);
+    this.name = 'UnknownAttributeStatusError';
+  }
+}
+
+const ATTRIBUTE_STATUS_LITERAL_PATTERN = /^[a-z][a-z -]*$/;
+
+function toAttributeStatusLiteral(status: string): string {
+  if (!AttributeStatusOptions.includes(status) || !ATTRIBUTE_STATUS_LITERAL_PATTERN.test(status)) {
+    throw new UnknownAttributeStatusError(status);
+  }
+  return `'${status}'`;
+}
+
+export function measurementStatusFromRank(rank: unknown): MeasurementStatus | null {
+  if (rank === null || rank === undefined || rank === '') return null;
+  const numeric = Number(rank);
+  return Number.isInteger(numeric) && numeric >= 0 && numeric < MEASUREMENT_STATUSES.length ? MEASUREMENT_STATUSES[numeric] : null;
+}
+
+/** Same predicates as buildMeasurementStateCountsSql, so a row's rank always agrees with the Show counts. */
+export function buildMeasurementStatusRankSql(schema: string, alias: string): string {
+  const hasUnresolvedErrors = buildMeasurementHasUnresolvedErrorsSql(schema, alias);
+  return `CASE
+            WHEN ${alias}.StemGUID IS NULL THEN ${MEASUREMENT_STATUS_RANK.ingestionFailed}
+            WHEN ${hasUnresolvedErrors} THEN ${MEASUREMENT_STATUS_RANK.unresolvedErrors}
+            WHEN ${alias}.IsValidated = FALSE THEN ${MEASUREMENT_STATUS_RANK.invalidNoLog}
+            WHEN ${alias}.IsValidated IS NULL THEN ${MEASUREMENT_STATUS_RANK.pending}
+            ELSE ${MEASUREMENT_STATUS_RANK.passed}
+          END`;
+}
+
+/** attributes' key is (Code, IsActive): prefer the active row so each code yields one status (A6). */
+function buildEffectiveAttributeJoinSql(schema: string, cmAttributeAlias: string, attributeAlias: string): string {
+  return `JOIN ${schema}.attributes ${attributeAlias}
+              ON ${attributeAlias}.Code = ${cmAttributeAlias}.Code
+             AND ${attributeAlias}.IsActive = (SELECT MAX(effective_attr.IsActive) FROM ${schema}.attributes effective_attr WHERE effective_attr.Code = ${cmAttributeAlias}.Code)`;
+}
+
+function buildUnresolvedErrorsFromSql(schema: string, alias: string, logAlias: string, errorAlias: string, validationAlias?: string): string {
+  const validationJoin = validationAlias
+    ? `LEFT JOIN ${schema}.sitespecificvalidations ${validationAlias}
+                ON ${errorAlias}.ErrorSource = 'validation' AND ${errorAlias}.ErrorCode = CAST(${validationAlias}.ValidationID AS CHAR)`
+    : '';
+  return `FROM ${schema}.measurement_error_log ${logAlias}
+              JOIN ${schema}.measurement_errors ${errorAlias} ON ${errorAlias}.ErrorID = ${logAlias}.ErrorID
+              ${validationJoin}
+             WHERE ${logAlias}.MeasurementID = ${alias}.CoreMeasurementID
+               AND COALESCE(${logAlias}.IsResolved, FALSE) = FALSE`;
+}
+
+function errorOrder(errorAlias: string): string {
+  return `ORDER BY ${errorAlias}.ErrorSource ASC, ${errorAlias}.ErrorCode ASC`;
+}
+
+function displayMessage(errorAlias: string, validationAlias: string): string {
+  return `COALESCE(NULLIF(${validationAlias}.Description, ''), ${errorAlias}.ErrorMessage)`;
+}
+
+/**
+ * Per-row columns the View Data grid reads (measurementssummary branch only). Message text and error order
+ * match buildRawErrorsQuery and its ORDER BY in app/api/errors/explorer/_shared.ts; the contradiction checks
+ * mirror buildDuplicateGroupsQuery and buildSameBatchConflictGroupsQuery there.
+ */
+export function buildMeasurementRowSummaryProjectionSql(schema: string, alias: string): string {
+  const statusOrder = AttributeStatusOptions.map(toAttributeStatusLiteral).join(', ');
+  const duplicateTagStem = `EXISTS (
+            SELECT 1 FROM ${schema}.measurementssummary rs_dup
+             WHERE rs_dup.PlotID = ${alias}.PlotID AND rs_dup.CensusID = ${alias}.CensusID
+               AND rs_dup.CoreMeasurementID <> ${alias}.CoreMeasurementID
+               AND rs_dup.TreeTag = ${alias}.TreeTag AND rs_dup.StemTag = ${alias}.StemTag
+               AND COALESCE(${alias}.TreeTag, '') <> '' AND COALESCE(${alias}.StemTag, '') <> '')`;
+  const sameBatchSpecies = `EXISTS (
+            SELECT 1 FROM ${schema}.coremeasurements rs_self
+              JOIN ${schema}.coremeasurements rs_other
+                ON rs_other.UploadFileID = rs_self.UploadFileID AND rs_other.UploadBatchID = rs_self.UploadBatchID
+               AND rs_other.CoreMeasurementID <> rs_self.CoreMeasurementID AND COALESCE(rs_other.IsActive, TRUE) = TRUE
+              JOIN ${schema}.measurementssummary rs_other_ms
+                ON rs_other_ms.CoreMeasurementID = rs_other.CoreMeasurementID
+               AND rs_other_ms.PlotID = ${alias}.PlotID AND rs_other_ms.CensusID = ${alias}.CensusID
+             WHERE rs_self.CoreMeasurementID = ${alias}.CoreMeasurementID
+               AND rs_self.UploadFileID IS NOT NULL AND rs_self.UploadBatchID IS NOT NULL AND COALESCE(rs_self.IsActive, TRUE) = TRUE
+               AND COALESCE(${alias}.TreeTag, '') <> '' AND rs_other_ms.TreeTag = ${alias}.TreeTag
+               AND COALESCE(rs_other_ms.SpeciesCode, '') <> COALESCE(${alias}.SpeciesCode, ''))`;
+
+  return `${buildMeasurementStatusRankSql(schema, alias)} AS ${MEASUREMENT_STATUS_RANK_COLUMN},
+          (SELECT COUNT(*) ${buildUnresolvedErrorsFromSql(schema, alias, 'rs_cmel', 'rs_cme')}) AS UnresolvedErrorCount,
+          (SELECT ${displayMessage('rs_pme', 'rs_pve')} ${buildUnresolvedErrorsFromSql(schema, alias, 'rs_pmel', 'rs_pme', 'rs_pve')}
+             ${errorOrder('rs_pme')} LIMIT 1) AS PrimaryErrorMessage,
+          (SELECT rs_sme.ErrorSource ${buildUnresolvedErrorsFromSql(schema, alias, 'rs_smel', 'rs_sme')}
+             ${errorOrder('rs_sme')} LIMIT 1) AS PrimaryErrorSource,
+          (SELECT GROUP_CONCAT(CONCAT(rs_kme.ErrorSource, '${UNRESOLVED_ERROR_CODE_PART_SEPARATOR}', rs_kme.ErrorCode) ${errorOrder('rs_kme')} SEPARATOR '${UNRESOLVED_ERROR_CODES_SEPARATOR}')
+             ${buildUnresolvedErrorsFromSql(schema, alias, 'rs_kmel', 'rs_kme')}) AS UnresolvedErrorCodes,
+          (SELECT GROUP_CONCAT(${displayMessage('rs_mme', 'rs_mve')} ${errorOrder('rs_mme')} SEPARATOR '${UNRESOLVED_ERROR_MESSAGES_SEPARATOR}')
+             ${buildUnresolvedErrorsFromSql(schema, alias, 'rs_mmel', 'rs_mme', 'rs_mve')}) AS UnresolvedErrorMessages,
+          (CASE WHEN ${duplicateTagStem} OR ${sameBatchSpecies} THEN 1 ELSE 0 END) AS HasContradiction,
+          (SELECT GROUP_CONCAT(DISTINCT rs_attr.Status ORDER BY FIELD(rs_attr.Status, ${statusOrder}) SEPARATOR '${STEM_STATUSES_SEPARATOR}')
+             FROM ${schema}.cmattributes rs_ca
+             ${buildEffectiveAttributeJoinSql(schema, 'rs_ca', 'rs_attr')}
+            WHERE rs_ca.CoreMeasurementID = ${alias}.CoreMeasurementID AND rs_attr.Status IS NOT NULL) AS StemStatuses`;
+}
+
+/** " AND EXISTS (...)" matching rows where any effective code carries one of the statuses; '' when none. */
+export function buildStemStatusFilterClauseSql(schema: string, alias: string, statuses: readonly string[]): string {
+  if (statuses.length === 0) return '';
+  const literals = statuses.map(toAttributeStatusLiteral).join(', ');
+  return ` AND EXISTS (
+            SELECT 1 FROM ${schema}.cmattributes sf_ca
+            ${buildEffectiveAttributeJoinSql(schema, 'sf_ca', 'sf_attr')}
+            WHERE sf_ca.CoreMeasurementID = ${alias}.CoreMeasurementID AND sf_attr.Status IN (${literals}))`;
 }

@@ -6,7 +6,17 @@ import {
   buildMeasurementHasUnresolvedErrorsSql,
   buildMeasurementStateCountsSql,
   buildMeasurementVisibleClauseSql,
-  buildMeasurementVisibleConditionSql
+  buildMeasurementVisibleConditionSql,
+  buildMeasurementRowSummaryProjectionSql,
+  buildMeasurementStatusRankSql,
+  buildStemStatusFilterClauseSql,
+  MEASUREMENT_STATUS_RANK,
+  MEASUREMENT_STATUS_RANK_COLUMN,
+  MEASUREMENT_STATUS_VISIBLE_BUCKET,
+  MEASUREMENT_STATUSES,
+  measurementStatusFromRank,
+  UnknownAttributeStatusError,
+  UNRESOLVED_ERROR_MESSAGES_SEPARATOR
 } from './measurementstatefilters';
 
 describe('measurementstatefilters', () => {
@@ -165,5 +175,115 @@ describe('measurementstatefilters', () => {
       expect(revalidatablePredicate).toContain("me.ErrorSource = 'validation'");
       expect(revalidatablePredicate).toContain('COALESCE(mel.IsResolved, FALSE) = FALSE');
     });
+  });
+});
+
+const SCHEMA = 'myschema';
+const ALIAS = 'vft';
+const STATUS_ORDER_IN_SPEC = ['ingestionFailed', 'unresolvedErrors', 'invalidNoLog', 'pending', 'passed'];
+
+describe('measurement status rank (View Data Validation column)', () => {
+  it('lists the five statuses in the spec order with ranks 0-4', () => {
+    console.log('[status rank]', JSON.stringify(MEASUREMENT_STATUS_RANK));
+    expect([...MEASUREMENT_STATUSES]).toEqual(STATUS_ORDER_IN_SPEC);
+    expect(STATUS_ORDER_IN_SPEC.map(status => MEASUREMENT_STATUS_RANK[status as keyof typeof MEASUREMENT_STATUS_RANK])).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('builds a CASE whose WHEN branches test, in order, StemGUID NULL, an unresolved log entry, FALSE and NULL, with passed as ELSE', () => {
+    const sql = buildMeasurementStatusRankSql(SCHEMA, ALIAS);
+    console.log('[status rank] sql', sql);
+    const positions = [
+      sql.indexOf(`WHEN ${ALIAS}.StemGUID IS NULL THEN 0`),
+      sql.indexOf(`WHEN ${buildMeasurementHasUnresolvedErrorsSql(SCHEMA, ALIAS)} THEN 1`),
+      sql.indexOf(`WHEN ${ALIAS}.IsValidated = FALSE THEN 2`),
+      sql.indexOf(`WHEN ${ALIAS}.IsValidated IS NULL THEN 3`),
+      sql.indexOf('ELSE 4')
+    ];
+    expect(positions.every(position => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
+  it('maps every status to exactly one Show bucket, matching the counts buckets', () => {
+    console.log('[status buckets]', JSON.stringify(MEASUREMENT_STATUS_VISIBLE_BUCKET));
+    expect(MEASUREMENT_STATUS_VISIBLE_BUCKET).toEqual({
+      ingestionFailed: 'errors',
+      unresolvedErrors: 'errors',
+      invalidNoLog: 'errors',
+      pending: 'pending',
+      passed: 'valid'
+    });
+  });
+
+  it.each([
+    [0, 'ingestionFailed'],
+    [4, 'passed'],
+    ['2', 'invalidNoLog'],
+    [null, null],
+    [undefined, null],
+    ['', null],
+    [5, null],
+    [-1, null],
+    ['x', null],
+    [1.5, null]
+  ])('measurementStatusFromRank(%j) → %j', (rank, expected) => {
+    expect(measurementStatusFromRank(rank)).toBe(expected);
+  });
+});
+
+describe('row summary projection', () => {
+  const sql = buildMeasurementRowSummaryProjectionSql(SCHEMA, ALIAS);
+
+  it('selects every projected column under its documented alias and binds no placeholder', () => {
+    const aliases = [
+      MEASUREMENT_STATUS_RANK_COLUMN,
+      'UnresolvedErrorCount',
+      'PrimaryErrorMessage',
+      'PrimaryErrorSource',
+      'UnresolvedErrorCodes',
+      'UnresolvedErrorMessages',
+      'HasContradiction',
+      'StemStatuses'
+    ];
+    const observed = Object.fromEntries(aliases.map(alias => [alias, sql.includes(`AS ${alias}`)]));
+    console.log('[projection] aliases', JSON.stringify(observed), 'placeholders', (sql.match(/\?/g) ?? []).length);
+    expect(Object.values(observed).every(Boolean)).toBe(true);
+    expect(sql).not.toContain('?');
+  });
+
+  it('orders the primary error, codes and messages by ErrorSource then ErrorCode, as View Errors does', () => {
+    const orderClauses = sql.match(/ORDER BY \w+\.ErrorSource ASC, \w+\.ErrorCode ASC/g) ?? [];
+    console.log('[projection] order clauses', orderClauses.length);
+    expect(orderClauses.length).toBe(4);
+    expect(sql).toMatch(/COALESCE\(NULLIF\(\w+\.Description, ''\), \w+\.ErrorMessage\)/);
+    expect(sql).toContain(`SEPARATOR '${UNRESOLVED_ERROR_MESSAGES_SEPARATOR}'`);
+  });
+
+  it('orders stem statuses by AttributeStatusOptions and prefers the active attribute row', () => {
+    expect(sql).toContain("FIELD(rs_attr.Status, 'alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing')");
+    expect(sql).toContain('IsActive = (SELECT MAX(effective_attr.IsActive)');
+  });
+
+  it('flags contradictions with the two View Errors rules scoped to the row plot and census', () => {
+    expect(sql).toContain(`rs_dup.PlotID = ${ALIAS}.PlotID AND rs_dup.CensusID = ${ALIAS}.CensusID`);
+    expect(sql).toContain(`COALESCE(rs_other_ms.SpeciesCode, '') <> COALESCE(${ALIAS}.SpeciesCode, '')`);
+    expect(sql).toContain('rs_self.UploadFileID IS NOT NULL AND rs_self.UploadBatchID IS NOT NULL');
+  });
+});
+
+describe('buildStemStatusFilterClauseSql', () => {
+  it('adds no clause when no status is selected', () => {
+    expect(buildStemStatusFilterClauseSql(SCHEMA, ALIAS, [])).toBe('');
+  });
+
+  it('matches rows where any effective code carries the status', () => {
+    const clause = buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead']);
+    console.log('[stem status clause]', clause);
+    expect(clause).toMatch(/^ AND EXISTS \(/);
+    expect(clause).toContain(`sf_ca.CoreMeasurementID = ${ALIAS}.CoreMeasurementID`);
+    expect(clause).toContain("sf_attr.Status IN ('dead')");
+  });
+
+  it('rejects a value outside AttributeStatusOptions', () => {
+    expect(() => buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ["dead') OR 1=1 --"])).toThrow(UnknownAttributeStatusError);
   });
 });
