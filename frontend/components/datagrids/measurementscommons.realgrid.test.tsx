@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MeasurementsGridHarness } from './measurementscommons.harness';
-import { VIEW_DATA_SORTABLE_FIELDS, VIEW_DATA_TEXT } from '@/config/viewdata';
+import { ALL_TREE_STEM_STATES, STEM_STATE_LABELS, VIEW_DATA_COLUMN_HEADERS, VIEW_DATA_SORTABLE_FIELDS, VIEW_DATA_TEXT } from '@/config/viewdata';
 import { HTTPResponses } from '@/config/macros';
 
 const faultBuilds = vi.hoisted(() => ({ calls: 0 }));
@@ -132,15 +132,28 @@ async function renderRealGrid(userStatus: string, rows: Array<Record<string, unk
 }
 
 let currentRows: Array<Record<string, unknown>> = [ROW];
+let stemStateFilterRequests: number[] = [];
+let quadratFilterRequests: number[] = [];
+const FILTER_SETTLE_MS = 600;
 
 describe('MeasurementsCommons on the real DataGrid', () => {
   beforeEach(() => {
     currentRows = [ROW];
+    stemStateFilterRequests = [];
+    quadratFilterRequests = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.startsWith('/api/fixeddatafilter/')) return respond({ output: currentRows, totalCount: currentRows.length });
+        if (url.startsWith('/api/fixeddatafilter/')) {
+          const requestedFilter = JSON.parse(String(init?.body ?? '{}')).filterModel;
+          const isStemStateFiltered = (requestedFilter?.tss?.length ?? ALL_TREE_STEM_STATES.length) < ALL_TREE_STEM_STATES.length;
+          stemStateFilterRequests.push(isStemStateFiltered ? 1 : 0);
+          const isQuadratFiltered = (requestedFilter?.items ?? []).some((item: { field: string }) => item.field === 'quadratName');
+          quadratFilterRequests.push(isQuadratFiltered ? 1 : 0);
+          if (isQuadratFiltered) return respond({ output: [{ ...ROW, quadratName: '' }], totalCount: 1 });
+          return isStemStateFiltered ? respond({ output: [], totalCount: 0 }) : respond({ output: currentRows, totalCount: currentRows.length });
+        }
         if (url.startsWith('/api/validations/validationerrordisplay')) return respond({ failed: [] });
         if (url === '/api/query') return respond(String(init?.body ?? '').includes(ATTRIBUTES_QUERY_MARKER) ? ATTRIBUTE_ROWS : [{ CountValid: 1 }]);
         return respond({});
@@ -286,6 +299,66 @@ describe('MeasurementsCommons on the real DataGrid', () => {
     };
     console.log('[real grid] after a census change with the save confirmation open', JSON.stringify(observed));
     expect(observed).toEqual({ editingRows: 0, treeTagEditor: false });
+  });
+
+  it('a filter that matches no rows keeps its filter item and shows the no-match overlay', async () => {
+    const user = userEvent.setup();
+    await renderRealGrid('field crew');
+    await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.filtersButton }));
+    const panel = await waitFor(() => {
+      const found = document.querySelector('.MuiDataGrid-panel') as HTMLElement | null;
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    const valueSelect = within(panel).getAllByRole('combobox').at(-1) as HTMLElement;
+    await user.click(valueSelect);
+    await user.click(await screen.findByRole('option', { name: STEM_STATE_LABELS['old tree'] }));
+    await waitFor(() => expect(stemStateFilterRequests.some(count => count > 0)).toBe(true), { timeout: 3000 });
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, FILTER_SETTLE_MS));
+    });
+    const observed = {
+      stemStateFilterRequests: [...stemStateFilterRequests],
+      filterCountChip: screen.queryByTestId('view-data-filter-count')?.textContent ?? null,
+      overlay: screen.queryByTestId('view-data-empty-state')?.textContent ?? null,
+      headers: Array.from(document.querySelectorAll('[role="columnheader"]')).map(header => header.getAttribute('data-field'))
+    };
+    console.log('[real grid] a filter with no matching rows', JSON.stringify(observed));
+    expect(observed.filterCountChip).toBe('1');
+    expect(observed.overlay).toContain(VIEW_DATA_TEXT.emptyFiltered);
+    expect(observed.headers).toEqual(expect.arrayContaining(['stemState', 'treeTag', 'speciesCode', 'measuredDBH']));
+    expect(stemStateFilterRequests.at(-1)).toBe(1);
+  });
+
+  it('a filter whose own column is blank on every returned row keeps that column and its filter item', async () => {
+    const user = userEvent.setup();
+    await renderRealGrid('field crew');
+    await user.click(screen.getByRole('button', { name: VIEW_DATA_TEXT.filtersButton }));
+    const panel = await waitFor(() => {
+      const found = document.querySelector('.MuiDataGrid-panel') as HTMLElement | null;
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    const [fieldSelect, operatorSelect] = within(panel).getAllByRole('combobox');
+    await user.click(fieldSelect);
+    await user.click(await screen.findByRole('option', { name: VIEW_DATA_COLUMN_HEADERS.quadratName }));
+    await user.click(operatorSelect);
+    await user.click(await screen.findByRole('option', { name: 'is empty' }));
+    await waitFor(() => expect(quadratFilterRequests.some(count => count > 0)).toBe(true), { timeout: 3000 });
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, FILTER_SETTLE_MS));
+    });
+    const observed = {
+      quadratFilterRequests: [...quadratFilterRequests],
+      filterCountChip: screen.queryByTestId('view-data-filter-count')?.textContent ?? null,
+      headers: Array.from(document.querySelectorAll('[role="columnheader"]')).map(header => header.getAttribute('data-field')),
+      rowCount: document.querySelectorAll('.MuiDataGrid-row').length
+    };
+    console.log('[real grid] a filter on a column that is blank in every returned row', JSON.stringify(observed));
+    expect(observed.filterCountChip).toBe('1');
+    expect(observed.headers).toContain('quadratName');
+    expect(quadratFilterRequests.at(-1)).toBe(1);
+    expect(observed.rowCount).toBe(1);
   });
 
   it('shows a column-menu button on every visible sortable header and none on Actions', async () => {

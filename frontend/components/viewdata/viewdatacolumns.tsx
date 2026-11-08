@@ -277,10 +277,16 @@ function isBlankCellValue(value: unknown): boolean {
   return value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
 }
 
-/** "Hide empty columns", judged per loaded page as today, reading the row key each derived column displays. */
-export function hideEmptyViewDataColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
+/**
+ * "Hide empty columns", judged per loaded page as today, reading the row key each derived column displays.
+ * MUI drops the filter item of every column that leaves the grid, so an empty page hides nothing and a column
+ * with an active filter item is never hidden.
+ */
+export function hideEmptyViewDataColumns(rows: GridRowsProp, columns: GridColDef[], filteredFields: readonly string[] = []): GridColDef[] {
+  if (rows.length === 0) return columns;
+  const filteredFieldSet = new Set(filteredFields);
   return columns.filter(column => {
-    if (ALWAYS_SHOWN_FIELDS.has(column.field)) return true;
+    if (ALWAYS_SHOWN_FIELDS.has(column.field) || filteredFieldSet.has(column.field)) return true;
     const key = HIDE_EMPTY_VALUE_KEYS[column.field] ?? column.field;
     return rows.some(row => !isBlankCellValue((row as Record<string, unknown>)[key]));
   });

@@ -1345,7 +1345,17 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
     [dataColumns, getGridActionsColumn, canEditRows, canEditSpeciesCode, faultsForRow, attributeTooltips]
   );
 
-  const filteredColumns = useMemo(() => (hidingEmpty ? hideEmptyViewDataColumns(gridRows, columns) : columns), [gridRows, columns, hidingEmpty]);
+  const filteredColumns = useMemo(
+    () =>
+      hidingEmpty
+        ? hideEmptyViewDataColumns(
+            gridRows,
+            columns,
+            gridFilterModel.items.map(item => item.field)
+          )
+        : columns,
+    [gridRows, columns, hidingEmpty, gridFilterModel.items]
+  );
 
   const editableFields = useMemo(() => new Set(columns.filter(column => column.editable).map(column => column.field)), [columns]);
   const isViewDataCellEditable = useCallback(

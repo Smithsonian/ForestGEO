@@ -219,4 +219,23 @@ describe('hideEmptyViewDataColumns', () => {
     const withStates = hideEmptyViewDataColumns([{ id: 1, userDefinedFields: 'old tree', stemStatuses: 'alive' }], columns).map(column => column.field);
     expect(withStates).toEqual(expect.arrayContaining(['stemState', 'stemStatus']));
   });
+
+  it('returns the columns unchanged for an empty page, so MUI keeps the filter items of every column', () => {
+    const columns = build();
+    const kept = hideEmptyViewDataColumns([], columns, ['speciesCode']);
+    console.log('[hide empty, empty page]', JSON.stringify({ built: columns.map(column => column.field), kept: kept.map(column => column.field) }));
+    expect(kept.map(column => column.field)).toEqual(columns.map(column => column.field));
+  });
+
+  it('keeps a blank column that has an active filter item, and still hides the other blank columns', () => {
+    const columns = build();
+    const rows = [{ id: 1, measurementStatus: 'passed', treeTag: 'T1', speciesCode: null }];
+    const withoutFilter = hideEmptyViewDataColumns(rows, columns).map(column => column.field);
+    const withFilter = hideEmptyViewDataColumns(rows, columns, ['speciesCode', 'stemState']).map(column => column.field);
+    console.log('[hide empty, filtered column]', JSON.stringify({ withoutFilter, withFilter }));
+    expect(withoutFilter).not.toContain('speciesCode');
+    expect(withFilter).toEqual(expect.arrayContaining(['speciesCode', 'stemState']));
+    expect(withFilter).not.toContain('stemStatus');
+    expect(withFilter).not.toContain('measuredDBH');
+  });
 });
