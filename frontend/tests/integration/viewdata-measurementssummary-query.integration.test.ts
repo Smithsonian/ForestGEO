@@ -17,8 +17,8 @@ vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[]) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
-      const [rows] = await sharedState.connection.query(query, params as never);
-      return rows;
+      const { runQuery } = await import('@/lib/db/primitives');
+      return runQuery(sharedState.connection as never, query, params);
     },
     closeConnection: async () => undefined
   };
@@ -32,6 +32,7 @@ const SMALL_PAGE = 4;
 const SMALL_PAGES = 3;
 const VALIDATION_CODE_INVALID_ATTRIBUTE = '14';
 const EFFECTIVE_CODE = 'ZD';
+const LITERAL_QUESTION_MARK_TAG = 'VD-Q?1';
 
 let connection: Connection;
 let testData: TestData;
@@ -104,7 +105,8 @@ beforeAll(async () => {
     { ...base, treeTag: 'VD-ZD', dbh: 16, date: '2024-06-09', codes: EFFECTIVE_CODE },
     { ...base, treeTag: 'VD-DUP', dbh: 17, date: '2024-06-10' },
     { ...base, treeTag: 'VD-DUP', dbh: 18, date: '2024-06-11' },
-    { ...base, treeTag: 'VD-NODATE', dbh: 19, date: '2024-06-12' }
+    { ...base, treeTag: 'VD-NODATE', dbh: 19, date: '2024-06-12' },
+    { ...base, treeTag: LITERAL_QUESTION_MARK_TAG, dbh: 21, date: '2024-06-14' }
   ];
   const { coreMeasurementIDs } = await insertDirectMeasurements(connection, testData, censusID, seeds);
   seeds.forEach((seed, index) => tagToID.set(index === 8 ? 'VD-DUP-2' : seed.treeTag, coreMeasurementIDs[index]));
@@ -248,5 +250,13 @@ describe('measurementssummary branch on real MySQL', () => {
     expect(duplicates).toHaveLength(2);
     expect(duplicates.every(row => row.hasContradiction === true)).toBe(true);
     expect(byTag(rows, 'VD-PASS')?.hasContradiction).toBeUndefined();
+  });
+
+  it('keeps a literal ? in a search value through the prepared-statement path', async () => {
+    const tagWithQuestionMark = (await query({ filterModel: { quickFilterValues: ['Q?1'] } })).map(row => row.treeTag);
+    const bareQuestionMark = (await query({ filterModel: { quickFilterValues: ['?'] } })).map(row => row.treeTag);
+    console.log('[viewdata query] literal question mark', JSON.stringify({ tagWithQuestionMark, bareQuestionMark }));
+    expect(tagWithQuestionMark).toEqual([LITERAL_QUESTION_MARK_TAG]);
+    expect(bareQuestionMark).toEqual([LITERAL_QUESTION_MARK_TAG]);
   });
 });
