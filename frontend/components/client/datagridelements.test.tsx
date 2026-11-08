@@ -46,6 +46,8 @@ vi.mock('@mui/x-data-grid', () => ({
   })
 }));
 
+vi.mock('@/components/client/rendergridformexplanations', () => ({ default: () => <div data-testid="form-explanations" /> }));
+
 describe('EditToolbar', () => {
   const handleAddNewRow = vi.fn().mockResolvedValue(undefined);
   const handleRefresh = vi.fn().mockResolvedValue(undefined);
@@ -396,5 +398,71 @@ describe('EditToolbar', () => {
 
     await user.click(fixButton);
     expect(onFixFailedRows).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the extracted export modal from the Export icon when handleExport is supplied', async () => {
+    const user = userEvent.setup();
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        handleExport={vi.fn(async () => '')}
+        filterModel={{ items: [], quickFilterValues: [], visible: ['errors', 'valid', 'pending'], tss: [] }}
+        gridColumns={[{ field: 'treeTag', headerName: 'Tree Tag' }]}
+        gridType="measurementssummary"
+        dynamicButtons={[]}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Export as CSV' }));
+    expect(await screen.findByText('Exporting Data')).toBeInTheDocument();
+  });
+
+  it('opens the extracted Header reference dialog', async () => {
+    const user = userEvent.setup();
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{ items: [], quickFilterValues: [], visible: [], tss: [] }}
+        gridColumns={[{ field: 'treeTag', headerName: 'Tree Tag' }]}
+        gridType="measurementssummary"
+        dynamicButtons={[]}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Header reference' }));
+    expect(await screen.findByRole('dialog', { name: 'Header reference' })).toBeInTheDocument();
+    expect(screen.getByTestId('form-explanations')).toBeInTheDocument();
+  });
+
+  it('keeps the Failed Measurements toolbar as it is today: Columns, Filter, Search, Export and More, no measurement chips (D5)', async () => {
+    const user = userEvent.setup();
+    const handleExportCSV = vi.fn(async () => undefined);
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        handleExportCSV={handleExportCSV}
+        filterModel={{ items: [], quickFilterValues: [], visible: [], tss: [] }}
+        gridColumns={[{ field: 'tag', headerName: 'Tag' }]}
+        gridType="failedmeasurements"
+        dynamicButtons={[{ label: 'Check if Ready', tooltip: 'Recompute current validation reasons for failed measurements', onClick: vi.fn() }]}
+      />
+    );
+    const observed = {
+      columns: Boolean(screen.queryByRole('button', { name: 'Columns' })),
+      filter: Boolean(screen.queryByRole('button', { name: 'Filter' })),
+      search: Boolean(screen.queryByPlaceholderText('Search All Fields...')),
+      export: Boolean(screen.queryByRole('button', { name: 'Export as CSV' })),
+      more: Boolean(screen.queryByRole('button', { name: 'More actions' })),
+      chips: ['filter-errors', 'filter-valid', 'filter-pending', 'filter-ot', 'filter-ms', 'filter-nr'].filter(testId => screen.queryByTestId(testId))
+    };
+    console.log('[failed measurements toolbar]', JSON.stringify(observed));
+    expect(observed).toEqual({ columns: true, filter: true, search: true, export: true, more: true, chips: [] });
+    await user.click(screen.getByRole('button', { name: 'Export as CSV' }));
+    expect(handleExportCSV).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Exporting Data')).not.toBeInTheDocument();
   });
 });
