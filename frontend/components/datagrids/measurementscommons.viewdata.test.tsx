@@ -82,18 +82,6 @@ vi.mock('@/components/viewdata/viewdatarowdetails', async importOriginal => {
     }
   };
 });
-// Renders the real sheet and keeps its latest props, so a test can call a handler the sheet would have refused to call.
-vi.mock('@/components/viewdata/viewdatarowdetails', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/components/viewdata/viewdatarowdetails')>();
-  const RealSheet = actual.default;
-  return {
-    ...actual,
-    default: (props: ViewDataRowDetailsProps) => {
-      ctx.sheetProps = props;
-      return <RealSheet {...props} />;
-    }
-  };
-});
 vi.mock('@/components/datagrids/skipreentrydatamodal', () => ({
   default: ({ handleSave, handleClose }: { handleSave: () => void; handleClose: () => void }) => (
     <div role="dialog" aria-label="Save confirmation">
