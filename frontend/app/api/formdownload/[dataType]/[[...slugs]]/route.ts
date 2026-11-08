@@ -284,7 +284,10 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
                   ? ` AND (${validTss.map((tss: any) => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
                   : ``;
               })()} 
-              ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+              ${[searchStub, filterStub]
+                .filter(Boolean)
+                .map(clause => ` AND (${clause})`)
+                .join('\n              ')}`;
         results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
           measurementID: row.CoreMeasurementID,

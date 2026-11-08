@@ -298,7 +298,8 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     expect(sql).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('multi stem'\), '\$\.treestemstate'\) = 1/);
     expect(sql).toMatch(/LEFT JOIN forestgeo_testing\.sitespecificvalidations vp/i);
     expect(sql).toMatch(/COALESCE\(/);
-    expect(sql).toMatch(/\(SEARCH_STUB OR FILTER_STUB\)/);
+    expect(sql).toContain('AND (SEARCH_STUB)');
+    expect(sql).toContain('AND (FILTER_STUB)');
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -573,5 +574,83 @@ describe('Stem status filter on the measurements Form CSV export', () => {
 
     expect(response.status).toBe(HTTPResponses.OK);
     expect(exec.mock.calls[1][0] as string).not.toContain('sf_attr');
+  });
+});
+
+describe('Search and column filter composition in the Form CSV', () => {
+  const COMPOSITION_SCHEMA = 'forestgeo_testing';
+  const COMPOSITION_PLOT_ID = '7';
+  const COMPOSITION_CENSUS_ID = '80';
+  const SEARCH_CLAUSE = 'SEARCH_STUB';
+  const FILTER_CLAUSE = 'FILTER_STUB';
+  const SEARCH_TERMS = ['tag'];
+  const FILTER_ITEMS = [{ field: 'MeasuredDBH', operator: '>', value: 20 }];
+  const NO_FILTER_ITEMS: unknown[] = [];
+  const NO_SEARCH_TERMS: string[] = [];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function stubStubsLikeTheRealBuilders() {
+    stubSpies.buildSearchStub.mockImplementationOnce((_columns, values) => (values?.length ? SEARCH_CLAUSE : ''));
+    stubSpies.buildFilterModelStub.mockImplementationOnce(filterModel => (filterModel.items?.length ? FILTER_CLAUSE : ''));
+  }
+
+  async function exportSqlFor(dataType: string, filterModel: Record<string, unknown>) {
+    stubStubsLikeTheRealBuilders();
+    const exec = vi
+      .spyOn((ConnectionManager as any).getInstance(), 'executeQuery')
+      .mockResolvedValueOnce([{ COLUMN_NAME: 'Code' }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn((ConnectionManager as any).getInstance(), 'closeConnection').mockResolvedValue(undefined);
+    const response = await GET(makeRequest(), makeProps(dataType, [COMPOSITION_SCHEMA, COMPOSITION_PLOT_ID, COMPOSITION_CENSUS_ID, fm(filterModel)]));
+    const sql = exec.mock.calls[1]?.[0] as string;
+    console.log(
+      `[formdownload composition] ${dataType}`,
+      JSON.stringify({ status: response.status, whereTail: sql?.replace(/\s+/g, ' ').slice(-220), filterModel })
+    );
+    expect(response.status).toBe(HTTPResponses.OK);
+    return sql;
+  }
+
+  const MEASUREMENTS_BASE_FILTER = { visible: ['valid', 'errors'], tss: [] };
+
+  it('measurements: a search and a column filter are ANDed as two separate clauses, so only rows matching both export', async () => {
+    const sql = await exportSqlFor('measurements', { ...MEASUREMENTS_BASE_FILTER, quickFilterValues: SEARCH_TERMS, items: FILTER_ITEMS });
+
+    expect(sql).toMatch(new RegExp(`AND \\(${SEARCH_CLAUSE}\\)\\s+AND \\(${FILTER_CLAUSE}\\)`));
+    expect(sql).not.toContain(`${SEARCH_CLAUSE} OR ${FILTER_CLAUSE}`);
+  });
+
+  it('measurements: a search alone adds only the search clause', async () => {
+    const sql = await exportSqlFor('measurements', { ...MEASUREMENTS_BASE_FILTER, quickFilterValues: SEARCH_TERMS, items: NO_FILTER_ITEMS });
+
+    expect(sql).toContain(`AND (${SEARCH_CLAUSE})`);
+    expect(sql).not.toContain(FILTER_CLAUSE);
+  });
+
+  it('measurements: a column filter alone adds only the filter clause', async () => {
+    const sql = await exportSqlFor('measurements', { ...MEASUREMENTS_BASE_FILTER, quickFilterValues: NO_SEARCH_TERMS, items: FILTER_ITEMS });
+
+    expect(sql).toContain(`AND (${FILTER_CLAUSE})`);
+    expect(sql).not.toContain(SEARCH_CLAUSE);
+  });
+
+  it('measurements: neither a search nor a filter adds a clause', async () => {
+    const sql = await exportSqlFor('measurements', { ...MEASUREMENTS_BASE_FILTER, quickFilterValues: NO_SEARCH_TERMS, items: NO_FILTER_ITEMS });
+
+    expect(sql).not.toContain(SEARCH_CLAUSE);
+    expect(sql).not.toContain(FILTER_CLAUSE);
+  });
+
+  it.each(['attributes', 'failedmeasurements'])('%s: keeps combining the search and the filter with OR, as before', async dataType => {
+    const sql = await exportSqlFor(dataType, { quickFilterValues: SEARCH_TERMS, items: FILTER_ITEMS });
+
+    expect(sql).toContain(`(${SEARCH_CLAUSE} OR ${FILTER_CLAUSE})`);
   });
 });
