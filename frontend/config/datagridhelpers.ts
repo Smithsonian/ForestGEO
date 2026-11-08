@@ -306,7 +306,7 @@ export interface MeasurementsCommonsProps {
   shouldAddRowAfterFetch: boolean;
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
-  dynamicButtons: DynamicButton[];
+  dynamicButtons?: DynamicButton[];
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;
   enablePageJump?: boolean;
