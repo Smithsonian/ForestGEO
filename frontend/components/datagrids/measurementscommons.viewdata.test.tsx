@@ -8,7 +8,7 @@ import type { ViewDataAboveGridControls } from '@/components/viewdata/viewdataco
 import ViewDataGridToolbar from '@/components/viewdata/viewdatagridtoolbar';
 import { VIEW_DATA_COLUMN_ORDER, VIEW_DATA_DEFAULT_HIDDEN_COLUMNS, VIEW_DATA_ROW_HEIGHT, VIEW_DATA_TEXT } from '@/config/viewdata';
 import { ALWAYS_VISIBLE_COLUMN_MENU_SX } from '@/config/styleddatagrid';
-import { CLEAR_UNCONFIRMED_MESSAGE, CLEAR_VALIDATION_ERRORS_SUCCESS, DETAILS_SHEET_TEXT, formatTreeStemLine } from '@/config/errorsexplorer';
+import { CLEAR_UNCONFIRMED_MESSAGE, CLEAR_VALIDATION_ERRORS_SUCCESS, DETAILS_SHEET_TEXT, formatOpenRow, formatTreeStemLine } from '@/config/errorsexplorer';
 import { PENDING_VALIDATION_SNACKBAR_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE, UNRESOLVED_ERRORS_SNACKBAR_MESSAGE } from './measurementscommonsutils';
 import { INFINITE_DEFAULT_CHUNK } from './hooks/useinfinitegridrows';
 import type { ViewDataRowDetailsProps } from '@/components/viewdata/viewdatarowdetails';
@@ -1295,6 +1295,8 @@ describe('MeasurementsCommons View Data details sheet', () => {
   describe('closing the sheet around a Clear (stage 7 F6)', () => {
     const INVALID_ROW = { ...ROW, measurementStatus: 'invalidNoLog' };
     const CLEAR_REQUEST_LOST = Symbol('the Clear response never arrives');
+    const DETAILS_URL_PREFIX = '/api/errors/explorer/details/';
+    const RELATED_MEASUREMENT_ID = 502;
     const clearAnswers: Array<[string, typeof CLEAR_REQUEST_LOST | Response, string]> = [
       ['cleared', respond({ clearedErrorCount: 1 }), CLEAR_VALIDATION_ERRORS_SUCCESS],
       ['unconfirmed', CLEAR_REQUEST_LOST, CLEAR_UNCONFIRMED_MESSAGE]
@@ -1303,6 +1305,8 @@ describe('MeasurementsCommons View Data details sheet', () => {
     let countsAnswer: 'hold' | 'fail' | 'ok';
     let releaseCounts: ((response: Response) => void) | null;
     let failHeldCounts: ((reason: Error) => void) | null;
+    let gridRowAnswer: typeof INVALID_ROW & Record<string, unknown>;
+    let detailsAnswer: ((url: string) => unknown) | null;
 
     function serveClear(clearAnswer: Response | typeof CLEAR_REQUEST_LOST) {
       fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
@@ -1320,7 +1324,8 @@ describe('MeasurementsCommons View Data details sheet', () => {
             });
           }
         }
-        if (url.startsWith(GRID_URL_PREFIX)) return Promise.resolve(respond({ output: [INVALID_ROW], totalCount: 1 }));
+        if (detailsAnswer && url.startsWith(DETAILS_URL_PREFIX)) return Promise.resolve(respond(detailsAnswer(url)));
+        if (url.startsWith(GRID_URL_PREFIX)) return Promise.resolve(respond({ output: [gridRowAnswer], totalCount: 1 }));
         return route(input, init);
       });
     }
@@ -1333,6 +1338,8 @@ describe('MeasurementsCommons View Data details sheet', () => {
       countsAnswer = 'ok';
       releaseCounts = null;
       failHeldCounts = null;
+      gridRowAnswer = INVALID_ROW;
+      detailsAnswer = null;
     });
 
     it.each(clearAnswers)(
@@ -1429,6 +1436,70 @@ describe('MeasurementsCommons View Data details sheet', () => {
       const afterRetry = rowActionsDisabled();
       console.log('[sheet] after Retry refresh on the reopened sheet', JSON.stringify(afterRetry));
       expect(afterRetry).toEqual({ edit: false, clear: false, deleteRow: false });
+    });
+
+    it('switching to a related row while the Clear re-read is held finishes the refresh on the original row: its lock clears and its outcome is reported once', async () => {
+      const user = userEvent.setup();
+      const flaggedRow = { ...INVALID_ROW, measurementStatus: 'unresolvedErrors', unresolvedErrorCount: 1, primaryErrorMessage: 'Flagged;Different species' };
+      const detailsFor = (coreMeasurementID: number, relatedRows: unknown[]) => ({
+        row: {
+          ...flaggedRow,
+          id: coreMeasurementID,
+          coreMeasurementID,
+          errorMessages: [flaggedRow.primaryErrorMessage],
+          errorSources: ['validation'],
+          errorFields: ['treeTag'],
+          errorCodes: ['7'],
+          errorCount: 1,
+          hasContradiction: relatedRows.length > 0,
+          contradictionTypes: [],
+          contradictionType: null,
+          contradictionGroupKey: null,
+          relatedMeasurementIDs: [],
+          isFailedRow: false
+        },
+        allErrors: [{ source: 'validation', code: '7', message: flaggedRow.primaryErrorMessage, fields: ['treeTag'], comparison: null }],
+        relatedRows
+      });
+      const relatedRow = { coreMeasurementID: RELATED_MEASUREMENT_ID, treeTag: '010204', stemTag: '1', inErrorSet: true };
+      countsAnswer = 'hold';
+      gridRowAnswer = flaggedRow;
+      detailsAnswer = url =>
+        url.includes(`${DETAILS_URL_PREFIX}${RELATED_MEASUREMENT_ID}?`)
+          ? detailsFor(RELATED_MEASUREMENT_ID, [])
+          : detailsFor(ROW.coreMeasurementID, [relatedRow]);
+      serveClear(CLEAR_REQUEST_LOST);
+      render(<MeasurementsGridHarness initialRows={[flaggedRow]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+      await waitFor(() => expect(ctx.grid).not.toBeNull());
+      await openSheetForRow(user, flaggedRow);
+      await user.click(await screen.findByRole('button', { name: 'Clear validation errors' }));
+      await waitFor(() => expect(releaseCounts).not.toBeNull());
+
+      await user.click(await screen.findByRole('button', { name: formatOpenRow(RELATED_MEASUREMENT_ID) }));
+      await screen.findByRole('heading', { name: `Measurement ${RELATED_MEASUREMENT_ID}` });
+      await waitFor(() => expect(clearButton().disabled).toBe(false));
+      const relatedRowWhileOriginalRefreshes = { clearDisabled: clearButton().disabled };
+      console.log('[sheet] the related row while the original row refreshes', JSON.stringify(relatedRowWhileOriginalRefreshes));
+      expect(relatedRowWhileOriginalRefreshes).toEqual({ clearDisabled: false });
+
+      await act(async () => {
+        releaseCounts?.(respond([COUNTS_ROW]));
+        await new Promise(resolve => setTimeout(resolve, LATE_READ_WAIT_MS));
+      });
+      const alertsAfterRelease = screen.queryAllByRole('alert', { hidden: true }).map(alert => alert.textContent);
+      await closeSheet(user);
+      await waitFor(() => expect(screen.queryByRole('heading', { name: `Measurement ${RELATED_MEASUREMENT_ID}` })).not.toBeInTheDocument());
+      await user.click(screen.getByRole('button', { name: new RegExp(VIEW_DATA_TEXT.detailsFor(flaggedRow.treeTag, flaggedRow.stemTag)) }));
+      await screen.findByRole('heading', { name: `Measurement ${ROW.coreMeasurementID}` });
+      const originalRowAfterReopen = {
+        edit: (screen.getByRole('button', { name: DETAILS_SHEET_TEXT.editThisRow }) as HTMLButtonElement).disabled,
+        clear: clearButton().disabled,
+        deleteRow: (screen.getByRole('button', { name: VIEW_DATA_TEXT.deleteMeasurement }) as HTMLButtonElement).disabled,
+        retryOffered: screen.queryByRole('button', { name: VIEW_DATA_TEXT.retryRefresh }) !== null,
+        alerts: alertsAfterRelease
+      };
+      console.log('[sheet] the original row reopened after the related-row switch', JSON.stringify(originalRowAfterReopen));
+      expect(originalRowAfterReopen).toEqual({ edit: false, clear: false, deleteRow: false, retryOffered: false, alerts: [CLEAR_UNCONFIRMED_MESSAGE] });
     });
   });
 

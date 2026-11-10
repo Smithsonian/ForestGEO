@@ -1767,6 +1767,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
         {/*)}*/}
         {sheetTarget && (
           <ViewDataRowDetails
+            key={sheetRefreshKey}
             target={sheetTarget}
             schema={currentSite.schemaName ?? ''}
             plotID={currentPlot.plotID ?? 0}
