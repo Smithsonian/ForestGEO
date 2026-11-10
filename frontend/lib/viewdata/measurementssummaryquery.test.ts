@@ -5,6 +5,7 @@ import {
   type MeasurementsSummaryPageQueryInput,
   buildTreeStemStateClauseSql,
   buildViewDataOrderByClause,
+  MEASUREMENTS_SUMMARY_PAGE_ALIAS,
   parseViewDataSortModel,
   parseViewDataStemStatusFilter,
   validateViewDataRequest,
@@ -199,11 +200,49 @@ describe('buildMeasurementsSummaryPageQueries', () => {
   it('puts the projection, the Stem status clause and the status ORDER BY in the paginated query only', () => {
     expect(queries.paginatedQuery).toContain('AS MeasurementStatusRank');
     expect(queries.paginatedQuery).toContain("sf_attr.Status IN ('dead')");
-    expect(queries.paginatedQuery).toContain('ORDER BY MeasurementStatusRank ASC, vft.CoreMeasurementID ASC LIMIT 25, 25;');
+    expect(queries.paginatedQuery).toContain('ORDER BY MeasurementStatusRank ASC, vft.CoreMeasurementID ASC LIMIT 25, 25');
     expect(queries.countQuery).not.toContain('MeasurementStatusRank');
     expect(queries.countQuery).toContain("sf_attr.Status IN ('dead')");
     expect(queries.exportQuery).not.toContain('MeasurementStatusRank');
     expect(queries.exportQuery).toContain('ORDER BY vft.MeasurementDate ASC LIMIT 25, 25;');
+  });
+
+  describe('deferred join', () => {
+    const paginated = queries.paginatedQuery;
+    const derivedTableStart = paginated.indexOf('FROM (');
+    const derivedTableEnd = paginated.indexOf(`) ${MEASUREMENTS_SUMMARY_PAGE_ALIAS}`);
+    const outerSelect = paginated.slice(0, derivedTableStart);
+    const derivedTable = paginated.slice(derivedTableStart, derivedTableEnd);
+    const outerTail = paginated.slice(derivedTableEnd);
+
+    it('computes the row projection outside the derived table, so only the page rows pay for it', () => {
+      console.log('[deferred join]', JSON.stringify({ derivedTableStart, derivedTableEnd, outerSelect: outerSelect.replace(/\s+/g, ' ').slice(0, 160) }));
+      expect(derivedTableStart).toBeGreaterThan(0);
+      expect(derivedTableEnd).toBeGreaterThan(derivedTableStart);
+      for (const projectedColumn of ['UnresolvedErrorCount', 'PrimaryErrorMessage', 'HasContradiction', 'StemStatuses']) {
+        expect(outerSelect, `${projectedColumn} projected in the outer select`).toContain(`AS ${projectedColumn}`);
+        expect(derivedTable, `${projectedColumn} must not be evaluated per census row`).not.toContain(`AS ${projectedColumn}`);
+      }
+    });
+
+    it('keeps the LIMIT inside the derived table and joins back on the measurement ID', () => {
+      expect(derivedTable).toContain('LIMIT 25, 25');
+      expect(outerTail).not.toContain('LIMIT');
+      expect(outerTail).toContain(`JOIN \`${SCHEMA}\`.measurementssummary vft`);
+      expect(outerTail).toContain(`vft.CoreMeasurementID = ${MEASUREMENTS_SUMMARY_PAGE_ALIAS}.CoreMeasurementID`);
+    });
+
+    it('orders the outer query too, since a join does not keep the derived table order', () => {
+      expect(outerTail.trim().endsWith('ORDER BY MeasurementStatusRank ASC, vft.CoreMeasurementID ASC;')).toBe(true);
+    });
+
+    it('selects the rank inside the derived table only for a status sort', () => {
+      const byDbh = buildMeasurementsSummaryPageQueries({ ...queryInput(), sortModel: [{ field: 'measuredDBH', sort: 'desc' }] }).paginatedQuery;
+      const byDbhDerivedTable = byDbh.slice(byDbh.indexOf('FROM ('), byDbh.indexOf(`) ${MEASUREMENTS_SUMMARY_PAGE_ALIAS}`));
+      expect(derivedTable).toContain('AS MeasurementStatusRank');
+      expect(byDbhDerivedTable).not.toContain('MeasurementStatusRank');
+      expect(byDbh.trim().endsWith('vft.CoreMeasurementID ASC;')).toBe(true);
+    });
   });
 
   it('binds plot, plot, census number, offset and page size, leaving no placeholder behind', () => {
@@ -220,7 +259,7 @@ describe('buildMeasurementsSummaryPageQueries', () => {
       `vft.PlotID = ${PLOT_ID}\n              AND c.PlotID = ${PLOT_ID}\n              AND c.PlotCensusNumber = ${PLOT_CENSUS_NUMBER}`
     );
     expect(queries.countQuery).toContain(`AND c.PlotCensusNumber = ${PLOT_CENSUS_NUMBER}`);
-    expect(queries.paginatedQuery.trim().endsWith(`vft.CoreMeasurementID ASC LIMIT ${PAGE * PAGE_SIZE}, ${PAGE_SIZE};`)).toBe(true);
+    expect(queries.paginatedQuery).toContain(`vft.CoreMeasurementID ASC LIMIT ${PAGE * PAGE_SIZE}, ${PAGE_SIZE})`);
     expect(queries.exportQuery.trim().endsWith(`ORDER BY vft.MeasurementDate ASC LIMIT ${PAGE * PAGE_SIZE}, ${PAGE_SIZE};`)).toBe(true);
     expect(queries.countQuery).not.toContain('LIMIT');
     expect([queries.paginatedQuery, queries.countQuery, queries.exportQuery].map(unboundPlaceholders)).toEqual([0, 0, 0]);
@@ -264,7 +303,7 @@ describe('a literal ? or ?? in a search or filter value', () => {
   });
 
   it('puts the real LIMIT numbers on the queries that page', () => {
-    expect(queries.paginatedQuery.trim().endsWith(`LIMIT ${PAGE * PAGE_SIZE}, ${PAGE_SIZE};`)).toBe(true);
+    expect(queries.paginatedQuery).toContain(`LIMIT ${PAGE * PAGE_SIZE}, ${PAGE_SIZE})`);
     expect(queries.exportQuery.trim().endsWith(`LIMIT ${PAGE * PAGE_SIZE}, ${PAGE_SIZE};`)).toBe(true);
   });
 });

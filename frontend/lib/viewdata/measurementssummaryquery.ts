@@ -12,6 +12,7 @@ import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import {
   buildMeasurementRowSummaryProjectionSql,
+  buildMeasurementStatusRankSql,
   buildMeasurementVisibleClauseSql,
   buildStemStatusFilterClauseSql,
   MEASUREMENT_STATUS_RANK_COLUMN,
@@ -27,7 +28,9 @@ import {
 } from '@/config/viewdata';
 
 export const MEASUREMENTS_SUMMARY_ALIAS = 'vft';
-export const PAGINATED_QUERY_LIMIT_CLAUSE = ' LIMIT ?, ?;';
+export const MEASUREMENTS_SUMMARY_PAGE_ALIAS = 'page_rows';
+const OFFSET_LIMIT_CLAUSE = ' LIMIT ?, ?';
+export const PAGINATED_QUERY_LIMIT_CLAUSE = `${OFFSET_LIMIT_CLAUSE};`;
 
 export const VIEW_DATA_REQUEST_ERRORS = {
   unsupportedSortField: 'Unsupported sort field',
@@ -218,17 +221,36 @@ export function buildMeasurementsSummaryPageQueries(input: MeasurementsSummaryPa
               ${buildStemStatusFilterClauseSql(schema, MEASUREMENTS_SUMMARY_ALIAS, stemStatuses)}
               `;
 
+  const pageIdentitySelectList = [
+    `${MEASUREMENTS_SUMMARY_ALIAS}.CoreMeasurementID`,
+    ...(sort.field === 'measurementStatus' ? [`${buildMeasurementStatusRankSql(schema, MEASUREMENTS_SUMMARY_ALIAS)} AS ${MEASUREMENT_STATUS_RANK_COLUMN}`] : [])
+  ].join(', ');
+
   const assemble = (selectList: string, tail: string, tailValues: number[]) =>
     formatSkeleton(schema, `SELECT ${selectList} ${stateFilteredScope}`, scopeValues) +
     searchAndFilter +
     (tail ? formatSkeleton(schema, tail, tailValues) : '');
 
+  const pageRowsQuery = assemble(pageIdentitySelectList, `\n            ${orderBy}${OFFSET_LIMIT_CLAUSE}`, pageValues);
+  const paginatedQuery =
+    formatSkeleton(
+      schema,
+      `SELECT ${MEASUREMENTS_SUMMARY_ALIAS}.*, ${buildMeasurementRowSummaryProjectionSql(schema, MEASUREMENTS_SUMMARY_ALIAS)}
+          FROM (`,
+      []
+    ) +
+    pageRowsQuery +
+    formatSkeleton(
+      schema,
+      `) ${MEASUREMENTS_SUMMARY_PAGE_ALIAS}
+          JOIN ??.measurementssummary ${MEASUREMENTS_SUMMARY_ALIAS}
+            ON ${MEASUREMENTS_SUMMARY_ALIAS}.CoreMeasurementID = ${MEASUREMENTS_SUMMARY_PAGE_ALIAS}.CoreMeasurementID
+          ${orderBy};`,
+      []
+    );
+
   return {
-    paginatedQuery: assemble(
-      `${MEASUREMENTS_SUMMARY_ALIAS}.*, ${buildMeasurementRowSummaryProjectionSql(schema, MEASUREMENTS_SUMMARY_ALIAS)}`,
-      `\n            ${orderBy}${PAGINATED_QUERY_LIMIT_CLAUSE}`,
-      pageValues
-    ),
+    paginatedQuery,
     countQuery: assemble('COUNT(*) as totalRows', '', []),
     exportQuery: assemble(
       `${MEASUREMENTS_SUMMARY_ALIAS}.*`,
