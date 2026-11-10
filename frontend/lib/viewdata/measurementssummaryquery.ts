@@ -165,6 +165,13 @@ export function buildTreeStemStateClauseSql(tss: readonly TSSFilter[] | undefine
   return ` AND (${selected.map(state => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${state}'), '$.treestemstate') = 1`).join(' OR ')})`;
 }
 
+/** Every bucket selected keeps every row, so the three correlated EXISTS it would emit only cost time. */
+function omitVisibleFilterWhenEveryBucketSelected(visible: VisibleFilter[] | undefined): VisibleFilter[] | undefined {
+  if (!visible) return undefined;
+  const selected = new Set<unknown>(visible);
+  return Array.from(KNOWN_VISIBLE_FILTERS).every(bucket => selected.has(bucket)) ? undefined : visible;
+}
+
 export interface MeasurementsSummaryPageQueryInput {
   schema: string;
   columns: string[];
@@ -216,7 +223,7 @@ export function buildMeasurementsSummaryPageQueries(input: MeasurementsSummaryPa
             WHERE ${MEASUREMENTS_SUMMARY_ALIAS}.PlotID = ?
               AND c.PlotID = ?
               AND c.PlotCensusNumber = ?
-              ${buildMeasurementVisibleClauseSql(schema, MEASUREMENTS_SUMMARY_ALIAS, filterModel.visible)}
+              ${buildMeasurementVisibleClauseSql(schema, MEASUREMENTS_SUMMARY_ALIAS, omitVisibleFilterWhenEveryBucketSelected(filterModel.visible))}
               ${buildTreeStemStateClauseSql(filterModel.tss)}
               ${buildStemStatusFilterClauseSql(schema, MEASUREMENTS_SUMMARY_ALIAS, stemStatuses)}
               `;

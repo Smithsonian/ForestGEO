@@ -276,6 +276,41 @@ describe('buildMeasurementsSummaryPageQueries', () => {
   });
 });
 
+describe('the Show clause', () => {
+  const buildAll = (visible: ExtendedGridFilterModel['visible']) => {
+    const q = buildMeasurementsSummaryPageQueries({ ...queryInput(), filterModel: filterModel({ visible }) });
+    return { paginatedQuery: q.paginatedQuery, countQuery: q.countQuery, exportQuery: q.exportQuery };
+  };
+  const PREDICATE_MARKERS = ['IsValidated', 'measurement_error_log mel'];
+  const scopeOf = (sql: string) => sql.slice(sql.indexOf('.census c'));
+
+  it.each(['paginatedQuery', 'countQuery', 'exportQuery'] as const)('%s emits no visible predicate when all three buckets are selected', name => {
+    const sql = buildAll(['errors', 'valid', 'pending'])[name];
+    const scope = scopeOf(sql);
+    expect(scope.startsWith('.census c'), 'scope located').toBe(true);
+    console.log(`[show all] ${name}`, JSON.stringify({ markersPresent: PREDICATE_MARKERS.filter(marker => scope.includes(marker)) }));
+    for (const marker of PREDICATE_MARKERS) expect(scope, `${marker} in ${name}`).not.toContain(marker);
+    expect(sql).not.toContain('1 = 0');
+  });
+
+  it('treats the buckets as a set, in any order', () => {
+    expect(buildAll(['pending', 'errors', 'valid']).countQuery).not.toContain('IsValidated');
+  });
+
+  it('still shows nothing for an empty selection', () => {
+    expect(buildAll([]).countQuery).toContain('AND 1 = 0');
+  });
+
+  it('keeps the predicate of a single bucket and of a subset', () => {
+    const onlyValid = buildAll(['valid']).countQuery;
+    expect(onlyValid).toContain('IsValidated = TRUE');
+    expect(onlyValid).not.toContain('IsValidated IS NULL AND NOT');
+    const validAndPending = buildAll(['valid', 'pending']).countQuery;
+    expect(validAndPending).toContain('IsValidated = TRUE');
+    expect(validAndPending).toContain('IsValidated IS NULL');
+  });
+});
+
 describe('a literal ? or ?? in a search or filter value', () => {
   const FILTER_VALUE = 'a?b';
   const SEARCH_VALUE = 'x?y??z';
