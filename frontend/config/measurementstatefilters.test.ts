@@ -283,6 +283,23 @@ describe('buildStemStatusFilterClauseSql', () => {
     expect(clause).toContain("sf_attr.Status IN ('dead')");
   });
 
+  it('resolves the status codes once, not through a per-row join to attributes', () => {
+    const clause = buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead']);
+    expect(clause).toContain('sf_ca.Code IN (');
+    expect(clause).not.toMatch(/\bJOIN\b/);
+  });
+
+  it('keeps the active-row-wins rule on the code list', () => {
+    const clause = buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead']);
+    expect(clause).toContain(
+      `sf_attr.IsActive = (SELECT MAX(effective_attr.IsActive) FROM ${SCHEMA}.attributes effective_attr WHERE effective_attr.Code = sf_attr.Code)`
+    );
+  });
+
+  it('lists every requested status in the IN list', () => {
+    expect(buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead', 'alive'])).toContain("sf_attr.Status IN ('dead', 'alive')");
+  });
+
   it('rejects a value outside AttributeStatusOptions', () => {
     expect(() => buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ["dead') OR 1=1 --"])).toThrow(UnknownAttributeStatusError);
   });

@@ -241,10 +241,14 @@ export function buildMeasurementStatusRankSql(schema: string, alias: string): st
 }
 
 /** attributes' key is (Code, IsActive): prefer the active row so each code yields one status (A6). */
+function buildEffectiveAttributeRowCondition(schema: string, attributeAlias: string, codeExpression: string): string {
+  return `${attributeAlias}.IsActive = (SELECT MAX(effective_attr.IsActive) FROM ${schema}.attributes effective_attr WHERE effective_attr.Code = ${codeExpression})`;
+}
+
 function buildEffectiveAttributeJoinSql(schema: string, cmAttributeAlias: string, attributeAlias: string): string {
   return `JOIN ${schema}.attributes ${attributeAlias}
               ON ${attributeAlias}.Code = ${cmAttributeAlias}.Code
-             AND ${attributeAlias}.IsActive = (SELECT MAX(effective_attr.IsActive) FROM ${schema}.attributes effective_attr WHERE effective_attr.Code = ${cmAttributeAlias}.Code)`;
+             AND ${buildEffectiveAttributeRowCondition(schema, attributeAlias, `${cmAttributeAlias}.Code`)}`;
 }
 
 function buildUnresolvedErrorsFromSql(schema: string, alias: string, logAlias: string, errorAlias: string, validationAlias?: string): string {
@@ -310,12 +314,18 @@ export function buildMeasurementRowSummaryProjectionSql(schema: string, alias: s
             WHERE rs_ca.CoreMeasurementID = ${alias}.CoreMeasurementID AND rs_attr.Status IS NOT NULL) AS StemStatuses`;
 }
 
-/** " AND EXISTS (...)" matching rows where any effective code carries one of the statuses; '' when none. */
+/**
+ * " AND EXISTS (...)" matching rows where any effective code carries one of the statuses; '' when none.
+ * The codes are resolved once in an IN subquery instead of joining attributes per cmattributes row.
+ */
 export function buildStemStatusFilterClauseSql(schema: string, alias: string, statuses: readonly string[]): string {
   if (statuses.length === 0) return '';
   const literals = statuses.map(toAttributeStatusLiteral).join(', ');
   return ` AND EXISTS (
             SELECT 1 FROM ${schema}.cmattributes sf_ca
-            ${buildEffectiveAttributeJoinSql(schema, 'sf_ca', 'sf_attr')}
-            WHERE sf_ca.CoreMeasurementID = ${alias}.CoreMeasurementID AND sf_attr.Status IN (${literals}))`;
+            WHERE sf_ca.CoreMeasurementID = ${alias}.CoreMeasurementID
+              AND sf_ca.Code IN (
+                SELECT sf_attr.Code FROM ${schema}.attributes sf_attr
+                WHERE sf_attr.Status IN (${literals})
+                  AND ${buildEffectiveAttributeRowCondition(schema, 'sf_attr', 'sf_attr.Code')}))`;
 }

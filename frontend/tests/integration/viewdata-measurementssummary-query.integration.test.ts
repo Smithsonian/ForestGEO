@@ -29,7 +29,9 @@ const ALL_VISIBLE = ['errors', 'valid', 'pending'];
 const ALL_TSS = ['old tree', 'multi stem', 'new recruit'];
 const FULL_PAGE = 100;
 const SMALL_PAGE = 4;
-const SMALL_PAGES = 3;
+const SEEDED_ROW_COUNT = 13;
+const SMALL_PAGES = Math.ceil(SEEDED_ROW_COUNT / SMALL_PAGE);
+const INACTIVE_STATUS_CODE = 'ZA';
 const VALIDATION_CODE_INVALID_ATTRIBUTE = '14';
 const EFFECTIVE_CODE = 'ZD';
 const LITERAL_QUESTION_MARK_TAG = 'VD-Q?1';
@@ -54,7 +56,12 @@ async function logError(tag: string, source: string, code: string) {
   ]);
 }
 
-async function query(body: { filterModel?: Record<string, unknown>; sortModel?: unknown[] }, page = 0, pageSize = FULL_PAGE) {
+interface QueryResult {
+  rows: Array<Record<string, unknown>>;
+  totalCount: number;
+}
+
+async function queryWithTotal(body: { filterModel?: Record<string, unknown>; sortModel?: unknown[] }, page = 0, pageSize = FULL_PAGE): Promise<QueryResult> {
   const { POST } = await import('@/app/api/fixeddatafilter/[dataType]/[[...slugs]]/route');
   const filterModel = { items: [], quickFilterValues: [], visible: ALL_VISIBLE, tss: ALL_TSS, ...(body.filterModel ?? {}) };
   const response = await POST(
@@ -71,8 +78,20 @@ async function query(body: { filterModel?: Record<string, unknown>; sortModel?: 
   expect(response.status, JSON.stringify(json)).toBe(HTTPResponses.OK);
   const rows = json.output as Array<Record<string, unknown>>;
   console.log('[viewdata query]', JSON.stringify({ body, page, pageSize, tags: rows.map(row => row.treeTag), total: json.totalCount }));
-  return rows;
+  return { rows, totalCount: Number(json.totalCount) };
 }
+
+async function query(body: { filterModel?: Record<string, unknown>; sortModel?: unknown[] }, page = 0, pageSize = FULL_PAGE) {
+  return (await queryWithTotal(body, page, pageSize)).rows;
+}
+
+async function queryEveryPage(body: { sortModel?: unknown[] }): Promise<Array<Array<Record<string, unknown>>>> {
+  const pages: Array<Array<Record<string, unknown>>> = [];
+  for (let page = 0; page < SMALL_PAGES; page++) pages.push(await query(body, page, SMALL_PAGE));
+  return pages;
+}
+
+const idsOf = (rows: Array<Record<string, unknown>>) => rows.map(row => Number(row.coreMeasurementID));
 
 const byTag = (rows: Array<Record<string, unknown>>, tag: string) => rows.find(row => row.treeTag === tag);
 
@@ -91,6 +110,10 @@ beforeAll(async () => {
     "INSERT INTO attributes (Code, Description, Status, IsActive) VALUES (?, 'effective active', 'alive', 1), (?, 'soft-deleted', 'dead', 0)",
     [EFFECTIVE_CODE, EFFECTIVE_CODE]
   );
+  await connection.query(
+    "INSERT INTO attributes (Code, Description, Status, IsActive) VALUES (?, 'inactive claims alive', 'alive', 0), (?, 'active says dead', 'dead', 1)",
+    [INACTIVE_STATUS_CODE, INACTIVE_STATUS_CODE]
+  );
 
   const species = testData.species[0].SpeciesCode;
   const quadrat = testData.quadrats[0].QuadratName;
@@ -106,7 +129,8 @@ beforeAll(async () => {
     { ...base, treeTag: 'VD-DUP', dbh: 17, date: '2024-06-10' },
     { ...base, treeTag: 'VD-DUP', dbh: 18, date: '2024-06-11' },
     { ...base, treeTag: 'VD-NODATE', dbh: 19, date: '2024-06-12' },
-    { ...base, treeTag: LITERAL_QUESTION_MARK_TAG, dbh: 21, date: '2024-06-14' }
+    { ...base, treeTag: LITERAL_QUESTION_MARK_TAG, dbh: 21, date: '2024-06-14' },
+    { ...base, treeTag: 'VD-ZA', dbh: 22, date: '2024-06-15', codes: INACTIVE_STATUS_CODE }
   ];
   const { coreMeasurementIDs } = await insertDirectMeasurements(connection, testData, censusID, seeds);
   seeds.forEach((seed, index) => tagToID.set(index === 8 ? 'VD-DUP-2' : seed.treeTag, coreMeasurementIDs[index]));
@@ -202,7 +226,7 @@ describe('measurementssummary branch on real MySQL', () => {
     expect(validationOnly).toMatchObject({ primaryErrorSource: 'validation', primaryErrorMessage: validationRow.message, unresolvedErrorCount: 1 });
   });
 
-  it('sorts by status rank and pages stably', async () => {
+  it('sorts by status rank', async () => {
     const full = await query({ sortModel: [{ field: 'measurementStatus', sort: 'asc' }] });
     const returnedStatuses = full.map(row => ({ coreMeasurementID: row.coreMeasurementID, measurementStatus: row.measurementStatus }));
     const knownStatuses = Object.keys(MEASUREMENT_STATUS_RANK);
@@ -213,13 +237,63 @@ describe('measurementssummary branch on real MySQL', () => {
     }
     const ranks = full.map(row => MEASUREMENT_STATUS_RANK[row.measurementStatus as keyof typeof MEASUREMENT_STATUS_RANK]);
     expect([...ranks].sort((a, b) => a - b)).toEqual(ranks);
-    const paged: Array<Record<string, unknown>> = [];
-    for (let page = 0; page < SMALL_PAGES; page++) paged.push(...(await query({ sortModel: [{ field: 'measurementStatus', sort: 'asc' }] }, page, SMALL_PAGE)));
-    const fullIDs = full.map(row => row.coreMeasurementID);
-    const pagedIDs = paged.map(row => row.coreMeasurementID);
-    console.log('[viewdata query] paging', JSON.stringify({ fullIDs, pagedIDs }));
-    expect(new Set(pagedIDs).size).toBe(pagedIDs.length);
-    expect(pagedIDs).toEqual(fullIDs.slice(0, pagedIDs.length));
+  });
+
+  it.each(['asc', 'desc'] as const)('pages a status rank sort (%s) without overlap or gaps, each page ordered by rank then ID', async direction => {
+    const sortModel = [{ field: 'measurementStatus', sort: direction }];
+    const full = await query({ sortModel });
+    const pages = await queryEveryPage({ sortModel });
+    const rankOf = (row: Record<string, unknown>) => MEASUREMENT_STATUS_RANK[row.measurementStatus as keyof typeof MEASUREMENT_STATUS_RANK];
+    const directionSign = direction === 'asc' ? 1 : -1;
+    console.log('[viewdata query] status paging', JSON.stringify({ direction, full: idsOf(full), pages: pages.map(idsOf) }));
+    expect(full).toHaveLength(SEEDED_ROW_COUNT);
+    const pagedRows = pages.flat();
+    expect(new Set(idsOf(pagedRows)).size, 'a row appeared on two pages').toBe(pagedRows.length);
+    expect(idsOf(pagedRows), 'union of pages is the full ordered set').toEqual(idsOf(full));
+    for (const [pageIndex, pageRows] of pages.entries()) {
+      for (let index = 1; index < pageRows.length; index++) {
+        const previous = pageRows[index - 1];
+        const current = pageRows[index];
+        const orderedByRankThenID =
+          directionSign * (rankOf(previous) - rankOf(current)) < 0 ||
+          (rankOf(previous) === rankOf(current) && Number(previous.coreMeasurementID) < Number(current.coreMeasurementID));
+        expect(
+          orderedByRankThenID,
+          `page ${pageIndex} rows ${index - 1},${index}: ${previous.treeTag}(rank ${rankOf(previous)}) before ${current.treeTag}(rank ${rankOf(current)})`
+        ).toBe(true);
+      }
+    }
+  });
+
+  it.each([
+    ['DBH descending', [{ field: 'measuredDBH', sort: 'desc' }]],
+    ['the default date sort', undefined]
+  ])('returns %s in the same order across page boundaries as one unpaged query', async (_name, sortModel) => {
+    const unpaged = await query({ sortModel });
+    const pages = await queryEveryPage({ sortModel });
+    console.log('[viewdata query] non-status paging', JSON.stringify({ unpaged: idsOf(unpaged), pages: pages.map(idsOf) }));
+    expect(unpaged).toHaveLength(SEEDED_ROW_COUNT);
+    expect(idsOf(pages.flat())).toEqual(idsOf(unpaged));
+    expect(pages.flat().map(row => row.measurementStatus)).toEqual(unpaged.map(row => row.measurementStatus));
+  });
+
+  it('shows the same count and rows with all three Show buckets as with no Show filter, covering every status', async () => {
+    const allBuckets = await queryWithTotal({});
+    const noShowFilter = await queryWithTotal({ filterModel: { visible: undefined } });
+    const statuses = new Set(allBuckets.rows.map(row => row.measurementStatus));
+    console.log(
+      '[viewdata query] show all',
+      JSON.stringify({ allBuckets: allBuckets.totalCount, noShowFilter: noShowFilter.totalCount, statuses: [...statuses] })
+    );
+    expect(allBuckets.totalCount).toBe(noShowFilter.totalCount);
+    expect(allBuckets.totalCount).toBe(SEEDED_ROW_COUNT);
+    expect(idsOf(allBuckets.rows)).toEqual(idsOf(noShowFilter.rows));
+    expect([...statuses].sort()).toEqual(Object.keys(MEASUREMENT_STATUS_RANK).sort());
+  });
+
+  it('still shows nothing for an empty Show selection', async () => {
+    const { rows, totalCount } = await queryWithTotal({ filterModel: { visible: [] } });
+    expect({ rows: rows.length, totalCount }).toEqual({ rows: 0, totalCount: 0 });
   });
 
   it('sorts a NULL date last in both directions', async () => {
@@ -244,6 +318,16 @@ describe('measurementssummary branch on real MySQL', () => {
     expect(dead).toContain('VD-DA');
     expect(dead).not.toContain('VD-ZD');
     expect(alive).toEqual(expect.arrayContaining(['VD-DA', 'VD-PASS', 'VD-ZD']));
+  });
+
+  it('judges a code by its active attribute row: an inactive row carrying the status neither includes nor excludes a row', async () => {
+    const dead = (await query({ filterModel: { stemStatus: ['dead'] } })).map(row => row.treeTag);
+    const alive = (await query({ filterModel: { stemStatus: ['alive'] } })).map(row => row.treeTag);
+    console.log('[viewdata query] inactive attribute rows', JSON.stringify({ dead, alive }));
+    expect(dead, `${EFFECTIVE_CODE}: active alive, inactive dead`).not.toContain('VD-ZD');
+    expect(alive, `${EFFECTIVE_CODE}: active alive, inactive dead`).toContain('VD-ZD');
+    expect(dead, `${INACTIVE_STATUS_CODE}: active dead, inactive alive`).toContain('VD-ZA');
+    expect(alive, `${INACTIVE_STATUS_CODE}: active dead, inactive alive`).not.toContain('VD-ZA');
   });
 
   it('filters by stem state through tss', async () => {
