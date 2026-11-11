@@ -192,6 +192,30 @@ jobs:
           done
           echo "Discovered $count real-DB spec file(s); requiring: $REQUIRED_SPECS"
 
+      # Started here, not through the Cypress action's start/wait-on: since runner
+      # 2.338.0 the action's readiness ping fails at once with "Socket closed before
+      # the connection was established" and never retries.
+      - name: Start Next dev server
+        working-directory: frontend
+        run: npx next dev --turbo > "$DEV_SERVER_LOG" 2>&1 &
+        env:
+          NEXT_PUBLIC_E2E_TESTING: "true"
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: "3306"
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: testpassword
+          DEV_SERVER_LOG: ${{ runner.temp }}/next-dev.log
+
+      - name: Wait for Next dev server
+        timeout-minutes: 5
+        run: |
+          curl --fail --location --silent --show-error --output /dev/null \
+            --retry "$DEV_SERVER_READY_TIMEOUT_SECONDS" --retry-delay 1 --retry-all-errors \
+            --retry-max-time "$DEV_SERVER_READY_TIMEOUT_SECONDS" "$DEV_SERVER_URL"
+        env:
+          DEV_SERVER_URL: http://localhost:3000
+          DEV_SERVER_READY_TIMEOUT_SECONDS: "120"
+
       # No `spec:` filter — the realdb config's own specPattern runs the whole
       # column-mapping-realdb/** directory, so a newly added real-DB spec is
       # picked up here automatically.
@@ -199,9 +223,9 @@ jobs:
         uses: cypress-io/github-action@v6
         with:
           working-directory: frontend
-          start: npx next dev --turbo
-          wait-on: "http://localhost:3000"
-          wait-on-timeout: 120
+          # Dependencies are installed above; the action's own `npm ci` would replace
+          # node_modules under the running dev server.
+          install: false
           browser: electron
           headed: false
           config-file: cypress.realdb.config.cjs
@@ -211,6 +235,12 @@ jobs:
           TEST_DB_PORT: "3306"
           TEST_DB_USER: root
           TEST_DB_PASSWORD: testpassword
+
+      - name: Show Next dev server log on failure
+        if: failure()
+        run: cat "$DEV_SERVER_LOG"
+        env:
+          DEV_SERVER_LOG: ${{ runner.temp }}/next-dev.log
 
       - name: Upload real-DB nightly screenshots on failure
         uses: actions/upload-artifact@v4

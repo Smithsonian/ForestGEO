@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import moment from 'moment';
+import { toSqlUtcDateTime } from '@/config/dateformats';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
@@ -68,7 +68,9 @@ async function handler(_request: NextRequest, context: RouteContext) {
 
     if (queryResults.length === 0) throw new Error('failure');
 
-    const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
+    // LastRunAt is an instant stored in a zone-less DATETIME column; the pool reads it back
+    // as UTC, so it must be written as UTC wall-clock time, not the server's local time.
+    const currentTime = toSqlUtcDateTime();
     const successResults = JSON.stringify(queryResults);
     await updatePostValidationLastRun(connectionManager, schema, {
       queryID,
@@ -83,7 +85,7 @@ async function handler(_request: NextRequest, context: RouteContext) {
   } catch (e: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
     if (e.message === 'failure') {
-      const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
+      const currentTime = toSqlUtcDateTime();
       await updatePostValidationLastRun(connectionManager, schema, {
         queryID,
         plotID,

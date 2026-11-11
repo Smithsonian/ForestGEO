@@ -73,7 +73,7 @@ import { applyEdit } from '@/config/editplan/apply';
 import { revertEdit, EditOperationNotFoundError, AlreadyRevertedError, CannotRevertRevertError, RevertDriftError } from '@/config/editplan/revert';
 import { ScopeLockHeldError } from '@/config/editplan/apply';
 import { readEditOperation } from '@/config/editoperations';
-import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
+import { SpeciesCorrectionUndoUnapplicableError } from '@/config/editplan/species-correction-undo';
 
 // ---------------------------------------------------------------------------
 // Fixture constants (kept short — StemTag is varchar(10)).
@@ -102,6 +102,13 @@ const DRIFT_DBH = 99.9;
 const UNKNOWN_EDIT_OPERATION_ID = 9_999_999;
 const CREATED_BY_APPLY = 'revert-test-apply';
 const CREATED_BY_REVERT = 'revert-test-revert';
+
+// Literal `status` tag from `SpeciesCorrectionPlanResult`
+// (config/editplan/tree-species-correction.ts:73) that
+// `classifyReversePlanResult` (config/editplan/species-correction-undo.ts:185)
+// folds into `SpeciesCorrectionUndoUnapplicableError.reason` when the
+// reverse-correction destination taxon still exists but is no longer active.
+const SPECIES_CORRECTION_PLAN_STATUS_DESTINATION_SPECIES_INACTIVE = 'destination_species_inactive';
 
 interface RevertFixture {
   plotID: number;
@@ -540,13 +547,17 @@ describe('revertEdit (integration)', () => {
     });
 
     // Referenced-entity deletion: the pre-edit species gets deactivated after the
-    // original edit, before anyone tries to undo the edit. Revert wants to restore
-    // SpeciesCode = ACERRU (captured in the ledger), but resolveSpeciesByCode only
-    // finds IsActive=1 rows. The revert must fail fast with SpeciesNotFoundError at
-    // analysis time — before the scope lock writes anything — and leave both the
-    // measurement's post-edit state and the original ledger entry intact so the
-    // user can make a conscious decision about the now-orphaned reference.
-    it('throws SpeciesNotFoundError when the pre-edit species has been deactivated since the original edit', async () => {
+    // original edit, before anyone tries to undo the edit. Reverting a species
+    // correction now runs the versioned preflight in species-correction-undo.ts,
+    // which replans the reverse correction and classifies a destination taxon
+    // that still exists but is no longer active as unapplicable (status
+    // "destination_species_inactive") rather than a drift conflict, since no
+    // later edit caused it. The revert must fail fast with
+    // SpeciesCorrectionUndoUnapplicableError at preflight time — before the
+    // scope lock writes anything — and leave both the measurement's post-edit
+    // state and the original ledger entry intact so the user can make a
+    // conscious decision about the now-orphaned reference.
+    it('throws SpeciesCorrectionUndoUnapplicableError when the reverse destination species has been deactivated since the original edit', async () => {
       // SpeciesCode is gated to 'global' / 'db admin' by the field role policy,
       // so both apply and revert must be called with an admin role for the
       // underlying write paths to be reached at all. (A field-crew caller would
@@ -569,14 +580,19 @@ describe('revertEdit (integration)', () => {
       await connection.query('UPDATE species SET IsActive = 0 WHERE SpeciesCode = ?', [SPECIES_CODE_ACERRU]);
 
       try {
-        await expect(
-          revertEdit(cm, {
+        let caughtRevertError: unknown;
+        try {
+          await revertEdit(cm, {
             schema: config.database,
             editOperationID: originalEditOperationID,
             createdBy: CREATED_BY_REVERT,
             role: ADMIN_ROLE
-          })
-        ).rejects.toBeInstanceOf(SpeciesNotFoundError);
+          });
+        } catch (error) {
+          caughtRevertError = error;
+        }
+        expect(caughtRevertError).toBeInstanceOf(SpeciesCorrectionUndoUnapplicableError);
+        expect((caughtRevertError as SpeciesCorrectionUndoUnapplicableError).reason).toContain(SPECIES_CORRECTION_PLAN_STATUS_DESTINATION_SPECIES_INACTIVE);
 
         const original = await readEditOperation(cm, config.database, originalEditOperationID);
         expect(original!.revertedByEditOperationID).toBeNull();

@@ -10,6 +10,7 @@ import { generateShortBatchID } from '@/config/utils';
 import { validatedSchema, type SchemaName } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -44,6 +45,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
   });
 
   let plotID: number, censusID: number, schema: SchemaName;
+  // Trusted actor for the unifiedchangelog audit rows this request's writes
+  // produce. Resolved from the authenticated session, never from the body.
+  let changedBy: string;
 
   if (!validation.success) {
     // Fallback to URL parameters — but authenticate and authorize before accepting
@@ -75,6 +79,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
 
       const denied = assertSchemaAccess(session, schema);
       if (denied) return denied;
+      changedBy = authenticatedSessionIdentity(session.user);
     } else {
       return validation.response!;
     }
@@ -85,6 +90,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
     schema = validatedSchema(values.schema!);
     plotID = values.plotID!;
     censusID = values.censusID!;
+    // validateContextualValues authenticates internally but does not return the
+    // session, so re-resolve it here for audit attribution.
+    const session = await auth();
+    changedBy = authenticatedSessionIdentity(session?.user);
   }
 
   // Add plotID and censusID to each row
@@ -109,7 +118,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
 
   try {
     transactionID = await connectionManager.beginTransaction();
-    await recordFailedMeasurementRows(connectionManager, schema, errorRows, fileID, batchID, plotID, censusID, transactionID);
+    await recordFailedMeasurementRows(connectionManager, schema, errorRows, fileID, batchID, plotID, censusID, transactionID, changedBy);
     await connectionManager.commitTransaction(transactionID);
 
     return new NextResponse(JSON.stringify({ message: 'Inserted ingestion error rows', rowCount: errorRows.length }), { status: HTTPResponses.OK });

@@ -1,5 +1,21 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
+import type { TxExecutor } from '@/lib/db/connectionmanager';
 // import ailogger from '@/ailogger';
+
+/**
+ * Binds a transaction id to a `TxExecutor` (#507). `recordMutation` requires
+ * the changelog write to share the mutation's connection so the two commit or
+ * roll back together; routes here hold a transaction id string (from
+ * `connectionManager.beginTransaction()`), not the `tx` object `withTransaction`
+ * hands to its callback, so this is the bridge between the two calling
+ * conventions.
+ */
+export function toTxExecutor(connectionManager: ConnectionManager, transactionID: string): TxExecutor {
+  return {
+    query: (sql, params) => connectionManager.executeQuery(sql, params, transactionID),
+    id: transactionID
+  };
+}
 
 export const MOBILE_SIDEBAR_TOGGLE_EVENT = 'forestgeo:toggle-mobile-sidebar';
 
@@ -138,6 +154,15 @@ export async function handleUpsert<Result>(
     const result = await connectionManager.executeQuery(query, Object.values(trimmed), transactionID);
     id = result.insertId;
 
+    // ON DUPLICATE KEY UPDATE's packet contract (verified against real MySQL):
+    // affectedRows is 2, and only 2, when it changed an existing row's values,
+    // and insertId is that row's real id -- not 0 -- when the table's matched
+    // unique index carries an AUTO_INCREMENT column (every real caller here).
+    // The `id === 0` check below used to run first and never saw this case.
+    if (result.affectedRows === 2 && id !== 0) {
+      return { id, operation: 'updated' };
+    }
+
     if (id === 0) {
       // console.log('existing record found, updating...');
       const fieldsToSearch = Object.keys(trimmed).filter(field => field !== 'UserDefinedFields' && trimmed[field as keyof Result] !== null);
@@ -175,10 +200,9 @@ export async function handleUpsert<Result>(
 
       if (searchResult.length > 0) {
         id = searchResult[0][key as keyof Result] as unknown as number;
-        // MySQL reports two affected rows when ON DUPLICATE KEY UPDATE changes
-        // an existing row. With CLIENT_FOUND_ROWS (the pool default), an
-        // identical duplicate reports one. Keep that distinction so audit
-        // consumers do not record a mutation for a no-op upsert.
+        // id was 0: a genuine no-op match (affectedRows 1) or a changed match
+        // whose unique index carries no AUTO_INCREMENT id of its own
+        // (affectedRows 2) -- resolve the row's real id here either way.
         return { id, operation: result.affectedRows === 1 ? 'unchanged' : 'updated' };
       } else {
         // ailogger.error(`Record not found after update. Data: ${JSON.stringify(trimmed)}, Query: ${findExistingQuery}, Values: ${values}`);
@@ -186,6 +210,7 @@ export async function handleUpsert<Result>(
       }
     }
 
+    // Only a fresh insert reaches here: id is nonzero and affectedRows wasn't 2.
     return { id, operation: 'inserted' };
   } catch (e: any) {
     // ailogger.error(`Error in handleUpsert: ${e.message} | Stack: ${e.stack}`);

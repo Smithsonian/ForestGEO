@@ -256,6 +256,30 @@ export function canonicalizeEditPayload(surface: EditSurface, rawNewRow: Record<
   return canonical;
 }
 
+// Canonical edit-plan fields that must never be negative. normalizeFieldValue
+// deliberately passes numbers through unchanged (range handling is per field), so
+// this is enforced as an explicit pass in analyzeEdit and shared with the grid
+// editors, instead of letting a negative DBH be silently dropped or persisted.
+export const NON_NEGATIVE_FIELDS: ReadonlySet<string> = new Set(['MeasuredDBH']);
+
+export const NON_NEGATIVE_FIELD_MESSAGE: Record<string, string> = {
+  MeasuredDBH: 'DBH must be non-negative'
+};
+
+export function isNegativeForNonNegativeField(field: string, value: unknown): boolean {
+  if (!NON_NEGATIVE_FIELDS.has(field)) return false;
+  const parsed = parseFiniteBase10Number(value);
+  return parsed !== null && parsed < 0;
+}
+
+export function assertNonNegativeFields(canonicalRow: Record<string, unknown>): void {
+  for (const [field, value] of Object.entries(canonicalRow)) {
+    if (isNegativeForNonNegativeField(field, value)) {
+      throw new InvalidFieldValueError(field, value, NON_NEGATIVE_FIELD_MESSAGE[field] ?? `Field "${field}" must be non-negative`);
+    }
+  }
+}
+
 export function rejectDisallowedFields(surface: EditSurface, newRow: Record<string, unknown>): string[] | null {
   const allowed = EDITABLE_FIELDS_BY_SURFACE[surface];
   const disallowed: string[] = [];

@@ -3,6 +3,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextResponse } from 'next/server';
 import { GET, POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { CALLER_OWNS_TRANSACTION_SQL, CLEAR_CALLER_TRANSACTION_SQL, FLAG_CLEAR_FAILED_REASON } from '@/lib/ingestion/bulk-ingestion-call';
+
+const TEST_TRANSACTION_ID = 'test-transaction-id';
+const RECONCILIATION_MAP_TABLE = 'reingestion_map';
+
+function expectCallBracketedByFlag(calls: any[][]) {
+  const statements = calls.map(call => String(call[0]));
+  const callIndex = statements.findIndex(sql => sql.includes('bulkingestionprocess'));
+  expect(callIndex, 'bulkingestionprocess must be called').toBeGreaterThan(0);
+  expect(statements[callIndex - 1]).toBe(CALLER_OWNS_TRANSACTION_SQL);
+  expect(statements[callIndex + 1]).toBe(CLEAR_CALLER_TRANSACTION_SQL);
+  for (const index of [callIndex - 1, callIndex, callIndex + 1]) {
+    expect(calls[index][2], `${statements[index]} must run on the route transaction`).toBe(TEST_TRANSACTION_ID);
+  }
+}
 
 // Sentinel values placed only on the first mock row so we can assert they survive the staging INSERT.
 const FIRST_ROW_RAW_CODES = 'AL';
@@ -38,6 +53,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
   const closeConnection = vi.fn();
   const cleanupStaleTransactions = vi.fn();
   const acquireApplicationLock = vi.fn();
+  const discardTransaction = vi.fn();
   const withTransaction = vi.fn(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
     fn({ query: (sql: string, params?: unknown[]) => executeQuery(sql, params), id: 'test-transaction-id' })
   );
@@ -46,6 +62,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
     closeConnection,
     cleanupStaleTransactions,
     acquireApplicationLock,
+    discardTransaction,
     withTransaction
   };
   return {
@@ -232,7 +249,9 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(10)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 10, insertId: 501 }) // move: insert temp rows
+        .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 8 records', batch_failed: false, records_failed: 0 }]]) // call bulkingestionprocess
+        .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
         .mockResolvedValueOnce(undefined) // reconcile: drop temp map table
         .mockResolvedValueOnce(undefined) // reconcile: create temp map table
         .mockResolvedValueOnce(undefined) // reconcile: insert map chunk
@@ -264,8 +283,8 @@ describe('reingest API routes', () => {
       expect(body.remainingFailures).toBe(2);
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
-      const bulkProcessCall = calls.find((call: any[]) => String(call[0]).includes('bulkingestionprocess'));
-      expect(bulkProcessCall).toBeDefined();
+      expectCallBracketedByFlag(calls);
+      expect(mockConnectionManager.discardTransaction).not.toHaveBeenCalled();
       expect(calls.some((call: any[]) => String(call[0]).includes('SELECT COALESCE(MAX(id), 0) as maxId'))).toBe(false);
 
       const syncCall = calls.find((call: any[]) => String(call[0]).includes('SET orig.CensusID'));
@@ -282,7 +301,9 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(3)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 3, insertId: 41 }) // move: insert temp rows
+        .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed: 2 valid, 1 failed', batch_failed: false, records_failed: 1 }]]) // call bulkingestionprocess
+        .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
         .mockResolvedValueOnce(undefined) // reconcile: drop temp map table
         .mockResolvedValueOnce(undefined) // reconcile: create temp map table
         .mockResolvedValueOnce(undefined) // reconcile: insert map chunk
@@ -335,7 +356,9 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 1, insertId: 11 }) // move: insert temp rows
-        .mockRejectedValueOnce(new Error('Bulk ingestion failed')); // call bulkingestionprocess
+        .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
+        .mockRejectedValueOnce(new Error('Bulk ingestion failed')) // call bulkingestionprocess
+        .mockResolvedValueOnce(undefined); // helper: CLEAR caller-owns-transaction flag
 
       const req = makeRequest('GET');
       const res = await GET(req, makeParams());
@@ -344,6 +367,28 @@ describe('reingest API routes', () => {
       const body = await res.json();
       expect(body.error).toBe('Bulk ingestion failed');
       expect(mockConnectionManager.closeConnection).toHaveBeenCalledTimes(1);
+      expectCallBracketedByFlag(mockConnectionManager.executeQuery.mock.calls);
+    });
+
+    it('returns 500 without reconciling when the CALL succeeded but the caller flag could not be cleared', async () => {
+      const clearError = new Error('connection lost while clearing the caller flag');
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
+        .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
+        .mockResolvedValueOnce({ affectedRows: 1, insertId: 11 }) // move: insert temp rows
+        .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
+        .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 1 records', batch_failed: false }]]) // call bulkingestionprocess
+        .mockRejectedValueOnce(clearError); // helper: CLEAR caller-owns-transaction flag
+
+      const res = await GET(makeRequest('GET'), makeParams());
+
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error).toBe(clearError.message);
+      expect(mockConnectionManager.discardTransaction).toHaveBeenCalledWith(TEST_TRANSACTION_ID, FLAG_CLEAR_FAILED_REASON);
+      const statements = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+      expect(statements.at(-1), 'reconciliation must not continue on a discarded transaction').toBe(CLEAR_CALLER_TRANSACTION_SQL);
+      expect(statements.some((sql: string) => sql.includes(RECONCILIATION_MAP_TABLE))).toBe(false);
     });
   });
 
@@ -414,7 +459,9 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 1, insertId: 601 }) // move: insert temp rows
+        .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 1 records', batch_failed: false, records_failed: 0 }]]) // call bulkingestionprocess
+        .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
         .mockResolvedValueOnce(undefined) // reconcile: drop temp map table
         .mockResolvedValueOnce(undefined) // reconcile: create temp map table
         .mockResolvedValueOnce(undefined) // reconcile: insert map chunk

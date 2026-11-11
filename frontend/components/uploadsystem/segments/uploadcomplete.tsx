@@ -1,8 +1,8 @@
 'use client';
 
-import { UploadCompleteProps } from '@/config/macros/uploadsystemmacros';
+import { IngestionUploadOutcome, UploadCompleteProps } from '@/config/macros/uploadsystemmacros';
 import Typography from '@mui/joy/Typography';
-import { Alert, Box, Button, DialogActions, DialogContent, DialogTitle, LinearProgress, Modal, ModalDialog, Stack } from '@mui/joy';
+import { Alert, Box, Button, LinearProgress, Stack } from '@mui/joy';
 import WarningIcon from '@mui/icons-material/Warning';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
@@ -13,13 +13,42 @@ import { FormType } from '@/config/macros/formdetails';
 import { useAppStore } from '@/config/store/appstore';
 import { withTimeout } from '@/components/uploadsystemhelpers/withtimeout';
 import ailogger from '@/ailogger';
+import RevisionApplyCounts from '@/components/uploadsystem/segments/revisionapplycounts';
 
 type LoadStatus = 'pending' | 'success' | 'warning' | 'error' | 'skipped';
 const CLEANUP_TIMEOUT_MS = 5000;
 const REFRESH_TIMEOUT_MS = 15000;
+const GENERIC_UPLOAD_SUCCESS_TEXT = 'Your data has been processed and uploaded successfully.';
+const UPLOAD_SUCCESS_WITH_REFRESH_ISSUES_TEXT = 'Your data has been uploaded, but some background refreshes encountered issues.';
+
+const SINGLE_ROW = 1;
+
+function pluralizeRows(rowCount: number): string {
+  return rowCount === SINGLE_ROW ? 'row' : 'rows';
+}
+
+function IngestionOutcomeSummary({ outcome }: Readonly<{ outcome: IngestionUploadOutcome }>) {
+  if (outcome.sourceRows === 0) {
+    return <Typography level="body-md">The file contained no rows to insert.</Typography>;
+  }
+  if (outcome.failedRows === 0) {
+    const insertedSentence = outcome.sourceRows === SINGLE_ROW ? 'The row was inserted.' : `All ${outcome.sourceRows} rows were inserted.`;
+    return <Typography level="body-md">{insertedSentence}</Typography>;
+  }
+  const failedVerb = outcome.failedRows === SINGLE_ROW ? 'was' : 'were';
+  return (
+    <>
+      <Typography level="body-md">{`${outcome.insertedRows} of ${outcome.sourceRows} ${pluralizeRows(outcome.sourceRows)} inserted.`}</Typography>
+      <Typography
+        level="body-md"
+        color="warning"
+      >{`${outcome.failedRows} ${pluralizeRows(outcome.failedRows)} ${failedVerb} sent to Failed Measurements for review.`}</Typography>
+    </>
+  );
+}
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
-  const { handleCloseUploadModal, uploadForm } = props;
+  const { handleCloseUploadModal, uploadForm, uploadOutcome } = props;
   const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
   const [loadStatus, setLoadStatus] = useState<{ census: LoadStatus; plots: LoadStatus; quadrats: LoadStatus }>({
@@ -28,7 +57,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     quadrats: 'pending'
   });
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
-  const [openUploadConfirmModal, setOpenUploadConfirmModal] = useState(false);
 
   const { triggerRefresh } = useDataValidityContext();
 
@@ -408,11 +436,13 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
           <Typography level="h2" color={hasIssues ? 'warning' : 'success'}>
             {hasIssues ? 'Upload Complete (with warnings)' : 'Upload Complete!'}
           </Typography>
-          <Typography level="body-lg">
-            {hasIssues
-              ? 'Your data has been uploaded, but some background refreshes encountered issues.'
-              : 'Your data has been processed and uploaded successfully.'}
-          </Typography>
+          {hasIssues ? (
+            <Typography level="body-lg">{UPLOAD_SUCCESS_WITH_REFRESH_ISSUES_TEXT}</Typography>
+          ) : !uploadOutcome ? (
+            <Typography level="body-lg">{GENERIC_UPLOAD_SUCCESS_TEXT}</Typography>
+          ) : null}
+          {uploadOutcome?.kind === 'ingestion' && <IngestionOutcomeSummary outcome={uploadOutcome} />}
+          {uploadOutcome?.kind === 'revisions' && <RevisionApplyCounts {...uploadOutcome} />}
 
           {/* Show warning alert if any refreshes failed */}
           {hasIssues && (
@@ -437,44 +467,11 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             </Alert>
           )}
 
-          {uploadForm === FormType.measurements && (
-            <Typography level="body-md" color="neutral">
-              Any rows with errors have been moved to the failed measurements table for review.
-            </Typography>
-          )}
-          <Button variant="solid" color={hasIssues ? 'warning' : 'success'} size="lg" onClick={() => setOpenUploadConfirmModal(true)} sx={{ mt: 2 }}>
+          <Button variant="solid" color={hasIssues ? 'warning' : 'success'} size="lg" onClick={() => handleCloseUploadModal()} sx={{ mt: 2 }}>
             Close
           </Button>
         </Stack>
       )}
-      <Modal open={openUploadConfirmModal} onClose={() => setOpenUploadConfirmModal(false)}>
-        <ModalDialog role="alertdialog">
-          <DialogTitle>Ready to Continue?</DialogTitle>
-          <DialogContent>
-            <Typography level="body-md">Your upload has completed. Click &quot;Done&quot; to close this dialog and return to the application.</Typography>
-            {uploadForm === FormType.measurements && (
-              <Typography level="body-sm" color="neutral" sx={{ mt: 2 }}>
-                You can review any failed measurements through the validation interface.
-              </Typography>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button
-              variant="solid"
-              color="success"
-              onClick={() => {
-                setOpenUploadConfirmModal(false);
-                handleCloseUploadModal();
-              }}
-            >
-              Done
-            </Button>
-            <Button variant="plain" color="neutral" onClick={() => setOpenUploadConfirmModal(false)}>
-              Cancel
-            </Button>
-          </DialogActions>
-        </ModalDialog>
-      </Modal>
     </Box>
   );
 }

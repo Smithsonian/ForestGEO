@@ -128,6 +128,13 @@ export interface SpecialProcessingProps {
   census?: OrgCensus;
   quadratID?: number;
   fullName?: string;
+  /**
+   * The caller's transaction id (#507). Every handleUpsert call a
+   * specialProcessing implementation makes MUST thread this through, or the
+   * row it writes escapes the caller's transaction and survives a rollback
+   * that is supposed to undo it.
+   */
+  transactionID?: string;
 }
 
 export interface InsertUpdateProcessingProps extends SpecialProcessingProps {

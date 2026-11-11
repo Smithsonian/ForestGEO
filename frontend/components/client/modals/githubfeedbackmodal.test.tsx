@@ -115,3 +115,77 @@ describe('GithubFeedbackModal - Accessibility', () => {
     expect(screen.getByRole('dialog')).toHaveAccessibleName(ACCESSIBLE_NAME);
   });
 });
+
+const NAME_INPUT_LABEL = /input for name of person reporting feedback/i;
+const DESCRIPTION_INPUT_LABEL = /description box/i;
+const MODAL_CLOSE_SELECTOR = '.MuiModalClose-root';
+const MODAL_BACKDROP_SELECTOR = '.MuiModal-backdrop';
+
+function feedbackModalCloseButton(): HTMLElement {
+  const closeButton = document.querySelector<HTMLElement>(MODAL_CLOSE_SELECTOR);
+  if (!closeButton) throw new Error(`[githubfeedbackmodal test] no ${MODAL_CLOSE_SELECTOR} rendered`);
+  return closeButton;
+}
+
+function feedbackModalBackdrop(): HTMLElement {
+  const backdrop = document.querySelector<HTMLElement>(MODAL_BACKDROP_SELECTOR);
+  if (!backdrop) throw new Error(`[githubfeedbackmodal test] no ${MODAL_BACKDROP_SELECTOR} rendered`);
+  return backdrop;
+}
+
+describe('GithubFeedbackModal - dismissal (#524 item 2 scope extension)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('a backdrop click leaves the modal open and keeps the typed draft', () => {
+    mockUseFormSubmission.mockReturnValue({ submitForm: vi.fn(), isSubmitting: false });
+    const onClose = vi.fn();
+    render(<GithubFeedbackModal open onClose={onClose} />);
+
+    fireEvent.change(screen.getByLabelText(NAME_INPUT_LABEL), { target: { value: 'Person Doe' } });
+    fireEvent.change(screen.getByLabelText(DESCRIPTION_INPUT_LABEL), { target: { value: 'Something broke' } });
+    fireEvent.click(feedbackModalBackdrop());
+    const nameAfterBackdropClick = (screen.getByLabelText(NAME_INPUT_LABEL) as HTMLInputElement).value;
+    const descriptionAfterBackdropClick = (screen.getByLabelText(DESCRIPTION_INPUT_LABEL) as HTMLTextAreaElement).value;
+    console.log(
+      `[feedback backdrop] onClose calls=${onClose.mock.calls.length} name=${JSON.stringify(nameAfterBackdropClick)} description=${JSON.stringify(descriptionAfterBackdropClick)}`
+    );
+
+    expect(onClose, 'a stray backdrop click must not dismiss the modal').not.toHaveBeenCalled();
+    expect(nameAfterBackdropClick).toBe('Person Doe');
+    expect(descriptionAfterBackdropClick).toBe('Something broke');
+  });
+
+  it('Escape closes through handleCancel: onClose fires once and the reopened form is empty', () => {
+    mockUseFormSubmission.mockReturnValue({ submitForm: vi.fn(), isSubmitting: false });
+    const onClose = vi.fn();
+    const { rerender } = render(<GithubFeedbackModal open onClose={onClose} />);
+
+    fireEvent.change(screen.getByLabelText(NAME_INPUT_LABEL), { target: { value: 'Person Doe' } });
+    fireEvent.change(screen.getByLabelText(DESCRIPTION_INPUT_LABEL), { target: { value: 'Something broke' } });
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    console.log(`[feedback Escape idle] onClose calls=${onClose.mock.calls.length}`);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    rerender(<GithubFeedbackModal open={false} onClose={onClose} />);
+    rerender(<GithubFeedbackModal open onClose={onClose} />);
+    const reopenedName = screen.getByLabelText(NAME_INPUT_LABEL) as HTMLInputElement;
+    const reopenedDescription = screen.getByLabelText(DESCRIPTION_INPUT_LABEL) as HTMLTextAreaElement;
+    console.log(`[feedback Escape idle] reopened name=${JSON.stringify(reopenedName.value)} description=${JSON.stringify(reopenedDescription.value)}`);
+    expect(reopenedName.value).toBe('');
+    expect(reopenedDescription.value).toBe('');
+  });
+
+  it('ignores Escape and the X while a submission is pending', () => {
+    mockUseFormSubmission.mockReturnValue({ submitForm: vi.fn(), isSubmitting: true });
+    const onClose = vi.fn();
+    render(<GithubFeedbackModal open onClose={onClose} />);
+
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    fireEvent.click(feedbackModalCloseButton());
+    console.log(`[feedback pending] onClose calls=${onClose.mock.calls.length}`);
+
+    expect(onClose, 'a pending submission must not be abandoned by Escape or the X').not.toHaveBeenCalled();
+  });
+});

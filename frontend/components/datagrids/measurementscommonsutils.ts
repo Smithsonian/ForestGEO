@@ -1,20 +1,51 @@
 import { GridFilterModel, GridPaginationModel, GridRowModel, GridSortModel } from '@mui/x-data-grid';
 import { ExtendedGridFilterModel, TSSFilter, VisibleFilter } from '@/config/datagridhelpers';
-import { EDITABLE_FIELDS_BY_SURFACE, EditSurface, FIELD_ALIASES_BY_SURFACE, PER_COLUMN_DECIMAL_PRECISION } from '@/config/editplan/fieldpolicy';
+import {
+  CLEAR_POLICY,
+  EDITABLE_FIELDS_BY_SURFACE,
+  EditSurface,
+  FIELD_ALIASES_BY_SURFACE,
+  isNegativeForNonNegativeField,
+  NON_NEGATIVE_FIELD_MESSAGE,
+  PER_COLUMN_DECIMAL_PRECISION
+} from '@/config/editplan/fieldpolicy';
+import { fieldChanged } from '@/config/editplan/storedfieldcomparison';
 import { areArraysEqual, areFilterItemsEqual, isActiveFilterItem, sanitizeQuickFilterValues, toServerFilterItem } from '@/lib/datagrid/filterModel';
+import { EditRevertRequest, requestEditRevert } from '@/lib/editplan/requestrevert';
+import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
+import type { ApplyResult } from '@/config/editplan/types';
+import { formatMeasurementForDisplay } from '@/config/measurementdisplay';
 
-// Numeric edits that round to the existing value at server precision are
-// detected here so the client can (a) skip the API roundtrip and (b) tell the
-// user their typing didn't change anything. Without this, typing 1.234 over
-// 1.23 in a DBH cell silently disappears (server normalizes both to 1.23).
+import { ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
+
+export { NEW_ROW_ADDED_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
+
+export function describeMeasurementRow(row: GridRowModel | null): string {
+  if (!row) return 'this measurement';
+  const treeTag = row.treeTag ?? row.TreeTag;
+  const stemTag = row.stemTag ?? row.StemTag;
+  const measuredValue = row.measuredDBH ?? row.MeasuredDBH ?? row.dbh ?? row.DBH;
+  const identity = [treeTag && `tree ${treeTag}`, stemTag && `stem ${stemTag}`].filter(Boolean).join(', ');
+  const value = measuredValue !== undefined && measuredValue !== null && measuredValue !== '' ? ` (DBH ${formatMeasurementForDisplay(measuredValue)})` : '';
+  return identity ? `${identity}${value}` : `this measurement${value}`;
+}
+
+// Detects edits that round to the existing server-precision value, so typing
+// 1.234 over 1.23 in a DBH cell isn't silently dropped as a no-op elsewhere.
 function findRoundedNoOpField(canonicalField: string, newValue: unknown, oldValue: unknown): boolean {
   const precision = PER_COLUMN_DECIMAL_PRECISION[canonicalField];
   if (precision === undefined) return false;
+  // Number(null) and Number('') are 0; a missing stored value is not "0 rounded".
+  if (isBlankValue(newValue) || isBlankValue(oldValue)) return false;
   const newNum = Number(newValue);
   const oldNum = Number(oldValue);
   if (!Number.isFinite(newNum) || !Number.isFinite(oldNum)) return false;
   if (newNum === oldNum) return false;
   return newNum.toFixed(precision) === oldNum.toFixed(precision);
+}
+
+function isBlankValue(value: unknown): boolean {
+  return value === null || value === undefined || (typeof value === 'string' && (value.trim() === '' || value.trim().toUpperCase() === 'NULL'));
 }
 
 export interface EditableFieldsDiffResult {
@@ -35,6 +66,9 @@ export function buildEditableFieldsDiffWithMetaForSurface(newRow: GridRowModel, 
     if (!editableFields.has(canonicalField)) continue;
     const oldValue = oldRow[rawKey];
     if (Object.is(newValue, oldValue)) continue;
+    // Blank numeric input is a server-side no-op (CLEAR_POLICY 'no-op-on-blank'); sending it
+    // would only create an empty plan that still records an edit operation.
+    if (isBlankValue(newValue) && CLEAR_POLICY[canonicalField] === 'no-op-on-blank') continue;
     if (newValue instanceof Date || oldValue instanceof Date) {
       const newTime = newValue instanceof Date ? newValue.getTime() : newValue;
       const oldTime = oldValue instanceof Date ? oldValue.getTime() : oldValue;
@@ -44,9 +78,85 @@ export function buildEditableFieldsDiffWithMetaForSurface(newRow: GridRowModel, 
       roundedNoOpFields.push(canonicalField);
       continue;
     }
+    // The server (analyzeEdit -> fieldChanged) compares normalized values: numbers at the
+    // column's stored precision (so '3.500000' === 3.5) and dates by day. Comparing raw
+    // shapes here is what made an untouched-but-blurred LocalX/LocalY/HOM (string from
+    // MySQL vs number from the editor) look like a change and record a phantom edit.
+    if (!fieldChanged(canonicalField, oldValue, newValue)) continue;
     diff[canonicalField] = newValue;
   }
   return { diff, roundedNoOpFields };
+}
+
+export interface NegativeDbhFieldError {
+  field: string;
+  message: string;
+}
+
+// Browser-side mirror of the server's non-negative guard (assertNonNegativeFields in
+// analyzeEdit), checked against the raw row so an invalid value is reported rather
+// than normalized away.
+export function findNonNegativeFieldErrors(newRow: GridRowModel, surface: EditSurface): NegativeDbhFieldError[] {
+  const aliases = FIELD_ALIASES_BY_SURFACE[surface];
+  const errors: NegativeDbhFieldError[] = [];
+  for (const [rawKey, value] of Object.entries(newRow)) {
+    const canonicalField = aliases[rawKey] ?? rawKey;
+    if (isNegativeForNonNegativeField(canonicalField, value)) {
+      errors.push({ field: rawKey, message: NON_NEGATIVE_FIELD_MESSAGE[canonicalField] ?? `${rawKey} must be non-negative` });
+    }
+  }
+  return errors;
+}
+
+export class MeasurementEditValidationError extends Error {
+  readonly errors: NegativeDbhFieldError[];
+  constructor(errors: NegativeDbhFieldError[]) {
+    super(errors.map(e => e.message).join('; '));
+    this.name = 'MeasurementEditValidationError';
+    this.errors = errors;
+  }
+}
+
+// Returns newRow with the stored (oldRow) value put back for editable fields, so the
+// grid shows what is actually persisted when an edit saved nothing or only rounded.
+// `keepCanonicalFields` are the fields that were genuinely saved (the effective diff); every
+// other editable field is put back to its persisted value, including blanked fields that the
+// no-op-on-blank policy omitted from the diff.
+export function restorePersistedEditableFields(
+  newRow: GridRowModel,
+  oldRow: GridRowModel,
+  surface: EditSurface,
+  keepCanonicalFields?: readonly string[]
+): GridRowModel {
+  const editableFields = EDITABLE_FIELDS_BY_SURFACE[surface];
+  const aliases = FIELD_ALIASES_BY_SURFACE[surface];
+  const restored: GridRowModel = { ...newRow };
+  for (const rawKey of Object.keys(newRow)) {
+    const canonicalField = aliases[rawKey] ?? rawKey;
+    if (!editableFields.has(canonicalField)) continue;
+    if (keepCanonicalFields?.includes(canonicalField)) continue;
+    if (rawKey in oldRow) restored[rawKey] = oldRow[rawKey];
+  }
+  return restored;
+}
+
+export type MeasurementEditSaveDecision =
+  | { kind: 'invalid'; errors: NegativeDbhFieldError[] }
+  | { kind: 'unchanged'; roundedNoOpFields: string[] }
+  | { kind: 'save'; diff: Record<string, unknown>; roundedNoOpFields: string[] };
+
+// Single decision point for a View Data row save: invalid input, nothing to save
+// (including edits that only round to the stored value), or a real diff to preview/apply.
+export function decideMeasurementEditSave(
+  newRow: GridRowModel,
+  oldRow: GridRowModel,
+  surface: EditSurface = 'measurementssummary'
+): MeasurementEditSaveDecision {
+  const errors = findNonNegativeFieldErrors(newRow, surface);
+  if (errors.length > 0) return { kind: 'invalid', errors };
+  const { diff, roundedNoOpFields } = buildEditableFieldsDiffWithMetaForSurface(newRow, oldRow, surface);
+  if (Object.keys(diff).length === 0) return { kind: 'unchanged', roundedNoOpFields };
+  return { kind: 'save', diff, roundedNoOpFields };
 }
 
 export function buildEditableFieldsDiffForSurface(newRow: GridRowModel, oldRow: GridRowModel, surface: EditSurface): Record<string, unknown> {
@@ -55,6 +165,44 @@ export function buildEditableFieldsDiffForSurface(newRow: GridRowModel, oldRow: 
 
 export function buildEditableFieldsDiff(newRow: GridRowModel, oldRow: GridRowModel): Record<string, unknown> {
   return buildEditableFieldsDiffForSurface(newRow, oldRow, 'measurementssummary');
+}
+
+export const NO_CHANGE_SAVED_MESSAGE = (fields: string[]) =>
+  `No change saved: ${fields.join(', ')} rounded to the existing value (server stores at fixed precision).`;
+export const PARTIAL_ROUNDED_MESSAGE = (fields: string[]) => `${fields.join(', ')} rounded to the existing value and was not changed; other edits applied.`;
+
+export interface RunMeasurementEditSaveArgs {
+  coreMeasurementID: number;
+  newRow: GridRowModel;
+  oldRow: GridRowModel;
+  beginEdit: (targetID: number, newRow: Record<string, unknown>) => Promise<ApplyResult>;
+  notify: (message: string, severity: 'success' | 'info' | 'error') => void;
+  // Called only when the server actually recorded an edit operation (so Undo is offered only then).
+  onEditOperation: (editOperationID: number) => void;
+}
+
+// The View Data row-save path: validate, drop non-changes (including sub-precision edits),
+// and only then preview/apply. An invalid or empty edit never reaches beginEdit, so it
+// can never create an edit operation, an Undo toast, or a success message.
+export async function runMeasurementEditSave(args: RunMeasurementEditSaveArgs): Promise<GridRowModel> {
+  const { coreMeasurementID, newRow, oldRow, beginEdit, notify, onEditOperation } = args;
+  const decision = decideMeasurementEditSave(newRow, oldRow, 'measurementssummary');
+  if (decision.kind === 'invalid') {
+    notify(`Error: ${decision.errors.map(e => e.message).join('; ')}`, 'error');
+    throw new MeasurementEditValidationError(decision.errors);
+  }
+  const { roundedNoOpFields } = decision;
+  if (decision.kind === 'unchanged') {
+    if (roundedNoOpFields.length > 0) notify(NO_CHANGE_SAVED_MESSAGE(roundedNoOpFields), 'info');
+    return restorePersistedEditableFields(newRow, oldRow, 'measurementssummary');
+  }
+  const result = await beginEdit(coreMeasurementID, decision.diff);
+  if (result.editOperationID !== null) onEditOperation(result.editOperationID);
+  // One message, only after the apply succeeded (the grid shows a single snackbar, so a second
+  // call would overwrite the rounding information).
+  if (roundedNoOpFields.length > 0) notify(PARTIAL_ROUNDED_MESSAGE(roundedNoOpFields), 'info');
+  else notify(ROW_UPDATED_MESSAGE, 'success');
+  return restorePersistedEditableFields(newRow, oldRow, 'measurementssummary', Object.keys(decision.diff));
 }
 
 export interface FormattedQueryRequest {
@@ -210,11 +358,8 @@ export function selectMeasurementStateSnackbar(counts: MeasurementStateCounts): 
     return { severity: 'warning', message: UNRESOLVED_ERRORS_SNACKBAR_MESSAGE(counts.unresolvedLogged) };
   }
 
-  // failedNoLog rows count as "not yet validated": IsValidated defaults to FALSE
-  // (tablestructures.sql) and a FALSE row without a log entry can also be a hard
-  // failure whose error-log link was dropped (see migration
-  // 51_backfill_hard_failure_error_log.sql) — re-running validations re-surfaces
-  // either case, so that is the honest prompt.
+  // failedNoLog rows count as "not yet validated": they may be a hard failure
+  // whose error-log link was dropped (see migration 51_backfill_hard_failure_error_log.sql).
   const notYetValidated = counts.pending + counts.failedNoLog;
   if (notYetValidated > 0) {
     // FALSE-without-log rows carry no unresolved validation error, so they are outside
@@ -229,4 +374,89 @@ export function selectMeasurementStateSnackbar(counts: MeasurementStateCounts): 
   }
 
   return null;
+}
+
+// --- Undo (edit revert) orchestration ---------------------------------
+// Once requestEditRevert resolves 'reverted' the write already committed;
+// a refresh failure here must never be reported as a failed undo.
+
+export interface MeasurementEditRevertNotification {
+  message: string;
+  severity: 'success' | 'warning' | 'error';
+}
+
+export interface EditRevertEffects {
+  refreshAfterRevert: () => Promise<void>;
+  notify: (notification: MeasurementEditRevertNotification) => void;
+  logError: (message: string, error: Error) => void;
+}
+
+export interface MeasurementEditRevertEffects {
+  invalidateQueries: () => Promise<void>;
+  refreshPaginated: () => Promise<void>;
+  refreshCounts: () => Promise<void>;
+  // Pass null (or omit) when infinite scroll is not the grid's active mode.
+  refreshInfinite?: (() => Promise<void>) | null;
+  notify: (notification: MeasurementEditRevertNotification) => void;
+  logError: (message: string, error: Error) => void;
+}
+
+export const EDIT_REVERTED_SNACKBAR_MESSAGE = 'Edit reverted';
+export const UNDO_FAILED_SNACKBAR_MESSAGE = (message: string) => `Undo failed: ${message}`;
+export const EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE = 'Edit reverted, but the view could not be refreshed. Reload the page to see current data.';
+const EDIT_REVERT_REFRESH_FAILURE_LOG_MESSAGE = 'revertEdit: refreshing the view after a successful revert failed';
+
+export async function revertEditAndRefresh(scope: EditRevertRequest, effects: EditRevertEffects): Promise<UndoRevertOutcome> {
+  const outcome = await requestEditRevert(scope);
+
+  if (outcome.status === 'confirmation-required') {
+    // No refresh, no snackbar — the toast is about to show the confirmation
+    // preview for the same operation.
+    return outcome;
+  }
+
+  if (outcome.status === 'failed') {
+    effects.notify({ message: UNDO_FAILED_SNACKBAR_MESSAGE(outcome.message), severity: 'error' });
+    return { status: 'failed' };
+  }
+
+  if (outcome.status === 'unconfirmed') {
+    // Write may or may not have committed; never claim success or refresh.
+    effects.notify({ message: outcome.message, severity: 'warning' });
+    return { status: 'unconfirmed' };
+  }
+
+  try {
+    await effects.refreshAfterRevert();
+  } catch (error) {
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    effects.logError(EDIT_REVERT_REFRESH_FAILURE_LOG_MESSAGE, errorObj);
+    // The revert already committed server-side; this must still resolve as
+    // 'reverted' so UndoToast dismisses and the write is never retried.
+    effects.notify({ message: EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE, severity: 'warning' });
+    return { status: 'reverted' };
+  }
+
+  effects.notify({ message: EDIT_REVERTED_SNACKBAR_MESSAGE, severity: 'success' });
+  return { status: 'reverted' };
+}
+
+async function refreshMeasurementGridAfterRevert(effects: MeasurementEditRevertEffects): Promise<void> {
+  await effects.invalidateQueries();
+  const refreshTasks: Promise<void>[] = [effects.refreshPaginated(), effects.refreshCounts()];
+  if (effects.refreshInfinite) refreshTasks.push(effects.refreshInfinite());
+  // allSettled, not all: waiting for every task guarantees the notify()
+  // afterwards always runs last, even if a sibling task's own internal success
+  // notification is still pending when another task rejects.
+  const settled = await Promise.allSettled(refreshTasks);
+  const firstRejection = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (firstRejection) throw firstRejection.reason;
+}
+
+export function revertMeasurementEdit(scope: EditRevertRequest, effects: MeasurementEditRevertEffects): Promise<UndoRevertOutcome> {
+  return revertEditAndRefresh(scope, {
+    refreshAfterRevert: () => refreshMeasurementGridAfterRevert(effects),
+    notify: effects.notify,
+    logError: effects.logError
+  });
 }

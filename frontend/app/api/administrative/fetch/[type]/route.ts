@@ -147,6 +147,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
     return NextResponse.json({ message: 'A row object is required' }, { status: HTTPResponses.INVALID_REQUEST });
   }
   let transactionID: string | undefined;
+  let createdID: number | undefined;
   try {
     transactionID = await connectionManager.beginTransaction();
     if (user) {
@@ -159,22 +160,29 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
       if (!Number.isInteger(userID) || userID <= 0) throw new Error('User insert did not return a valid identifier');
       await connectionManager.commitTransaction(transactionID);
       invalidateAdminPermissionsChange(type, undefined, user);
-      return NextResponse.json({ message: 'Successfully inserted', userID }, { status: HTTPResponses.OK });
+      return NextResponse.json({ message: 'Successfully inserted', userID, createdIDs: { [type]: userID } }, { status: HTTPResponses.OK });
     }
     // Grid rows arrive camelCase with grid-only scaffold fields; demap to the
     // PascalCase column names (demapData drops `id`; `isNew` is grid state).
     const { isNew: _isNew, ...rowFields } = newRow as Record<string, unknown>;
     const mappedRow = MapperFactory.getMapper<any, any>(type).demapData([rowFields])[0];
     const insertQuery = format(`INSERT INTO ?? SET ?`, [`catalog.${type}`, mappedRow]);
-    await connectionManager.executeQuery(insertQuery, undefined, transactionID);
+    const insertResult = await connectionManager.executeQuery(insertQuery, undefined, transactionID);
     await connectionManager.commitTransaction(transactionID);
     invalidateAdminPermissionsChange(type, undefined, newRow);
+    // The grid needs the generated identifier to edit the row it just created;
+    // without it the row is unaddressable until a refetch supplies one.
+    const insertedID = Number(insertResult?.insertId);
+    createdID = Number.isInteger(insertedID) && insertedID > 0 ? insertedID : undefined;
   } catch (error) {
     await rollbackIfStarted(connectionManager, transactionID);
     ailogger.error(`Administrative insertion failed for ${type}`, error instanceof Error ? error : new Error(String(error)));
     return NextResponse.json({ message: `Insertion into catalog.${type} failed` }, { status: HTTPResponses.INVALID_REQUEST });
   }
-  return new NextResponse(JSON.stringify({ message: 'Successfully inserted' }), { status: HTTPResponses.OK });
+  return NextResponse.json(
+    { message: 'Successfully inserted', ...(createdID !== undefined ? { createdIDs: { [type]: createdID } } : {}) },
+    { status: HTTPResponses.OK }
+  );
 }
 
 export async function PATCH(request: NextRequest, props: { params: Promise<{ type: string }> }) {

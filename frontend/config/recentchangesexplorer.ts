@@ -100,6 +100,9 @@ export const RECENT_CHANGES_PRESETS = [
 
 const BATCH_WINDOW_MS = 60_000;
 
+// file_upload rows are already per-file aggregates; batching them would hide which file is which behind a row count.
+const TABLES_EXCLUDED_FROM_BATCHING = new Set(['file_upload']);
+
 export function groupIntoBatches(entries: ChangelogEntry[]): FeedItem[] {
   if (entries.length === 0) return [];
 
@@ -109,7 +112,7 @@ export function groupIntoBatches(entries: ChangelogEntry[]): FeedItem[] {
   while (i < entries.length) {
     const current = entries[i];
 
-    if (current.operation !== 'INSERT') {
+    if (current.operation !== 'INSERT' || TABLES_EXCLUDED_FROM_BATCHING.has(current.tableName)) {
       items.push({ type: 'single', entry: current });
       i++;
       continue;
@@ -155,7 +158,8 @@ export function groupIntoBatches(entries: ChangelogEntry[]): FeedItem[] {
 }
 
 export const KEY_FIELDS_BY_TABLE: Record<string, string[]> = {
-  coremeasurements: ['TreeTag', 'StemTag', 'SpeciesCode', 'QuadratName', 'MeasuredDBH'],
+  // coremeasurements only has the ingestion pipeline's Raw* columns, not resolved-entity columns like TreeTag/SpeciesCode.
+  coremeasurements: ['RawTreeTag', 'RawStemTag', 'RawSpCode', 'RawQuadrat', 'MeasuredDBH'],
   species: ['SpeciesCode', 'Family', 'Genus'],
   stems: ['StemTag', 'TreeID', 'QuadratID', 'LocalX', 'LocalY'],
   trees: ['TreeTag', 'SpeciesID', 'SubSpeciesID'],

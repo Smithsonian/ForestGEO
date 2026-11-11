@@ -52,8 +52,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     },
     {
       label: 'status',
-      explanation: `Which of the following categories does your attribute fit into: ${AttributeStatusOptions.join(', ')}`, // this is converted to Chip
-      // array via regex in rendering.
+      explanation: `Which of the following categories does your attribute fit into: ${AttributeStatusOptions.join(', ')}`, // the renderers strip this exact list and show AttributeStatusOptions as chips
       category: 'optional'
     }
   ],

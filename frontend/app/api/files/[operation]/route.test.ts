@@ -1,6 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { DELETE, GET, POST } from './route';
+import { HTTPResponses } from '@/config/macros';
+import { SourceFormat } from '@/config/macros/formdetails';
+import {
+  MAX_UPLOAD_FILE_BYTES,
+  MAX_UPLOAD_REQUEST_BODY_BYTES,
+  UNKNOWN_FORMAT_UPLOAD_RECOVERY_ADVICE,
+  UPLOAD_LENGTH_REQUIRED_MESSAGE,
+  UPLOAD_UNREADABLE_MESSAGE,
+  ARCGIS_UPLOAD_RECOVERY_ADVICE,
+  CSV_UPLOAD_RECOVERY_ADVICE,
+  uploadFileTooLargeMessage,
+  uploadRequestBodyTooLargeMessage
+} from '@/lib/uploads/upload-request-limits';
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
@@ -55,6 +68,23 @@ function makeRequest(url: string, init?: RequestInit) {
   const request = new Request(url, init) as NextRequest;
   Object.defineProperty(request, 'nextUrl', { value: new URL(url) });
   return request;
+}
+
+const SMALL_DECLARED_BODY_BYTES = 4096;
+const UPLOAD_URL = 'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&fileName=measurements.csv&formType=measurements';
+
+function makeUploadRequest(url: string, formData: FormData | null, declaredBodyBytes: number | null = SMALL_DECLARED_BODY_BYTES) {
+  const headers: Record<string, string> = {};
+  if (declaredBodyBytes !== null) headers['content-length'] = String(declaredBodyBytes);
+  const request = makeRequest(url, { method: 'POST', headers }) as any;
+  request.formData = vi.fn(async () => formData);
+  return request;
+}
+
+function fileReportingSize(name: string, byteCount: number, type = 'text/csv'): File {
+  const file = new File(['TreeTag\n1'], name, { type });
+  Object.defineProperty(file, 'size', { value: byteCount });
+  return file;
 }
 
 function props(operation: string) {
@@ -264,11 +294,10 @@ describe('/api/files/[operation]', () => {
     const file = new File(['TreeTag\n1'], 'measurements.csv', { type: 'text/csv' });
     formData.append('measurements.csv', file);
 
-    const request = makeRequest(
+    const request = makeUploadRequest(
       'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&fileName=measurements.csv&formType=measurements&user=attacker@example.com',
-      { method: 'POST' }
-    ) as any;
-    request.formData = vi.fn(async () => formData);
+      formData
+    );
 
     const response = await POST(request, props('upload'));
 
@@ -293,10 +322,10 @@ describe('/api/files/[operation]', () => {
     const formData = new FormData();
     const file = new File(['TreeTag\n1'], fileName, { type: 'text/csv' });
     formData.append(fileName, file);
-    const request = makeRequest(`http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&census=2&fileName=${fileName}&formType=measurements`, {
-      method: 'POST'
-    }) as any;
-    request.formData = vi.fn(async () => formData);
+    const request = makeUploadRequest(
+      `http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&census=2&fileName=${fileName}&formType=measurements`,
+      formData
+    );
 
     const response = await POST(request, props('upload'));
 
@@ -310,11 +339,10 @@ describe('/api/files/[operation]', () => {
     const file = new File(['TreeTag\n1'], 'measurements.csv', { type: 'text/csv' });
     formData.append('measurements.csv', file);
     formData.append('fileRowErrors', '{not-json');
-    const request = makeRequest(
+    const request = makeUploadRequest(
       'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&census=2&fileName=measurements.csv&formType=measurements',
-      { method: 'POST' }
-    ) as any;
-    request.formData = vi.fn(async () => formData);
+      formData
+    );
 
     const response = await POST(request, props('upload'));
 
@@ -336,11 +364,10 @@ describe('/api/files/[operation]', () => {
       const file = new File(['TreeTag\n1'], 'measurements.csv', { type: 'text/csv' });
       formData.append('measurements.csv', file);
       formData.append('fileRowErrors', rawFileRowErrors);
-      const request = makeRequest(
+      const request = makeUploadRequest(
         'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&census=2&fileName=measurements.csv&formType=measurements',
-        { method: 'POST' }
-      ) as any;
-      request.formData = vi.fn(async () => formData);
+        formData
+      );
       return POST(request, props('upload'));
     }
 
@@ -380,11 +407,10 @@ describe('/api/files/[operation]', () => {
     const file = new File(['TreeTag\n1'], 'bad/name.csv', { type: 'text/csv' });
     formData.append('bad/name.csv', file);
 
-    const request = makeRequest(
+    const request = makeUploadRequest(
       'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&fileName=bad%2Fname.csv&formType=measurements',
-      { method: 'POST' }
-    ) as any;
-    request.formData = vi.fn(async () => formData);
+      formData
+    );
 
     const response = await POST(request, props('upload'));
 
@@ -410,11 +436,10 @@ describe('/api/files/[operation]', () => {
     });
     formData.append('arcgis-export.xlsx', file);
 
-    const request = makeRequest(
+    const request = makeUploadRequest(
       'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&fileName=arcgis-export.xlsx&formType=measurements&sourceFormat=arcgis_xlsx',
-      { method: 'POST' }
-    ) as any;
-    request.formData = vi.fn(async () => formData);
+      formData
+    );
 
     const response = await POST(request, props('upload'));
 
@@ -438,11 +463,10 @@ describe('/api/files/[operation]', () => {
     const file = new File(['TreeTag\n1'], 'measurements.csv', { type: 'text/csv' });
     formData.append('measurements.csv', file);
 
-    const request = makeRequest(
+    const request = makeUploadRequest(
       'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&fileName=measurements.csv&formType=measurements&sourceFormat=pretend_arcgis',
-      { method: 'POST' }
-    ) as any;
-    request.formData = vi.fn(async () => formData);
+      formData
+    );
 
     const response = await POST(request, props('upload'));
 
@@ -457,15 +481,124 @@ describe('/api/files/[operation]', () => {
     });
     formData.append('attributes.xlsx', file);
 
-    const request = makeRequest(
+    const request = makeUploadRequest(
       'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&fileName=attributes.xlsx&formType=attributes&sourceFormat=arcgis_xlsx',
-      { method: 'POST' }
-    ) as any;
-    request.formData = vi.fn(async () => formData);
+      formData
+    );
 
     const response = await POST(request, props('upload'));
 
     expect(response.status).toBe(400);
     expect(mocks.uploadValidFileAsBufferWithMetadata).not.toHaveBeenCalled();
+  });
+
+  describe('upload body size and readability', () => {
+    function measurementsForm(file: File) {
+      const formData = new FormData();
+      formData.append('measurements.csv', file);
+      return formData;
+    }
+
+    it('rejects an unauthenticated upload with 401 before checking size or reading the body', async () => {
+      mocks.auth.mockResolvedValueOnce(null);
+      const request = makeUploadRequest(UPLOAD_URL, measurementsForm(fileReportingSize('measurements.csv', 10)), null);
+
+      const response = await POST(request, props('upload'));
+
+      expect(response.status, 'upload routes must not rely on middleware for auth').toBe(HTTPResponses.UNAUTHORIZED);
+      expect(request.formData).not.toHaveBeenCalled();
+    });
+
+    it('answers 411 when the upload declares no Content-Length, without parsing', async () => {
+      const request = makeUploadRequest(UPLOAD_URL, measurementsForm(fileReportingSize('measurements.csv', 10)), null);
+
+      const response = await POST(request, props('upload'));
+      const body = await response.json();
+
+      expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.LENGTH_REQUIRED);
+      expect(body.error).toBe(UPLOAD_LENGTH_REQUIRED_MESSAGE);
+      expect(request.formData).not.toHaveBeenCalled();
+      expect(mocks.uploadValidFileAsBufferWithMetadata).not.toHaveBeenCalled();
+    });
+
+    it('answers 413 with the request-body message when metadata pushes an under-limit file over the ceiling', async () => {
+      const underLimitFile = fileReportingSize('measurements.csv', MAX_UPLOAD_FILE_BYTES - 10);
+      const request = makeUploadRequest(UPLOAD_URL, measurementsForm(underLimitFile), MAX_UPLOAD_REQUEST_BODY_BYTES + 1);
+
+      const response = await POST(request, props('upload'));
+      const body = await response.json();
+
+      expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.PAYLOAD_TOO_LARGE);
+      expect(body.error).toBe(uploadRequestBodyTooLargeMessage(SourceFormat.csv));
+      expect(body.error, 'must not present the request length as the file size').not.toMatch(/^File is/);
+      expect(request.formData).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 "could not be read" when the multipart body cannot be parsed, never "File is required"', async () => {
+      const request = makeUploadRequest(UPLOAD_URL, null);
+      request.formData = vi.fn(async () => {
+        throw new TypeError('Failed to parse body as FormData.');
+      });
+
+      const response = await POST(request, props('upload'));
+      const body = await response.json();
+
+      expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.INVALID_REQUEST);
+      expect(body.error).toBe(UPLOAD_UNREADABLE_MESSAGE);
+      expect(mocks.loggerWarn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to parse body as FormData'),
+        expect.objectContaining({ route: '/api/files/upload' })
+      );
+    });
+
+    it('still answers "File is required" when the form parses but carries no fields', async () => {
+      const request = makeUploadRequest(UPLOAD_URL, new FormData());
+
+      const response = await POST(request, props('upload'));
+      const body = await response.json();
+
+      expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+      expect(body.error).toBe('File is required');
+    });
+
+    it('accepts a file exactly at the per-file limit', async () => {
+      const request = makeUploadRequest(
+        UPLOAD_URL,
+        measurementsForm(fileReportingSize('measurements.csv', MAX_UPLOAD_FILE_BYTES)),
+        MAX_UPLOAD_REQUEST_BODY_BYTES
+      );
+
+      const response = await POST(request, props('upload'));
+      const body = await response.json();
+
+      expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.OK);
+      expect(body.byteSize).toBe(MAX_UPLOAD_FILE_BYTES);
+    });
+
+    it('rejects a file one byte over the per-file limit with the file-size message', async () => {
+      const overLimit = MAX_UPLOAD_FILE_BYTES + 1;
+      const request = makeUploadRequest(UPLOAD_URL, measurementsForm(fileReportingSize('measurements.csv', overLimit)), MAX_UPLOAD_REQUEST_BODY_BYTES);
+
+      const response = await POST(request, props('upload'));
+      const body = await response.json();
+
+      expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.PAYLOAD_TOO_LARGE);
+      expect(body.error).toBe(uploadFileTooLargeMessage(overLimit, SourceFormat.csv));
+      expect(mocks.uploadValidFileAsBufferWithMetadata).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['csv (default when sourceFormat is omitted)', '', CSV_UPLOAD_RECOVERY_ADVICE],
+      ['arcgis_xlsx', '&sourceFormat=arcgis_xlsx', ARCGIS_UPLOAD_RECOVERY_ADVICE],
+      ['an unrecognised sourceFormat', '&sourceFormat=shapefile', UNKNOWN_FORMAT_UPLOAD_RECOVERY_ADVICE]
+    ])('gives %s recovery advice on a request-body rejection', async (_label, sourceFormatQuery, advice) => {
+      const request = makeUploadRequest(`${UPLOAD_URL}${sourceFormatQuery}`, null, MAX_UPLOAD_REQUEST_BODY_BYTES + 1);
+
+      const response = await POST(request, props('upload'));
+      const body = await response.json();
+
+      expect(response.status).toBe(HTTPResponses.PAYLOAD_TOO_LARGE);
+      expect(body.error.endsWith(advice), body.error).toBe(true);
+    });
   });
 });

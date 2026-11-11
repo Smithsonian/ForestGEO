@@ -138,7 +138,7 @@ export type TreeResult = ResultType<TreeRDS>;
 export interface SpecimensRDS {
   id?: number;
   specimenID?: number;
-  stemGUID?: number;
+  stemID?: number;
   personnelID?: number;
   specimenNumber?: number;
   speciesID?: number;

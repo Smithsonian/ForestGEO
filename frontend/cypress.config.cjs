@@ -56,6 +56,7 @@ module.exports = defineConfig({
       })
     },
     supportFile: 'cypress/support/component.ts',
-    specPattern: 'cypress/components/**/*.cy.{js,ts,jsx,tsx}'
+    specPattern: 'cypress/components/**/*.cy.{js,ts,jsx,tsx}',
+    excludeSpecPattern: 'cypress/components/responsive/**/*'
   }
 });

@@ -71,7 +71,7 @@ export interface MeasurementStagingRow {
   SubspeciesName: string | null;
   DBH: number | null;
   HOM: string | null;
-  ExactDate: string;
+  ExactDate: string | null;
   Comments: string | null;
   LX: number | null;
   LY: number | null;

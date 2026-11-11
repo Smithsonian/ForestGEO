@@ -3,6 +3,7 @@ import mysql, { type PoolOptions, type RowDataPacket } from 'mysql2/promise';
 import type { ProvisioningStep, StepContext } from '../types';
 import { executeSqlFile } from '../sql-runner';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
+import { CREATE_SCHEMA_STEP_KEY } from '../abort-scope';
 
 const TABLES_FILE = () => path.join(process.cwd(), 'db/sql/tablestructures.sql');
 const PROCS_FILE = () => path.join(process.cwd(), 'db/sql/storedprocedures.sql');
@@ -203,7 +204,7 @@ async function resetSiteSchema(ctx: StepContext): Promise<void> {
 }
 
 export const createSchemaStep: ProvisioningStep = {
-  key: 'create_schema',
+  key: CREATE_SCHEMA_STEP_KEY,
   label: 'Create database schema',
   async alreadyDone(ctx: StepContext): Promise<boolean> {
     const [rows]: any = await ctx.catalogPool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ? LIMIT 1`, [ctx.schemaName]);

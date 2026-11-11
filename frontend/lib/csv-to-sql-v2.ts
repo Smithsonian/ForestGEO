@@ -35,6 +35,9 @@ export const LEGACY_DEFAULT_MEASURE_ID = 0;
 // string is asserted, not retyped.
 export const MISSING_PLOT_COORDINATE_SCOPE = 'New stems missing PX or PY';
 
+// Stage 0a's non-blocking destination Stem.PX/PY column-type report (#475).
+export const DESTINATION_PLOT_COORDINATE_TYPE_SCOPE = 'Destination Stem.PX/PY column type';
+
 // Destination CTFS `Tree.Tag` column width. The Stage 0a destination probe and
 // the Stage 5 per-row length check share this so they can never drift; it must
 // match `CTFS_LIMITS.treeTag` in lib/ctfs-export/precondition.ts.
@@ -45,6 +48,15 @@ export const TREE_TAG_MAX_WIDTH = 20;
 // researchers asked to preserve, so it outranks the parent Species row.
 export const TAXON_RANK_SUBSPECIES = 1;
 export const TAXON_RANK_SPECIES = 2;
+
+// Inline key names for the Stage 2 lookup temp tables, shared with tests so the
+// rendered DDL is asserted, not retyped.
+export const STEM_LOOKUP_INDEX_NAME = 'idxTreeStemTag';
+export const TEMP_ID_INDEX_NAME = 'idxTempID';
+export const TREE_LOOKUP_AMBIGUITY_INDEX_NAME = 'idxTreeCount';
+
+// Stage 5 check 1b reason. The operator manual quotes this text verbatim.
+export const EMPTY_STEMTAG_COLLISION_REASON = 'Empty StemTag collides with another stem under same Tree+Quadrat';
 
 // Live scalars only — resprout/cursor scratch removed with the pivot.
 // `_viewfulltable_installed` is populated by the Stage 0 ViewFullTable probe.
@@ -154,6 +166,9 @@ export interface Stage0Options {
  * Always emits:
  *   - DBHAttributes schema probe (post-2014f shape required; SIGNAL with
  *     install-DBCHANGES2014f message if the legacy CensusID column is present)
+ *   - Tree.Tag width probe (SIGNAL if narrower than TREE_TAG_MAX_WIDTH)
+ *   - Stem.PX/PY column-type report (SIGNAL when either required column is
+ *     absent; existing FLOAT columns remain tolerated and visible, see #475)
  *   - ViewFullTable install probe (SIGNAL with helpful install message if
  *     ctfsweb_webuser.CreateFullView is missing; the post-procedure CALL
  *     would otherwise blow up after the data committed)
@@ -207,6 +222,34 @@ export function renderStage0(opts: Stage0Options): string {
   END IF;
 `;
 
+  const plotCoordinateTypeProbe = `
+  -- Report how the destination stores Stem.PX/PY. The exporter stages them as
+  -- DECIMAL(16,5) (#475); a destination that never applied the DBCHANGES2014f
+  -- widen still has the original FLOAT columns and may store 992.34567 near
+  -- 992.34564. FLOAT is tolerated and reported because the backfill runbook
+  -- documents that precision. A missing column is not a storage variant: the
+  -- real publish necessarily references both columns, so fail during Stage 0a
+  -- instead of allowing a dry run to report a false success.
+  IF (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Stem'
+      AND COLUMN_NAME IN ('PX', 'PY')
+  ) <> 2 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Destination Stem.PX or Stem.PY is missing. Stem does not match the Smithsonian DDL; restore both columns before publishing.';
+  END IF;
+
+  SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope,
+         MAX(CASE WHEN COLUMN_NAME = 'PX' THEN COLUMN_TYPE END) AS px_column_type,
+         MAX(CASE WHEN COLUMN_NAME = 'PY' THEN COLUMN_TYPE END) AS py_column_type
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Stem'
+      AND COLUMN_NAME IN ('PX', 'PY');
+`;
+
   const viewFullTableProbe =
     opts.includeViewFullTableProbe === false
       ? ''
@@ -246,7 +289,7 @@ export function renderStage0(opts: Stage0Options): string {
   SET @target_plot_id := ${opts.destinationPlotId};
 `;
 
-  const guard = dbhAttributesProbe + viewFullTableProbe + censusGuard;
+  const guard = dbhAttributesProbe + plotCoordinateTypeProbe + viewFullTableProbe + censusGuard;
 
   if (opts.allowReload) {
     return guard;
@@ -401,7 +444,8 @@ export interface Stage2Options {
  *      Groups by (Tag, SpeciesID, SubSpeciesID)
  *   6. UPDATE measurementsTable JOIN tree_lookup (TreeCount = 1) with NULL-safe <=> on SubSpeciesID
  *      to write back TreeID
- *   7. CREATE TEMPORARY TABLE stem_lookup — scoped via Stem → Quadrat → @target_plot_id
+ *   7. CREATE TEMPORARY TABLE stem_lookup — its (TreeID, StemTag) key declared inline in the CREATE
+ *      (never ALTER TABLE, which would commit the load transaction); scoped via Stem → Quadrat → @target_plot_id
  *   8. UPDATE measurementsTable JOIN stem_lookup with NULL-safe StemTag (<=>) and StemCount = 1
  *      to write back StemID
  *   9. UPDATE attributesTable JOIN TSMAttributes to resolve TSMID
@@ -449,13 +493,13 @@ export function renderStage2(opts: Stage2Options): string {
       ) r ON r.Mnemonic = t.Mnemonic;
 
   DROP TEMPORARY TABLE IF EXISTS taxonomy_best_rank;
-  CREATE TEMPORARY TABLE taxonomy_best_rank AS
+  CREATE TEMPORARY TABLE taxonomy_best_rank (KEY ${TEMP_ID_INDEX_NAME} (TempID)) AS
     SELECT TempID, MIN(MatchRank) AS BestRank
       FROM taxonomy_candidates
      GROUP BY TempID;
 
   DROP TEMPORARY TABLE IF EXISTS taxonomy_lookup;
-  CREATE TEMPORARY TABLE taxonomy_lookup AS
+  CREATE TEMPORARY TABLE taxonomy_lookup (KEY ${TEMP_ID_INDEX_NAME} (TempID)) AS
     SELECT c.TempID,
            MIN(CASE WHEN c.MatchRank = b.BestRank THEN c.SpeciesID END)    AS SpeciesID,
            MIN(CASE WHEN c.MatchRank = b.BestRank THEN c.SubSpeciesID END) AS SubSpeciesID,
@@ -483,8 +527,10 @@ export function renderStage2(opts: Stage2Options): string {
         t.SubSpeciesID = tx.SubSpeciesID;
 
   -- Tree lookup (CTFS Tree has no PlotID; scope via Stem -> Quadrat -> Plot)
+  -- Keyed on TreeCount: check 3 probes only ambiguous keys, and a Tag-led key is
+  -- unusable when staging and the destination Tree.Tag differ in charset.
   DROP TEMPORARY TABLE IF EXISTS tree_lookup;
-  CREATE TEMPORARY TABLE tree_lookup AS
+  CREATE TEMPORARY TABLE tree_lookup (KEY ${TREE_LOOKUP_AMBIGUITY_INDEX_NAME} (TreeCount)) AS
     SELECT tr.Tag,
            tr.SpeciesID,
            tr.SubSpeciesID,
@@ -503,9 +549,10 @@ export function renderStage2(opts: Stage2Options): string {
                        AND tl.TreeCount = 1
     SET t.TreeID = tl.TreeID;
 
-  -- Stem lookup (also plot-scoped)
+  -- Stem lookup (also plot-scoped). The key is declared here because ALTER TABLE or
+  -- CREATE INDEX on a temporary table would implicitly commit the load transaction.
   DROP TEMPORARY TABLE IF EXISTS stem_lookup;
-  CREATE TEMPORARY TABLE stem_lookup AS
+  CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTag)) AS
     SELECT s.TreeID,
            s.StemTag,
            MIN(s.StemID) AS StemID,
@@ -616,18 +663,20 @@ ${appendErr(
     HAVING COUNT(*) > 1
        OR EXISTS (
             SELECT 1 FROM Stem s
-             WHERE s.TreeID = TreeID
-               AND s.QuadratID = QuadratID
+             WHERE s.TreeID = ${m}.TreeID
+               AND s.QuadratID = ${m}.QuadratID
                AND (s.StemTag IS NULL OR s.StemTag = '')
           );
 
-  UPDATE ${m}
-    SET Errors = CONCAT(COALESCE(Errors, ''), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END, 'Empty StemTag collides with another stem under same Tree+Quadrat')
-    WHERE StemID IS NULL
+${appendErr(
+  m,
+  EMPTY_STEMTAG_COLLISION_REASON,
+  `StemID IS NULL
       AND (StemTag IS NULL OR StemTag = '')
       AND TreeID IS NOT NULL
       AND QuadratID IS NOT NULL
-      AND EXISTS (SELECT 1 FROM _stage5_empty_stemtag e WHERE e.TreeID = ${m}.TreeID AND e.QuadratID = ${m}.QuadratID);
+      AND EXISTS (SELECT 1 FROM _stage5_empty_stemtag e WHERE e.TreeID = ${m}.TreeID AND e.QuadratID = ${m}.QuadratID)`
+)}
 
   DROP TEMPORARY TABLE IF EXISTS _stage5_empty_stemtag;
 

@@ -122,6 +122,19 @@ export function safeFormatQuery(schema: string | null | undefined, query: string
   return formatWithSchema(schema, query);
 }
 
+export class EmptyInListError extends Error {
+  constructor(count: number) {
+    super(`An IN (...) list needs at least one value; received a count of ${count}`);
+    this.name = 'EmptyInListError';
+  }
+}
+
+/** Builds the `?, ?, ...` placeholder list for an `IN (...)` clause; an empty list is a SQL syntax error, so it is refused here. */
+export function buildInPlaceholders(count: number): string {
+  if (!Number.isInteger(count) || count <= 0) throw new EmptyInListError(count);
+  return Array.from({ length: count }, () => '?').join(', ');
+}
+
 /**
  * Safely escapes an identifier (table name, column name, etc.)
  * Validates that identifier contains only alphanumeric characters, underscores, and dots

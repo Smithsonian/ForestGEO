@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getSessionUserId: vi.fn(() => 'mason@example.com'),
   getPoolMonitorInstance: vi.fn(() => ({ getUsablePool: vi.fn(async () => 'catalog-pool') })),
   getBackgroundJobWithDetails: vi.fn(),
+  selectFailureContext: vi.fn(() => undefined),
   cancelBackgroundJob: vi.fn(),
   requestBackgroundJobCancel: vi.fn(),
   executeQuery: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock('@/lib/db/connectionmanager', () => ({
 
 vi.mock('@/lib/background-jobs/repository', () => ({
   getBackgroundJobWithDetails: mocks.getBackgroundJobWithDetails,
+  selectFailureContext: mocks.selectFailureContext,
   cancelBackgroundJob: mocks.cancelBackgroundJob,
   requestBackgroundJobCancel: mocks.requestBackgroundJobCancel
 }));

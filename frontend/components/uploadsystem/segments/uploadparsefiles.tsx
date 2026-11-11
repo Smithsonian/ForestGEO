@@ -58,6 +58,7 @@ import {
 import type { QuadratCsvRow } from '@/lib/provisioning/types';
 import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
 import { MAX_REFERENCE_UPLOAD_ROWS } from '@/lib/uploads/reference-upload-limits';
+import { MAX_UPLOAD_FILE_BYTES, uploadFileSizeSelectionIssue } from '@/lib/uploads/upload-request-limits';
 
 export interface FileValidationStatus {
   fileName: string;
@@ -490,6 +491,15 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
       }));
   }, [acceptedFiles, uploadForm]);
 
+  // Measurement files are bounded server-side at MAX_UPLOAD_FILE_BYTES (413); block them here
+  // instead of letting the uploader wait for a rejected upload.
+  const uploadFileSizeIssues = useMemo(() => {
+    if (uploadForm !== FormType.measurements) return [];
+    return acceptedFiles
+      .filter(file => file.size > MAX_UPLOAD_FILE_BYTES)
+      .map(file => ({ fileName: file.name, issues: [uploadFileSizeSelectionIssue(file.size, sourceFormat ?? null)] }));
+  }, [acceptedFiles, sourceFormat, uploadForm]);
+
   // A file passes when its own header validation succeeded, or when a confirmed column mapping
   // covers its header-coverage gaps (structural issues like inconsistent column counts still block).
   const fileEffectivelyValid = useCallback(
@@ -507,10 +517,19 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     if (acceptedFiles.length === 0) return false;
     if (fileNameLengthIssues.length > 0) return false;
     if (singleRequestFileSizeIssues.length > 0) return false;
+    if (uploadFileSizeIssues.length > 0) return false;
     // ArcGIS .xlsx uploads bypass CSV header validation; the workbook contents are validated at pre-flight.
     if (sourceFormat === SourceFormat.arcgis_xlsx) return arcgisValidationIssues.length === 0;
     return acceptedFiles.every(file => fileEffectivelyValid(file.name));
-  }, [acceptedFiles, arcgisValidationIssues.length, fileEffectivelyValid, fileNameLengthIssues.length, singleRequestFileSizeIssues.length, sourceFormat]);
+  }, [
+    acceptedFiles,
+    arcgisValidationIssues.length,
+    fileEffectivelyValid,
+    fileNameLengthIssues.length,
+    singleRequestFileSizeIssues.length,
+    sourceFormat,
+    uploadFileSizeIssues.length
+  ]);
 
   // Get all validation issues across all files
   const allValidationIssues = useMemo(() => {
@@ -527,7 +546,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
       }
     });
     const base = sourceFormat === SourceFormat.arcgis_xlsx ? [...arcgisValidationIssues, ...issues] : issues;
-    return [...fileNameLengthIssues, ...singleRequestFileSizeIssues, ...base];
+    return [...fileNameLengthIssues, ...singleRequestFileSizeIssues, ...uploadFileSizeIssues, ...base];
   }, [
     acceptedFiles,
     arcgisValidationIssues,
@@ -536,7 +555,8 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     fileValidationStatuses,
     mappingValidForFile,
     singleRequestFileSizeIssues,
-    sourceFormat
+    sourceFormat,
+    uploadFileSizeIssues
   ]);
 
   // Check if any file is still being analyzed (no validation status yet)

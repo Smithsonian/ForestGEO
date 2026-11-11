@@ -131,6 +131,7 @@ import {
 const SESSION_ONE = 'reference-session-one';
 const SESSION_TWO = 'reference-session-two';
 const SESSION_USER = 'reference-clean-reupload-test@forestgeo.test';
+const TEST_CHANGED_BY = 'integration-test-user';
 
 const FILE_A_CODES = ['FILEA01', 'FILEA02', 'FILEA03'];
 const FILE_B_CODES = ['FILEB01', 'FILEB02'];
@@ -327,7 +328,9 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
 
   describe('species', () => {
     const uploadSpecies = (codes: string[], uploadSessionID: string | null, uploadMode = UploadMode.CLEAN_REUPLOAD) =>
-      uploadFile(transactionID => upsertSpeciesRows(connectionManager, schema, codes.map(speciesRow), uploadMode, uploadSessionID, transactionID));
+      uploadFile(transactionID =>
+        upsertSpeciesRows(connectionManager, schema, codes.map(speciesRow), uploadMode, uploadSessionID, transactionID, TEST_CHANGED_BY)
+      );
 
     it('keeps every file of one session: the second file must not delete the first file rows', async () => {
       await seedUploadSession(SESSION_ONE);
@@ -358,6 +361,8 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
 
     it('replaces again for a genuinely new upload session', async () => {
       await seedUploadSession(SESSION_ONE);
+      // The table is empty on this first CLEAN_REUPLOAD: nothing captured, so no
+      // DELETE runs at all (an empty capture deletes nothing -- #507).
       await uploadSpecies(FILE_A_CODES, SESSION_ONE);
       await completeUploadSession(SESSION_ONE);
 
@@ -365,7 +370,7 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
       await uploadSpecies(LATER_SESSION_CODES, SESSION_TWO);
 
       expect(await activeSpeciesCodes()).toEqual([...LATER_SESSION_CODES].sort());
-      expect(deleteStatementCount('species')).toBe(2);
+      expect(deleteStatementCount('species')).toBe(1);
     });
 
     it('is idempotent when a timed-out request is retried inside the same session', async () => {
@@ -429,9 +434,10 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
         };
         try {
           const result = await uploadFile(tx => {
-            if (form === 'attributes') return upsertAttributeRows(connectionManager, schema, rows, UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx);
-            if (form === 'species') return upsertSpeciesRows(connectionManager, schema, rows, UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx);
-            if (form === 'personnel') return upsertPersonnelRows(connectionManager, schema, censusID, rows, UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx);
+            if (form === 'attributes') return upsertAttributeRows(connectionManager, schema, rows, UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx, TEST_CHANGED_BY);
+            if (form === 'species') return upsertSpeciesRows(connectionManager, schema, rows, UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx, TEST_CHANGED_BY);
+            if (form === 'personnel')
+              return upsertPersonnelRows(connectionManager, schema, censusID, rows, UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx, TEST_CHANGED_BY);
             return writeQuadratUpload(connectionManager, schema, plotID, rows, UploadMode.CLEAN_REUPLOAD, null, 'SW', SESSION_ONE, tx);
           });
           console.log('[benchmark]', JSON.stringify({ form, phase, statements, seconds: (performance.now() - start) / 1000, result }));
@@ -444,9 +450,15 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
   );
   describe('attributes', () => {
     const uploadAttributes = (codes: string[], uploadSessionID: string | null, uploadMode = UploadMode.CLEAN_REUPLOAD) =>
-      uploadFile(transactionID => upsertAttributeRows(connectionManager, schema, codes.map(attributeRow), uploadMode, uploadSessionID, transactionID));
+      uploadFile(transactionID =>
+        upsertAttributeRows(connectionManager, schema, codes.map(attributeRow), uploadMode, uploadSessionID, transactionID, TEST_CHANGED_BY)
+      );
 
     it('keeps every file of one session: the second file must not delete the first file rows', async () => {
+      // Pre-existing rows so the session's first CLEAN_REUPLOAD actually captures
+      // and deletes something: an empty capture runs no DELETE at all (#507).
+      await uploadAttributes(PREEXISTING_CODES, null, UploadMode.REVISIONS);
+
       await seedUploadSession(SESSION_ONE);
       await uploadAttributes(FILE_A_CODES, SESSION_ONE);
       expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
@@ -488,7 +500,7 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
       const rows = [attributeRow('DUP'), { codes: ' dup ', description: 'conflicting value', status: ATTRIBUTE_STATUS }];
       const mode = scenario === 'revisions' ? UploadMode.REVISIONS : UploadMode.CLEAN_REUPLOAD;
 
-      await expect(uploadFile(tx => upsertAttributeRows(connectionManager, schema, rows, mode, SESSION_ONE, tx))).rejects.toThrow(
+      await expect(uploadFile(tx => upsertAttributeRows(connectionManager, schema, rows, mode, SESSION_ONE, tx, TEST_CHANGED_BY))).rejects.toThrow(
         'Attribute upload contains duplicate Code values: dup'
       );
       expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
@@ -506,7 +518,8 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
           [{ ...attributeRow(FILE_A_CODES[0]), description: 'later description' }],
           UploadMode.CLEAN_REUPLOAD,
           SESSION_ONE,
-          tx
+          tx,
+          TEST_CHANGED_BY
         )
       );
       expect(result).toEqual({ insertedCount: 0, updatedCount: 1, skippedCount: 0 });
@@ -553,7 +566,7 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
       await uploadAttributes(FILE_A_CODES, null, UploadMode.REVISIONS);
       await expect(
         uploadFile(async tx => {
-          await upsertAttributeRows(connectionManager, schema, FILE_B_CODES.map(attributeRow), UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx);
+          await upsertAttributeRows(connectionManager, schema, FILE_B_CODES.map(attributeRow), UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx, TEST_CHANGED_BY);
           throw new Error('injected failure after recording the marker');
         })
       ).rejects.toThrow('injected failure');
@@ -628,10 +641,14 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
   describe('personnel', () => {
     const uploadPersonnel = (codes: string[], uploadSessionID: string | null, uploadMode = UploadMode.CLEAN_REUPLOAD) =>
       uploadFile(transactionID =>
-        upsertPersonnelRows(connectionManager, schema, censusID, codes.map(personnelRow), uploadMode, uploadSessionID, transactionID)
+        upsertPersonnelRows(connectionManager, schema, censusID, codes.map(personnelRow), uploadMode, uploadSessionID, transactionID, TEST_CHANGED_BY)
       );
 
     it('keeps every file of one session: the second file must not unlink the first file roster', async () => {
+      // A pre-existing roster link so the session's first CLEAN_REUPLOAD actually
+      // captures and deletes something: an empty capture runs no DELETE (#507).
+      await uploadPersonnel(PREEXISTING_CODES, null, UploadMode.REVISIONS);
+
       await seedUploadSession(SESSION_ONE);
       await uploadPersonnel(FILE_A_CODES, SESSION_ONE);
       expect(await censusPersonnelFirstNames()).toEqual([...FILE_A_CODES].sort());

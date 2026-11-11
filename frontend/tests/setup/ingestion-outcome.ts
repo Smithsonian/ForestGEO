@@ -38,7 +38,9 @@ export const INGESTION_ERROR_CODE = {
   DUPLICATE_TAG_STEMTAG: 'DUPLICATE_TAG_STEMTAG',
   DUPLICATE_TAG_CONFLICT_EXISTING: 'DUPLICATE_TAG_CONFLICT_EXISTING',
   PUBLISHED_STEMID_CONFLICT: 'PUBLISHED_STEMID_CONFLICT',
-  MEASUREMENT_INSERT_SKIPPED: 'MEASUREMENT_INSERT_SKIPPED'
+  MEASUREMENT_INSERT_SKIPPED: 'MEASUREMENT_INSERT_SKIPPED',
+  /** Written by the procedure's SQLEXCEPTION handler when it parks the whole batch. */
+  SQL_EXCEPTION: 'SQL_EXCEPTION'
 } as const;
 
 /**
@@ -53,7 +55,9 @@ export const INGESTION_ALERT_TYPE = {
   INVALID_REFERENCE_DATA: 'INVALID_REFERENCE_DATA',
   VALIDATION_FAILURE: 'VALIDATION_FAILURE',
   CROSS_CENSUS_VALIDATION_FAILURE: 'CROSS_CENSUS_VALIDATION_FAILURE',
-  RECONCILIATION_MISMATCH: 'RECONCILIATION_MISMATCH'
+  RECONCILIATION_MISMATCH: 'RECONCILIATION_MISMATCH',
+  /** Written by the procedure's SQLEXCEPTION handler. */
+  PROCEDURE_EXCEPTION: 'PROCEDURE_EXCEPTION'
 } as const;
 
 /**
@@ -94,6 +98,8 @@ export interface IngestionOutcome {
   metricFailedRecords: number | null;
   /** uploadmetrics.missingRecords. */
   metricMissingRecords: number | null;
+  /** Failed rows of this batch carrying an unresolved ingestion SQL_EXCEPTION link. */
+  unresolvedSqlExceptionRows: number;
   /** Distinct ingestion ErrorCodes linked to this batch's failed rows, sorted. */
   errorCodes: string[];
   /** Distinct uploadintegrityalerts.type values for this batch, sorted. */
@@ -156,6 +162,18 @@ export async function readIngestionOutcome(connection: Connection, scope: Ingest
     [fileID, batchID, censusID]
   );
 
+  const unresolvedSqlExceptionRows = await scalarCount(
+    connection,
+    `SELECT COUNT(DISTINCT cm.CoreMeasurementID) AS total
+     FROM coremeasurements cm
+     JOIN measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID AND mel.IsResolved = FALSE
+     JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+     WHERE cm.UploadFileID = ? AND cm.UploadBatchID = ? AND cm.CensusID = ?
+       AND cm.StemGUID IS NULL
+       AND me.ErrorSource = 'ingestion' AND me.ErrorCode = ?`,
+    [fileID, batchID, censusID, INGESTION_ERROR_CODE.SQL_EXCEPTION]
+  );
+
   const [alertRows] = await connection.query<RowDataPacket[]>(
     `SELECT DISTINCT type FROM uploadintegrityalerts
      WHERE fileID = ? AND batchID = ?
@@ -171,6 +189,7 @@ export async function readIngestionOutcome(connection: Connection, scope: Ingest
     metricProcessedRecords: metric ? Number(metric.processedRecords) : null,
     metricFailedRecords: metric ? Number(metric.failedRecords) : null,
     metricMissingRecords: metric ? Number(metric.missingRecords) : null,
+    unresolvedSqlExceptionRows,
     errorCodes: errorRows.map(r => String(r.code)),
     alertTypes: alertRows.map(r => String(r.type))
   };

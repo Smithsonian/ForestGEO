@@ -1,7 +1,15 @@
 import { QueryNamespace, QueryScope } from './queryKey';
 import { mutateKey } from './mutateKey';
 
-export type MutationKind = 'delete-measurement' | 'reingest' | 'save-edit-plan' | 'delete-quadrat' | 'delete-attribute' | 'delete-taxonomy' | 'census-creation';
+export type MutationKind =
+  | 'delete-measurement'
+  | 'reingest'
+  | 'upload-job'
+  | 'save-edit-plan'
+  | 'delete-quadrat'
+  | 'delete-attribute'
+  | 'delete-taxonomy'
+  | 'census-creation';
 
 const FAN_OUT: Record<MutationKind, readonly QueryNamespace[]> = {
   'delete-measurement': [
@@ -23,6 +31,24 @@ const FAN_OUT: Record<MutationKind, readonly QueryNamespace[]> = {
     'grid:measurementssummary',
     'grid:measurementssummary_staging',
     'grid:unifiedchangelog',
+    'dashboard:metrics',
+    'dashboard:dataquality',
+    'dashboard:progress'
+  ],
+  // Separate from reingest so the two lists can change independently. A
+  // measurements job also creates trees and stems and moves the summary tiles.
+  'upload-job': [
+    'grid:failedmeasurements',
+    'grid:errors',
+    'grid:measurements',
+    'grid:measurementssummary',
+    'grid:measurementssummary_staging',
+    'grid:unifiedchangelog',
+    'grid:summary',
+    'grid:quadrats',
+    'grid:trees',
+    'grid:stems',
+    'grid:stemtaxonomiesview',
     'dashboard:metrics',
     'dashboard:dataquality',
     'dashboard:progress'

@@ -196,6 +196,28 @@ describe('recordMutation', () => {
     });
   });
 
+  describe('JSON column binding (#507)', () => {
+    it('wraps OldRowState and NewRowState in CONVERT(? USING utf8mb4), not a bare placeholder', async () => {
+      // Cheap regression guard for the SQL text only; the real ER_INVALID_JSON_CHARSET
+      // fix is proven against real MySQL in recent-changes-reference-audit.integration.test.ts.
+      const { tx, query } = createTxSpy();
+
+      await recordMutation({
+        tx,
+        schema: TEST_SCHEMA,
+        tableName: TEST_TABLE,
+        recordID: TEST_PLOT_ID,
+        operation: ChangelogOperation.UPDATE,
+        oldRowState: { PlotID: TEST_PLOT_ID },
+        newRowState: { PlotID: TEST_PLOT_ID, DefaultDBHUnits: 'cm' },
+        changedBy: TEST_CHANGED_BY
+      });
+
+      const { sql } = decodeWrittenRow(query);
+      expect(sql).toContain('CONVERT(? USING utf8mb4), CONVERT(? USING utf8mb4)');
+    });
+  });
+
   describe('schema interpolation', () => {
     it('routes the schema through safeFormatQuery, escaping it as an identifier', async () => {
       const { tx, query } = createTxSpy();

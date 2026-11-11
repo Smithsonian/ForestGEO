@@ -29,6 +29,7 @@ import {
 import type { CreateUploadJobInput } from '@/lib/background-jobs/types';
 import { UPLOAD_JOB_MAX_RETRIES } from '@/lib/background-jobs/types';
 import ailogger from '@/ailogger';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 // ---------------------------------------------------------------------------
 // Safety guard — this suite DELETEs from the shared `catalog` schema and must
@@ -47,10 +48,6 @@ if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const TEST_DB_PORT = Number(process.env.TEST_DB_PORT || 3306);
-const TEST_DB_USER = process.env.TEST_DB_USER || 'root';
-const TEST_DB_PASSWORD = process.env.TEST_DB_PASSWORD || 'testpassword';
 
 const TEST_USER = 'sweeper-tester@forestgeo.test';
 const TEST_SCHEMA = 'forestgeo_testing_sweeper';
@@ -87,10 +84,7 @@ let pool: Pool;
 
 beforeAll(async () => {
   pool = mysql.createPool({
-    host: TEST_DB_HOST,
-    port: TEST_DB_PORT,
-    user: TEST_DB_USER,
-    password: TEST_DB_PASSWORD,
+    ...testDbServerOptions(),
     connectionLimit: 5
   });
   await seedCatalogTables(pool);

@@ -4,6 +4,7 @@ import { insertQuadratsStep } from './insert-quadrats';
 import { createSchemaStep, initTablesStep } from './sql-steps';
 import { insertPlotStep } from './catalog-and-rows';
 import type { StepContext, ProvisioningInput, QuadratCsvRow } from '../types';
+import { testDbServerOptions } from '@/tests/setup/test-db-connection';
 
 function makeInput(quadrats: ProvisioningInput['quadrats']): ProvisioningInput {
   return {
@@ -45,10 +46,7 @@ describe('insertQuadratsStep', () => {
 
   beforeAll(async () => {
     catalogPool = mysql.createPool({
-      host: process.env.TEST_DB_HOST || 'localhost',
-      port: Number(process.env.TEST_DB_PORT || 3306),
-      user: process.env.TEST_DB_USER || 'root',
-      password: process.env.TEST_DB_PASSWORD || 'testpassword',
+      ...testDbServerOptions(),
       multipleStatements: false,
       connectionLimit: 5
     });

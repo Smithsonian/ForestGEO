@@ -197,30 +197,53 @@ export async function loadSelectableOptions(
   });
 }
 
-export function selectableAutocomplete(params: any, column: GridColDef, selectableOpts: any) {
+// A real function component (not a plain JSX-returning helper) so it can hold the
+// per-field state below; `selectableAutocomplete` keeps its original call signature by
+// invoking this as JSX, so every existing call site is unaffected.
+function SelectableAutocompleteField({ params, column, selectableOpts }: { params: any; column: GridColDef; selectableOpts: any }) {
+  const isMultiple = column.field === 'codes';
+
+  // MUI's blur handler auto-selects the highlighted option (via `autoHighlight`) even
+  // when the visible text is empty, resurrecting a suggestion after an intentional
+  // clear. Tracking the clear here (via `onInputChange`, ignoring the 'reset' reason it
+  // fires as its own side effect) lets us disable `autoSelect` for exactly that case,
+  // suppressing the resurrection at its source instead of only its onChange payload.
+  const [inputWasCleared, setInputWasCleared] = React.useState(false);
+
   return (
     <Autocomplete
       sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
-      multiple={column.field === 'codes'}
+      multiple={isMultiple}
       variant={'soft'}
-      autoSelect
+      autoSelect={isMultiple || !inputWasCleared}
       autoHighlight
-      freeSolo={column.field !== 'codes'}
+      freeSolo={!isMultiple}
       clearOnBlur={false}
       isOptionEqualToValue={(option, value) => option === value}
       options={[...getSelectableOptionsForField(selectableOpts, column.field)].sort((a, b) => a.localeCompare(b))}
-      value={
-        column.field === 'codes' ? (params.value ? (params.value ?? '').split(';').filter((s: string | any[]) => s.length > 0) : []) : (params.value ?? '')
-      }
-      onChange={(_event, value) => {
-        if (value) {
-          params.api.setEditCellValue({
-            id: params.id,
-            field: params.field,
-            value: column.field === 'codes' && Array.isArray(value) ? value.join(';') : value
-          });
+      value={isMultiple ? (params.value ? (params.value ?? '').split(';').filter((s: string | any[]) => s.length > 0) : []) : (params.value ?? '')}
+      onInputChange={(_event, inputValue, reason) => {
+        if (!isMultiple && (reason === 'input' || reason === 'clear')) {
+          setInputWasCleared(inputValue === '');
         }
+      }}
+      onChange={(_event, value, reason) => {
+        // Falsy values (clear indicator, emptied freeSolo input) must still commit as
+        // '' - dropping them silently would keep the row's old value and produce a
+        // false-positive empty diff on save. An explicit selection always clears the
+        // marker above so a later genuine typed-freeSolo blur commit isn't disabled.
+        if (reason === 'selectOption') setInputWasCleared(false);
+        const nextValue = isMultiple && Array.isArray(value) ? value.join(';') : (value ?? '');
+        params.api.setEditCellValue({
+          id: params.id,
+          field: params.field,
+          value: nextValue
+        });
       }}
     />
   );
+}
+
+export function selectableAutocomplete(params: any, column: GridColDef, selectableOpts: any) {
+  return <SelectableAutocompleteField params={params} column={column} selectableOpts={selectableOpts} />;
 }

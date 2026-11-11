@@ -1,8 +1,32 @@
+import { ChangelogOperation, ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { HTTPResponses } from '@/config/macros';
+import {
+  BULK_INGESTION_CALL_TEMPLATE,
+  CALLER_OWNS_TRANSACTION_SQL,
+  CLEAR_CALLER_TRANSACTION_SQL,
+  FLAG_CLEAR_FAILED_REASON
+} from '@/lib/ingestion/bulk-ingestion-call';
 import { POST } from './route';
+// Real (unmocked) error classes: route.ts imports these directly from
+// tree-species-correction-writer.ts, which this file never mocks. Using the
+// genuine classes (not stand-ins) is what makes the route's `instanceof`
+// branches actually exercised here.
+import { SpeciesCorrectionTransactionMismatchError, SpeciesCorrectionWriteConflictError } from '@/config/editplan/tree-species-correction-writer';
+import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writers/measurementssummary';
+// Deliberately NOT mocked: route.ts imports this same module directly, so
+// using the real computeInvalidRowsIntegrityHash here (instead of a
+// hand-rolled stand-in) is what makes buildValidBody's default hash and
+// the route's recomputed hash provably the same function, not just two
+// implementations that happen to agree today.
+import { computeInvalidRowsIntegrityHash, REVISION_UPLOAD_FILE_ID } from '../shared/invalidrowintegrity';
 
+const REVISION_TRANSACTION_ID = 'tx-1';
 const MATCHED_PLAN_HASH = 'plan-hash-matched';
 const DRIFTED_PLAN_HASH = 'plan-hash-drifted';
+// Valid per the UPLOAD_ATTEMPT_ID_PATTERN in shared/invalidrowintegrity.ts
+// (UUID v4 shape: version nibble 4, variant nibble in [89ab]).
+const VALID_UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
 
 const mocks = vi.hoisted(() => {
   class MockPendingUserEditForbiddenError extends Error {}
@@ -50,6 +74,7 @@ const mocks = vi.hoisted(() => {
     acquireApplicationLock: vi.fn(async () => true),
     executeQuery: vi.fn<(...args: any[]) => Promise<any>>(async () => []),
     closeConnection: vi.fn(async () => undefined),
+    discardTransaction: vi.fn(),
     buildMeasurementScopeLockName: vi.fn((schema: string, plotID: number, censusID: number) => `measurement-scope:${schema}:${plotID}:${censusID}`),
     refreshMeasurementViewsForScope: vi.fn(async () => undefined),
     assertCanEditMeasurementScope: vi.fn(async () => undefined),
@@ -84,7 +109,26 @@ const mocks = vi.hoisted(() => {
     })),
     assertBulkPlanCanApply: vi.fn(),
     MockBulkPlanUnapplicableError,
-    MockMeasurementResolutionError
+    MockMeasurementResolutionError,
+    // #427 bulk species-correction prepare/apply: mocked here (not the route's
+    // real group-partition/membership logic, which lives in route.ts itself
+    // and is exercised directly) so these tests control exactly what each
+    // group's prepare/apply phase returns or throws, without re-implementing
+    // prepareTreeSpeciesCorrection's real locked-replan machinery.
+    prepareBulkSpeciesCorrections: vi.fn<(...args: any[]) => Promise<any>>(),
+    applyPreparedBulkSpeciesCorrections: vi.fn<(...args: any[]) => Promise<any>>(),
+    // recordAuditedIngestionFailureRows is mocked wholesale (not exercised
+    // through the real SQL it issues) — the real before/after audit diff
+    // behavior is covered by lib/changelog/ingestion-failure-audit.test.ts and
+    // the revision-apply-invalid-persistence integration suite. Default
+    // behavior here treats every row as a fresh INSERT, matching what
+    // insertIngestionFailureRows did before #507 wrapped it in an audit.
+    recordAuditedIngestionFailureRows: vi.fn<(...args: any[]) => Promise<any>>(async ({ rows }: { rows: unknown[] }) => ({
+      measurementIDs: rows.map((_, index) => 9000 + index),
+      insertedCount: rows.length,
+      updatedCount: 0,
+      unchangedCount: 0
+    }))
   };
 });
 
@@ -93,6 +137,7 @@ vi.mock('@/auth', () => ({
 }));
 
 vi.mock('@/lib/db/sqlsecurity', () => ({
+  buildInPlaceholders: (count: number) => Array(count).fill('?').join(', '),
   isValidSchema: mocks.isValidSchema,
   safeFormatQuery: mocks.safeFormatQuery
 }));
@@ -120,7 +165,8 @@ vi.mock('@/lib/db/connectionmanager', () => ({
       withTransaction: mocks.withTransaction,
       acquireApplicationLock: mocks.acquireApplicationLock,
       executeQuery: mocks.executeQuery,
-      closeConnection: mocks.closeConnection
+      closeConnection: mocks.closeConnection,
+      discardTransaction: mocks.discardTransaction
     })
   }
 }));
@@ -135,15 +181,33 @@ vi.mock('@/config/editplan/apply', () => ({
   SessionExpiredError: mocks.MockSessionExpiredError
 }));
 
-vi.mock('@/config/editplan/bulkanalyzer', () => ({
-  analyzeBulk: mocks.analyzeBulk,
-  assertBulkPlanCanApply: mocks.assertBulkPlanCanApply,
-  BulkPlanUnapplicableError: mocks.MockBulkPlanUnapplicableError
-}));
+vi.mock('@/config/editplan/bulkanalyzer', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/config/editplan/bulkanalyzer')>();
+  return {
+    ...actual,
+    analyzeBulk: mocks.analyzeBulk,
+    assertBulkPlanCanApply: mocks.assertBulkPlanCanApply,
+    BulkPlanUnapplicableError: mocks.MockBulkPlanUnapplicableError
+  };
+});
 
 vi.mock('@/config/editplan/writers/resolvers-mutating', () => ({
   MeasurementResolutionError: mocks.MockMeasurementResolutionError
 }));
+
+// Only prepareBulkSpeciesCorrections/applyPreparedBulkSpeciesCorrections are
+// mocked here. Every error class is re-exported from the real module via
+// importOriginal, so the route's own `instanceof` classification (BulkSpecies-
+// CorrectionInputError / ...UnresolvedMeasurementError / ...ApplyScopeMismatchError)
+// keeps working against instances these tests construct directly.
+vi.mock('@/config/editplan/bulk-species-correction-writer', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/config/editplan/bulk-species-correction-writer')>();
+  return {
+    ...actual,
+    prepareBulkSpeciesCorrections: mocks.prepareBulkSpeciesCorrections,
+    applyPreparedBulkSpeciesCorrections: mocks.applyPreparedBulkSpeciesCorrections
+  };
+});
 
 vi.mock('@/config/editplan/analyzer', () => ({
   RoleForbiddenFieldError: mocks.MockRoleForbiddenFieldError
@@ -166,6 +230,10 @@ vi.mock('@/config/editoperations', () => ({
   ensureEditOperationsTable: mocks.ensureEditOperationsTable
 }));
 
+vi.mock('@/lib/changelog/ingestion-failure-audit', () => ({
+  recordAuditedIngestionFailureRows: mocks.recordAuditedIngestionFailureRows
+}));
+
 vi.mock('@/ailogger', () => ({
   default: {
     info: mocks.loggerInfo,
@@ -181,15 +249,34 @@ function buildRequest(body: Record<string, unknown>) {
   }) as any;
 }
 
+/**
+ * Every test in this suite that reaches past the uploadAttemptID/
+ * invalidRowsIntegrityHash gate (route.ts ~823-835) needs a hash that
+ * actually matches whatever invalidRows it submits — the route recomputes
+ * computeInvalidRowsIntegrityHash from the submitted body and 409s on any
+ * mismatch (route.ts ~868-881), before any mutation. Computing it here with
+ * the REAL function (not a stand-in) against the SAME schema/plotID/
+ * censusID/uploadAttemptID/invalidRows the body ends up carrying keeps the
+ * two provably in sync: a test that overrides invalidRows gets a hash for
+ * that exact array, not the empty-array default.
+ */
 function buildValidBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const schema = (overrides.schema as string | undefined) ?? 'forestgeo_testing';
+  const plotID = (overrides.plotID as number | undefined) ?? 1;
+  const censusID = (overrides.censusID as number | undefined) ?? 2;
+  const uploadAttemptID = (overrides.uploadAttemptID as string | undefined) ?? VALID_UPLOAD_ATTEMPT_ID;
+  const invalidRows = (overrides.invalidRows as Array<{ csvIndex: number; csvRow?: Record<string, unknown>; reason: string }> | undefined) ?? [];
+
   return {
     matchedRows: [],
     newRows: [],
     confirmNewRows: false,
-    schema: 'forestgeo_testing',
-    plotID: 1,
-    censusID: 2,
+    schema,
+    plotID,
+    censusID,
     bulkPlanHash: MATCHED_PLAN_HASH,
+    uploadAttemptID,
+    invalidRowsIntegrityHash: computeInvalidRowsIntegrityHash(schema, plotID, censusID, uploadAttemptID, REVISION_UPLOAD_FILE_ID, invalidRows),
     ...overrides
   };
 }
@@ -243,6 +330,88 @@ function buildFreshPlan(planHash: string, overrides: Record<string, unknown> = {
   };
 }
 
+// --- #427 bulk species-correction fixtures -------------------------------
+// The route indexes a group member's rowPlan by `rowPlan.rowIndex` (a Map,
+// not array position) and requires `rowPlan.plan` to be truthy before it
+// will build that member's BulkSpeciesCorrectionMemberInput. Since
+// prepareBulkSpeciesCorrections/applyPreparedBulkSpeciesCorrections are
+// mocked below, these EditPlan stubs only need to be real enough to satisfy
+// that truthiness/targetID check — their field-level content is irrelevant
+// because no real writer ever reads it in these tests.
+function buildGroupMemberPlan(targetID: number): Record<string, unknown> {
+  return {
+    dataType: 'measurementssummary',
+    targetID,
+    fieldChanges: [{ field: 'SpeciesCode', from: 'AAA', to: 'BBB' }],
+    effects: [],
+    maxSeverity: 'info',
+    planHash: `member-plan-${targetID}`,
+    generatedAt: '2026-04-21T00:00:00Z'
+  };
+}
+
+// For a group member whose own diff is empty (rowPlan status 'unchanged'):
+// no fieldChanges and no `speciesCorrection`, matching what the real
+// analyzer actually produces for a zero-change row.
+function buildUnchangedGroupMemberPlan(targetID: number): Record<string, unknown> {
+  return {
+    dataType: 'measurementssummary',
+    targetID,
+    fieldChanges: [],
+    effects: [],
+    maxSeverity: 'info',
+    planHash: `member-plan-unchanged-${targetID}`,
+    generatedAt: '2026-04-21T00:00:00Z'
+  };
+}
+
+const SPECIES_GROUP_TREE_ID = 909;
+const SPECIES_GROUP_CENSUS_ID = 2;
+
+function buildSpeciesCorrectionGroup(members: Array<{ rowIndex: number; coreMeasurementID: number; requestedCorrection: boolean }>): Record<string, unknown> {
+  return {
+    version: 1,
+    treeID: SPECIES_GROUP_TREE_ID,
+    censusID: SPECIES_GROUP_CENSUS_ID,
+    correction: {
+      version: 1,
+      targetTreeID: SPECIES_GROUP_TREE_ID,
+      treeTag: 'T',
+      plotID: 1,
+      censusID: SPECIES_GROUP_CENSUS_ID,
+      oldSpeciesID: 1,
+      oldSpeciesCode: 'AAA',
+      newSpeciesID: 2,
+      newSpeciesCode: 'BBB',
+      activeStemCount: 1,
+      inactiveStemCount: 0,
+      activeMeasurementCount: members.length,
+      inactiveMeasurementCount: 0,
+      stems: [],
+      measurements: []
+    },
+    members,
+    affectedCoreMeasurementIDs: members.map(m => m.coreMeasurementID),
+    affectedStemGUIDs: []
+  };
+}
+
+// Mirrors the two FIXED, unexported `code` constants route.ts attaches to
+// every #427 species-correction error response (F34) — redefined here
+// because the route does not export them, exactly like this file already
+// redefines the route's literal response shapes elsewhere (e.g. 'role
+// forbidden field').
+const SPECIES_CORRECTION_CONFLICT_CODE = 'species-correction-conflict';
+const SPECIES_CORRECTION_SERVER_FAILURE_CODE = 'species-correction-server-failure';
+
+// Sentinel "obviously sensitive" substrings embedded in mocked errors below,
+// to prove the response body never contains raw internals (F34).
+const SENSITIVE_SQL_FRAGMENT = 'UPDATE forestgeo_testing.trees SET SpeciesID';
+const SENSITIVE_REASON_TOKEN = 'ER_DUP_ENTRY-1062-unique-constraint';
+const SENSITIVE_CORE_MEASUREMENT_ID = 918273;
+const SENSITIVE_TRANSACTION_ID_PREPARED = 'txn-secret-prepared-55512';
+const SENSITIVE_TRANSACTION_ID_APPLY = 'txn-secret-apply-99981';
+
 describe('POST /api/revisionupload/apply', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -267,11 +436,35 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.assertAuthorizationFresh.mockResolvedValue(undefined);
     mocks.assertBulkPlanCanApply.mockReturnValue(undefined);
     mocks.analyzeBulk.mockResolvedValue(buildFreshPlan(MATCHED_PLAN_HASH));
+    mocks.recordAuditedIngestionFailureRows.mockImplementation(async ({ rows }: { rows: unknown[] }) => ({
+      measurementIDs: rows.map((_, index) => 9000 + index),
+      insertedCount: rows.length,
+      updatedCount: 0,
+      unchangedCount: 0
+    }));
     mocks.applyEditInTransaction.mockResolvedValue({
       updatedIDs: { CoreMeasurementID: 0 },
       applyErrors: [],
       editOperationID: null,
       validationPending: true
+    });
+    // Harmless no-op defaults: every existing (pre-#427) test keeps
+    // speciesCorrectionGroups empty on its fresh plan, so the route's
+    // `speciesCorrectionGroups.length > 0` guard never calls either of these
+    // — only the #427 tests below override them.
+    mocks.prepareBulkSpeciesCorrections.mockResolvedValue({
+      transactionID: 'tx-1',
+      schema: 'forestgeo_testing',
+      plotID: 1,
+      censusID: 2,
+      groups: []
+    });
+    mocks.applyPreparedBulkSpeciesCorrections.mockResolvedValue({
+      correctedTreeIDs: [],
+      updatedMemberCoreMeasurementIDs: [],
+      additionalAffectedCoreMeasurementIDs: [],
+      allAffectedCoreMeasurementIDs: [],
+      groups: []
     });
   });
 
@@ -290,6 +483,57 @@ describe('POST /api/revisionupload/apply', () => {
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.error).toContain('bulkPlanHash');
+  });
+
+  it('rejects requests missing uploadAttemptID', async () => {
+    const validBody = buildValidBody() as Record<string, unknown>;
+    delete validBody.uploadAttemptID;
+
+    const response = await POST(buildRequest(validBody));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('uploadAttemptID');
+    expect(mocks.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed (non-UUID-v4-shaped) uploadAttemptID', async () => {
+    const response = await POST(buildRequest(buildValidBody({ uploadAttemptID: 'not-a-uuid' })));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('uploadAttemptID');
+    expect(mocks.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects requests missing invalidRowsIntegrityHash', async () => {
+    const validBody = buildValidBody() as Record<string, unknown>;
+    delete validBody.invalidRowsIntegrityHash;
+
+    const response = await POST(buildRequest(validBody));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('invalidRowsIntegrityHash');
+    expect(mocks.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 without writing anything when invalidRowsIntegrityHash does not match the recomputed hash of the submitted invalidRows (client tampered with a reviewed rejected row after match)', async () => {
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }],
+          // Deliberately stale: this is the hash of an EMPTY invalidRows array
+          // (buildValidBody's own default), not the array actually submitted above.
+          invalidRowsIntegrityHash: computeInvalidRowsIntegrityHash('forestgeo_testing', 1, 2, VALID_UPLOAD_ATTEMPT_ID, REVISION_UPLOAD_FILE_ID, [])
+        })
+      )
+    );
+
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.error).toContain('invalidRows no longer match the reviewed plan');
+    expect(mocks.withTransaction, 'a tampered-hash request must be rejected before any transaction opens').not.toHaveBeenCalled();
   });
 
   it('returns 403 before scope checks for pending users', async () => {
@@ -399,8 +643,8 @@ describe('POST /api/revisionupload/apply', () => {
       2,
       {
         matched: [
-          { rowIndex: 0, targetID: 101, newRow: { MeasuredDBH: 12.5 } },
-          { rowIndex: 1, targetID: 202, newRow: {} }
+          { rowIndex: 0, targetID: 101, newRow: { MeasuredDBH: 12.5 }, explicitSpeciesCode: null },
+          { rowIndex: 1, targetID: 202, newRow: {}, explicitSpeciesCode: null }
         ],
         newRows: [{ rowIndex: 5, newRow: { TreeTag: 'T2', MeasuredDBH: 1.2 } }],
         invalid: [{ rowIndex: 7, reason: 'duplicate stemid' }],
@@ -409,6 +653,44 @@ describe('POST /api/revisionupload/apply', () => {
       'tx-1',
       { role: 'global' }
     );
+  });
+
+  it('carries explicitSpeciesCode into the recomputed bulk input, even when the spcode cell is unchanged and dropped from newRow (#427 batch species-correction grouping needs the sibling signal computeDiff throws away)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101, { SpeciesCode: 'QUEMAR' }), buildDbRow(202, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            // Row 0: spcode retyped with a case-only match against the DB
+            // value — computeDiff reports no change, so newRow carries no
+            // SpeciesCode, but the request still explicitly named 'quemar'.
+            { coreMeasurementID: 101, csvRow: { spcode: 'quemar' } },
+            // Row 1: blank spcode — genuinely unspecified.
+            { coreMeasurementID: 202, csvRow: { spcode: '' } }
+          ]
+        })
+      )
+    );
+
+    expect(mocks.analyzeBulk).toHaveBeenCalledTimes(1);
+    const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
+    const bulkInput = analyzeArgs[5] as {
+      matched: Array<{ targetID: number; newRow: Record<string, unknown>; explicitSpeciesCode?: string | null }>;
+    };
+    expect(bulkInput.matched).toHaveLength(2);
+
+    const row0 = bulkInput.matched.find(m => m.targetID === 101)!;
+    expect(row0.newRow).toEqual({});
+    expect(row0.explicitSpeciesCode).toBe('quemar');
+
+    const row1 = bulkInput.matched.find(m => m.targetID === 202)!;
+    expect(row1.explicitSpeciesCode).toBeNull();
   });
 
   it('stages new rows with plot coordinates into temporarymeasurements PlotX/PlotY', async () => {
@@ -455,6 +737,41 @@ describe('POST /api/revisionupload/apply', () => {
     expect(rowValues[9]).toBe(4.25);
     expect(rowValues[10]).toBe(-2.531244);
     expect(rowValues[11]).toBe(487.125);
+
+    const statements = mocks.executeQuery.mock.calls.map(([sql]) => String(sql));
+    const procedureIndex = statements.findIndex(sql => sql.includes('bulkingestionprocess'));
+    expect(statements.slice(procedureIndex - 1, procedureIndex + 2)).toEqual([
+      CALLER_OWNS_TRANSACTION_SQL,
+      BULK_INGESTION_CALL_TEMPLATE,
+      CLEAR_CALLER_TRANSACTION_SQL
+    ]);
+    for (const [, , transactionID] of mocks.executeQuery.mock.calls.slice(procedureIndex - 1, procedureIndex + 2)) {
+      expect(transactionID, 'the flag and CALL must run on the revision transaction').toBe(REVISION_TRANSACTION_ID);
+    }
+    expect(mocks.discardTransaction).not.toHaveBeenCalled();
+  });
+
+  it('fails the apply instead of reporting inserted rows when the CALL succeeded but the caller flag could not be cleared', async () => {
+    const clearError = new Error('connection lost while clearing the caller flag');
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('INSERT INTO ??.temporarymeasurements')) return { affectedRows: 1, warningStatus: 0 };
+      if (query === CLEAR_CALLER_TRANSACTION_SQL) throw clearError;
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          newRows: [{ csvIndex: 0, csvRow: { tag: 'T9', stemtag: 'S9', spcode: 'AAA', quadrat: 'Q1', dbh: '10', date: '2026-04-01' } }],
+          confirmNewRows: true
+        })
+      )
+    );
+
+    expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    await expect(response.json()).resolves.toEqual({ error: clearError.message });
+    expect(mocks.discardTransaction).toHaveBeenCalledWith(REVISION_TRANSACTION_ID, FLAG_CLEAR_FAILED_REASON);
+    expect(mocks.refreshMeasurementViewsForScope, 'no derived refresh may follow a discarded transaction').not.toHaveBeenCalled();
   });
 
   it('rejects malformed numeric values in new rows before inserting temporary measurements', async () => {
@@ -507,7 +824,7 @@ describe('POST /api/revisionupload/apply', () => {
     await expect(response.json()).resolves.toEqual({
       error: "Revision staging produced 1 SQL warning(s): Warning 1265 Data truncated for column 'PlotX'"
     });
-    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('CALL ??.bulkingestionprocess'), expect.anything(), expect.anything());
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('bulkingestionprocess'), expect.anything(), expect.anything());
 
     // SHOW WARNINGS must go through the text protocol. runQuery routes to
     // connection.execute() whenever a params array is supplied, and MySQL
@@ -540,7 +857,7 @@ describe('POST /api/revisionupload/apply', () => {
 
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({ error: 'Revision staging inserted 0 of 1 expected row(s)' });
-    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('CALL ??.bulkingestionprocess'), expect.anything(), expect.anything());
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('bulkingestionprocess'), expect.anything(), expect.anything());
   });
 
   it('returns 409 with freshPlan when the bulk plan hash drifts between match and apply', async () => {
@@ -565,12 +882,18 @@ describe('POST /api/revisionupload/apply', () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       error: 'plan hash mismatch',
-      freshPlan
+      freshPlan,
+      // No invalidRows were submitted and nothing was demoted, so the
+      // authoritative replacement set the 409 hands back is empty — but it
+      // must still be present and its hash must be the real function's hash
+      // of that exact (empty) set, not the client's stale hash.
+      freshInvalidRows: [],
+      freshInvalidRowsIntegrityHash: computeInvalidRowsIntegrityHash('forestgeo_testing', 1, 2, VALID_UPLOAD_ATTEMPT_ID, REVISION_UPLOAD_FILE_ID, [])
     });
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
   });
 
-  it('moves apply-time invalid matched rows into the hash plan and only writes surviving matched rows', async () => {
+  it('moves apply-time invalid matched rows into the hash plan, only writes surviving matched rows, and persists the demoted row as a failed measurement', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
@@ -614,8 +937,20 @@ describe('POST /api/revisionupload/apply', () => {
     await expect(response.json()).resolves.toMatchObject({
       updatedCount: 1,
       skippedCount: 0,
-      deletedDuplicateCount: 0
+      deletedDuplicateCount: 0,
+      failedRowCount: 1
     });
+    expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledTimes(1);
+    expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schema: 'forestgeo_testing',
+        transactionID: 'tx-1',
+        changedBy: 'mason@example.com',
+        plotID: 1,
+        censusID: 2,
+        rows: expect.arrayContaining([expect.objectContaining({ sourceRowIndex: 10, failureReason: 'Quadrat 999 was not found in this plot/census' })])
+      })
+    );
     expect(mocks.analyzeBulk).toHaveBeenCalledTimes(2);
     const secondBulkInput = (mocks.analyzeBulk.mock.calls[1] as unknown as Array<unknown>)[5] as {
       matched: Array<{ targetID: number }>;
@@ -627,6 +962,141 @@ describe('POST /api/revisionupload/apply', () => {
     expect(secondBulkInput.duplicateMeasurementIDsToDelete).toEqual([]);
     expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(1);
     expect((mocks.applyEditInTransaction.mock.calls[0] as unknown as [unknown, Record<string, unknown>])[1]).toMatchObject({ targetID: 202 });
+  });
+
+  const GROUP_CONFLICT_TREE_ID = 42;
+  const GROUP_CONFLICT_ROW_INDEXES = [0, 1];
+  const GROUP_SPECIES_CONFLICT_ERROR = {
+    kind: 'TreeStemResolution',
+    subject: 'species',
+    reason: 'group_species_conflict',
+    field: 'SpeciesCode',
+    message: `Tree T#${GROUP_CONFLICT_TREE_ID} (TreeTag "T") has conflicting species corrections requested in this batch: "BBB", "CCC". Submit one species per tree in a single batch.`,
+    severity: 'destructive',
+    blocking: true,
+    treeID: GROUP_CONFLICT_TREE_ID,
+    rowIndex: GROUP_CONFLICT_ROW_INDEXES[0],
+    rowIndexes: GROUP_CONFLICT_ROW_INDEXES
+  } as const;
+
+  it('skips the demote-and-re-run and surfaces the group blocker via the existing unapplicable-plan path when the fresh plan carries a batch-level group blocker (#427)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
+      }
+      return [];
+    });
+
+    // Row 0 (target 101) individually threw and would normally be demoted;
+    // row 1 (target 202) matched fine. Both also triggered the group conflict.
+    mocks.analyzeBulk.mockResolvedValueOnce(
+      buildFreshPlan('plan-with-group-blocker', {
+        rowCount: 2,
+        rowPlans: [
+          { rowIndex: 0, targetID: 101, status: 'invalid', reason: 'Row 1: species "BBB" was not found' },
+          { rowIndex: 1, targetID: 202, status: 'matched' }
+        ],
+        errors: [GROUP_SPECIES_CONFLICT_ERROR],
+        maxSeverity: 'destructive'
+      })
+    );
+    mocks.assertBulkPlanCanApply.mockImplementation(() => {
+      throw new mocks.MockBulkPlanUnapplicableError([GROUP_SPECIES_CONFLICT_ERROR]);
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { csvIndex: 10, coreMeasurementID: 101, csvRow: { spcode: 'BBB' } },
+            { csvIndex: 11, coreMeasurementID: 202, csvRow: { spcode: 'CCC' } }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body).toEqual({ error: 'plan not applicable', blockingErrors: [GROUP_SPECIES_CONFLICT_ERROR] });
+    expect(
+      mocks.analyzeBulk,
+      'a batch-level group blocker already makes canApply false; re-running on survivors only would drop row 0 explicitSpeciesCode and silently erase the conflict'
+    ).toHaveBeenCalledTimes(1);
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('still demotes and re-runs when the only blocking error is a non-group TreeStemResolution reason (regression: the #427 gate must match only reason values prefixed "group_", not any blocking error)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
+      }
+      return [];
+    });
+    mocks.analyzeBulk
+      .mockResolvedValueOnce(
+        buildFreshPlan('plan-with-non-group-blocker', {
+          rowCount: 2,
+          rowPlans: [
+            { rowIndex: 0, targetID: 101, status: 'invalid', reason: 'Matching stem exists in a different quadrat' },
+            { rowIndex: 1, targetID: 202, status: 'matched' }
+          ],
+          errors: [
+            {
+              kind: 'TreeStemResolution',
+              subject: 'stem',
+              reason: 'different_quadrat',
+              field: 'QuadratName',
+              message: 'Matching stem exists in a different quadrat',
+              severity: 'destructive',
+              blocking: true,
+              rowIndex: 0
+            }
+          ],
+          maxSeverity: 'destructive'
+        })
+      )
+      .mockResolvedValueOnce(
+        buildFreshPlan(MATCHED_PLAN_HASH, {
+          rowCount: 2,
+          rowPlans: [
+            { rowIndex: 0, targetID: 202, status: 'matched' },
+            { rowIndex: 10, status: 'invalid', reason: 'Matching stem exists in a different quadrat' }
+          ]
+        })
+      );
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { csvIndex: 10, coreMeasurementID: 101, csvRow: { quadrat: '999' } },
+            { csvIndex: 11, coreMeasurementID: 202, csvRow: { dbh: '12.5' } }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      updatedCount: 1,
+      skippedCount: 0,
+      deletedDuplicateCount: 0,
+      failedRowCount: 1
+    });
+    expect(
+      mocks.analyzeBulk,
+      'a non-group blocking error must not engage the #427 gate; demotion+re-run is still required so classify and apply hash the same survivor-only input'
+    ).toHaveBeenCalledTimes(2);
+    const secondBulkInput = (mocks.analyzeBulk.mock.calls[1] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number }>;
+      invalid: Array<{ rowIndex: number; reason: string }>;
+    };
+    expect(secondBulkInput.matched.map(row => row.targetID)).toEqual([202]);
+    expect(secondBulkInput.invalid).toEqual([{ rowIndex: 10, reason: 'Matching stem exists in a different quadrat' }]);
   });
 
   it('returns 403 when the recomputed bulk plan contains role-forbidden fields', async () => {
@@ -823,7 +1293,7 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
-      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+      if (query.trimStart().startsWith('SELECT') && query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
         return [buildDbRow(101)];
       }
       if (query.includes('SELECT cm.CoreMeasurementID, cm.StemGUID')) {
@@ -831,6 +1301,14 @@ describe('POST /api/revisionupload/apply', () => {
           { CoreMeasurementID: 55, StemGUID: 777 },
           { CoreMeasurementID: 101, StemGUID: 777 }
         ];
+      }
+      // recordDeletedCoreMeasurementsAudit's own INSERT ... SELECT (OldRowState
+      // identifies it uniquely from the committed-rows INSERT audit, which
+      // selects into NewRowState instead) — must report exactly 1 audited row
+      // to match the 1 row the DELETE below actually removes, or
+      // verifyAndDeleteDuplicate's audited-vs-deleted equality check throws.
+      if (query.includes('OldRowState')) {
+        return { affectedRows: 1 };
       }
       if (query.includes('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND CensusID = ? AND IsActive = 1')) {
         return { affectedRows: 1 };
@@ -853,6 +1331,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 1,
       insertedCount: 0,
       deletedDuplicateCount: 1,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: true
     });
@@ -861,6 +1340,14 @@ describe('POST /api/revisionupload/apply', () => {
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM ??.measurementssummary WHERE CoreMeasurementID = ?', [55], 'tx-1');
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM ??.viewfulltable WHERE CoreMeasurementID = ?', [55], 'tx-1');
     expect(mocks.refreshMeasurementViewsForScope).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing', 1, 2, 'tx-1');
+
+    // #507: the duplicate/survivor verify SELECT must lock every row it reads
+    // (cm, the joined stems row, and the joined quadrats row) for the rest of
+    // the transaction, closing the TOCTOU window between this read and the
+    // audit+DELETE that follow it.
+    const verifyCall = mocks.executeQuery.mock.calls.find(([sql]) => typeof sql === 'string' && sql.includes('SELECT cm.CoreMeasurementID, cm.StemGUID\n'));
+    expect(verifyCall, 'the duplicate/survivor verify query must have run').toBeDefined();
+    expect(verifyCall![0]).toContain('FOR UPDATE');
   });
 
   it('refreshes derived measurement views when matched rows are updated', async () => {
@@ -887,6 +1374,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 0,
       insertedCount: 0,
       deletedDuplicateCount: 0,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: true
     });
@@ -966,6 +1454,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 1,
       insertedCount: 0,
       deletedDuplicateCount: 0,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: false
     });
@@ -1017,6 +1506,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 1,
       insertedCount: 0,
       deletedDuplicateCount: 0,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: false
     });
@@ -1067,5 +1557,490 @@ describe('POST /api/revisionupload/apply', () => {
     const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
     const bulkInput = analyzeArgs[5] as { matched: Array<{ newRow: Record<string, unknown> }> };
     expect(bulkInput.matched[0].newRow).toEqual({});
+  });
+
+  it('routes a species-correction group member through applyPreparedBulkSpeciesCorrections and skips it in the ordinary per-row apply loop, while the non-member row still goes through applyEditInTransaction (#427 group routing)', async () => {
+    const GROUP_MEMBER_CORE_ID = 501;
+    const ORDINARY_ROW_CORE_ID = 601;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(GROUP_MEMBER_CORE_ID, { SpeciesCode: 'AAA' }), buildDbRow(ORDINARY_ROW_CORE_ID)];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 2,
+        rowPlans: [
+          { rowIndex: 0, targetID: GROUP_MEMBER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(GROUP_MEMBER_CORE_ID) },
+          { rowIndex: 1, targetID: ORDINARY_ROW_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(ORDINARY_ROW_CORE_ID) }
+        ],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: GROUP_MEMBER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { coreMeasurementID: GROUP_MEMBER_CORE_ID, csvRow: { spcode: 'BBB' } },
+            { coreMeasurementID: ORDINARY_ROW_CORE_ID, csvRow: { dbh: '12.5' } }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.prepareBulkSpeciesCorrections).toHaveBeenCalledTimes(1);
+    expect(mocks.applyPreparedBulkSpeciesCorrections).toHaveBeenCalledTimes(1);
+
+    const applyCalls = mocks.applyEditInTransaction.mock.calls as unknown as Array<[unknown, Record<string, unknown>]>;
+    const memberCall = applyCalls.find(call => call[1].targetID === GROUP_MEMBER_CORE_ID);
+    expect(
+      memberCall,
+      'the group member must never reach the ordinary per-row writer — its write context cannot be threaded through applyEditInTransaction'
+    ).toBeUndefined();
+
+    const ordinaryCall = applyCalls.find(call => call[1].targetID === ORDINARY_ROW_CORE_ID);
+    expect(ordinaryCall, 'the non-member row must still go through the ordinary writer').toBeDefined();
+    expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes a submitted sibling row whose own diff is empty (rowPlan status "unchanged") as a species-correction group member instead of 500ing the whole batch (#427 fix F35 regression)', async () => {
+    const REQUESTER_CORE_ID = 501;
+    const UNCHANGED_SIBLING_CORE_ID = 502;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' }), buildDbRow(UNCHANGED_SIBLING_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 2,
+        rowPlans: [
+          { rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) },
+          { rowIndex: 1, targetID: UNCHANGED_SIBLING_CORE_ID, status: 'unchanged', plan: buildUnchangedGroupMemberPlan(UNCHANGED_SIBLING_CORE_ID) }
+        ],
+        speciesCorrectionGroups: [
+          buildSpeciesCorrectionGroup([
+            { rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true },
+            { rowIndex: 1, coreMeasurementID: UNCHANGED_SIBLING_CORE_ID, requestedCorrection: false }
+          ])
+        ]
+      })
+    );
+
+    const speciesCorrectionsSummary = {
+      correctedTreeIDs: [SPECIES_GROUP_TREE_ID],
+      updatedMemberCoreMeasurementIDs: [REQUESTER_CORE_ID],
+      additionalAffectedCoreMeasurementIDs: [],
+      allAffectedCoreMeasurementIDs: [REQUESTER_CORE_ID],
+      groups: []
+    };
+    mocks.applyPreparedBulkSpeciesCorrections.mockResolvedValueOnce(speciesCorrectionsSummary);
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } },
+            // Species omitted entirely: this sibling's own diff is empty,
+            // so it is a legitimate zero-change group member pulled in by
+            // tree membership — not an ordinary skip, and not absent.
+            { coreMeasurementID: UNCHANGED_SIBLING_CORE_ID, csvRow: {} }
+          ]
+        })
+      )
+    );
+
+    expect(response.status, 'removing the "unchanged" half of the rowPlan-status filter trips the assembly guard and 500s the whole batch').toBe(200);
+    const body = await response.json();
+    expect(body.code).toBeUndefined();
+
+    expect(mocks.prepareBulkSpeciesCorrections).toHaveBeenCalledTimes(1);
+    const prepareInput = mocks.prepareBulkSpeciesCorrections.mock.calls[0][1] as { members: Array<{ coreMeasurementID: number }> };
+    expect(prepareInput.members.map(m => m.coreMeasurementID).sort((a, b) => a - b)).toEqual([REQUESTER_CORE_ID, UNCHANGED_SIBLING_CORE_ID]);
+
+    // The requester's own row-local write is accounted for inside
+    // applyPreparedBulkSpeciesCorrections (route.ts ~1058), not the ordinary
+    // per-row loop (route.ts ~1005-1009 `continue`s past every group
+    // member). The zero-change sibling is a submitted member absent from
+    // updatedMemberCoreMeasurementIDs, so it increments skippedCount exactly
+    // once (route.ts ~1064-1068) — never through the ordinary-row
+    // zero-diff branch at ~1012, which group members never reach.
+    expect(body.updatedCount).toBe(1);
+    expect(body.skippedCount).toBe(1);
+  });
+
+  it('completes species-correction preparation but performs zero writes when assertAuthorizationFresh rejects immediately afterward (#427 fix F33: the single fresh-auth call sits right before the first mutation)', async () => {
+    const REQUESTER_CORE_ID = 501;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) }],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+    mocks.assertAuthorizationFresh.mockRejectedValueOnce(new mocks.MockSessionExpiredError());
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: 'session expired' });
+
+    expect(mocks.prepareBulkSpeciesCorrections, 'preparation is read-only and must complete before the fresh-auth gate').toHaveBeenCalledTimes(1);
+    expect(mocks.applyPreparedBulkSpeciesCorrections).not.toHaveBeenCalled();
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+    expect(mocks.writeEditOperation).not.toHaveBeenCalled();
+    expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('DELETE FROM ??.coremeasurements'), expect.anything(), expect.anything());
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO ??.temporarymeasurements'), expect.anything(), expect.anything());
+  });
+
+  it('surfaces a species-correction write conflict as the FIXED safe 422 message/code, never the raw drift message, SQL fragment, coreMeasurementID, or transaction id it carried (#427 fix F34)', async () => {
+    const REQUESTER_CORE_ID = 501;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) }],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+
+    const sensitiveDriftMessage = `${SENSITIVE_SQL_FRAGMENT} reason=${SENSITIVE_REASON_TOKEN} coreMeasurementID=${SENSITIVE_CORE_MEASUREMENT_ID} txID=${SENSITIVE_TRANSACTION_ID_PREPARED}`;
+    mocks.applyPreparedBulkSpeciesCorrections.mockRejectedValueOnce(new SpeciesCorrectionWriteConflictError({ kind: 'drift', message: sensitiveDriftMessage }));
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.code).toBe(SPECIES_CORRECTION_CONFLICT_CODE);
+    expect(body.freshPlan, '409+freshPlan is reserved exclusively for actual plan-hash drift, never a write-conflict').toBeUndefined();
+
+    const bodyText = JSON.stringify(body);
+    expect(bodyText).not.toContain(SENSITIVE_SQL_FRAGMENT);
+    expect(bodyText).not.toContain(SENSITIVE_REASON_TOKEN);
+    expect(bodyText).not.toContain(String(SENSITIVE_CORE_MEASUREMENT_ID));
+    expect(bodyText).not.toContain(SENSITIVE_TRANSACTION_ID_PREPARED);
+  });
+
+  it('propagates a mid-apply applyPreparedBulkSpeciesCorrections failure with no ledger write and no view refresh, surfacing the FIXED safe 500 server-failure code, never leaking the transaction ids it carried (#427 fix F34)', async () => {
+    const REQUESTER_CORE_ID = 501;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) }],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+
+    mocks.applyPreparedBulkSpeciesCorrections.mockRejectedValueOnce(
+      new SpeciesCorrectionTransactionMismatchError(SENSITIVE_TRANSACTION_ID_PREPARED, SENSITIVE_TRANSACTION_ID_APPLY)
+    );
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.code).toBe(SPECIES_CORRECTION_SERVER_FAILURE_CODE);
+    expect(body.freshPlan).toBeUndefined();
+
+    const bodyText = JSON.stringify(body);
+    expect(bodyText).not.toContain(SENSITIVE_TRANSACTION_ID_PREPARED);
+    expect(bodyText).not.toContain(SENSITIVE_TRANSACTION_ID_APPLY);
+
+    // Limitation: this harness's withTransaction mock has no commit/rollback
+    // spies, so it cannot observe actual rollback. Real transactional
+    // atomicity is covered by the DB integration suite.
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+    expect(mocks.writeEditOperation, 'a mid-apply failure must never produce a ledger entry for a partially-applied batch').not.toHaveBeenCalled();
+    expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+  });
+
+  it('maps a group-member write-context rejection raised mid-apply to the FIXED safe 500 server-failure code, never echoing the transaction ids in its message (#427)', async () => {
+    const REQUESTER_CORE_ID = 501;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) }],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+
+    const sensitiveContextMessage = `group-member write context transactionID ("${SENSITIVE_TRANSACTION_ID_PREPARED}") does not match this call's own transaction ("${SENSITIVE_TRANSACTION_ID_APPLY}")`;
+    mocks.applyPreparedBulkSpeciesCorrections.mockRejectedValueOnce(new SpeciesCorrectionGroupMemberContextError(sensitiveContextMessage));
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } }]
+        })
+      )
+    );
+
+    const body = await response.json();
+    const bodyText = JSON.stringify(body);
+    expect(response.status, `response body: ${bodyText}`).toBe(500);
+    expect(body.code).toBe(SPECIES_CORRECTION_SERVER_FAILURE_CODE);
+    expect(bodyText).not.toContain(SENSITIVE_TRANSACTION_ID_PREPARED);
+    expect(bodyText).not.toContain(SENSITIVE_TRANSACTION_ID_APPLY);
+    expect(mocks.writeEditOperation, 'a mid-apply failure must never produce a ledger entry').not.toHaveBeenCalled();
+  });
+
+  it('reports the full affected species-correction membership (submitted members plus additionally-affected unsubmitted measurements) on a non-revertable ledger entry, without inflating updatedCount for the unsubmitted ones (#427)', async () => {
+    const REQUESTER_CORE_ID = 501;
+    const ADDITIONALLY_AFFECTED_CORE_ID = 777;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) }],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+
+    const speciesCorrectionsSummary = {
+      correctedTreeIDs: [SPECIES_GROUP_TREE_ID],
+      updatedMemberCoreMeasurementIDs: [REQUESTER_CORE_ID],
+      additionalAffectedCoreMeasurementIDs: [ADDITIONALLY_AFFECTED_CORE_ID],
+      allAffectedCoreMeasurementIDs: [REQUESTER_CORE_ID, ADDITIONALLY_AFFECTED_CORE_ID],
+      groups: []
+    };
+    mocks.applyPreparedBulkSpeciesCorrections.mockResolvedValueOnce(speciesCorrectionsSummary);
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.speciesCorrections).toEqual(speciesCorrectionsSummary);
+    expect(body.updatedCount, 'a not-submitted measurement the correction also touched must never inflate updatedCount').toBe(1);
+
+    expect(mocks.writeEditOperation).toHaveBeenCalledTimes(1);
+    const summaryArgs = mocks.writeEditOperation.mock.calls[0] as unknown as [unknown, string, Record<string, unknown>, string];
+    const summaryRecord = summaryArgs[2];
+    expect(summaryRecord.revertable, 'a species-correction batch ledger entry must be non-revertable').toBe(false);
+
+    const beforeStateRow = (summaryRecord.beforeState as Array<Record<string, unknown>>)[0].row as Record<string, unknown>;
+    const recordedSpeciesCorrections = beforeStateRow.speciesCorrections as typeof speciesCorrectionsSummary;
+    expect(recordedSpeciesCorrections.additionalAffectedCoreMeasurementIDs).toEqual([ADDITIONALLY_AFFECTED_CORE_ID]);
+    expect(recordedSpeciesCorrections.allAffectedCoreMeasurementIDs).toEqual([REQUESTER_CORE_ID, ADDITIONALLY_AFFECTED_CORE_ID]);
+  });
+
+  describe('#507 ingestion-failure audit integration', () => {
+    it('returns safe retry guidance when the audit fails without exposing its SQL cause', async () => {
+      const secretDetail = 'INSERT INTO private_schema.unifiedchangelog transaction secret';
+      mocks.recordAuditedIngestionFailureRows.mockRejectedValueOnce(
+        new ChangelogWriteError(ChangelogOperation.INSERT, 'coremeasurements', '123', new Error(secretDetail))
+      );
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+      expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+      expect(await response.json()).toEqual({ error: 'Unable to record revision history. Please retry.' });
+      expect(mocks.writeEditOperation).not.toHaveBeenCalled();
+    });
+
+    it('writes a ledger summary with failedRowCount for an invalid-only batch (previously silent: the write guard only checked updatedCount/deletedDuplicateCount/speciesCorrections)', async () => {
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const body = await response.json();
+      expect(body.failedRowCount).toBe(1);
+      expect(body.updatedCount).toBe(0);
+
+      expect(mocks.writeEditOperation, 'an invalid-only apply must still get a ledger summary').toHaveBeenCalledTimes(1);
+      const summaryArgs = mocks.writeEditOperation.mock.calls[0] as unknown as [unknown, string, Record<string, unknown>, string];
+      const summaryRow = (summaryArgs[2].beforeState as Array<Record<string, unknown>>)[0].row as Record<string, unknown>;
+      expect(summaryRow.failedRowCount).toBe(1);
+      expect(summaryRow.insertedCount).toBe(0);
+    });
+
+    it('writes a ledger summary for an insert-only batch (regression: #507 extends the write guard to insertedCount, previously silent)', async () => {
+      mocks.executeQuery.mockImplementation(async (query: string) => {
+        if (query.includes('INSERT INTO ??.temporarymeasurements')) return { affectedRows: 1, warningStatus: 0 };
+        return [];
+      });
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            newRows: [{ csvIndex: 0, csvRow: { tag: 'T9', stemtag: 'S9', spcode: 'AAA', quadrat: 'Q1', dbh: '10', date: '2026-04-01' } }],
+            confirmNewRows: true
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const body = await response.json();
+      expect(body.insertedCount).toBe(1);
+
+      expect(mocks.writeEditOperation, 'an insert-only apply must still get a ledger summary').toHaveBeenCalledTimes(1);
+      const summaryArgs = mocks.writeEditOperation.mock.calls[0] as unknown as [unknown, string, Record<string, unknown>, string];
+      const summaryRow = (summaryArgs[2].beforeState as Array<Record<string, unknown>>)[0].row as Record<string, unknown>;
+      expect(summaryRow.insertedCount).toBe(1);
+      expect(summaryRow.failedRowCount).toBe(0);
+    });
+
+    it('omits the ledger summary entirely when every rejected row is an unchanged same-attempt retry and nothing else mutated', async () => {
+      mocks.recordAuditedIngestionFailureRows.mockImplementation(async ({ rows }: { rows: unknown[] }) => ({
+        measurementIDs: rows.map((_, index) => 9000 + index),
+        insertedCount: 0,
+        updatedCount: 0,
+        unchangedCount: rows.length
+      }));
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const body = await response.json();
+      expect(body.failedRowCount, 'the response must still report the retried row as rejected').toBe(1);
+      expect(mocks.writeEditOperation, 'an unchanged-retry apply must not produce a new ledger entry').not.toHaveBeenCalled();
+      expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+    });
+
+    it('rolls back the whole apply when recordAuditedIngestionFailureRows persists fewer rows than were rejected (data/audit disagreement must abort, never silently under-report)', async () => {
+      mocks.recordAuditedIngestionFailureRows.mockResolvedValueOnce({
+        measurementIDs: [],
+        insertedCount: 0,
+        updatedCount: 0,
+        unchangedCount: 0
+      });
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.UNPROCESSABLE_ENTITY);
+      const body = await response.json();
+      expect(body.error).toBe('Revision failure-row persistence recorded 0 of 1 expected rejected row(s)');
+      expect(mocks.writeEditOperation, 'a count-mismatch must abort before any ledger write').not.toHaveBeenCalled();
+      expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+    });
+
+    it('passes the trusted server-side actor, the caller transaction, and the correct plot/census scope to recordAuditedIngestionFailureRows, never a client-supplied changedBy', async () => {
+      mocks.auth.mockResolvedValue({ user: { name: 'Jess Researcher', email: 'jess@example.com', userStatus: 'global', sites: [] } });
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledTimes(1);
+      expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schema: 'forestgeo_testing',
+          transactionID: 'tx-1',
+          changedBy: 'jess@example.com',
+          plotID: 1,
+          censusID: 2
+        })
+      );
+    });
   });
 });

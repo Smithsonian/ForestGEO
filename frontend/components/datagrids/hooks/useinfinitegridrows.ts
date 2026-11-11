@@ -7,6 +7,28 @@ export type GridMode = 'paginated' | 'infinite';
 export type InfiniteFetcherArgs = { page: number; pageSize: number; signal: AbortSignal };
 export type InfiniteFetcherResult<R> = { rows: R[]; totalRows: number };
 
+// strict rejects on fetch failure instead of only setting `error`, so an
+// awaiting caller (the post-undo refresh chain) learns refresh failed.
+// loadMore/retry/mode-switch never pass this — they stay void/non-throwing.
+export type RefreshOptions = { strict?: boolean };
+
+const GRID_REFRESH_CANCELLED_MESSAGE = 'Grid refresh was cancelled before its read completed.';
+
+// Thrown only to a strict caller whose read was aborted with no newer read to
+// follow. Never written to the visible `error` state: the read simply never
+// happened, it is not a user-facing grid failure.
+export class GridRefreshCancelledError extends Error {
+  constructor() {
+    super(GRID_REFRESH_CANCELLED_MESSAGE);
+    this.name = 'GridRefreshCancelledError';
+  }
+}
+
+type GridReadOutcome = { status: 'completed' } | { status: 'cancelled' } | { status: 'failed'; error: unknown };
+
+const GRID_READ_COMPLETED: GridReadOutcome = { status: 'completed' };
+const GRID_READ_CANCELLED: GridReadOutcome = { status: 'cancelled' };
+
 export type UseInfiniteGridRowsOptions<R> = {
   fetcher: (args: InfiniteFetcherArgs) => Promise<InfiniteFetcherResult<R>>;
   initialPageSize: number;
@@ -25,9 +47,11 @@ export type UseInfiniteGridRowsResult<R> = {
   isLoadingMore: boolean;
   hasMore: boolean;
   loadMore: () => void;
-  refresh: () => Promise<void>;
+  refresh: (options?: RefreshOptions) => Promise<void>;
   retry: () => void;
   error: Error | null;
+  /** Counts reads that landed in the list; a caller keeping its own stale flag clears it when this moves. */
+  successfulReadCount: number;
   softCapExceeded: boolean;
   upsertRow: (row: R) => void;
   removeRow: (id: R[keyof R]) => void;
@@ -65,12 +89,14 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
   const [failedPage, setFailedPage] = useState<number | null>(null);
+  const [successfulReadCount, setSuccessfulReadCount] = useState<number>(0);
 
   const abortRef = useRef<AbortController | null>(null);
   const tokenRef = useRef<number>(0);
   const inflightRef = useRef<boolean>(false);
   const lastResetKey = useRef<unknown>(resetKey);
   const lastMode = useRef<GridMode>(mode);
+  const latestReadRef = useRef<{ token: number; outcome: Promise<GridReadOutcome> } | null>(null);
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
@@ -81,28 +107,23 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
     }
   }, []);
 
-  const fetchPage = useCallback(
-    async (targetPage: number) => {
-      abortInFlight();
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-      const token = ++tokenRef.current;
-      inflightRef.current = true;
-      setIsLoadingMore(true);
-      setError(null);
+  const readPage = useCallback(
+    async (targetPage: number, token: number, ctrl: AbortController): Promise<GridReadOutcome> => {
+      const isSuperseded = () => token !== tokenRef.current || ctrl.signal.aborted;
       try {
         const res = await fetcherRef.current({ page: targetPage, pageSize: infiniteChunkSize, signal: ctrl.signal });
-        if (token !== tokenRef.current) return;
+        if (isSuperseded()) return GRID_READ_CANCELLED;
         setAccumulator(prev => (targetPage === 0 ? res.rows : appendUniqueRows(prev, res.rows, rowIdKey)));
         setInfiniteTotal(res.totalRows);
         setPage(targetPage);
         setFailedPage(null);
+        setSuccessfulReadCount(count => count + 1);
+        return GRID_READ_COMPLETED;
       } catch (e) {
-        if (token !== tokenRef.current) return;
-        const err = e as { name?: string };
-        if (err && err.name === 'AbortError') return;
+        if (isSuperseded() || (e as { name?: string } | null)?.name === 'AbortError') return GRID_READ_CANCELLED;
         setError(e as Error);
         setFailedPage(targetPage);
+        return { status: 'failed', error: e };
       } finally {
         if (token === tokenRef.current) {
           inflightRef.current = false;
@@ -110,7 +131,38 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
         }
       }
     },
-    [abortInFlight, infiniteChunkSize, rowIdKey]
+    [infiniteChunkSize, rowIdKey]
+  );
+
+  // A strict caller whose read was superseded follows the newer read and
+  // reports its outcome; it rejects as cancelled only when no newer read exists.
+  const confirmStrictRead = useCallback(async (token: number, outcome: GridReadOutcome) => {
+    let followedToken = token;
+    let followedOutcome = outcome;
+    while (followedOutcome.status === 'cancelled') {
+      const latest = latestReadRef.current;
+      if (!latest || latest.token <= followedToken) throw new GridRefreshCancelledError();
+      followedToken = latest.token;
+      followedOutcome = await latest.outcome;
+    }
+    if (followedOutcome.status === 'failed') throw followedOutcome.error;
+  }, []);
+
+  const fetchPage = useCallback(
+    async (targetPage: number, options?: RefreshOptions) => {
+      abortInFlight();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      const token = ++tokenRef.current;
+      inflightRef.current = true;
+      setIsLoadingMore(true);
+      setError(null);
+      const outcome = readPage(targetPage, token, ctrl);
+      latestReadRef.current = { token, outcome };
+      const settledOutcome = await outcome;
+      if (options?.strict) await confirmStrictRead(token, settledOutcome);
+    },
+    [abortInFlight, confirmStrictRead, readPage]
   );
 
   const resetInfiniteState = useCallback(() => {
@@ -155,10 +207,13 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
     void fetchPage(page + 1);
   }, [mode, isLoadingMore, hasMore, fetchPage, page]);
 
-  const refresh = useCallback(() => {
-    if (mode !== 'infinite') return Promise.resolve();
-    return fetchPage(0);
-  }, [mode, fetchPage]);
+  const refresh = useCallback(
+    (options?: RefreshOptions) => {
+      if (mode !== 'infinite') return Promise.resolve();
+      return fetchPage(0, options);
+    },
+    [mode, fetchPage]
+  );
 
   const retry = useCallback(() => {
     if (mode !== 'infinite') return;
@@ -209,6 +264,7 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
         refresh,
         retry,
         error: null,
+        successfulReadCount: 0,
         softCapExceeded: false,
         upsertRow: () => {},
         removeRow: () => {}
@@ -226,9 +282,25 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
       refresh,
       retry,
       error,
+      successfulReadCount,
       softCapExceeded: accumulator.length > INFINITE_SOFT_CAP,
       upsertRow,
       removeRow
     };
-  }, [mode, setMode, paginated, accumulator, infiniteTotal, isLoadingMore, hasMore, loadMore, refresh, retry, error, upsertRow, removeRow]);
+  }, [
+    mode,
+    setMode,
+    paginated,
+    accumulator,
+    infiniteTotal,
+    isLoadingMore,
+    hasMore,
+    loadMore,
+    refresh,
+    retry,
+    error,
+    successfulReadCount,
+    upsertRow,
+    removeRow
+  ]);
 }

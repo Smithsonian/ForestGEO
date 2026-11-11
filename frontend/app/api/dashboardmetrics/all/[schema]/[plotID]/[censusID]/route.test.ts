@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
+import { buildMeasuredStemCountSql, buildMeasuredTreeCountSql } from '@/config/dashboardmetricsqueries';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 
@@ -154,7 +155,7 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
 
       // Query 6: First-census stem classification. The DB grouping identifies 40
       // trees carrying more than one measured stem — consistent with 1.5 stems/tree.
-      exec.mockResolvedValueOnce([{ CountMultiStems: 40, CountNewRecruits: 150 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 40 }]);
 
       const res = await callGET('testschema', '1', '1');
 
@@ -177,12 +178,9 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       expect(String(classificationCall![0])).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
       expect(String(classificationCall![0])).not.toMatch(/previous_stems/i);
 
-      // Recruits on a first census must count EVERY measured stem, the same way
-      // the comparison branch counts measured_stems rows. Tag-pair concatenation
-      // would return NULL for NULL TreeTags (dropping those stems) and collapse
-      // duplicate tag pairs, undercounting recruits below the Stems tile.
-      expect(String(classificationCall![0])).toMatch(/SELECT COUNT\(\*\) FROM measured_stems\) AS CountNewRecruits/i);
-      expect(String(classificationCall![0])).not.toMatch(/CONCAT\(TreeTag/i);
+      // Recruits on a first census are the Total Stems result (150 above), not a second
+      // count with its own filters, so the two tiles cannot drift apart.
+      expect(String(classificationCall![0])).not.toMatch(/CountNewRecruits/i);
 
       // Verify other metrics are present
       expect(body.progressTachometer).toBeDefined();
@@ -457,8 +455,8 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       exec.mockResolvedValueOnce([{ CountTrees: 10 }]);
       exec.mockResolvedValueOnce([{ CountStems: 15 }]);
 
-      // First-census classification query (multi-stems + new recruits, current census only)
-      exec.mockResolvedValueOnce([{ CountMultiStems: 5, CountNewRecruits: 15 }]);
+      // First-census classification query (multi-stems, current census only)
+      exec.mockResolvedValueOnce([{ CountMultiStems: 5 }]);
 
       await callGET('testschema', '1', '1');
 
@@ -471,6 +469,82 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       expect(firstCensusCall).toBeDefined();
       expect(String(firstCensusCall![0])).not.toMatch(/previous_trees/i);
       expect(String(firstCensusCall![0])).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
+    });
+  });
+
+  // ===== Issue #508 regression: Total Trees / Total Stems must shrink when the
+  // last measurement for a stem/tree is hard-deleted. The old implementation
+  // counted trees/stems rows directly and NEVER decreased on measurement delete
+  // (deleting a measurement never touches the trees/stems rows). =====
+  describe('measured-count SQL (issue #508 regression)', () => {
+    it('CountTrees/CountStems queries are byte-for-byte the shared builder output, joined through coremeasurements', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+      vi.spyOn(cm, 'beginTransaction').mockResolvedValue('tx123');
+      vi.spyOn(cm, 'commitTransaction').mockResolvedValue(undefined);
+
+      exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
+      exec.mockResolvedValueOnce([{ total_quadrats: 1, populated_quadrats: 1, populated_pct: 100, unpopulated_quadrats: '' }]);
+      exec.mockResolvedValueOnce([{ PersonnelCount: 1 }]);
+      exec.mockResolvedValueOnce([{ CountTrees: 52 }]);
+      exec.mockResolvedValueOnce([{ CountStems: 52 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 0 }]);
+
+      await callGET('testschema', '7', '9');
+
+      // Calls are issued in source order: previousCensus(0), progressTacho(1),
+      // activeUsers(2), countTrees(3), countStems(4), stemTypes(5).
+      const [treesSql, treesParams] = exec.mock.calls[3];
+      const [stemsSql, stemsParams] = exec.mock.calls[4];
+
+      expect(String(treesSql)).toBe(buildMeasuredTreeCountSql('testschema'));
+      expect(String(stemsSql)).toBe(buildMeasuredStemCountSql('testschema'));
+
+      // Must count via coremeasurements, not the trees/stems tables directly —
+      // this is the join that makes the tile shrink on measurement delete.
+      expect(String(treesSql)).toMatch(/FROM testschema\.coremeasurements cm/i);
+      expect(String(treesSql)).not.toMatch(/FROM testschema\.trees t\s+JOIN testschema\.census/i);
+      expect(String(stemsSql)).toMatch(/FROM testschema\.coremeasurements cm/i);
+      expect(String(stemsSql)).not.toMatch(/FROM testschema\.stems st\s+JOIN testschema\.census/i);
+
+      // Both must exclude soft-deleted measurements/stems/trees so a tile never
+      // shows an entity whose only evidence of measurement is inactive.
+      expect(String(treesSql)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1 AND t\.IsActive = 1/i);
+      expect(String(stemsSql)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1/i);
+
+      // DISTINCT is required: a stem/tree with multiple measurements (or a
+      // multi-stem tree) must only be counted once.
+      expect(String(treesSql)).toMatch(/COUNT\(DISTINCT t\.TreeID\)/i);
+      expect(String(stemsSql)).toMatch(/COUNT\(DISTINCT s\.StemGUID\)/i);
+
+      // Bound parameter contract: [censusID, plotID] for both queries.
+      expect(treesParams).toEqual([9, 7]);
+      expect(stemsParams).toEqual([9, 7]);
+    });
+
+    it('measured_quads (ProgressTachometer) and measured_stems (StemTypes) CTEs filter IsActive so their totals never exceed CountStems/CountTrees', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+      vi.spyOn(cm, 'beginTransaction').mockResolvedValue('tx123');
+      vi.spyOn(cm, 'commitTransaction').mockResolvedValue(undefined);
+
+      exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
+      exec.mockResolvedValueOnce([{ total_quadrats: 1, populated_quadrats: 1, populated_pct: 100, unpopulated_quadrats: '' }]);
+      exec.mockResolvedValueOnce([{ PersonnelCount: 1 }]);
+      exec.mockResolvedValueOnce([{ CountTrees: 1 }]);
+      exec.mockResolvedValueOnce([{ CountStems: 1 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 0 }]);
+
+      await callGET('testschema', '7', '9');
+
+      const progressTachoCall = exec.mock.calls[1];
+      const stemTypesCall = exec.mock.calls[5];
+
+      expect(String(progressTachoCall[0])).toMatch(/WITH measured_quads AS/i);
+      expect(String(progressTachoCall[0])).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1/i);
+
+      expect(String(stemTypesCall[0])).toMatch(/WITH measured_stems AS/i);
+      expect(String(stemTypesCall[0])).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1 AND t\.IsActive = 1/i);
     });
   });
 
@@ -524,7 +598,7 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       exec.mockResolvedValueOnce([{ PersonnelCount: 2 }]);
       exec.mockResolvedValueOnce([{ CountTrees: 50 }]);
       exec.mockResolvedValueOnce([{ CountStems: 80 }]);
-      exec.mockResolvedValueOnce([{ CountNewRecruits: 80 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 0 }]);
 
       const res = await callGET('testschema', '2', '3');
 

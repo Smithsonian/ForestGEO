@@ -1,10 +1,11 @@
 'use client';
 import * as React from 'react';
-import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useState } from 'react';
 import { preloadKey } from '@/lib/query/preload';
 import { queryKey } from '@/lib/query';
 import { createFetchQuery } from '@/config/servergridhelpers';
 import { formatDisplayDate } from '@/config/dateformats';
+import { getCensusWindow, getMeasurementSpan } from '@/config/censuswindow';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -131,6 +132,8 @@ interface SidebarProps {
  * /dashboard (bug F7). Real user interactions (click/keyboard) always carry an event, so
  * only they may clear a selection.
  */
+export const SIDEBAR_WIDTH = 'clamp(240px, 24vw, 340px)';
+
 export const isProgrammaticSelectClear = (event: React.SyntheticEvent | null, newValue: number | string | null): boolean => event === null && newValue === null;
 
 const ADMIN_NAV = [
@@ -173,48 +176,12 @@ export default function Sidebar(props: SidebarProps) {
 
   const { setCensusListLoaded: _setCensusListLoaded } = props;
 
-  const sidebarRef = useRef<HTMLDivElement>(null);
-  const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
   const [isSiteDropdownOpen, setSiteDropdownOpen] = useState(false);
   const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
   // Admin pages used to forcibly clear the user's site/plot/census selections on mount.
   // That side-effect was hostile UX (sub-paths like /admin/provision/runs would wipe state),
   // and admin pages are overlays — they don't need a clean context. Removed in 2026-05 task 13.
-
-  useEffect(() => {
-    let debounceTimer: NodeJS.Timeout | null = null;
-
-    const updateSidebarWidth = () => {
-      if (sidebarRef.current) {
-        const scrollWidth = sidebarRef.current.scrollWidth;
-        const calculatedWidth = Math.max(scrollWidth, 340); // Minimum width
-
-        setSidebarWidth(Math.min(calculatedWidth + 10, 380)); // Reduced max width from 500 to 380
-      }
-    };
-
-    // Debounce resize updates to prevent excessive recalculations
-    const debouncedUpdate = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(updateSidebarWidth, 300);
-    };
-
-    const resizeObserver = new ResizeObserver(debouncedUpdate);
-
-    // Only observe the container, not all children
-    if (sidebarRef.current) {
-      resizeObserver.observe(sidebarRef.current);
-    }
-
-    // Initial calculation
-    updateSidebarWidth();
-
-    return () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      resizeObserver.disconnect();
-    };
-  }, []); // Remove context dependencies - observer doesn't need to recreate
 
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
     if (selectedSite === undefined) {
@@ -225,9 +192,9 @@ export default function Sidebar(props: SidebarProps) {
     if (siteDispatch) {
       await siteDispatch({ site: selectedSite });
     }
-    if (selectedSite === undefined) {
-      await handlePlotSelection(undefined);
-    }
+    // Dependent plot/census/quadrat selections are cleared synchronously and atomically by the
+    // store (setSite) and their cookies by the dispatcher; clearing them here after the awaited
+    // cookie write could wipe a newer selection.
     // If on admin page and a site is selected, navigate to dashboard
     if (isAdminPage && selectedSite) {
       router.push('/dashboard');
@@ -238,9 +205,7 @@ export default function Sidebar(props: SidebarProps) {
     if (plotDispatch) {
       await plotDispatch({ plot: selectedPlot });
     }
-    if (selectedPlot === undefined) {
-      await handleCensusSelection(undefined);
-    }
+    // Census/quadrat are cleared by the store (setPlot) and dispatcher cascade, not here.
   };
 
   const handleCensusSelection = async (selectedCensus: OrgCensus) => {
@@ -329,18 +294,25 @@ export default function Sidebar(props: SidebarProps) {
       return <Typography className="sidebar-item">Select a Census</Typography>;
     }
 
-    const startDate = currentCensus?.dateRanges?.[0]?.startDate;
-    const endDate = currentCensus?.dateRanges?.[0]?.endDate;
+    const range = currentCensus?.dateRanges?.[0];
+    const censusWindow = range ? getCensusWindow(range) : { start: undefined, end: undefined };
+    const measurements = range ? getMeasurementSpan(range) : { first: undefined, last: undefined };
 
-    const hasStartDate = startDate !== undefined && startDate !== null;
-    const hasEndDate = endDate !== undefined && endDate !== null;
+    const hasWindowStart = !!censusWindow.start;
+    const hasWindowEnd = !!censusWindow.end;
+    const hasFirstMeasurement = !!measurements.first;
+    const hasLastMeasurement = !!measurements.last;
 
-    // Ensure dates are rendered in a block layout to stack them vertically
+    // "First/Last Record" are observed measurement dates only; a census with no data never
+    // presents its census window as a first record.
     const dateMessage = (
       <span aria-label={'census record information'} style={{ display: 'block' }}>
-        {hasStartDate && <Typography display="block">{`— First Record: ${formatDisplayDate(startDate)}`}</Typography>}
-        {hasEndDate && <Typography display="block">{`— Last Record: ${formatDisplayDate(endDate)}`}</Typography>}
-        {!hasStartDate && !hasEndDate && <Typography display="block">No Measurements</Typography>}
+        {(hasWindowStart || hasWindowEnd) && (
+          <Typography display="block">{`— Census window: ${hasWindowStart ? formatDisplayDate(censusWindow.start) : '—'} to ${hasWindowEnd ? formatDisplayDate(censusWindow.end) : 'open'}`}</Typography>
+        )}
+        {hasFirstMeasurement && <Typography display="block">{`— First Record: ${formatDisplayDate(measurements.first)}`}</Typography>}
+        {hasLastMeasurement && <Typography display="block">{`— Last Record: ${formatDisplayDate(measurements.last)}`}</Typography>}
+        {!hasFirstMeasurement && !hasLastMeasurement && <Typography display="block">No Measurements</Typography>}
       </span>
     );
 
@@ -349,8 +321,14 @@ export default function Sidebar(props: SidebarProps) {
         <Typography level="body-md" className="sidebar-item" data-testid={'selected-census-plotcensusnumber'}>
           {`Census: ${selectedCensus?.plotCensusNumber}`}
         </Typography>
-        <Stack direction={'column'} alignItems={'start'}>
-          <Typography color={!currentCensus ? 'danger' : 'primary'} level="body-sm" className="sidebar-item" data-testid={'selected-census-dates'}>
+        <Stack direction={'column'} alignItems={'start'} sx={{ maxWidth: '100%', minWidth: 0 }}>
+          <Typography
+            color={!currentCensus ? 'danger' : 'primary'}
+            level="body-sm"
+            className="sidebar-item"
+            data-testid={'selected-census-dates'}
+            sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}
+          >
             {currentCensus !== undefined && dateMessage}
           </Typography>
         </Stack>
@@ -406,7 +384,7 @@ export default function Sidebar(props: SidebarProps) {
           .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
           .map(item => (
             <Option
-              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges?.[0]?.startDate ? formatDisplayDate(item.dateRanges?.[0]?.startDate) : 'No measurements'}` : ''}`}
+              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${getMeasurementSpan(item.dateRanges[0]).first ? formatDisplayDate(getMeasurementSpan(item.dateRanges[0]).first) : 'No measurements'}` : ''}`}
               data-testid={'census-selection-option'}
               key={item?.plotCensusNumber}
               value={item?.plotCensusNumber?.toString()}
@@ -429,15 +407,15 @@ export default function Sidebar(props: SidebarProps) {
                     item.dateRanges.map((dateRange, index) => (
                       <Stack key={index} direction={'row'}>
                         <Typography level="body-sm" color={'neutral'}>
-                          {`${dateRange.startDate ? `First Msmt: ${formatDisplayDate(dateRange.startDate)}` : 'No Measurements'}`}
+                          {`${getMeasurementSpan(dateRange).first ? `First Msmt: ${formatDisplayDate(getMeasurementSpan(dateRange).first)}` : 'No Measurements'}`}
                         </Typography>
-                        {dateRange.endDate && (
+                        {getMeasurementSpan(dateRange).last && (
                           <Typography level="body-sm" color={'neutral'} sx={{ whiteSpace: 'pre' }}>
                             {' — '}
                           </Typography>
                         )}
                         <Typography level="body-sm" color={'neutral'}>
-                          {`${dateRange.endDate ? `Last Msmt: ${formatDisplayDate(dateRange.endDate)}` : ''}`}
+                          {`${getMeasurementSpan(dateRange).last ? `Last Msmt: ${formatDisplayDate(getMeasurementSpan(dateRange).last)}` : ''}`}
                         </Typography>
                       </Stack>
                     ))}
@@ -743,7 +721,6 @@ export default function Sidebar(props: SidebarProps) {
       <Stack direction={'row'} sx={{ display: 'flex', width: '100%', maxWidth: '100vw', minWidth: 0 }}>
         <Box
           component="nav"
-          ref={sidebarRef}
           id="side-navigation"
           className="Sidebar"
           aria-label="Site navigation sidebar"
@@ -752,7 +729,7 @@ export default function Sidebar(props: SidebarProps) {
             top: 0,
             left: 0,
             height: '100vh',
-            width: { xs: '100%', md: `${sidebarWidth}px` },
+            width: { xs: '100%', md: 'var(--Sidebar-width)' },
             maxWidth: '100vw',
             boxSizing: 'border-box',
             p: 2,
@@ -770,16 +747,7 @@ export default function Sidebar(props: SidebarProps) {
             }
           }}
         >
-          <GlobalStyles
-            styles={theme => ({
-              ':root': {
-                '--Sidebar-width': `${sidebarWidth}px`,
-                [theme.breakpoints.up('lg')]: {
-                  '--Sidebar-width': `${sidebarWidth}px`
-                }
-              }
-            })}
-          />
+          <GlobalStyles styles={{ ':root': { '--Sidebar-width': SIDEBAR_WIDTH } }} />
           <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Stack direction={'column'} sx={{ marginRight: '1em' }}>
@@ -866,7 +834,7 @@ export default function Sidebar(props: SidebarProps) {
                 <Avatar sx={{ marginRight: 1 }} alt={'site options icon'}>
                   <TravelExploreIcon />
                 </Avatar>
-                <Box sx={{ flexGrow: 1 }}>{renderSiteOptions()}</Box>
+                <Box sx={{ flexGrow: 1, minWidth: 0 }}>{renderSiteOptions()}</Box>
               </Box>
               {currentSite !== undefined && !isAdminPage && (
                 <>
@@ -874,7 +842,9 @@ export default function Sidebar(props: SidebarProps) {
                     <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'plot options icon'}>
                       <PlotLogo />
                     </Avatar>
-                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: currentPlot ? '0.5em' : '1em' }}>{renderPlotOptions()}</Box>
+                    <Box sx={{ flexGrow: 1, minWidth: 0, marginLeft: '0.5em', alignItems: 'center', marginRight: currentPlot ? '0.5em' : '1em' }}>
+                      {renderPlotOptions()}
+                    </Box>
                     {currentPlot && (
                       <Tooltip title="Clear plot selection" arrow>
                         <IconButton
@@ -902,7 +872,7 @@ export default function Sidebar(props: SidebarProps) {
                         <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'census options icon'}>
                           <CensusLogo />
                         </Avatar>
-                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: currentCensus ? '0.5em' : '1em' }}>
+                        <Box sx={{ flexGrow: 1, minWidth: 0, marginLeft: '0.5em', alignItems: 'center', marginRight: currentCensus ? '0.5em' : '1em' }}>
                           {renderCensusOptions()}
                         </Box>
                         {currentCensus && (

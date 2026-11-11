@@ -3,6 +3,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { selectNewestFamilyPerFile, type StagedBatchRow } from '@/lib/uploads/batch-family';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
@@ -36,36 +37,19 @@ async function handler(request: NextRequest, context: RouteContext) {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
-    const discoverySQL = safeFormatQuery(
+    const stagedBatchesSQL = safeFormatQuery(
       schema,
-      `WITH ranked_batches AS (
-         SELECT FileID,
-                BatchID,
-                MAX(id) AS maxRowID,
-                COUNT(*) OVER (PARTITION BY FileID) AS fileBatchCount,
-                ROW_NUMBER() OVER (PARTITION BY FileID ORDER BY MAX(id) DESC, BatchID DESC) AS rowNum
-         FROM ??.temporarymeasurements
-         WHERE PlotID = ? AND CensusID = ?
-         GROUP BY FileID, BatchID
-       )
-       SELECT FileID, BatchID, fileBatchCount
-       FROM ranked_batches
-       WHERE rowNum = 1
-       ORDER BY FileID, maxRowID DESC`
+      `SELECT FileID, BatchID, CAST(MAX(id) AS CHAR) AS maxRowID
+       FROM ??.temporarymeasurements
+       WHERE PlotID = ? AND CensusID = ?
+       GROUP BY FileID, BatchID`
     );
-
-    const result = await connectionManager.executeQuery(discoverySQL, [plotID, censusID]);
-    const output: { fileID: string; batchID: string }[] = result.map((row: any) => {
-      if (Number(row.fileBatchCount ?? 0) > 1) {
-        ailogger.warn(
-          `Multiple temporarymeasurement batches detected for file ${row.FileID} in plot ${plotID}, census ${censusID}; selecting the newest batch ${row.BatchID}`
-        );
+    const stagedBatches = (await connectionManager.executeQuery(stagedBatchesSQL, [plotID, censusID])) as StagedBatchRow[];
+    const output = selectNewestFamilyPerFile(stagedBatches).map(({ fileID, batchID, familyCount }) => {
+      if (familyCount > 1) {
+        ailogger.warn(`Multiple staged batch families for file ${fileID} in plot ${plotID}, census ${censusID}; selecting the newest family ${batchID}`);
       }
-
-      return {
-        fileID: row.FileID,
-        batchID: row.BatchID
-      };
+      return { fileID, batchID };
     });
     ailogger.info(`Found ${output.length} batches for schema: ${schema}, plotID: ${plotID}, censusID: ${censusID}`);
     ailogger.debug(`Batch details: ${JSON.stringify(output)}`);

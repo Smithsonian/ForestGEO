@@ -41,8 +41,9 @@ This guide covers technical errors related to database connections, server issue
 | **403** | Forbidden             | You lack permission for this site or action | Ask an administrator for access            |
 | **408** | SQL Connection Failure | The app could not reach the database (a repurposed code, not a request timeout) | Retry; report if it persists |
 | **409** | Conflict              | Data conflict (duplicate, etc.)  | Resolve the conflict and retry                |
+| **411** | Length Required       | The upload request did not declare its size | Select the file again; if it repeats, contact support |
 | **412** | Precondition Failed   | A required precondition was not met | Read the message; it names what is missing |
-| **413** | Payload Too Large     | The file exceeds the size limit  | Split the file (500 MB per file, 1 GB per upload) |
+| **413** | Payload Too Large     | The file is over 100 MB, or the whole upload request (file plus form metadata) is over 101 MiB | CSV: split the file and select the parts together. ArcGIS: export a smaller workbook (one .xlsx per import) |
 | **422** | Unprocessable Entity  | The request was understood but its contents were rejected | Correct the data described in the message |
 | **423** | Locked                | The resource is busy — usually another upload or job holds it | Wait for the other operation to finish |
 | **500** | Internal Server Error | Server-side error                | Wait and retry; report if persistent          |

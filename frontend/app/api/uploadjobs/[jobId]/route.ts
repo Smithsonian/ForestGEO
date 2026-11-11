@@ -3,7 +3,7 @@ import { auth } from '@/auth';
 import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
 import { HTTPResponses } from '@/config/macros';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
-import { cancelBackgroundJob, getBackgroundJobWithDetails, requestBackgroundJobCancel } from '@/lib/background-jobs/repository';
+import { cancelBackgroundJob, getBackgroundJobWithDetails, requestBackgroundJobCancel, selectFailureContext } from '@/lib/background-jobs/repository';
 import { cleanupCancelledUnclaimedJobArtifacts } from '@/lib/background-jobs/worker';
 import { parseJobID, requireJobAccess } from '@/lib/background-jobs/route-helpers';
 import type { BackgroundJobWithDetails } from '@/lib/background-jobs/types';
@@ -72,7 +72,7 @@ async function getHandler(request: NextRequest, context: RouteContext) {
   const accessError = requireJobAccess(session!, job);
   if (accessError) return accessError;
 
-  return NextResponse.json({ job }, { status: HTTPResponses.OK });
+  return NextResponse.json({ job: { ...job, failureContext: selectFailureContext(job, job.events) } }, { status: HTTPResponses.OK });
 }
 
 async function postHandler(request: NextRequest, context: RouteContext) {

@@ -80,12 +80,16 @@ Trees rarely shrink significantly. Large shrinkage usually indicates measurement
 
 ### Reviewing growth and shrinkage findings in View Errors
 
+View Errors shows census-wide totals at the top. A **Show** control narrows the list to All, Validation, Ingestion or Contradictions errors. Below the totals, errors are grouped by type, with one section per error. In each section you can sort and filter the rows from any column's menu, and the sorting and filtering cover every row, not only the rows on screen. Each row has a **Details** button that opens a side sheet with every error on that row and the original CSV codes. If you can edit the census, the sheet also has **Clear validation errors**.
+
 Both checks compare the current measurement against the same tag/stem in the previous census, so
-View Errors shows that comparison alongside each finding: the **Prior DBH** and **Prior HOM** from
-the earlier census, and an **HOM Changed** chip when the height of measurement differs between the
-two — a changed HOM is a common, legitimate explanation for an apparent shrinkage or growth
-finding, not necessarily a measurement error. An **Export CSV** button on the errors screen exports
-every flagged occurrence, including the prior-census columns, for review outside the application.
+View Errors can show that comparison alongside each finding. A DBH growth or shrinkage group shows
+**Prior DBH** (headed with the earlier census number when it is known), **DBH** and **Change** by
+default. A changed height of measurement (HOM) is a common, legitimate explanation for an apparent
+shrinkage or growth finding, not necessarily a measurement error. **Prior HOM** and **HOM Changed**
+stay available: open the menu on any column header, choose **Manage columns**, and tick them. An
+**Export CSV** button on the errors screen exports every flagged occurrence, including the
+prior-census columns, for review outside the application, whichever columns are showing.
 
 Neither check runs at all when the DBH it needs from either census is missing — there is nothing
 to compare, so the row is silently skipped rather than flagged in either direction.
@@ -249,8 +253,8 @@ Each stem can only have one measurement per census. Duplicates indicate double-e
 
 1. Verify the measurement date is correct
 2. Check the census start and end dates
-3. If measurement date is correct, census dates may need adjustment
-4. Contact administrator to adjust census dates if needed
+3. If the measurement date is correct, the census dates may need adjustment: on the dashboard, open the census card's **⋮** menu and choose **Edit census dates**
+4. Re-run validations after saving; the date change does not clear existing errors by itself
 
 ---
 

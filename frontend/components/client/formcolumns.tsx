@@ -3,14 +3,12 @@
 import { GridColDef, GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { Box, Input, Tooltip, Typography } from '@mui/joy';
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useEnhancedEffect from '@mui/utils/useEnhancedEffect';
-import { AttributeStatusOptions } from '@/lib/db/definitions/core';
-import { styled } from '@mui/joy/styles';
-import { CheckCircleOutlined } from '@mui/icons-material';
+import { AttributeStatusEditorOptions } from '@/lib/db/definitions/core';
+import { renderAttributeStatusCell } from '@/components/client/attributestatuscell';
 import { FormType, TableHeadersByFormType } from '@/config/macros/formdetails';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
-import ailogger from '@/ailogger';
 
 const getClosestAreaUnit = (input: string): string | null => {
   const normalizedInput = input.trim().toLowerCase();
@@ -144,167 +142,6 @@ function levenshteinDistance(a: string, b: string): number {
   return matrix[a.length][b.length];
 }
 
-function normalizeString(str: string): string {
-  return str.replace(/[\s-]+/g, '').toLowerCase();
-}
-
-const getClosestStatus = (input: string): string | null => {
-  const normalizedInput = normalizeString(input);
-
-  // Define threshold for acceptable "closeness" (tune this value)
-  const threshold = 2;
-
-  let closestStatus: string | null = null;
-  let minDistance = Infinity;
-
-  for (const option of AttributeStatusOptions) {
-    const normalizedOption = normalizeString(option);
-    const distance = levenshteinDistance(normalizedInput, normalizedOption);
-    if (distance < minDistance && distance <= threshold) {
-      minDistance = distance;
-      closestStatus = option; // Return the original option, not the normalized one
-    }
-  }
-
-  // Return the closest match if within the acceptable threshold, otherwise return null
-  return closestStatus;
-};
-
-const StyledInput = styled('input')({
-  border: 'none',
-  minWidth: 0,
-  outline: 0,
-  padding: 0,
-  paddingTop: '1em',
-  flex: 1,
-  color: 'inherit',
-  backgroundColor: 'transparent',
-  fontFamily: 'inherit',
-  fontSize: 'inherit',
-  fontStyle: 'inherit',
-  fontWeight: 'inherit',
-  lineHeight: 'inherit',
-  textOverflow: 'ellipsis',
-  '&::placeholder': {
-    opacity: 0,
-    transition: '0.1s ease-out'
-  },
-  '&:focus::placeholder': {
-    opacity: 1
-  },
-  '&:focus ~ label, &:not(:placeholder-shown) ~ label, &:-webkit-autofill ~ label': {
-    top: '0.5rem',
-    fontSize: '0.75rem'
-  },
-  '&:focus ~ label': {
-    color: 'var(--Input-focusedHighlight)'
-  },
-  '&:-webkit-autofill': {
-    alignSelf: 'stretch'
-  },
-  '&:-webkit-autofill:not(* + &)': {
-    marginInlineStart: 'calc(-1 * var(--Input-paddingInline))',
-    paddingInlineStart: 'var(--Input-paddingInline)',
-    borderTopLeftRadius: 'calc(var(--Input-radius) - var(--variant-borderWidth, 0px))',
-    borderBottomLeftRadius: 'calc(var(--Input-radius) - var(--variant-borderWidth, 0px))'
-  }
-});
-
-const StyledLabel = styled('label')(({ theme }) => ({
-  position: 'absolute',
-  lineHeight: 1,
-  top: 'calc((var(--Input-minHeight) - 1em) / 2)',
-  color: theme.vars.palette.text.tertiary,
-  fontWeight: theme.vars.fontWeight.md,
-  transition: 'all 150ms cubic-bezier(0.4, 0, 0.2, 1)'
-}));
-
-const InnerInput = React.forwardRef<
-  HTMLInputElement,
-  React.JSX.IntrinsicElements['input'] & {
-    error?: boolean;
-    noInput?: boolean;
-  }
->(function InnerInput(props, ref) {
-  const { error, noInput, ...rest } = props;
-  const id = React.useId();
-
-  return (
-    <Box>
-      <StyledInput {...rest} ref={ref} id={id} aria-invalid={error} />
-      <StyledLabel htmlFor={id}>{noInput ? AttributeStatusOptions.join(', ') : error ? 'Invalid status' : 'Accepted!'}</StyledLabel>
-    </Box>
-  );
-});
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const EditStatusCell = (params: GridRenderEditCellParams) => {
-  const apiRef = useGridApiContext();
-  const { id, hasFocus } = params;
-  const [value, setValue] = React.useState<string>(params.row['status']);
-  const [error, setError] = React.useState<boolean>(false);
-  const ref = React.useRef<HTMLDivElement>(null);
-
-  useEnhancedEffect(() => {
-    if (hasFocus && ref.current) {
-      const input = ref.current.querySelector<HTMLInputElement>(`input[value="${value}"]`);
-      input?.focus();
-    }
-  }, [hasFocus, value]);
-
-  React.useEffect(() => {
-    if (!(apiRef.current.getCellMode(id, 'status') === 'edit')) {
-      apiRef.current.startCellEditMode({ id, field: 'status' });
-    }
-  }, [apiRef, id]);
-
-  React.useEffect(() => {
-    setError(!getClosestStatus(value) && value !== '');
-  }, [value]);
-
-  const handleCommit = () => {
-    const correctedValue = getClosestStatus(value);
-
-    ailogger.info(`handle commit: corrected value: ${correctedValue}`);
-
-    apiRef.current.setEditCellValue({
-      id,
-      field: 'status',
-      value: value
-    });
-
-    apiRef.current.stopCellEditMode({ id, field: 'status' });
-  };
-
-  return (
-    <Input
-      aria-label={'commit status cell changes'}
-      ref={ref}
-      fullWidth
-      value={value}
-      endDecorator={<CheckCircleOutlined />}
-      slots={{ input: InnerInput }}
-      slotProps={{
-        input: {
-          placeholder: 'Enter status...',
-          type: 'text',
-          error,
-          noInput: value === ''
-        }
-      }}
-      sx={{ '--Input-minHeight': '56px', '--Input-radius': '6px' }}
-      onChange={e => setValue(e.target.value)}
-      onBlur={handleCommit}
-      onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === 'Tab') {
-          handleCommit();
-        }
-      }}
-      error={error}
-    />
-  );
-};
-
 const getFieldMetadata = (formType: FormType, field: string) => {
   return TableHeadersByFormType[formType]?.find(header => header.label === field) || null;
 };
@@ -377,9 +214,12 @@ export const AttributesFormGridColumns: GridColDef[] = standardizeGridColumns([
     headerName: 'Status',
     // renderHeader: () => renderCustomHeader(FormType.attributes, 'status'),
     flex: 1,
-    editable: true
-    // This is temporarily being suspended -- it's a nice to have, not a need to have
-    // renderEditCell: params => <EditStatusCell {...params} />
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: AttributeStatusEditorOptions,
+    // Export a blank status as blank, not the editor's label.
+    valueFormatter: (value: string | null) => value ?? '',
+    renderCell: renderAttributeStatusCell
   }
 ]);
 

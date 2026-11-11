@@ -26,7 +26,8 @@ const testCensus: OrgCensusRDS = {
   dateRanges: [],
   description: '',
   plotID: 1,
-  plotCensusNumber: 1
+  plotCensusNumber: 1,
+  isActive: true
 };
 
 export function mockUseSession(overrides = {}) {

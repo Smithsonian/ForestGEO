@@ -2,7 +2,7 @@
 'use client';
 import { GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, Button } from '@mui/joy';
+import { Box, Button, Snackbar, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
 import { AllTaxonomiesViewRDS } from '@/lib/db/definitions/views';
@@ -13,9 +13,11 @@ import MultilineModal from '@/components/datagrids/applications/multiline/multil
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import { AssignmentOutlined, UploadFileOutlined } from '@mui/icons-material';
-import SpeciesLimitsModal from '@/components/client/modals/specieslimitsmodal';
+import SpeciesLimitsModal, { type SpeciesLimitsSaveOutcome } from '@/components/client/modals/specieslimitsmodal';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
+
+const SPECIES_LIMITS_NOTICE_AUTO_HIDE_MS = 4000;
 
 export default function IsolatedAllTaxonomiesViewDataGrid() {
   const initialAllTaxonomiesViewRDSRow: AllTaxonomiesViewRDS = {
@@ -42,6 +44,11 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
   const [isSpeciesLimitsDialogOpen, setIsSpeciesLimitsDialogOpen] = useState(false);
   const [selectedSpeciesRow, setSelectedSpeciesRow] = useState<SpeciesRDS | null>(null);
   const [allSpeciesLimits, setAllSpeciesLimits] = useState<SpeciesLimitsRDS[]>([]);
+  const [speciesLimitsNotice, setSpeciesLimitsNotice] = useState<{ open: boolean; message: string; color: 'success' | 'danger' }>({
+    open: false,
+    message: '',
+    color: 'success'
+  });
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -63,6 +70,10 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
   const handleOpenSpeciesLimitsModal = useCallback((speciesRow: SpeciesRDS) => {
     setSelectedSpeciesRow(speciesRow);
     setIsSpeciesLimitsDialogOpen(true);
+  }, []);
+
+  const handleSpeciesLimitsSaveOutcome = useCallback((outcome: SpeciesLimitsSaveOutcome) => {
+    setSpeciesLimitsNotice({ open: true, message: outcome.message, color: outcome.status === 'saved' ? 'success' : 'danger' });
   }, []);
 
   const handleCloseSpeciesLimitsModal = () => {
@@ -166,8 +177,19 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
           incomingSpecies={selectedSpeciesRow}
           allSpeciesLimits={allSpeciesLimits}
           setRefresh={setRefresh}
+          onSaveOutcome={handleSpeciesLimitsSaveOutcome}
         />
       )}
+      <Snackbar
+        open={speciesLimitsNotice.open}
+        autoHideDuration={SPECIES_LIMITS_NOTICE_AUTO_HIDE_MS}
+        onClose={() => setSpeciesLimitsNotice(previous => ({ ...previous, open: false }))}
+        color={speciesLimitsNotice.color}
+        variant="soft"
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Typography level="body-md">{speciesLimitsNotice.message}</Typography>
+      </Snackbar>
     </>
   );
 }

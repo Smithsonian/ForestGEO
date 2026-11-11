@@ -1,9 +1,10 @@
 'use client';
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { FileRejection, FileWithPath, useDropzone } from 'react-dropzone';
-import { Box, Chip, Stack, Typography } from '@mui/joy';
+import { Alert, Box, Chip, Stack, Typography } from '@mui/joy';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import { SourceFormat } from '@/config/macros/formdetails';
+import { describeRejections, RejectedFileMessage } from '@/components/uploadsystemhelpers/dropzonerejections';
 
 interface DropzoneCompactProps {
   onChange: (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => void;
@@ -15,15 +16,19 @@ interface DropzoneCompactProps {
 export function DropzoneCompact({ onChange, hasFiles = false, sourceFormat = SourceFormat.csv, allowMultipleFiles = true }: DropzoneCompactProps) {
   const isArcgisWorkbook = sourceFormat === SourceFormat.arcgis_xlsx;
   const acceptsMultipleFiles = allowMultipleFiles && !isArcgisWorkbook;
+  const acceptedFormats = isArcgisWorkbook ? '.xlsx (ArcGIS workbook)' : '.csv, .txt, .tsv';
+  const [rejections, setRejections] = useState<RejectedFileMessage[]>([]);
   const onDrop = useCallback(
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
+      // Each drop replaces the previous notice; accepted files in a mixed drop still proceed.
+      setRejections(describeRejections(rejectedFiles, acceptedFormats));
       onChange(acceptedFiles, rejectedFiles);
 
       rejectedFiles.forEach((fileRejection: FileRejection) => {
         console.warn(`File ${fileRejection.file.name} rejected:`, fileRejection.errors);
       });
     },
-    [onChange]
+    [onChange, acceptedFormats]
   );
 
   const { getRootProps, getInputProps, isDragActive, isDragAccept, isDragReject } = useDropzone({
@@ -60,82 +65,96 @@ export function DropzoneCompact({ onChange, hasFiles = false, sourceFormat = Sou
   };
 
   return (
-    <Box
-      {...getRootProps()}
-      sx={{
-        border: '2px dashed',
-        borderColor: getBorderColor(),
-        borderRadius: 'md',
-        bgcolor: getBackgroundColor(),
-        p: 3,
-        textAlign: 'center',
-        cursor: 'pointer',
-        transition: 'all 0.2s ease-in-out',
-        minHeight: hasFiles ? 120 : 160,
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        '&:hover': {
-          bgcolor: 'primary.50',
-          borderColor: 'primary.300'
-        }
-      }}
-    >
-      <input {...getInputProps()} />
+    <>
+      <Box
+        {...getRootProps()}
+        sx={{
+          border: '2px dashed',
+          borderColor: getBorderColor(),
+          borderRadius: 'md',
+          bgcolor: getBackgroundColor(),
+          p: 3,
+          textAlign: 'center',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease-in-out',
+          minHeight: hasFiles ? 120 : 160,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          '&:hover': {
+            bgcolor: 'primary.50',
+            borderColor: 'primary.300'
+          }
+        }}
+      >
+        <input {...getInputProps()} />
 
-      <Stack spacing={1.5} alignItems="center">
-        <CloudUploadIcon
-          sx={{
-            fontSize: hasFiles ? 32 : 48,
-            color: getTextColor(),
-            opacity: isDragActive ? 1 : 0.7
-          }}
-        />
+        <Stack spacing={1.5} alignItems="center">
+          <CloudUploadIcon
+            sx={{
+              fontSize: hasFiles ? 32 : 48,
+              color: getTextColor(),
+              opacity: isDragActive ? 1 : 0.7
+            }}
+          />
 
-        {isDragActive ? (
-          isDragAccept ? (
-            <Typography level="body-md" color="success">
-              Drop files here to add them
-            </Typography>
+          {isDragActive ? (
+            isDragAccept ? (
+              <Typography level="body-md" color="success">
+                Drop files here to add them
+              </Typography>
+            ) : (
+              <Typography level="body-md" color="danger">
+                Some files are not supported
+              </Typography>
+            )
           ) : (
-            <Typography level="body-md" color="danger">
-              Some files are not supported
-            </Typography>
-          )
-        ) : (
-          <Stack spacing={0.5} alignItems="center">
-            <Typography level={hasFiles ? 'body-sm' : 'body-md'} sx={{ fontWeight: 'bold', color: getTextColor() }}>
-              {hasFiles
-                ? 'Choose a replacement file'
-                : isArcgisWorkbook
-                  ? 'Choose one ArcGIS .xlsx workbook or drag it here'
-                  : acceptsMultipleFiles
-                    ? 'Choose files or drag them here'
-                    : 'Choose one file or drag it here'}
-            </Typography>
-            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', justifyContent: 'center' }}>
-              {isArcgisWorkbook ? (
-                <Chip size="sm" variant="soft">
-                  ArcGIS XLSX only
-                </Chip>
-              ) : (
-                <>
+            <Stack spacing={0.5} alignItems="center">
+              <Typography level={hasFiles ? 'body-sm' : 'body-md'} sx={{ fontWeight: 'bold', color: getTextColor() }}>
+                {hasFiles
+                  ? 'Choose a replacement file'
+                  : isArcgisWorkbook
+                    ? 'Choose one ArcGIS .xlsx workbook or drag it here'
+                    : acceptsMultipleFiles
+                      ? 'Choose files or drag them here'
+                      : 'Choose one file or drag it here'}
+              </Typography>
+              <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', justifyContent: 'center' }}>
+                {isArcgisWorkbook ? (
                   <Chip size="sm" variant="soft">
-                    CSV
+                    ArcGIS XLSX only
                   </Chip>
-                  <Chip size="sm" variant="soft">
-                    TXT
-                  </Chip>
-                  <Chip size="sm" variant="soft">
-                    TSV
-                  </Chip>
-                </>
-              )}
+                ) : (
+                  <>
+                    <Chip size="sm" variant="soft">
+                      CSV
+                    </Chip>
+                    <Chip size="sm" variant="soft">
+                      TXT
+                    </Chip>
+                    <Chip size="sm" variant="soft">
+                      TSV
+                    </Chip>
+                  </>
+                )}
+              </Stack>
             </Stack>
+          )}
+        </Stack>
+      </Box>
+      {rejections.length > 0 && (
+        <Alert color="danger" variant="soft" role="alert" sx={{ mt: 1, alignItems: 'flex-start' }} data-testid="dropzone-rejections">
+          <Stack spacing={0.5}>
+            <Typography level="title-sm">{rejections.length === 1 ? '1 file was not added' : `${rejections.length} files were not added`}</Typography>
+            {rejections.map((rejection, index) => (
+              <Typography key={`${rejection.fileName}-${index}`} level="body-sm">
+                {rejection.fileName}: {rejection.reason}
+              </Typography>
+            ))}
           </Stack>
-        )}
-      </Stack>
-    </Box>
+        </Alert>
+      )}
+    </>
   );
 }

@@ -106,3 +106,75 @@ const ATTEMPT_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 export function isValidUploadAttemptID(attemptID: string): boolean {
   return ATTEMPT_ID_PATTERN.test(attemptID);
 }
+
+/**
+ * `unifiedchangelog.RecordID` for a `file_upload` row (issue #507).
+ *
+ * Two independent upload attempts for the same (fileName, census) must never
+ * be merged into one changelog row — accumulating one attempt's rowCount into
+ * an unrelated attempt's metadata is wrong regardless of how the merge
+ * happens. The identity therefore includes the attempt, not just the
+ * filename: `${fileName}::${attemptIdentity}`. Retries of the SAME attempt
+ * (same uploadSessionID, or the same batch family when there is no session)
+ * still accumulate into their own row as later batches/chunks land — this
+ * changes WHICH row a write targets, not whether same-attempt writes merge.
+ *
+ * `attemptIdentity` should be the caller's `uploadSessionID` when one exists
+ * (the synchronous upload route, the background worker, and ArcGIS commits
+ * all have one). When it is null (a live case — see
+ * upload-pipeline-equivalence.test.ts), the caller's batch id is the
+ * fallback: distinct ingestion attempts for the same file still get distinct
+ * batch ids, so this still separates them.
+ *
+ * Truncated to 255 chars: `unifiedchangelog.RecordID` is VARCHAR(255). Older
+ * rows written before this fix used plain `fileName` as RecordID; those rows
+ * are untouched and readers must still tolerate them (see
+ * tests/integration/file-upload-attempt-identity.integration.test.ts).
+ */
+export const FILE_UPLOAD_RECORD_ID_SEPARATOR = '::';
+export const FILE_UPLOAD_RECORD_ID_MAX_LENGTH = 255;
+
+export function buildFileUploadChangelogRecordID(fileName: string, attemptIdentity: string): string {
+  return `${fileName}${FILE_UPLOAD_RECORD_ID_SEPARATOR}${attemptIdentity}`.slice(0, FILE_UPLOAD_RECORD_ID_MAX_LENGTH);
+}
+
+/** One chunk's contribution to a `file_upload` changelog row's running totals (#507). */
+export interface FileUploadChunkSummary {
+  rowCount: number;
+  droppedCount: number;
+}
+
+/**
+ * Merges one chunk's counts into a `file_upload` changelog row's metadata,
+ * keyed by `chunkIdentity` (#507) — NOT by `batchID`: the worker stages every
+ * chunk of one file under the SAME batchID (one chunkIndex per chunk), so
+ * keying by batchID collapsed every chunk but the last. `chunkIdentity` must
+ * be stable across a retry of the SAME chunk (REPLACES, no double-count) and
+ * distinct per genuinely different chunk (ADDS). Attempt separation comes
+ * from buildFileUploadChangelogRecordID's RecordID, not from this.
+ *
+ * Mutates `metadata` in place and returns it for convenience.
+ */
+export function mergeFileUploadChunkIntoMetadata<T extends Record<string, unknown>>(metadata: T, chunkIdentity: string, chunk: FileUploadChunkSummary): T {
+  const existingChunks = metadata.chunksByIdentity;
+  const chunksByIdentity: Record<string, FileUploadChunkSummary> =
+    existingChunks && typeof existingChunks === 'object' ? { ...(existingChunks as Record<string, FileUploadChunkSummary>) } : {};
+
+  chunksByIdentity[chunkIdentity] = chunk;
+
+  let rowCount = 0;
+  let droppedCount = 0;
+  for (const summary of Object.values(chunksByIdentity)) {
+    rowCount += summary.rowCount;
+    droppedCount += summary.droppedCount;
+  }
+
+  Object.assign(metadata, {
+    chunksByIdentity,
+    rowCount,
+    droppedCount,
+    batchCount: Object.keys(chunksByIdentity).length
+  });
+
+  return metadata;
+}

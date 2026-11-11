@@ -17,9 +17,18 @@ import {
   TAXON_RANK_SUBSPECIES,
   TAXON_RANK_SPECIES,
   MISSING_PLOT_COORDINATE_SCOPE,
+  DESTINATION_PLOT_COORDINATE_TYPE_SCOPE,
+  STEM_LOOKUP_INDEX_NAME,
+  TEMP_ID_INDEX_NAME,
+  TREE_LOOKUP_AMBIGUITY_INDEX_NAME,
+  EMPTY_STEMTAG_COLLISION_REASON,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
 import { type MeasurementStagingRow, type AttributeStagingRow, renderInsertChunksMeasurements } from '../lib/csv-to-sql-shared';
+import { renderArtifact } from '../lib/ctfs-export/render-procedure';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Default MeasurementStagingRow for renderStage1 tests — every field
@@ -194,8 +203,8 @@ describe('renderStage0', () => {
   });
 
   it('preserves the exact whitespace seam between the CreateFullView probe and the census guard (default path)', () => {
-    // The renderStage0 body is assembled by concatenating three fragments
-    // (DBHAttributes probe + CreateFullView probe + census guard). This locks
+    // The renderStage0 body is assembled by concatenating four fragments
+    // (DBHAttributes + coordinate-type + CreateFullView probes + census guard). This locks
     // the seam so a future edit cannot silently collapse the blank-line
     // separator that keeps the emitted SQL readable and matches the goldens.
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
@@ -206,6 +215,32 @@ describe('renderStage0', () => {
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
     expect(sql).toMatch(/DBHAttributes still has a CensusID column/);
     expect(sql).toMatch(/apply DBCHANGES2014f\.sql/);
+  });
+
+  it('reports the destination Stem.PX/PY column type as a Stage 0a result set', () => {
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope,`);
+    expect(sql).toMatch(/MAX\(CASE WHEN COLUMN_NAME = 'PX' THEN COLUMN_TYPE END\) AS px_column_type,/);
+    expect(sql).toMatch(/MAX\(CASE WHEN COLUMN_NAME = 'PY' THEN COLUMN_TYPE END\) AS py_column_type/);
+    expect(sql).not.toMatch(/_px_col_type|_py_col_type/);
+  });
+
+  it('pins the public Stem.PX/PY diagnostic scope label', () => {
+    expect(DESTINATION_PLOT_COORDINATE_TYPE_SCOPE).toBe('Destination Stem.PX/PY column type');
+  });
+
+  it('fails when either Stem.PX/PY column is absent without rejecting an existing FLOAT type', () => {
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).toMatch(/COLUMN_NAME IN \('PX', 'PY'\)[\s\S]+<> 2 THEN[\s\S]+Destination Stem\.PX or Stem\.PY is missing/);
+    expect(sql).not.toMatch(/COLUMN_TYPE\s*(?:=|<>|IN)\s*['(]float/i);
+  });
+
+  it('emits the Stem.PX/PY column-type probe on the allowReload path and when the CreateFullView probe is omitted', () => {
+    const reloadSql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: true });
+    expect(reloadSql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope`);
+
+    const publishSql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false, includeViewFullTableProbe: false });
+    expect(publishSql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope`);
   });
 
   it('sets @target_census_id and @target_plot_id session variables', () => {
@@ -542,12 +577,29 @@ describe('renderStage2', () => {
     );
   });
 
-  it('tree_lookup groups by (Tag, SpeciesID, SubSpeciesID) and is plot-scoped via Stem -> Quadrat', () => {
+  it('tree_lookup declares its TreeCount key inline, groups by (Tag, SpeciesID, SubSpeciesID) and is plot-scoped via Stem -> Quadrat', () => {
     const s = sql();
-    expect(s).toMatch(/CREATE TEMPORARY TABLE tree_lookup AS/);
+    expect(s).toContain(`CREATE TEMPORARY TABLE tree_lookup (KEY ${TREE_LOOKUP_AMBIGUITY_INDEX_NAME} (TreeCount)) AS`);
     expect(s).toMatch(
       /FROM Tree tr\s+JOIN Stem s ON s\.TreeID = tr\.TreeID\s+JOIN Quadrat q ON q\.QuadratID = s\.QuadratID\s+WHERE q\.PlotID = @target_plot_id\s+GROUP BY tr\.Tag, tr\.SpeciesID, tr\.SubSpeciesID/
     );
+  });
+
+  it('the taxonomy lookup temp tables declare their TempID keys inline (MySQL 5.7 and MariaDB have no hash join for these probes)', () => {
+    const s = sql();
+    expect(s).toContain(`CREATE TEMPORARY TABLE taxonomy_best_rank (KEY ${TEMP_ID_INDEX_NAME} (TempID)) AS`);
+    expect(s).toContain(`CREATE TEMPORARY TABLE taxonomy_lookup (KEY ${TEMP_ID_INDEX_NAME} (TempID)) AS`);
+  });
+
+  it('tree_lookup has no Tag-led key: staging Tag takes the database charset and destination Tree.Tag is latin1', () => {
+    const s = sql();
+    const createStart = s.indexOf('CREATE TEMPORARY TABLE tree_lookup');
+    expect(createStart).toBeGreaterThan(-1);
+    const treeLookupDefinition = s.slice(createStart, s.indexOf(' AS\n', createStart));
+    expect(
+      treeLookupDefinition,
+      'A Tag-led tree_lookup key is unusable when staging and destination Tree.Tag differ in charset, which leaves check 3 a per-row full scan on MySQL 5.7 and MariaDB (spec §3.4)'
+    ).not.toMatch(/\bTag\b/);
   });
 
   it('tree write-back uses NULL-safe <=> on SubSpeciesID, not IS NULL', () => {
@@ -556,9 +608,9 @@ describe('renderStage2', () => {
     expect(s).not.toMatch(/tl\.SubSpeciesID IS NULL/);
   });
 
-  it('stem_lookup plot-scoped and grouped by (TreeID, StemTag)', () => {
+  it('stem_lookup declares its (TreeID, StemTag) key inline, is plot-scoped and grouped by (TreeID, StemTag)', () => {
     const s = sql();
-    expect(s).toMatch(/CREATE TEMPORARY TABLE stem_lookup AS/);
+    expect(s).toContain(`CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTag)) AS`);
     expect(s).toMatch(/GROUP BY s\.TreeID, s\.StemTag/);
   });
 
@@ -597,6 +649,9 @@ describe('renderStage2', () => {
 
 describe('renderStage5', () => {
   const opts = { measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' };
+  const TEST_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
+  const PUBLISH_MANUAL_PATH = path.resolve(TEST_DIRECTORY, '../docs/src/content/docs/publishing-census-to-smithsonian-db.mdx');
+  const operatorManual = readFileSync(PUBLISH_MANUAL_PATH, 'utf8');
   const sql = () => renderStage5(opts);
 
   it('check 1: required-field NOT NULL (catches empty strings as well as NULLs)', () => {
@@ -608,9 +663,16 @@ describe('renderStage5', () => {
     );
   });
 
-  it("check 1b: empty StemTag collisions are caught (app schema stores StemTag with default '')", () => {
-    expect(sql()).toMatch(/Empty StemTag collides with another stem under same Tree\+Quadrat/);
-    expect(sql()).toMatch(/_stage5_empty_stemtag/);
+  it("check 1b: empty StemTag collisions are caught (app schema stores StemTag with default ''), scoped to the staged tree and quadrat", () => {
+    const s = sql();
+    expect(operatorManual, `${PUBLISH_MANUAL_PATH} must quote the exact reason text the artifact reports`).toContain(EMPTY_STEMTAG_COLLISION_REASON);
+    expect(s).toContain(`'${EMPTY_STEMTAG_COLLISION_REASON}'`);
+    expect(s).toMatch(/_stage5_empty_stemtag/);
+    expect(s).toContain('s.TreeID = `staging_measurements`.TreeID');
+    expect(s).toContain('s.QuadratID = `staging_measurements`.QuadratID');
+    // Unqualified, these resolve to Stem s itself and the predicate is always true.
+    expect(s).not.toMatch(/s\.TreeID = TreeID\b/);
+    expect(s).not.toMatch(/s\.QuadratID = QuadratID\b/);
   });
 
   it('check 2: unmatched and ambiguous taxonomy are separate, distinguishable reasons', () => {
@@ -899,5 +961,109 @@ describe('renderPostLoadViewFullTableCall', () => {
     const sql = renderPostLoadViewFullTableCall();
     expect(sql).not.toMatch(/DELIMITER/);
     expect(sql).not.toMatch(/CREATE PROCEDURE/);
+  });
+});
+
+describe('load transaction body', () => {
+  const DESTINATION_PLOT_ID = 1;
+  const CENSUS_NUMBER = '2024';
+  const SOURCE_SCHEMA = 'forestgeo_test';
+  const APP_PLOT_ID = 5;
+  const APP_CENSUS_ID = 7;
+  const GENERATED_AT = new Date('2026-05-19T12:00:00Z');
+  const SQL_LINE_COMMENT_PREFIX = '--';
+  const ENVELOPE_TRANSACTION_START = '\n  START TRANSACTION;\n';
+  const ENVELOPE_TRANSACTION_COMMIT = '\n  COMMIT;\n';
+
+  const TABLE_MAINTENANCE_VERBS = ['ANALYZE', 'OPTIMIZE', 'CHECK', 'REPAIR'];
+  const SCHEMA_OBJECT_DDL_VERBS = ['CREATE', 'DROP', 'ALTER'];
+  const SCHEMA_OBJECT_TYPES = ['VIEW', 'PROCEDURE', 'FUNCTION', 'TRIGGER', 'EVENT'];
+
+  const IMPLICIT_COMMIT_STATEMENTS: ReadonlyArray<{ statement: string; pattern: RegExp; example: string }> = [
+    { statement: 'ALTER TABLE', pattern: /\bALTER\s+TABLE\b/gi, example: 'ALTER TABLE staging_x ADD KEY k (a);' },
+    { statement: 'CREATE INDEX', pattern: /\bCREATE\s+(UNIQUE\s+)?INDEX\b/gi, example: 'CREATE UNIQUE INDEX k ON staging_x (a);' },
+    { statement: 'DROP INDEX', pattern: /\bDROP\s+INDEX\b/gi, example: 'DROP INDEX k ON staging_x;' },
+    { statement: 'TRUNCATE', pattern: /\bTRUNCATE\b(?!\s*\()/gi, example: 'TRUNCATE staging_x;' },
+    { statement: 'RENAME TABLE', pattern: /\bRENAME\s+TABLE\b/gi, example: 'RENAME TABLE staging_x TO staging_y;' },
+    { statement: 'CREATE TABLE without TEMPORARY', pattern: /\bCREATE\s+TABLE\b/gi, example: 'CREATE TABLE staging_x (a INT);' },
+    { statement: 'DROP TABLE without TEMPORARY', pattern: /\bDROP\s+TABLE\b/gi, example: 'DROP TABLE staging_x;' },
+    { statement: 'LOCK TABLES / UNLOCK TABLES', pattern: /\b(UN)?LOCK\s+TABLES\b/gi, example: 'LOCK TABLES staging_x WRITE;' },
+    { statement: 'LOCK TABLE / UNLOCK TABLE (singular)', pattern: /\b(UN)?LOCK\s+TABLE\b/gi, example: 'LOCK TABLE staging_x WRITE;' },
+    { statement: 'COMMIT', pattern: /\bCOMMIT\b/gi, example: 'COMMIT;' },
+    { statement: 'START TRANSACTION', pattern: /\bSTART\s+TRANSACTION\b/gi, example: 'START TRANSACTION;' },
+    { statement: 'ROLLBACK (not TO SAVEPOINT)', pattern: /\bROLLBACK\b(?!\s+TO\s+SAVEPOINT\b)/gi, example: 'ROLLBACK;' },
+    { statement: 'SET autocommit', pattern: /\bSET\s+(?:(?:SESSION|GLOBAL)\s+)?autocommit\b/gi, example: 'SET autocommit = 1;' },
+    { statement: 'SET @@autocommit', pattern: /\bSET\s+@@(?:(?:SESSION|GLOBAL)\.)?autocommit\b/gi, example: 'SET @@autocommit = 1;' },
+    ...TABLE_MAINTENANCE_VERBS.map(verb => ({
+      statement: `${verb} TABLE`,
+      pattern: new RegExp(`\\b${verb}\\s+(?:(?:NO_WRITE_TO_BINLOG|LOCAL)\\s+)?TABLE\\b`, 'gi'),
+      example: `${verb} TABLE staging_x;`
+    })),
+    ...SCHEMA_OBJECT_DDL_VERBS.flatMap(verb =>
+      SCHEMA_OBJECT_TYPES.map(objectType => ({
+        statement: `${verb} ${objectType}`,
+        pattern: new RegExp(`\\b${verb}\\s+(?:OR\\s+REPLACE\\s+)?${objectType}\\b`, 'gi'),
+        example: `${verb} ${objectType} some_object;`
+      }))
+    )
+  ];
+
+  const findImplicitCommitStatements = (sqlBody: string): string[] => {
+    const executableSql = sqlBody
+      .split('\n')
+      .filter(line => !line.trim().startsWith(SQL_LINE_COMMENT_PREFIX))
+      .join('\n');
+    return IMPLICIT_COMMIT_STATEMENTS.flatMap(({ statement, pattern }) => Array.from(executableSql.matchAll(pattern), match => `${statement}: "${match[0]}"`));
+  };
+
+  const renderLoadTransactionBody = (overrides: { allowReload: boolean; reloadDryRun: boolean }): string => {
+    const { sql } = renderArtifact({
+      schema: SOURCE_SCHEMA,
+      appPlotId: APP_PLOT_ID,
+      destinationPlotId: DESTINATION_PLOT_ID,
+      appCensusId: APP_CENSUS_ID,
+      plotCensusNumber: CENSUS_NUMBER,
+      generatedAt: GENERATED_AT,
+      measurementRows: [],
+      attributeRows: [],
+      ...overrides
+    });
+    const bodyStart = sql.indexOf(ENVELOPE_TRANSACTION_START);
+    const bodyEnd = sql.lastIndexOf(ENVELOPE_TRANSACTION_COMMIT);
+    expect(bodyStart, 'envelope START TRANSACTION not found in the rendered artifact').toBeGreaterThanOrEqual(0);
+    expect(bodyEnd, 'envelope COMMIT not found in the rendered artifact').toBeGreaterThan(bodyStart);
+    return sql.slice(bodyStart + ENVELOPE_TRANSACTION_START.length, bodyEnd);
+  };
+
+  const loadBodies = [
+    { name: 'first publish (default, no reload)', options: { allowReload: false, reloadDryRun: false } },
+    { name: 'real publish with reload cleanup (all stages)', options: { allowReload: true, reloadDryRun: false } },
+    { name: 'reload dry-run', options: { allowReload: false, reloadDryRun: true } }
+  ];
+
+  it.each(loadBodies)('the $name body has no statement that implicitly commits the load transaction', ({ options }) => {
+    const loadBody = renderLoadTransactionBody(options);
+    const offendingStatements = findImplicitCommitStatements(loadBody);
+
+    expect(loadBody.length, 'rendered load body is empty, so the guard would pass vacuously').toBeGreaterThan(0);
+    expect(offendingStatements, `these statements would commit the load transaction mid-procedure:\n${offendingStatements.join('\n')}`).toEqual([]);
+  });
+
+  it.each(IMPLICIT_COMMIT_STATEMENTS)('the guard detects $statement, so the check above cannot pass vacuously', ({ statement, pattern, example }) => {
+    expect(Array.from(example.matchAll(pattern)), `pattern for ${statement} (${pattern}) missed its own example: ${example}`).not.toEqual([]);
+    expect(findImplicitCommitStatements(example), `guard missed ${statement} (pattern ${pattern})`).not.toEqual([]);
+  });
+
+  it('the guard ignores commented-out statements, TEMPORARY tables, the TRUNCATE() function and savepoint rollbacks', () => {
+    const permittedSql = [
+      '-- TRUNCATE staging_x;',
+      'CREATE TEMPORARY TABLE t AS SELECT 1;',
+      'DROP TEMPORARY TABLE IF EXISTS t;',
+      'SELECT TRUNCATE(Value, 2) FROM t;',
+      'SAVEPOINT reload_dry;',
+      'ROLLBACK TO SAVEPOINT reload_dry;'
+    ].join('\n');
+
+    expect(findImplicitCommitStatements(permittedSql)).toEqual([]);
   });
 });

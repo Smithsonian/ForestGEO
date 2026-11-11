@@ -103,6 +103,8 @@ export const ROUTE_POLICIES = {
   // Dashboard metrics
   'dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDParam]': 'site-scoped',
   'dashboardmetrics/all/[schema]/[plotID]/[censusID]': 'site-scoped',
+  // Census overview (read-only publish facts; any site member)
+  'censusoverview/summary/[schema]/[plotID]/[censusID]': 'site-scoped',
   // Data fetch / paged data views
   'fetchall/[[...slugs]]': 'site-scoped',
   'fixeddata/[dataType]/[[...slugs]]': 'site-scoped',
@@ -132,6 +134,7 @@ export const ROUTE_POLICIES = {
   'validations/procedures/[validationType]': 'site-scoped',
   'validations/procedures/shared-cross-census-location': 'site-scoped',
   'validations/procedures/shared-dbh': 'site-scoped',
+  'validations/clearmeasurementerrors': 'site-scoped',
   'validations/run': 'site-scoped',
   'validations/updatepassedvalidations': 'site-scoped',
   'validations/validate-query': 'site-scoped',
@@ -168,7 +171,11 @@ export const ROUTE_POLICIES = {
   // membership up front; the handler then verifies the loaded job's
   // SchemaName matches the authorized query schema (404 on mismatch) before
   // the existing per-user ownership check (requireJobAccess) runs.
-  'uploadjobs/[jobId]': 'site-scoped'
+  'uploadjobs/[jobId]': 'site-scoped',
+  // Read-only "how many rows would a Clean Re-Upload replace" preview
+  // (issue #504): withRouteAuthz + fromQuery('schema'), plus the handler's own
+  // assertCanEditMeasurementScope plot/census check.
+  'uploads/replacement-preview': 'site-scoped'
 } satisfies Record<string, RoutePolicy>;
 
 /** Compile-time union of every declared route key. Adoption sites use this so a

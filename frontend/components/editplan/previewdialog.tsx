@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Alert,
   Box,
@@ -78,12 +78,15 @@ export default function PreviewDialog({ plan, onConfirm, onCancel, busy, wasRefr
   const isBlocked = plan.canApply === false || (plan.errors ?? []).some(error => error.blocking);
   const isDestructive = plan.maxSeverity === 'destructive' && !isBlocked;
 
-  const [confirmText, setConfirmText] = useState('');
-  // Reset the typed-confirm box whenever the plan identity or refresh status
-  // changes — drift replay must force the user to re-acknowledge.
-  useEffect(() => {
-    setConfirmText('');
-  }, [plan.planHash, wasRefreshed]);
+  // Reset during render (not an effect) whenever a new plan DELIVERY
+  // arrives, keyed by the `plan` object reference plus `wasRefreshed`
+  // (not planHash), so a stale "APPLY" can never reach a committed frame.
+  const [typedConfirm, setTypedConfirm] = useState({ plan, wasRefreshed: !!wasRefreshed, text: '' });
+  const typedConfirmMatchesCurrentDelivery = typedConfirm.plan === plan && typedConfirm.wasRefreshed === !!wasRefreshed;
+  if (!typedConfirmMatchesCurrentDelivery) {
+    setTypedConfirm({ plan, wasRefreshed: !!wasRefreshed, text: '' });
+  }
+  const confirmText = typedConfirmMatchesCurrentDelivery ? typedConfirm.text : '';
 
   const typedConfirmSatisfied = !isDestructive || confirmText.trim().toUpperCase() === DESTRUCTIVE_CONFIRM_TOKEN;
 
@@ -178,7 +181,7 @@ export default function PreviewDialog({ plan, onConfirm, onCancel, busy, wasRefr
                 <Input
                   size="sm"
                   value={confirmText}
-                  onChange={event => setConfirmText(event.target.value)}
+                  onChange={event => setTypedConfirm({ plan, wasRefreshed: !!wasRefreshed, text: event.target.value })}
                   placeholder={DESTRUCTIVE_CONFIRM_TOKEN}
                   disabled={busy}
                   slotProps={{

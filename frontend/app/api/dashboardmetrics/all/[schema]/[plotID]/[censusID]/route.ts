@@ -16,6 +16,7 @@ import { HTTPResponses } from '@/config/macros';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
+import { buildMeasuredStemCountSql, buildMeasuredTreeCountSql } from '@/config/dashboardmetricsqueries';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database compatibility
@@ -116,6 +117,7 @@ export async function GET(
             JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
             JOIN ${schema}.quadrats q2 ON s.QuadratID = q2.QuadratID
             WHERE cm.CensusID = ? AND q2.PlotID = ?
+              AND cm.IsActive = 1 AND s.IsActive = 1
           )
           SELECT
             COUNT(*) AS total_quadrats,
@@ -144,25 +146,9 @@ export async function GET(
       [censusID, plotID]
     );
 
-    const countTreesPromise = connectionManager.executeQuery(
-      `
-          SELECT COUNT(t.TreeID) AS CountTrees
-          FROM ${schema}.trees t
-          JOIN ${schema}.census c ON t.CensusID = c.CensusID
-          WHERE t.CensusID = ? AND c.PlotID = ?
-        `,
-      [censusID, plotID]
-    );
+    const countTreesPromise = connectionManager.executeQuery(buildMeasuredTreeCountSql(schema), [censusID, plotID]);
 
-    const countStemsPromise = connectionManager.executeQuery(
-      `
-          SELECT COUNT(st.StemGUID) AS CountStems
-          FROM ${schema}.stems st
-          JOIN ${schema}.census c ON st.CensusID = c.CensusID
-          WHERE st.CensusID = ? AND c.PlotID = ?
-        `,
-      [censusID, plotID]
-    );
+    const countStemsPromise = connectionManager.executeQuery(buildMeasuredStemCountSql(schema), [censusID, plotID]);
 
     const independentMetricPromises = [progressTachoPromise, activeUsersPromise, countTreesPromise, countStemsPromise] as const;
     const prevCensusResult = await previousCensusPromise.catch(async error => {
@@ -187,14 +173,10 @@ export async function GET(
             JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
             JOIN ${schema}.trees t ON s.TreeID = t.TreeID
             WHERE cm.CensusID = ? AND s.CensusID = ?
+              AND cm.IsActive = 1 AND s.IsActive = 1 AND t.IsActive = 1
           )
           SELECT
-            ${MULTI_STEM_TREES_SUBQUERY} AS CountMultiStems,
-            -- Every measured stem is a recruit on a first census. Count rows the
-            -- same way the comparison branch does (one per distinct StemGUID):
-            -- concatenating tag pairs would yield NULL for NULL TreeTags and drop
-            -- those stems, contradicting the Stems tile.
-            (SELECT COUNT(*) FROM measured_stems) AS CountNewRecruits
+            ${MULTI_STEM_TREES_SUBQUERY} AS CountMultiStems
         `,
         [censusID, censusID]
       );
@@ -208,6 +190,7 @@ export async function GET(
             JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
             JOIN ${schema}.trees t ON s.TreeID = t.TreeID
             WHERE cm.CensusID = ? AND s.CensusID = ?
+              AND cm.IsActive = 1 AND s.IsActive = 1 AND t.IsActive = 1
           ),
           previous_stems AS (
             SELECT t_prev.TreeTag, s_prev.StemTag
@@ -258,7 +241,9 @@ export async function GET(
       stemTypes: {
         CountOldStems: isFirstCensus ? null : (stemTypesResults[0]?.CountOldStems ?? 0),
         CountMultiStems: stemTypesResults[0]?.CountMultiStems ?? 0,
-        CountNewRecruits: stemTypesResults[0]?.CountNewRecruits ?? 0,
+        // A first census has no lower CensusID in the plot, so every measured stem is a
+        // recruit: reuse the Total Stems result so the two tiles are equal by construction.
+        CountNewRecruits: isFirstCensus ? (countStemsResults[0]?.CountStems ?? 0) : (stemTypesResults[0]?.CountNewRecruits ?? 0),
         isFirstCensus
       }
     };

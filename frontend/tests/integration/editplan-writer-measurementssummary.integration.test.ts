@@ -231,7 +231,12 @@ async function countCmAttributes(connection: Connection, coreMeasurementID: numb
 }
 
 async function loadCoreMeasurement(connection: Connection, coreMeasurementID: number): Promise<Record<string, unknown>> {
-  const [rows] = await connection.query<RowDataPacket[]>('SELECT * FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1', [coreMeasurementID]);
+  // MeasurementDateYmd is formatted server-side so the assertion reads the
+  // stored calendar day without going through the driver's Date decoding.
+  const [rows] = await connection.query<RowDataPacket[]>(
+    "SELECT *, DATE_FORMAT(MeasurementDate, '%Y-%m-%d') AS MeasurementDateYmd FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1",
+    [coreMeasurementID]
+  );
   if (rows.length === 0) throw new Error('coremeasurements row vanished');
   return rows[0] as Record<string, unknown>;
 }
@@ -580,9 +585,7 @@ describe('writeMeasurementsSummary (integration)', () => {
       await cm.commitTransaction(txID);
 
       const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
-      const storedDate = cmRow.MeasurementDate;
-      const storedDateAsIso = storedDate instanceof Date ? storedDate.toISOString().split('T')[0] : String(storedDate).split('T')[0].split(' ')[0];
-      expect(storedDateAsIso).toBe(newDate);
+      expect(cmRow.MeasurementDateYmd, 'stored SQL DATE retains the requested calendar day').toBe(newDate);
       expect(cmRow.Description).toBe(newDescription);
       expect(cmRow.RawComments).toBe(newDescription);
       expect(cmRow.StemGUID).toBe(stemGUIDBefore);
@@ -692,9 +695,7 @@ describe('writeMeasurementsSummary (integration)', () => {
       expect(cmRow.RawCodes).toBe(newAttributes);
       expect(cmRow.RawComments).toBe(newDescription);
 
-      const storedDate = cmRow.MeasurementDate;
-      const storedDateAsIso = storedDate instanceof Date ? storedDate.toISOString().split('T')[0] : String(storedDate).split('T')[0].split(' ')[0];
-      expect(storedDateAsIso).toBe(newDate);
+      expect(cmRow.MeasurementDateYmd, 'stored SQL DATE retains the requested calendar day').toBe(newDate);
 
       const newStem = await loadStem(connection, Number(cmRow.StemGUID));
       expect(newStem?.StemTag).toBe(allFieldStemTag);

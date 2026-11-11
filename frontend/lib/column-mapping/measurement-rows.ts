@@ -169,6 +169,8 @@ export function validateMeasurementRow(row: FileRow, requiredHeaders: { label: s
 
 export interface MeasurementChunkResult {
   validRows: FileRow[];
+  /** Chunk-relative index in `rawRows` of each entry of `validRows`, in the same order. */
+  validRowSourceIndexes: number[];
   invalidRows: FileRow[];
   plan: HeaderResolutionPlan | null;
   columnCountMismatch: boolean;
@@ -201,11 +203,19 @@ export function resolveMeasurementChunk(rawRows: Record<string, string>[], parse
   const ignoredColumnCount = plan ? plan.ignoredKeys.size : 0;
 
   if (plan && !planColumnCountMatches(plan, parsedFieldCount)) {
-    return { validRows: [], invalidRows: [], plan, columnCountMismatch: true, diagnostics: { invalidDateValues: [], extraColumnRows: 0, ignoredColumnCount } };
+    return {
+      validRows: [],
+      validRowSourceIndexes: [],
+      invalidRows: [],
+      plan,
+      columnCountMismatch: true,
+      diagnostics: { invalidDateValues: [], extraColumnRows: 0, ignoredColumnCount }
+    };
   }
 
   const keyOf = plan ? transformHeaderFromPlan(plan) : (h: string) => h;
   const validRows: FileRow[] = [];
+  const validRowSourceIndexes: number[] = [];
   const invalidRows: FileRow[] = [];
   const invalidDateValues: string[] = [];
   let extraColumnRows = 0;
@@ -225,7 +235,7 @@ export function resolveMeasurementChunk(rawRows: Record<string, string>[], parse
     return keyed;
   };
 
-  for (const rawRow of rawRows) {
+  for (const [sourceIndex, rawRow] of rawRows.entries()) {
     const allEntries = Object.entries(rawRow) as [string, string][];
 
     if (plan) {
@@ -248,8 +258,10 @@ export function resolveMeasurementChunk(rawRows: Record<string, string>[], parse
       }
 
       const result = validateMeasurementRow(collapsed, requiredHeaders, delimiter, formType);
-      if (result.valid) validRows.push(collapsed);
-      else invalidRows.push({ ...collapsed, failureReason: result.failureReason ?? 'Unknown error' });
+      if (result.valid) {
+        validRows.push(collapsed);
+        validRowSourceIndexes.push(sourceIndex);
+      } else invalidRows.push({ ...collapsed, failureReason: result.failureReason ?? 'Unknown error' });
       continue;
     }
 
@@ -257,9 +269,18 @@ export function resolveMeasurementChunk(rawRows: Record<string, string>[], parse
     const keyed = keyEntries(allEntries);
     const result = validateMeasurementRow(keyed, requiredHeaders, delimiter, formType);
     if (result.hasExtraColumns) extraColumnRows += 1;
-    if (result.valid) validRows.push(keyed);
-    else invalidRows.push({ ...keyed, failureReason: result.failureReason ?? 'Unknown error' });
+    if (result.valid) {
+      validRows.push(keyed);
+      validRowSourceIndexes.push(sourceIndex);
+    } else invalidRows.push({ ...keyed, failureReason: result.failureReason ?? 'Unknown error' });
   }
 
-  return { validRows, invalidRows, plan, columnCountMismatch: false, diagnostics: { invalidDateValues, extraColumnRows, ignoredColumnCount } };
+  return {
+    validRows,
+    validRowSourceIndexes,
+    invalidRows,
+    plan,
+    columnCountMismatch: false,
+    diagnostics: { invalidDateValues, extraColumnRows, ignoredColumnCount }
+  };
 }

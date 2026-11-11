@@ -17,16 +17,12 @@ import {
   Typography
 } from '@mui/joy';
 import React from 'react';
+import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 import WarningIcon from '@mui/icons-material/Warning';
 
 export default function RenderFormExplanations(uploadForm: FormType) {
-  const categoryRegex = /alive(?:-not measured)?|dead|missing|broken below|stem dead/g;
-  const matches = TableHeadersByFormType[uploadForm].find(obj => obj.label === 'status')?.explanation?.match(categoryRegex);
-  const cleanedString = TableHeadersByFormType[uploadForm]
-    .find(obj => obj.label === 'status')
-    ?.explanation?.replace(categoryRegex, '')
-    .replace(/\s*,\s*/g, '')
-    .trim();
+  const statusExplanation = TableHeadersByFormType[uploadForm].find(obj => obj.label === 'status')?.explanation;
+  const cleanedString = statusExplanation?.replace(AttributeStatusOptions.join(', '), '').trim();
 
   return (
     <Box
@@ -137,7 +133,7 @@ export default function RenderFormExplanations(uploadForm: FormType) {
                       <Box display="flex" flex={1} flexDirection="column">
                         <Typography level="body-sm">{cleanedString}</Typography>
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                          {matches?.map((category, index) => (
+                          {AttributeStatusOptions.map((category, index) => (
                             <Chip key={index} variant="soft">
                               {category}
                             </Chip>

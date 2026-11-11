@@ -3,44 +3,21 @@ import Papa from 'papaparse';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { DEFAULT_ERROR_EXPLORER_FILTERS, ErrorExplorerQueryRequest } from '@/config/errorsexplorer';
-import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { buildErrorExportRows, fetchGroupedErrorRows } from '../_shared';
 import { fromBody, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
-import { z } from 'zod';
+import {
+  errorExplorerExportRequestSchema,
+  parseExplorerRequest,
+  readExplorerRequestJson,
+  type ParsedErrorExplorerScopeRequest
+} from '@/lib/errorsexplorer/explorerrequest';
 
 export const runtime = 'nodejs';
 
 type ErrorExplorerExportRequest = Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters'>;
 
-const MAX_EXPORT_CENSUS_IDS = 25;
-const boundedStrings = z.array(z.string().max(1_000)).max(100);
-const exportRequestSchema = z
-  .object({
-    schema: z.string().refine(isValidSchema, 'Invalid schema'),
-    plotID: z.coerce.number().int().positive(),
-    censusID: z.coerce.number().int().positive(),
-    censusIDs: z.array(z.coerce.number().int().positive()).max(MAX_EXPORT_CENSUS_IDS).optional().default([]),
-    filters: z
-      .object({
-        source: z.enum(['all', 'validation', 'ingestion']).optional().default(DEFAULT_ERROR_EXPLORER_FILTERS.source),
-        exactMessages: boundedStrings.optional().default([]),
-        affectedFields: boundedStrings.optional().default([]),
-        contradictionOnly: z.boolean().optional().default(false),
-        contradictionTypes: z
-          .array(z.enum(['duplicate_tag_stem', 'same_batch_conflict']))
-          .max(2)
-          .optional()
-          .default([]),
-        quickSearch: z.string().max(500).optional().default(''),
-        presetId: z.string().max(100).optional()
-      })
-      .optional()
-      .default(DEFAULT_ERROR_EXPLORER_FILTERS)
-  })
-  .strict();
-
-function parseRequest(body: z.infer<typeof exportRequestSchema>): ErrorExplorerExportRequest {
+function parseRequest(body: ParsedErrorExplorerScopeRequest): ErrorExplorerExportRequest {
   return {
     schema: body.schema ?? '',
     plotID: Number(body.plotID ?? 0),
@@ -61,17 +38,13 @@ async function handler(request: NextRequest, _context: RouteContext) {
   const startedAt = Date.now();
 
   try {
-    let rawBody: unknown;
-    try {
-      rawBody = await request.json();
-    } catch {
+    const json = await readExplorerRequestJson(request);
+    if (!json.ok) {
       return NextResponse.json({ error: 'Invalid export request', code: 'INVALID_EXPORT_REQUEST' }, { status: HTTPResponses.INVALID_REQUEST });
     }
-    const parsed = exportRequestSchema.safeParse(rawBody);
-    if (!parsed.success) {
-      ailogger.warn('Rejected invalid errors explorer export request', {
-        issues: parsed.error.issues.map(issue => ({ path: issue.path.join('.'), code: issue.code }))
-      });
+    const parsed = parseExplorerRequest(errorExplorerExportRequestSchema, json.body);
+    if (!parsed.ok) {
+      ailogger.warn('Rejected invalid errors explorer export request', { issues: parsed.issues });
       return NextResponse.json({ error: 'Invalid export request', code: 'INVALID_EXPORT_REQUEST' }, { status: HTTPResponses.INVALID_REQUEST });
     }
     const body = parseRequest(parsed.data);

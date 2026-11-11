@@ -45,11 +45,10 @@ interface CleanupResult {
 /**
  * Find orphaned temporary measurements (not associated with active session)
  */
-async function findOrphanedTemporaryMeasurements(schema: string): Promise<{ fileId: string; batchCount: number; rowCount: number }[]> {
+async function findOrphanedTemporaryMeasurements(schema: string): Promise<{ fileId: string; rowCount: number }[]> {
   const query = `
     SELECT
       tm.FileID as fileId,
-      COUNT(DISTINCT tm.BatchID) as batchCount,
       COUNT(*) as rowCount
     FROM ${schema}.temporarymeasurements tm
     LEFT JOIN ${schema}.upload_sessions us ON tm.FileID = us.file_id
@@ -66,7 +65,6 @@ async function findOrphanedTemporaryMeasurements(schema: string): Promise<{ file
     if (!Array.isArray(results)) return [];
     return results.map((row: any) => ({
       fileId: row.fileId,
-      batchCount: row.batchCount,
       rowCount: row.rowCount
     }));
   } catch (error: any) {
@@ -125,14 +123,13 @@ async function findStaleTemporaryMeasurements(schema: string, _maxAgeHours: numb
 }
 
 /**
- * Clear stale transactions from ConnectionManager
+ * Reap abandoned transactions in this process and return how many were reaped
  */
 async function clearStaleTransactions(): Promise<number> {
   try {
     // Import dynamically to avoid circular dependencies
     const { default: ConnectionManager } = await import('@/lib/db/connectionmanager');
-    await ConnectionManager.getInstance().cleanupStaleTransactions();
-    return 1; // Cleanup was attempted
+    return await ConnectionManager.getInstance().cleanupStaleTransactions();
   } catch (error: unknown) {
     ailogger.error('[Cleanup API] Failed to clear stale transactions:', error instanceof Error ? error : new Error(String(error)));
     return 0;

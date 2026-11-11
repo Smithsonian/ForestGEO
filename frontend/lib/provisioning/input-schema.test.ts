@@ -4,9 +4,11 @@ import {
   EPSG_CODE_MIN,
   GEOGRAPHIC_EPSG_CODES,
   GLOBAL_COORDINATE_ABS_MAX,
+  PLOT_DESCRIPTION_MAX_LENGTH,
   ProvisioningInputSchema,
   ProvisioningPlotSchema,
-  ProvisioningQuadratsSchema
+  ProvisioningQuadratsSchema,
+  ProvisioningSiteSchema
 } from './input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import {
@@ -88,6 +90,22 @@ describe('ProvisioningPlotSchema unit vocabulary', () => {
     for (const unit of areaSelectionOptions) {
       expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, defaultAreaUnits: unit }).success).toBe(true);
     }
+  });
+});
+
+describe('ProvisioningPlotSchema description length (Sinharaja run #8 failed insert_plot on a longer one)', () => {
+  it('accepts a description exactly at the PlotDescription column width', () => {
+    const description = 'x'.repeat(PLOT_DESCRIPTION_MAX_LENGTH);
+    const result = ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, description });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
+  it('rejects a description one character over, naming the limit so the admin knows what to fix', () => {
+    const description = 'x'.repeat(PLOT_DESCRIPTION_MAX_LENGTH + 1);
+    const result = ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, description });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map(issue => issue.path.join('.'))).toEqual(['description']);
+    expect(result.error?.issues[0].message).toContain(String(PLOT_DESCRIPTION_MAX_LENGTH));
   });
 });
 
@@ -357,5 +375,36 @@ describe('ProvisioningInputSchema', () => {
     const second = ProvisioningInputSchema.safeParse(JSON.parse(JSON.stringify(first.data)));
     if (!second.success) throw new Error('expected re-parse to succeed');
     expect(second.data).toEqual(first.data);
+  });
+});
+
+describe('ProvisioningSiteSchema (inputs that broke Sinharaja provisioning)', () => {
+  it("rejects a HOM height typed into the HOM unit field ('1.3')", () => {
+    const result = ProvisioningSiteSchema.safeParse({ ...BASE_REQUEST.site, defaultUOMHOM: '1.3' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map(issue => issue.path.join('.'))).toEqual(['defaultUOMHOM']);
+  });
+
+  it('rejects a free-text DBH unit outside the unit enum', () => {
+    const result = ProvisioningSiteSchema.safeParse({ ...BASE_REQUEST.site, defaultUOMDBH: 'millimetres' });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts every dimension unit for both site unit fields', () => {
+    for (const unit of unitSelectionOptions) {
+      const result = ProvisioningSiteSchema.safeParse({ ...BASE_REQUEST.site, defaultUOMDBH: unit, defaultUOMHOM: unit });
+      expect(result.success, `unit ${unit}: ${JSON.stringify(result.error?.issues)}`).toBe(true);
+    }
+  });
+
+  it("trims a trailing space from the site name ('Sinharaja ' was stored verbatim in catalog.sites)", () => {
+    const result = ProvisioningSiteSchema.safeParse({ ...BASE_REQUEST.site, siteName: 'Sinharaja ' });
+    expect(result.success).toBe(true);
+    expect(result.data?.siteName).toBe('Sinharaja');
+  });
+
+  it('rejects a whitespace-only site name', () => {
+    const result = ProvisioningSiteSchema.safeParse({ ...BASE_REQUEST.site, siteName: '   ' });
+    expect(result.success).toBe(false);
   });
 });

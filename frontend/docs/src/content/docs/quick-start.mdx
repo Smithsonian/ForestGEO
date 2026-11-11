@@ -125,7 +125,7 @@ go back and choose **Revisions Upload** instead.
 :::
 
 :::caution
-**Don't navigate away during upload.** A file may be up to 500 MB, and large files take several minutes.
+**Don't navigate away during upload.** A file may be up to 100 MB, and large files take several minutes.
 :::
 
 <Screenshot src={uploadComplete} alt="Upload complete view with summary" caption="Upload complete — successes land in coremeasurements; failures are surfaced for review." />
@@ -142,8 +142,7 @@ Open **View Data → Measurements** to see what landed. The grid is editable inl
 
 ### Fix anything that failed
 
-Rows that didn't pass validation are listed under **Census Hub → View Errors**, in the Errors
-Explorer. Each row keeps the original values from your CSV alongside the reason it was rejected,
+Rows that didn't pass validation are listed under **Census Hub → View Errors**, grouped by error type. Each row keeps the original values from your CSV alongside the reason it was rejected,
 so you can see exactly what the file said.
 
 You have two ways to fix them: edit the fields **in place** in the grid, or upload a CSV of
@@ -162,7 +161,7 @@ to just the rows you're fixing.
     'If the reason is INTERRUPTED_UPLOAD, the row was never rejected on its merit — the upload timed out. Re-run the upload rather than editing the data.',
     'Otherwise fix the values: edit fields inline in the grid, or — for many rows at once — export, correct in a spreadsheet, and submit as a revision upload.'
   ]}
-  outcome="Corrected rows resolve against the census and appear in View Data with the rest of the measurements."
+  outcome="Corrected rows are checked again on the next validation run; a row that failed at ingestion also needs re-ingesting from Fix failed uploads."
 />
 
 ---

@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { useLayoutEffect } from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PreviewDialog from './previewdialog';
 import { EditPlan, Effect } from '@/config/editplan/types';
 
 const PLAN_HASH = 'a'.repeat(64);
+// A second, distinct plan hash standing in for a 409 drift-replay response.
+const DRIFTED_PLAN_HASH = 'b'.repeat(64);
+// The literal a user must type into the destructive typed-confirm input.
+const APPLY_CONFIRM_TEXT = 'APPLY';
 
 function makeEffect(overrides: Partial<Effect> = {}): Effect {
   return {
@@ -34,6 +39,53 @@ function makePlan(overrides: Partial<EditPlan> = {}): EditPlan {
     planHash: overrides.planHash ?? PLAN_HASH,
     generatedAt: overrides.generatedAt ?? '2026-04-20T12:00:00Z'
   };
+}
+
+// A missing button is recorded as a distinguishable sentinel rather than
+// silently coerced to `true` (disabled): if the selector ever stops
+// matching (renamed data-testid, portal not mounted, dialog unmounted),
+// the test must fail loudly on a sentinel value, not pass vacuously
+// because every frame defaulted to "disabled".
+type ApplyButtonFrame = boolean | 'apply-button-not-found';
+
+interface ApplyButtonSnapshotRecorderProps {
+  snapshots: ApplyButtonFrame[];
+}
+
+// Reads the Apply button's `disabled` state directly off the committed DOM
+// inside a layout effect with NO dependency array, which React guarantees
+// to run after every commit this component takes part in (unlike a
+// passive `useEffect`, which can lag a commit by a tick). This lets a test
+// see exactly what a user's eyes/mouse would have seen in every painted
+// frame — the precise gap where an effect-based confirmText reset could
+// leave a stale, destructive Apply button enabled for one committed frame
+// before the effect flushes.
+function ApplyButtonSnapshotRecorder({ snapshots }: ApplyButtonSnapshotRecorderProps) {
+  useLayoutEffect(() => {
+    const applyButton = document.querySelector<HTMLButtonElement>('[data-testid="edit-preview-apply"]');
+    snapshots.push(applyButton === null ? 'apply-button-not-found' : applyButton.disabled);
+  });
+  return null;
+}
+
+interface PreviewDialogHarnessProps {
+  plan: EditPlan;
+  wasRefreshed?: boolean;
+  busy?: boolean;
+  onConfirm: () => Promise<void>;
+  onCancel: () => void;
+  snapshots: ApplyButtonFrame[];
+}
+
+// Renders PreviewDialog alongside the frame recorder above so a test can
+// assert on every committed frame, not just the final settled state.
+function PreviewDialogHarness({ plan, wasRefreshed, busy, onConfirm, onCancel, snapshots }: PreviewDialogHarnessProps) {
+  return (
+    <>
+      <PreviewDialog plan={plan} onConfirm={onConfirm} onCancel={onCancel} busy={busy ?? false} wasRefreshed={wasRefreshed} />
+      <ApplyButtonSnapshotRecorder snapshots={snapshots} />
+    </>
+  );
 }
 
 describe('PreviewDialog', () => {
@@ -286,6 +338,139 @@ describe('PreviewDialog', () => {
       rerender(<PreviewDialog plan={refreshedPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} wasRefreshed={true} />);
 
       expect(screen.getByTestId('edit-preview-apply')).toBeDisabled();
+    });
+
+    // Regression test for a real correctness bug: an effect-based
+    // confirmText reset only clears the input in a passive effect AFTER
+    // the drifted/destructive plan has already committed to the DOM, so
+    // there is one real committed frame in which the Apply button for a
+    // never-read, drifted destructive plan is enabled. A fast second
+    // click (or a queued pointer event) in that frame would apply a plan
+    // the user never reviewed. This test fails against that old
+    // implementation and passes against the render-time reset because the
+    // reset is guaranteed to land in the FIRST committed frame for the new
+    // plan delivery.
+    it('never paints an enabled Apply button for a drifted destructive plan in any committed frame', async () => {
+      const user = userEvent.setup();
+      const snapshots: ApplyButtonFrame[] = [];
+      const firstPlan = makePlan({
+        maxSeverity: 'destructive',
+        planHash: PLAN_HASH,
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+
+      const { rerender } = render(
+        <PreviewDialogHarness plan={firstPlan} wasRefreshed={false} onConfirm={onConfirm} onCancel={onCancel} snapshots={snapshots} />
+      );
+
+      await user.type(screen.getByTestId('edit-preview-typed-confirm-input'), APPLY_CONFIRM_TEXT);
+      expect(screen.getByTestId('edit-preview-apply')).not.toBeDisabled();
+
+      // Everything recorded up to here belongs to firstPlan's own
+      // render/typing frames. Only snapshots recorded from this index
+      // onward belong to the drift rerender under test below.
+      const snapshotCountBeforeDrift = snapshots.length;
+
+      const driftedPlan = makePlan({
+        maxSeverity: 'destructive',
+        planHash: DRIFTED_PLAN_HASH,
+        targetID: firstPlan.targetID + 1,
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      rerender(<PreviewDialogHarness plan={driftedPlan} wasRefreshed={true} onConfirm={onConfirm} onCancel={onCancel} snapshots={snapshots} />);
+
+      const snapshotsFromDriftOnward = snapshots.slice(snapshotCountBeforeDrift);
+      // Guard the two assertions below against vacuous truth: there must be
+      // at least one newly recorded committed frame for the drift rerender,
+      // or "contains no false/not-found frame" would pass trivially on an
+      // empty array even if the recorder never fired.
+      expect(snapshotsFromDriftOnward.length).toBeGreaterThan(0);
+      // Each assertion's expected side (`false` / the sentinel literal) is
+      // independent of the recorded data, so a failure prints the real,
+      // full array of recorded frames rather than something derived from
+      // itself.
+      expect(snapshotsFromDriftOnward).not.toContain(false);
+      expect(snapshotsFromDriftOnward).not.toContain('apply-button-not-found');
+    });
+
+    it('clears the typed-confirm input on drift replay and refuses to apply the drifted plan without re-typing', async () => {
+      const user = userEvent.setup({ pointerEventsCheck: 0 });
+      const firstPlan = makePlan({
+        maxSeverity: 'destructive',
+        planHash: PLAN_HASH,
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      const { rerender } = render(<PreviewDialog plan={firstPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      await user.type(screen.getByTestId('edit-preview-typed-confirm-input'), APPLY_CONFIRM_TEXT);
+      expect(screen.getByTestId('edit-preview-apply')).not.toBeDisabled();
+
+      const driftedPlan = makePlan({
+        maxSeverity: 'destructive',
+        planHash: DRIFTED_PLAN_HASH,
+        targetID: firstPlan.targetID + 1,
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      rerender(<PreviewDialog plan={driftedPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} wasRefreshed={true} />);
+
+      expect(screen.getByTestId('edit-preview-typed-confirm-input')).toHaveValue('');
+
+      await user.click(screen.getByTestId('edit-preview-apply'));
+      expect(onConfirm).not.toHaveBeenCalled();
+    });
+
+    it('resets typed-confirm when a new plan object redelivers the same planHash (the fail-open case a hash-only identity check would miss)', async () => {
+      const user = userEvent.setup();
+      const firstPlan = makePlan({
+        maxSeverity: 'destructive',
+        planHash: PLAN_HASH,
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      const { rerender } = render(<PreviewDialog plan={firstPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      await user.type(screen.getByTestId('edit-preview-typed-confirm-input'), APPLY_CONFIRM_TEXT);
+      expect(screen.getByTestId('edit-preview-apply')).not.toBeDisabled();
+
+      // A brand-new EditPlan object whose planHash matches firstPlan's
+      // PLAN_HASH exactly — a same-hash redelivery (e.g. the same preview
+      // re-fetched twice). Identity keyed only on planHash would treat
+      // this as "the same plan" and leave the stale typed confirmation
+      // live; identity keyed on object reference must not.
+      const sameHashPlan = makePlan({
+        maxSeverity: 'destructive',
+        planHash: PLAN_HASH,
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      expect(sameHashPlan).not.toBe(firstPlan);
+
+      rerender(<PreviewDialog plan={sameHashPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      expect(screen.getByTestId('edit-preview-typed-confirm-input')).toHaveValue('');
+      expect(screen.getByTestId('edit-preview-apply')).toBeDisabled();
+    });
+
+    // Guards against a future "reset on every render" regression, which
+    // would silently make destructive confirmation unusable (the input
+    // would clear itself out from under a user mid-session on any
+    // unrelated parent re-render, e.g. a busy-state toggle delivering a
+    // new onCancel/onConfirm closure identity).
+    it('keeps the typed APPLY confirmation when only callback props change for the same plan delivery', async () => {
+      const user = userEvent.setup();
+      const plan = makePlan({
+        maxSeverity: 'destructive',
+        planHash: PLAN_HASH,
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      const { rerender } = render(<PreviewDialog plan={plan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      await user.type(screen.getByTestId('edit-preview-typed-confirm-input'), APPLY_CONFIRM_TEXT);
+      expect(screen.getByTestId('edit-preview-apply')).not.toBeDisabled();
+
+      const newOnCancel = vi.fn();
+      rerender(<PreviewDialog plan={plan} onConfirm={onConfirm} onCancel={newOnCancel} busy={false} />);
+
+      expect(screen.getByTestId('edit-preview-typed-confirm-input')).toHaveValue(APPLY_CONFIRM_TEXT);
+      expect(screen.getByTestId('edit-preview-apply')).not.toBeDisabled();
     });
 
     it('renders the drift-replay banner when wasRefreshed is true', () => {

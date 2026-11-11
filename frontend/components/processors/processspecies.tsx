@@ -1,6 +1,8 @@
 import { FamilyResult, GenusResult, SpeciesResult } from '@/lib/db/definitions/taxonomies';
 import { createError, handleUpsert } from '@/config/utils';
 import { SpecialProcessingProps } from '@/config/macros';
+import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
+import { auditHandleUpsertResult } from '@/lib/changelog/reference-audit';
 
 function cleanInputData(data: any) {
   const cleanedData: any = {};
@@ -13,17 +15,37 @@ function cleanInputData(data: any) {
 }
 
 export async function processSpecies(props: Readonly<SpecialProcessingProps>): Promise<void> {
-  const { connectionManager, rowData, schema } = props;
+  const { connectionManager, rowData, schema, transactionID, fullName } = props;
+  if (!transactionID) {
+    throw createError('processSpecies requires a transactionID so family/genus/species writes and their changelog audit share the caller transaction', {
+      rowData
+    });
+  }
+  if (!fullName) {
+    throw createError('processSpecies requires fullName (the resolved session identity) to attribute the changelog entry honestly', { rowData });
+  }
+  const changedBy = fullName.slice(0, CHANGED_BY_MAX_LENGTH);
 
   try {
     let familyID: number | undefined;
     if (rowData.family) {
-      familyID = (await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family: rowData.family }, 'FamilyID')).id;
+      const familyResult = await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family: rowData.family }, 'FamilyID', transactionID);
+      familyID = familyResult.id;
+      await auditHandleUpsertResult(connectionManager, schema, transactionID, 'family', 'FamilyID', familyResult, changedBy);
     }
 
     let genusID: number | undefined;
     if (rowData.genus && familyID) {
-      genusID = (await handleUpsert<GenusResult>(connectionManager, schema, 'genus', { Genus: rowData.genus, FamilyID: familyID }, 'GenusID')).id;
+      const genusResult = await handleUpsert<GenusResult>(
+        connectionManager,
+        schema,
+        'genus',
+        { Genus: rowData.genus, FamilyID: familyID },
+        'GenusID',
+        transactionID
+      );
+      genusID = genusResult.id;
+      await auditHandleUpsertResult(connectionManager, schema, transactionID, 'genus', 'GenusID', genusResult, changedBy);
     }
 
     if (rowData.spcode && genusID) {
@@ -38,7 +60,8 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
       };
 
       const cleanedSpeciesData = cleanInputData(speciesData);
-      await handleUpsert<SpeciesResult>(connectionManager, schema, 'species', cleanedSpeciesData, 'SpeciesID');
+      const speciesResult = await handleUpsert<SpeciesResult>(connectionManager, schema, 'species', cleanedSpeciesData, 'SpeciesID', transactionID);
+      await auditHandleUpsertResult(connectionManager, schema, transactionID, 'species', 'SpeciesID', speciesResult, changedBy);
     }
   } catch (error: any) {
     console.error('Upsert failed:', error.message);

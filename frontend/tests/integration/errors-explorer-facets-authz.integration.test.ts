@@ -131,8 +131,7 @@ describe('POST /api/errors/explorer/facets per-site authz', () => {
     // The handler read schema/plotID/censusID from the (post-clone) body and issued queries.
     expect(sharedState.executeQueryCalls).toBeGreaterThan(0);
     const body = await res.json();
-    expect(body).toHaveProperty('messages');
-    expect(body).toHaveProperty('fields');
-    expect(body).toHaveProperty('sourceCounts');
+    expect(body).toHaveProperty('errorTypes');
+    expect(body).toHaveProperty('censusTotals');
   });
 });

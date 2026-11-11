@@ -49,6 +49,7 @@ import { POST } from './route';
 import ailogger from '@/ailogger';
 import connectionmanager from '@/lib/db/connectionmanager';
 import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
+import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
 
 function makeRequest(body: unknown) {
   const req = new Request('http://localhost/api', {
@@ -73,8 +74,16 @@ describe('batchedupload POST route', () => {
     validateContextualValuesMock.mockResolvedValue({ success: true, values: HAPPY_VALUES });
     validatedSchemaMock.mockImplementation((s: string) => s as any);
     authMock.mockResolvedValue({
-      user: { id: 'site-user', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] }
+      user: { id: 'site-user', email: 'crew@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] }
     });
+    // The project's vitest.config.mts runs clearMocks/mockReset/restoreMocks before every
+    // test, which wipes the mockResolvedValue set once at vi.mock() factory evaluation —
+    // re-arm it here or beginTransaction() silently resolves undefined.
+    const cm = connectionmanager.getInstance();
+    (cm.beginTransaction as ReturnType<typeof vi.fn>).mockResolvedValue('tx-test');
+    (cm.commitTransaction as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (cm.rollbackTransaction as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (cm.closeConnection as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
   });
 
   it('400 when body is empty', async () => {
@@ -123,7 +132,7 @@ describe('batchedupload POST route', () => {
 
     const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
     expect(insertMock).toHaveBeenCalledTimes(1);
-    const [connArg, schemaArg, rowsArg, fileIDArg, batchIDArg, plotIDArg, censusIDArg] = insertMock.mock.calls[0];
+    const [connArg, schemaArg, rowsArg, fileIDArg, batchIDArg, plotIDArg, censusIDArg, transactionIDArg, changedByArg] = insertMock.mock.calls[0];
     expect(connArg).toBe(connectionmanager.getInstance());
     expect(schemaArg).toBe('forestgeo_testing');
     expect(rowsArg).toHaveLength(2);
@@ -131,6 +140,10 @@ describe('batchedupload POST route', () => {
     expect(censusIDArg).toBe(7);
     expect(typeof fileIDArg).toBe('string');
     expect(typeof batchIDArg).toBe('string');
+    expect(typeof transactionIDArg).toBe('string');
+    // The trusted actor for this write's unifiedchangelog audit row(s) (#507)
+    // must be the authenticated session's own identity.
+    expect(changedByArg).toBe('crew@example.com');
 
     // Per-row shape: the route enriches each row with plotID, censusID, batchID,
     // fileID before passing to recordFailedMeasurementRows. Verify the mapped-in
@@ -145,6 +158,56 @@ describe('batchedupload POST route', () => {
     expect(typeof (rowsArg[0] as any).fileID).toBe('string');
 
     expect(validatedSchemaMock).toHaveBeenCalledWith('forestgeo_testing');
+  });
+
+  it('ignores a client-supplied changedBy-shaped field on a row; the session identity is used instead', async () => {
+    const payload = [{ treeID: 10, stemGUID: 20, reason: 'bad diameter', changedBy: 'attacker@example.com' }];
+    const req = makeRequest(payload);
+    const res = await POST(req, makeParams('forestgeo_testing', ['42', '7']));
+
+    expect(res.status).toBe(200);
+
+    const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
+    const [, , , , , , , , changedByArg] = insertMock.mock.calls[0];
+    expect(changedByArg).toBe('crew@example.com');
+  });
+
+  describe('changedBy resolution via authenticatedSessionIdentity', () => {
+    it('falls back from a blank email to the session name', async () => {
+      authMock.mockResolvedValueOnce({ user: { email: '   ', name: 'Real Researcher', sites: [{ schemaName: 'forestgeo_testing' }] } });
+
+      const res = await POST(makeRequest([{ treeID: 1, reason: 'bad' }]), makeParams('forestgeo_testing', ['42', '7']));
+      expect(res.status).toBe(200);
+
+      const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
+      const [, , , , , , , , changedByArg] = insertMock.mock.calls[0];
+      expect(changedByArg).toBe('Real Researcher');
+    });
+
+    it('retains an id-only identity when email and name are both absent', async () => {
+      authMock.mockResolvedValueOnce({ user: { id: 'azure-oid-999', sites: [{ schemaName: 'forestgeo_testing' }] } });
+
+      const res = await POST(makeRequest([{ treeID: 1, reason: 'bad' }]), makeParams('forestgeo_testing', ['42', '7']));
+      expect(res.status).toBe(200);
+
+      const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
+      const [, , , , , , , , changedByArg] = insertMock.mock.calls[0];
+      expect(changedByArg).toBe('azure-oid-999');
+    });
+
+    it('caps an over-length identity at CHANGED_BY_MAX_LENGTH characters', async () => {
+      const longEmail = `${'a'.repeat(100 - '@example.com'.length)}@example.com`;
+      expect(longEmail.length).toBeGreaterThan(CHANGED_BY_MAX_LENGTH);
+      authMock.mockResolvedValueOnce({ user: { email: longEmail, sites: [{ schemaName: 'forestgeo_testing' }] } });
+
+      const res = await POST(makeRequest([{ treeID: 1, reason: 'bad' }]), makeParams('forestgeo_testing', ['42', '7']));
+      expect(res.status).toBe(200);
+
+      const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
+      const [, , , , , , , , changedByArg] = insertMock.mock.calls[0];
+      expect(changedByArg).toHaveLength(CHANGED_BY_MAX_LENGTH);
+      expect(changedByArg).toBe(longEmail.slice(0, CHANGED_BY_MAX_LENGTH));
+    });
   });
 
   it('does not accept malformed or unsafe numeric URL parameters in the fallback path', async () => {
@@ -263,9 +326,9 @@ describe('batchedupload POST route', () => {
       expect(insertMock).not.toHaveBeenCalled();
     });
 
-    it('proceeds when authed and schema is in user.sites', async () => {
+    it('proceeds when authed and schema is in user.sites; changedBy falls back to session name when email is absent', async () => {
       authMock.mockResolvedValueOnce({
-        user: { id: 'u', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] }
+        user: { id: 'u', name: 'Field Crew Member', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] }
       });
 
       const payload = [{ treeID: 1, stemGUID: 1, reason: 'bad' }];
@@ -276,11 +339,12 @@ describe('batchedupload POST route', () => {
 
       const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
       expect(insertMock).toHaveBeenCalledTimes(1);
-      const [, schemaArg] = insertMock.mock.calls[0];
+      const [, schemaArg, , , , , , , changedByArg] = insertMock.mock.calls[0];
       expect(schemaArg).toBe('forestgeo_testing');
+      expect(changedByArg).toBe('Field Crew Member');
     });
 
-    it('admin bypass: schema not in admin.sites still proceeds', async () => {
+    it('admin bypass: schema not in admin.sites still proceeds; changedBy falls back to the session id when email and name are both absent', async () => {
       authMock.mockResolvedValueOnce({
         user: { id: 'admin', userStatus: 'global', sites: [] }
       });
@@ -290,6 +354,10 @@ describe('batchedupload POST route', () => {
       const res = await POST(req, makeParams('forestgeo_other_site', ['1', '2']));
 
       expect(res.status).toBe(200);
+
+      const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
+      const [, , , , , , , , changedByArg] = insertMock.mock.calls[0];
+      expect(changedByArg).toBe('admin');
     });
 
     it('falls back to validation.response when slugs length != 2', async () => {

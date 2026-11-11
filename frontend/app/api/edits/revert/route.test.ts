@@ -110,6 +110,15 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class MockRevertRecordChangedError extends Error {
+    editOperationID: number;
+    constructor(editOperationID: number) {
+      super(`edit operation ${editOperationID} changed between the discovery read and the locked recheck`);
+      this.name = 'RevertRecordChangedError';
+      this.editOperationID = editOperationID;
+    }
+  }
+
   class MockScopeAccessError extends Error {
     constructor(message = 'scope forbidden') {
       super(message);
@@ -144,6 +153,58 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  // --- #427 species-correction undo mappings ---------------------------
+  class MockSpeciesCorrectionUndoMetadataError extends Error {
+    editOperationID: number;
+    constructor(editOperationID: number, message: string) {
+      super(`parseSpeciesCorrectionUndoMetadata: EditOperationID=${editOperationID}: ${message}`);
+      this.name = 'SpeciesCorrectionUndoMetadataError';
+      this.editOperationID = editOperationID;
+    }
+  }
+
+  class MockEditOperationStateIntegrityError extends Error {
+    editOperationID: number;
+    column: string;
+    constructor(editOperationID: number, column: string, reason: string) {
+      super(`EditOperationID=${editOperationID} ${column}: ${reason}`);
+      this.name = 'EditOperationStateIntegrityError';
+      this.editOperationID = editOperationID;
+      this.column = column;
+    }
+  }
+
+  class MockSpeciesCorrectionUndoUnapplicableError extends Error {
+    editOperationID: number;
+    reason: string;
+    constructor(editOperationID: number, reason: string) {
+      super(`SpeciesCorrectionUndoUnapplicableError: EditOperationID=${editOperationID}: ${reason}`);
+      this.name = 'SpeciesCorrectionUndoUnapplicableError';
+      this.editOperationID = editOperationID;
+      this.reason = reason;
+    }
+  }
+
+  class MockSpeciesCorrectionUndoCurrentStateConflictError extends Error {
+    editOperationID: number;
+    conflicts: Array<{ kind: string; detail: string }>;
+    constructor(editOperationID: number, conflicts: Array<{ kind: string; detail: string }>) {
+      super('species correction undo current-state conflict');
+      this.name = 'SpeciesCorrectionUndoCurrentStateConflictError';
+      this.editOperationID = editOperationID;
+      this.conflicts = conflicts;
+    }
+  }
+
+  class MockSpeciesCorrectionWriteConflictError extends Error {
+    reason: unknown;
+    constructor(reason: unknown) {
+      super('species correction write conflict');
+      this.name = 'SpeciesCorrectionWriteConflictError';
+      this.reason = reason;
+    }
+  }
+
   return {
     auth: vi.fn(),
     isValidSchema: vi.fn(() => true),
@@ -166,10 +227,16 @@ const mocks = vi.hoisted(() => {
     MockCannotRevertRevertError,
     MockNonRevertableEditOperationError,
     MockRevertDriftError,
+    MockRevertRecordChangedError,
     MockScopeAccessError,
     MockScopeBusyError,
     MockInvalidClearError,
-    MockInvalidFieldValueError
+    MockInvalidFieldValueError,
+    MockSpeciesCorrectionUndoMetadataError,
+    MockEditOperationStateIntegrityError,
+    MockSpeciesCorrectionUndoUnapplicableError,
+    MockSpeciesCorrectionUndoCurrentStateConflictError,
+    MockSpeciesCorrectionWriteConflictError
   };
 });
 
@@ -212,7 +279,8 @@ vi.mock('@/config/editplan/revert', () => ({
   AlreadyRevertedError: mocks.MockAlreadyRevertedError,
   CannotRevertRevertError: mocks.MockCannotRevertRevertError,
   NonRevertableEditOperationError: mocks.MockNonRevertableEditOperationError,
-  RevertDriftError: mocks.MockRevertDriftError
+  RevertDriftError: mocks.MockRevertDriftError,
+  RevertRecordChangedError: mocks.MockRevertRecordChangedError
 }));
 
 vi.mock('@/config/editplan/scopeguard', () => ({
@@ -229,7 +297,28 @@ vi.mock('@/config/editplan/fieldpolicy', () => ({
 
 vi.mock('@/config/editoperations', () => ({
   ensureEditOperationsTable: mocks.ensureEditOperationsTable,
-  readEditOperation: mocks.readEditOperation
+  readEditOperation: mocks.readEditOperation,
+  EditOperationStateIntegrityError: mocks.MockEditOperationStateIntegrityError
+}));
+
+vi.mock('@/config/editplan/species-correction-undo-metadata', () => ({
+  SpeciesCorrectionUndoMetadataError: mocks.MockSpeciesCorrectionUndoMetadataError
+}));
+
+// This mock's SPECIES_CORRECTION_UNDO_CONFLICT_GUIDANCE text must stay in
+// sync with the real export in species-correction-undo.ts (asserted via the
+// test-local SPECIES_CORRECTION_UNDO_CONFLICT_GUIDANCE constant below) — a
+// real vi.importActual isn't used here because that module also imports
+// ConnectionManager as a value, which would pull in real DB wiring.
+vi.mock('@/config/editplan/species-correction-undo', () => ({
+  SPECIES_CORRECTION_UNDO_CONFLICT_GUIDANCE:
+    "This correction can no longer be undone automatically because the affected tree's data changed after the correction was applied. Review the tree's current measurements and apply the needed change directly.",
+  SpeciesCorrectionUndoCurrentStateConflictError: mocks.MockSpeciesCorrectionUndoCurrentStateConflictError,
+  SpeciesCorrectionUndoUnapplicableError: mocks.MockSpeciesCorrectionUndoUnapplicableError
+}));
+
+vi.mock('@/config/editplan/tree-species-correction-writer', () => ({
+  SpeciesCorrectionWriteConflictError: mocks.MockSpeciesCorrectionWriteConflictError
 }));
 
 function buildRequest(body: unknown) {
@@ -487,5 +576,192 @@ describe('POST /api/edits/revert', () => {
       })
     );
     expect(mocks.closeConnection).toHaveBeenCalled();
+  });
+
+  it('forwards the authorized request-body scope to revertEdit as expectedScope', async () => {
+    const applyResult = { updatedIDs: { coremeasurements: 42 }, applyErrors: [], editOperationID: 8, validationPending: false };
+    mocks.revertEdit.mockResolvedValue(applyResult);
+
+    await POST(buildRequest(VALID_BODY));
+
+    expect(mocks.revertEdit).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ expectedScope: { plotID: VALID_BODY.plotID, censusID: VALID_BODY.censusID } })
+    );
+  });
+
+  it('returns 409 when revertEdit throws RevertRecordChangedError from the locked recheck', async () => {
+    mocks.revertEdit.mockRejectedValue(new mocks.MockRevertRecordChangedError(7));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: 'edit operation changed during revert, please retry' });
+  });
+});
+
+// #427 — tree-species-correction undo mappings added to the route's catch
+// chain. These mirror route.ts's own (private, unexported) response shapes
+// and status codes exactly, so a regression in either the mapping or an
+// information leak through any of these payloads is caught here.
+describe('POST /api/edits/revert — #427 species-correction undo error mappings', () => {
+  // Mirrors species-correction-undo.ts's real (mocked above) exported guidance text.
+  const SPECIES_CORRECTION_UNDO_CONFLICT_GUIDANCE =
+    "This correction can no longer be undone automatically because the affected tree's data changed after the correction was applied. Review the tree's current measurements and apply the needed change directly.";
+  // Mirrors route.ts's private SPECIES_CORRECTION_UNDO_CONFLICT_CODE — not exported, so re-declared here for assertion only.
+  const SPECIES_CORRECTION_UNDO_CONFLICT_CODE = 'species-correction-undo-conflict';
+  // Mirrors route.ts's private SPECIES_CORRECTION_REVERT_CONFLICT_MESSAGE/_CODE.
+  const SPECIES_CORRECTION_REVERT_CONFLICT_MESSAGE = "This tree's species state changed since this revert was previewed. Refresh and retry the revert.";
+  const SPECIES_CORRECTION_REVERT_CONFLICT_CODE = 'species-correction-revert-conflict';
+
+  // Distinctive markers planted inside internal error evidence (conflict
+  // `detail`, SpeciesCorrectionWriteConflictError's `reason.message`, and an
+  // EditOperationStateIntegrityError's `reason`) that must never reach the
+  // serialized HTTP response body.
+  const UNDO_CONFLICT_DETAIL_LEAK_MARKER = 'UNDO_CONFLICT_DETAIL_LEAK_MARKER_8f21ac';
+  const UNDO_CONFLICT_DETAIL_SQL_FRAGMENT = 'SELECT StemGUID FROM forestgeo_testing.stems FOR UPDATE';
+  const UNDO_CONFLICT_DETAIL_JSON_FRAGMENT = '{"internalPlanHash":"should-not-leak"}';
+  const WRITE_CONFLICT_REASON_MESSAGE_LEAK_MARKER = 'WRITE_CONFLICT_REASON_MESSAGE_LEAK_MARKER_3d91c7';
+  const STATE_INTEGRITY_REASON_LEAK_MARKER = 'STATE_INTEGRITY_REASON_LEAK_MARKER_77ab42';
+  const STATE_INTEGRITY_STORED_PAYLOAD_FRAGMENT = '{"row":{"RawSpCode":"should-not-leak-either"}}';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } });
+    mocks.isValidSchema.mockReturnValue(true);
+    mocks.assertCanEditMeasurementScope.mockResolvedValue(undefined);
+    mocks.assertNoActiveMeasurementScopeConflict.mockResolvedValue(undefined);
+    mocks.ensureEditOperationsTable.mockResolvedValue(undefined);
+    mocks.closeConnection.mockResolvedValue(undefined);
+    mocks.readEditOperation.mockResolvedValue(buildLedgerRow());
+  });
+
+  it('returns 422 with a generic message when revertEdit throws SpeciesCorrectionUndoMetadataError', async () => {
+    mocks.revertEdit.mockRejectedValue(new mocks.MockSpeciesCorrectionUndoMetadataError(7, 'beforeState metadata.targetTreeID must be a positive integer'));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'species correction metadata is invalid' });
+  });
+
+  it('returns 422 with a generic message when revertEdit throws SpeciesCorrectionUndoUnapplicableError', async () => {
+    mocks.revertEdit.mockRejectedValue(
+      new mocks.MockSpeciesCorrectionUndoUnapplicableError(7, 'reverse replan returned "edited_stem_inactive": the edited stem is no longer active')
+    );
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'species correction undo is not applicable' });
+  });
+
+  it('returns 422 with a generic message when revertEdit throws EditOperationStateIntegrityError, and the response leaks no stored payload content from the error', async () => {
+    mocks.revertEdit.mockRejectedValue(
+      new mocks.MockEditOperationStateIntegrityError(
+        7,
+        'BeforeState',
+        `${STATE_INTEGRITY_REASON_LEAK_MARKER} stored string is not valid JSON near ${STATE_INTEGRITY_STORED_PAYLOAD_FRAGMENT}`
+      )
+    );
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body).toEqual({ error: 'edit operation state is invalid' });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain(STATE_INTEGRITY_REASON_LEAK_MARKER);
+    expect(serialized).not.toContain(STATE_INTEGRITY_STORED_PAYLOAD_FRAGMENT);
+    expect(serialized).not.toContain('BeforeState');
+  });
+
+  it('returns 422 (never 409) with the fixed guidance and only the conflict kinds when revertEdit throws SpeciesCorrectionUndoCurrentStateConflictError, leaking no per-conflict detail', async () => {
+    const conflicts = [
+      {
+        kind: 'tree-species',
+        detail: `${UNDO_CONFLICT_DETAIL_LEAK_MARKER} current species (ID=4, code="ABC") does not match recorded afterState species; evidence: ${UNDO_CONFLICT_DETAIL_SQL_FRAGMENT}`
+      },
+      {
+        kind: 'stem-membership',
+        detail: `stem 501 current membership differs from recorded afterState membership; raw dump: ${UNDO_CONFLICT_DETAIL_JSON_FRAGMENT}`
+      }
+    ];
+    mocks.revertEdit.mockRejectedValue(new mocks.MockSpeciesCorrectionUndoCurrentStateConflictError(7, conflicts));
+
+    const response = await POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(422);
+    expect(response.status).not.toBe(409);
+    const body = await response.json();
+    expect(body).toEqual({
+      error: SPECIES_CORRECTION_UNDO_CONFLICT_GUIDANCE,
+      code: SPECIES_CORRECTION_UNDO_CONFLICT_CODE,
+      conflictKinds: ['tree-species', 'stem-membership']
+    });
+    const serialized = JSON.stringify(body);
+    expect(serialized).toContain(SPECIES_CORRECTION_UNDO_CONFLICT_GUIDANCE);
+    expect(serialized).toContain('tree-species');
+    expect(serialized).toContain('stem-membership');
+    expect(serialized).not.toContain(UNDO_CONFLICT_DETAIL_LEAK_MARKER);
+    expect(serialized).not.toContain(UNDO_CONFLICT_DETAIL_SQL_FRAGMENT);
+    expect(serialized).not.toContain(UNDO_CONFLICT_DETAIL_JSON_FRAGMENT);
+    expect(serialized).not.toContain('detail');
+  });
+
+  it('returns 422 with a fixed message when revertEdit throws SpeciesCorrectionWriteConflictError, never leaking reason.message', async () => {
+    mocks.revertEdit.mockRejectedValue(
+      new mocks.MockSpeciesCorrectionWriteConflictError({
+        kind: 'drift',
+        message: `${WRITE_CONFLICT_REASON_MESSAGE_LEAK_MARKER} field "MeasuredDBH" no longer matches its locked current value`
+      })
+    );
+
+    const response = await POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body).toEqual({ error: SPECIES_CORRECTION_REVERT_CONFLICT_MESSAGE, code: SPECIES_CORRECTION_REVERT_CONFLICT_CODE });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain(WRITE_CONFLICT_REASON_MESSAGE_LEAK_MARKER);
+    expect(serialized).not.toContain('MeasuredDBH');
+    expect(serialized).not.toContain('drift');
+  });
+
+  it('still returns 409 with freshPlan for RevertDriftError, confirming 409 remains the confirmation bucket, not the species-correction-undo conflict bucket', async () => {
+    const freshPlan = {
+      dataType: 'measurementssummary',
+      targetID: 42,
+      fieldChanges: [{ field: 'SpeciesCode', from: 'PSIMEN', to: 'PSIMEN2' }],
+      effects: [],
+      maxSeverity: 'warn',
+      planHash: 'f'.repeat(64),
+      generatedAt: '2026-04-22T00:00:00.000Z'
+    };
+    mocks.revertEdit.mockRejectedValue(new mocks.MockRevertDriftError(freshPlan));
+
+    const response = await POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(409);
+    expect(response.status).not.toBe(422);
+    const body = await response.json();
+    expect(body).toEqual({ error: 'revert drift', freshPlan });
+    expect(body.freshPlan).toBeDefined();
+  });
+
+  it('still returns 403 with {fields, role} when revertEdit rejects a role-forbidden field on the undo path', async () => {
+    mocks.revertEdit.mockRejectedValue(new mocks.MockRoleForbiddenFieldError(['SpeciesCode', 'StemLocalX'], 'field crew'));
+
+    const response = await POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'role forbidden field', fields: ['SpeciesCode', 'StemLocalX'], role: 'field crew' });
+  });
+
+  it('returns 200 with the resolved ApplyResult, validationPending included, when the species-correction undo succeeds', async () => {
+    const applyResult = {
+      updatedIDs: { coremeasurements: 42, trees: 1, stems: 501 },
+      applyErrors: [],
+      editOperationID: 11,
+      validationPending: true
+    };
+    mocks.revertEdit.mockResolvedValue(applyResult);
+
+    const response = await POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(applyResult);
   });
 });

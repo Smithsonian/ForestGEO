@@ -19,6 +19,7 @@ import {
   getKeyFields
 } from '@/config/recentchangesexplorer';
 import { computeDiff, DiffEntry } from '@/config/changelogdiff';
+import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
 import moment from 'moment';
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -72,6 +73,8 @@ export function summarizeChange(entry: Pick<ChangelogEntry, 'operation' | 'table
     users: 'user'
   };
   const objectLabel = singularTableLabel[tableLabel] ?? tableLabel;
+  // bulk-revision-apply rows are summaries (see projectBulkRevisionRow), not a real table.
+  if (entry.tableName === 'bulk-revision-apply') return 'Applied a bulk revision';
   if (entry.operation === 'INSERT' && entry.tableName === 'file_upload') return filename ? `Uploaded ${filename}` : 'Uploaded a file';
   if (entry.operation === 'UPDATE' && /measurement/i.test(entry.tableName)) return 'Updated a measurement record';
   if (entry.operation === 'DELETE') return `Deleted a ${objectLabel}`;
@@ -185,8 +188,41 @@ function CardHeader({ entry }: { entry: ChangelogEntry }) {
   );
 }
 
+/** NewRowState here is a summary object, not a row snapshot (see projectBulkRevisionRow); render counts directly, never a diff. */
+function BulkRevisionSummaryCard({ entry }: { entry: ChangelogEntry }) {
+  const summary = entry.newRowState ?? {};
+  const updatedCount = typeof summary.updatedCount === 'number' ? summary.updatedCount : 0;
+  const skippedCount = typeof summary.skippedCount === 'number' ? summary.skippedCount : 0;
+  const insertedCount = typeof summary.insertedCount === 'number' ? summary.insertedCount : 0;
+  const deletedDuplicateCount = typeof summary.deletedDuplicateCount === 'number' ? summary.deletedDuplicateCount : 0;
+  // Older summaries predate failedRowCount; only render it when the field is actually present, never default it to 0.
+  const failedRowCount = typeof summary.failedRowCount === 'number' ? summary.failedRowCount : null;
+  const failedRowCountSuffix = failedRowCount === null ? '' : `, ${failedRowCount} failed`;
+  const summaryText = `Bulk revision applied: ${updatedCount} updated, ${skippedCount} skipped, ${insertedCount} inserted, ${deletedDuplicateCount} duplicate(s) removed${failedRowCountSuffix}`;
+
+  return (
+    <Sheet variant="outlined" sx={{ p: 1.75, borderRadius: 'md', borderLeft: '3px solid', borderLeftColor: 'primary.500' }}>
+      <Stack spacing={1.25}>
+        <CardHeader entry={entry} />
+        <Box sx={{ backgroundColor: 'neutral.900', borderRadius: '6px', p: 1.5, fontFamily: 'monospace', fontSize: '12px' }}>
+          <Typography sx={{ color: 'neutral.400', fontFamily: 'inherit', fontSize: 'inherit' }}>{summaryText}</Typography>
+        </Box>
+      </Stack>
+    </Sheet>
+  );
+}
+
 function UpdateCard({ entry }: { entry: ChangelogEntry }) {
-  const diffs = useMemo(() => computeDiff(entry.oldRowState, entry.newRowState), [entry.oldRowState, entry.newRowState]);
+  const isBulkRevisionSummary = entry.newRowState?.summaryKind === BULK_REVISION_SUMMARY_KIND;
+  // computeDiff must never run against a summary object (see BulkRevisionSummaryCard).
+  const diffs = useMemo(
+    () => (isBulkRevisionSummary ? [] : computeDiff(entry.oldRowState, entry.newRowState)),
+    [isBulkRevisionSummary, entry.oldRowState, entry.newRowState]
+  );
+
+  if (isBulkRevisionSummary) {
+    return <BulkRevisionSummaryCard entry={entry} />;
+  }
 
   return (
     <Sheet variant="outlined" sx={{ p: 1.75, borderRadius: 'md', borderLeft: '3px solid', borderLeftColor: 'primary.500' }}>

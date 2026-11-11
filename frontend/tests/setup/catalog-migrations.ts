@@ -10,6 +10,7 @@
  */
 
 import mysql from 'mysql2/promise';
+import { testDbServerOptions } from './test-db-connection';
 import {
   applyPendingCatalogMigrations,
   loadCatalogMigrationSources,
@@ -22,16 +23,11 @@ import type { SqlExecutor } from '@/scripts/lib/schema-cli';
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1'];
 
 function testConnectionSettings() {
-  const host = process.env.TEST_DB_HOST ?? 'localhost';
-  if (!LOCAL_HOSTS.includes(host)) {
-    throw new Error(`[catalog-migrations] Refusing to migrate catalog on non-local host "${host}".`);
+  const options = testDbServerOptions();
+  if (!LOCAL_HOSTS.includes(options.host)) {
+    throw new Error(`[catalog-migrations] Refusing to migrate catalog on non-local host "${options.host}".`);
   }
-  return {
-    host,
-    port: Number.parseInt(process.env.TEST_DB_PORT ?? '3306', 10),
-    user: process.env.TEST_DB_USER ?? 'root',
-    password: process.env.TEST_DB_PASSWORD ?? 'testpassword'
-  };
+  return options;
 }
 
 /**

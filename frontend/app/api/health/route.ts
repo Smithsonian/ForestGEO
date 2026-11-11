@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { probeDatabaseConnectivity } from '@/lib/db/connectivityprobe';
+import { HEALTH_DB_PROBE_TIMEOUT_MESSAGE, HEALTH_DB_REACHABLE_MESSAGE, HEALTH_DB_UNREACHABLE_MESSAGE } from './constants';
 
 // Ensure this runs on Node.js runtime (required for fs operations)
 export const runtime = 'nodejs';
@@ -32,7 +34,7 @@ const startTime = Date.now();
 /**
  * Health check endpoint for deployment verification
  * GET /api/health - Returns health status of the application
- * GET /api/health?deep=true - Performs deep checks including database connectivity
+ * GET /api/health?deep=true - Also opens one new database connection and runs SELECT 1 (cached per instance)
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -217,24 +219,6 @@ export async function GET(request: Request) {
   // Check 6: Deep check - Database and storage configuration (optional)
   if (deepCheck) {
     try {
-      // Check database configuration
-      const hasDbConfig = !!(process.env.AZURE_SQL_SERVER && process.env.AZURE_SQL_USER && process.env.AZURE_SQL_PASSWORD);
-
-      if (hasDbConfig) {
-        checks.push({
-          name: 'database_config',
-          status: 'pass',
-          message: 'Database configuration present'
-        });
-      } else {
-        checks.push({
-          name: 'database_config',
-          status: 'fail',
-          message: 'Database configuration incomplete'
-        });
-        overallStatus = 'unhealthy';
-      }
-
       // Check storage configuration
       const hasStorageConfig = !!(process.env.AZURE_STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_SAS_CONNECTION_STRING);
 
@@ -257,6 +241,19 @@ export async function GET(request: Request) {
         name: 'deep_check',
         status: 'fail',
         message: `Deep check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
+      overallStatus = 'unhealthy';
+    }
+
+    // Outside the try above: that catch echoes error.message, and this endpoint is public.
+    const connectivity = await probeDatabaseConnectivity();
+    if (connectivity.status === 'pass') {
+      checks.push({ name: 'database_connectivity', status: 'pass', message: `${HEALTH_DB_REACHABLE_MESSAGE} in ${connectivity.latencyMs} ms` });
+    } else {
+      checks.push({
+        name: 'database_connectivity',
+        status: 'fail',
+        message: connectivity.reason === 'timeout' ? HEALTH_DB_PROBE_TIMEOUT_MESSAGE : HEALTH_DB_UNREACHABLE_MESSAGE
       });
       overallStatus = 'unhealthy';
     }

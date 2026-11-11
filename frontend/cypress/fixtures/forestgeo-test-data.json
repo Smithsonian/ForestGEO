@@ -155,7 +155,8 @@
         "endDate": "1991-12-31",
         "censusID": 1,
         "plotID": 1,
-        "description": "First census of Luquillo plot"
+        "description": "First census of Luquillo plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 2,
@@ -163,7 +164,8 @@
         "endDate": "1996-12-31",
         "censusID": 2,
         "plotID": 1,
-        "description": "Second census of Luquillo plot"
+        "description": "Second census of Luquillo plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 3,
@@ -171,7 +173,8 @@
         "endDate": "2001-12-31",
         "censusID": 3,
         "plotID": 1,
-        "description": "Third census of Luquillo plot"
+        "description": "Third census of Luquillo plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 4,
@@ -179,7 +182,8 @@
         "endDate": "2006-12-31",
         "censusID": 4,
         "plotID": 1,
-        "description": "Fourth census of Luquillo plot"
+        "description": "Fourth census of Luquillo plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 5,
@@ -187,7 +191,8 @@
         "endDate": "2011-12-31",
         "censusID": 5,
         "plotID": 1,
-        "description": "Fifth census of Luquillo plot"
+        "description": "Fifth census of Luquillo plot",
+        "isActive": 1
       }
     ],
     "plot2": [
@@ -197,7 +202,8 @@
         "endDate": "1982-12-31",
         "censusID": 6,
         "plotID": 2,
-        "description": "First census of BCI plot"
+        "description": "First census of BCI plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 2,
@@ -205,7 +211,8 @@
         "endDate": "1987-12-31",
         "censusID": 7,
         "plotID": 2,
-        "description": "Second census of BCI plot"
+        "description": "Second census of BCI plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 3,
@@ -213,7 +220,8 @@
         "endDate": "1992-12-31",
         "censusID": 8,
         "plotID": 2,
-        "description": "Third census of BCI plot"
+        "description": "Third census of BCI plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 4,
@@ -221,7 +229,8 @@
         "endDate": "1997-12-31",
         "censusID": 9,
         "plotID": 2,
-        "description": "Fourth census of BCI plot"
+        "description": "Fourth census of BCI plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 5,
@@ -229,7 +238,8 @@
         "endDate": "2002-12-31",
         "censusID": 10,
         "plotID": 2,
-        "description": "Fifth census of BCI plot"
+        "description": "Fifth census of BCI plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 6,
@@ -237,7 +247,8 @@
         "endDate": "2007-12-31",
         "censusID": 11,
         "plotID": 2,
-        "description": "Sixth census of BCI plot"
+        "description": "Sixth census of BCI plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 7,
@@ -245,7 +256,8 @@
         "endDate": "2012-12-31",
         "censusID": 12,
         "plotID": 2,
-        "description": "Seventh census of BCI plot"
+        "description": "Seventh census of BCI plot",
+        "isActive": 1
       },
       {
         "plotCensusNumber": 8,
@@ -253,7 +265,8 @@
         "endDate": "2017-12-31",
         "censusID": 13,
         "plotID": 2,
-        "description": "Eighth census of BCI plot"
+        "description": "Eighth census of BCI plot",
+        "isActive": 1
       }
     ]
   },

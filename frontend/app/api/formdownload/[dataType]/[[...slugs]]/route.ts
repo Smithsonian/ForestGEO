@@ -3,7 +3,13 @@ import MapperFactory from '@/config/datamapper';
 import { AttributesRDS } from '@/lib/db/definitions/core';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
+import {
+  buildFilterModelStub,
+  buildSearchStub,
+  resolveFilterLogicOperatorSql,
+  UNSUPPORTED_LOGIC_OPERATOR_MESSAGE,
+  UnsupportedFilterLogicOperatorError
+} from '@/components/processors/processormacros';
 import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
@@ -74,6 +80,13 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
     return new NextResponse(JSON.stringify({ error: filterModel.error }), {
       status: HTTPResponses.INVALID_REQUEST
     });
+  }
+  try {
+    resolveFilterLogicOperatorSql(filterModel?.logicOperator);
+  } catch (error: unknown) {
+    if (!(error instanceof UnsupportedFilterLogicOperatorError)) throw error;
+    ailogger.warn(`[formdownload API] rejected an unsupported filter logic operator for ${dataType}`);
+    return new NextResponse(JSON.stringify({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE }), { status: HTTPResponses.INVALID_REQUEST });
   }
   const connectionManager = ConnectionManager.getInstance();
   let query = '';
@@ -295,8 +308,11 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
                   fm.DBH                 AS dbh,
                   fm.HOM                 AS hom,
                   fm.Date                AS date,
-                  fm.Codes               AS codes,
-                  fm.FailureReasons      AS failureReasons
+                  fm.Codes                   AS codes,
+                  fm.FailureReasons          AS failureReasons,
+                  fm.OriginalFailureReasons  AS originalFailureReasons,
+                  fm.CurrentFailureReasons   AS currentFailureReasons,
+                  fm.LastValidatedAt         AS lastValidatedAt
               FROM (${buildFailedMeasurementsSelectQuery(schema)}) fm
               WHERE fm.PlotID = ? AND fm.CensusID = ?
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}
@@ -317,9 +333,9 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
           date: row.date,
           codes: row.codes,
           failureReasons: row.failureReasons,
-          originalFailureReasons: row.OriginalFailureReasons,
-          currentFailureReasons: row.CurrentFailureReasons,
-          lastValidatedAt: row.LastValidatedAt
+          originalFailureReasons: row.originalFailureReasons,
+          currentFailureReasons: row.currentFailureReasons,
+          lastValidatedAt: row.lastValidatedAt
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       default:

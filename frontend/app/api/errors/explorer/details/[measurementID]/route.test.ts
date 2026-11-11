@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
+import { ERRORS_EXPLORER_FAILURE_RESPONSES, INVALID_ERRORS_EXPLORER_REQUEST_RESPONSE } from '@/lib/errorsexplorer/explorerrequest';
+import ailogger from '@/ailogger';
 
 // Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
 // A 'global' admin passes the per-site access gate.
@@ -260,5 +262,50 @@ describe('GET /api/errors/explorer/details/[measurementID]', () => {
         })
       ])
     );
+  });
+
+  it.each([
+    ['a non-integer measurement ID', '12.5', '1', '5'],
+    ['a zero measurement ID', '0', '1', '5'],
+    ['a non-numeric plot ID', '12', 'abc', '5'],
+    ['a missing census ID', '12', '1', null]
+  ])('answers %s with the fixed 400 and runs no SQL beyond the cached schema-quarantine lookup', async (_label, measurementID, plotID, censusID) => {
+    const executeQuery = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
+    const search = new URLSearchParams({ schema: 'forestgeo_testing', plotID: plotID ?? '' });
+    if (censusID !== null) search.set('censusID', censusID);
+    const request = { nextUrl: new URL(`http://localhost/api/errors/explorer/details/${measurementID}?${search.toString()}`) };
+    const response = await GET(request as any, { params: Promise.resolve({ measurementID }) });
+    const body = await response.json();
+    console.log('[view-errors details 400]', _label, response.status, JSON.stringify(body), executeQuery.mock.calls.length);
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body).toEqual(INVALID_ERRORS_EXPLORER_REQUEST_RESPONSE);
+    expect(executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('answers an unknown contradiction type with the same fixed 400', async () => {
+    const executeQuery = vi.spyOn((ConnectionManager as any).getInstance(), 'executeQuery');
+    const request = {
+      nextUrl: new URL('http://localhost/api/errors/explorer/details/101?schema=forestgeo_testing&plotID=5&censusID=7&activeContradictionType=bogus')
+    };
+    const response = await GET(request as any, { params: Promise.resolve({ measurementID: '101' }) });
+    const body = await response.json();
+    console.log('[view-errors details bad contradiction type]', response.status, JSON.stringify(body));
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body).toEqual(INVALID_ERRORS_EXPLORER_REQUEST_RESPONSE);
+    expect(executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('answers a thrown error with the fixed 500 and logs, not returns, the exception', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const secret = 'ER_PARSE_ERROR near SELECT secret_table';
+    vi.spyOn(cm, 'executeQuery').mockRejectedValue(new Error(secret));
+    const request = { nextUrl: new URL('http://localhost/api/errors/explorer/details/101?schema=forestgeo_testing&plotID=5&censusID=7') };
+    const response = await GET(request as any, { params: Promise.resolve({ measurementID: '101' }) });
+    const text = await response.text();
+    console.log('[view-errors details 500]', response.status, text);
+    expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(JSON.parse(text)).toEqual(ERRORS_EXPLORER_FAILURE_RESPONSES.details);
+    expect(text).not.toContain(secret);
+    expect(vi.mocked(ailogger.error).mock.calls.some(call => call.some(argument => argument instanceof Error && argument.message === secret))).toBe(true);
   });
 });

@@ -1,14 +1,25 @@
 import { format } from 'mysql2/promise';
 import moment from 'moment/moment';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { recordDeletedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
 import ailogger from '@/ailogger';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
 import { toFiniteNumber } from '@/config/measurementerrors';
 import { isMissingTableError } from '@/lib/errorhelpers';
 
 export const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
+
+export class StagingBatchIDCountMismatchError extends Error {
+  readonly code = 'STAGING_BATCH_ID_COUNT_MISMATCH';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'StagingBatchIDCountMismatchError';
+  }
+}
 
 const verifiedTemporaryMeasurementSourceFormatSchemas = new Set<string>();
 
@@ -180,31 +191,75 @@ export function toTemporaryMeasurementInsertValues(record: TemporaryMeasurementI
   return TEMPORARY_MEASUREMENT_INSERT_COLUMNS.map(column => record[column]);
 }
 
+/** Returns the rows the server inserted (INSERT IGNORE without ON DUPLICATE KEY counts only inserted rows). */
 export async function insertTemporaryMeasurementsInBatches(
   connectionManager: ConnectionManager,
   schema: string,
   rows: FileRow[],
   fileName: string,
-  batchID: string,
+  rowBatchIDs: readonly string[],
   sessionId: string | null,
   sourceFormat: SourceFormat,
   plotID: number,
   censusID: number,
   transactionID: string
-): Promise<void> {
+): Promise<number> {
+  if (rowBatchIDs.length !== rows.length) {
+    throw new StagingBatchIDCountMismatchError(`Staging ${fileName} received ${rows.length} row(s) but ${rowBatchIDs.length} BatchID(s)`);
+  }
   const columnList = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.join(', ');
   const placeholderTuple = `(${TEMPORARY_MEASUREMENT_INSERT_COLUMNS.map(() => '?').join(', ')})`;
   const insertSQLPrefix = format(`INSERT IGNORE INTO ??.temporarymeasurements (${columnList}) VALUES `, [schema]);
 
+  let insertedRows = 0;
   for (let start = 0; start < rows.length; start += TEMP_MEASUREMENT_INSERT_BATCH_SIZE) {
     const slice = rows.slice(start, start + TEMP_MEASUREMENT_INSERT_BATCH_SIZE);
     const placeholders = slice.map(() => placeholderTuple).join(', ');
-    const values = slice.flatMap(row =>
-      toTemporaryMeasurementInsertValues(buildTemporaryMeasurementInsertRecord(row, fileName, batchID, sessionId, sourceFormat, plotID, censusID))
+    const values = slice.flatMap((row, index) =>
+      toTemporaryMeasurementInsertValues(
+        buildTemporaryMeasurementInsertRecord(row, fileName, rowBatchIDs[start + index], sessionId, sourceFormat, plotID, censusID)
+      )
     );
-    await connectionManager.executeQuery(`${insertSQLPrefix}${placeholders}`, values, transactionID);
+    const insertSQL = `${insertSQLPrefix}${placeholders}`;
+    const result = await connectionManager.executeQuery(insertSQL, values, transactionID);
+    insertedRows += requireAffectedRows(result, insertSQL);
   }
+  return insertedRows;
 }
+
+/** True when any row of `batchID`'s family (the batch itself or a `__subNNN` member) is staged for the file. */
+export async function familyHasStagedRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  batchID: string,
+  transactionID?: string
+): Promise<boolean> {
+  const existsSQL = safeFormatQuery(
+    schema,
+    `SELECT 1 AS staged FROM ??.temporarymeasurements
+     WHERE FileID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
+     LIMIT 1`
+  );
+  const rows = await connectionManager.executeQuery(existsSQL, [fileName, batchID, buildSubBatchPattern(batchID)], transactionID);
+  if (!Array.isArray(rows)) {
+    throw new Error(
+      `Family staging probe for ${fileName} (batch ${batchID}) expected a row list from the server but got ${JSON.stringify(rows)}; ` +
+        `refusing to report the family as not staged.`
+    );
+  }
+  return rows.length > 0;
+}
+
+/**
+ * The stale-batch DELETE pins this (PlotID, CensusID, FileID, BatchID) index: all
+ * three equality predicates are leading columns, so it examines only the
+ * file's rows in one plot/census. Measured on 200k staged rows: pinned, a const
+ * range; FileID-led ingest_temporarymeasurements_FBPC_index, ~99k rows examined;
+ * neither, a full scan. A hint, not FORCE INDEX, so a schema missing the index
+ * degrades to a warning.
+ */
+export const STALE_BATCH_SCAN_INDEX = 'idx_tmpm_plot_census_file_batch';
 
 export async function cleanupStaleMeasurementBatchesForFile(
   connectionManager: ConnectionManager,
@@ -216,15 +271,15 @@ export async function cleanupStaleMeasurementBatchesForFile(
   transactionID: string
 ): Promise<number> {
   const cleanupSQL = format(
-    `DELETE FROM ??.temporarymeasurements
+    `DELETE /*+ INDEX(temporarymeasurements ${STALE_BATCH_SCAN_INDEX}) */ FROM ??.temporarymeasurements
      WHERE FileID = ?
        AND PlotID = ?
        AND CensusID = ?
-       AND BatchID <> ?`,
+       AND ${buildNotIncomingFamilyPredicate('BatchID')}`,
     [schema]
   );
-  const cleanupResult = await connectionManager.executeQuery(cleanupSQL, [fileName, plotID, censusID, batchID], transactionID);
-  const deletedRows = Number((cleanupResult as { affectedRows?: number })?.affectedRows ?? 0);
+  const cleanupResult = await connectionManager.executeQuery(cleanupSQL, [fileName, plotID, censusID, batchID, buildSubBatchPattern(batchID)], transactionID);
+  const deletedRows = requireAffectedRows(cleanupResult, cleanupSQL);
 
   if (deletedRows > 0) {
     ailogger.warn(
@@ -237,21 +292,38 @@ export async function cleanupStaleMeasurementBatchesForFile(
 }
 
 /**
- * Rows removed per statement by the census-replacement deletes.
+ * Rows a census-replacement statement touches per window, and the longest id
+ * list an audited coremeasurements DELETE builds.
  *
- * What chunking DOES bound: per-statement execution time and per-statement
- * rollback size. A single unbounded DELETE over a large census (Harvard: 116,227
- * rows) runs as one statement that can outlive the 660s JS-side KILL in
- * lib/db/primitives.ts, and a KILL mid-statement forces the server to roll back
- * everything that one statement had removed.
+ * The bound is the range optimizer's. With use_index_extensions=on every
+ * secondary index carries the primary key, so a `CoreMeasurementID IN (...)`
+ * list builds a range tree on every index of coremeasurements. Past
+ * range_optimizer_max_mem_size (8 MiB default) MySQL raises warning 3170 and
+ * plans a full table scan. On the canonical 19-index table, 3,315 ids still
+ * plan `range PRIMARY` and 3,316 fall back. The limit tracks indexes x ids of
+ * about 63,000-67,000 (issue #555 spec, finding F-1).
  *
- * What chunking does NOT bound: the lock footprint at commit. Every chunk runs
- * inside the SAME caller-owned transaction, so InnoDB holds every row lock this
- * loop takes until that transaction commits — the total is identical to the
- * unbounded DELETE. Do not treat lock contention against a concurrent writer as
- * mitigated by this constant.
+ * Azure, read 2026-10-27: the 8 MiB default; 19 indexes in ten schemas, 21 in
+ * forestgeo_harvard, forestgeo_mpala and forestgeo_rabi. The limit there is
+ * about 3,000 ids, so 1,000 keeps a 3x margin.
+ * tests/integration/census-replacement-statement-plans.integration.test.ts
+ * asserts no warning 3170 at this size at both index counts.
+ *
+ * replaceCensusForCleanReupload and the failed-first-census recovery commit
+ * every window separately. Callers that pass their own transaction (the ArcGIS
+ * commit via cleanupPreviousFileUploads, ingest-batch's setup cleanup,
+ * record-invalid-rows) still hold every row lock they take until that
+ * transaction ends.
  */
-export const CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE = 5000;
+export const CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE = 1000;
+
+/**
+ * The census window walks this (CensusID, CoreMeasurementID) index in id
+ * order. Without the hint, the keyset cursor makes the optimizer switch to a
+ * PRIMARY range scan that walks every other census under FOR UPDATE. A hint,
+ * not FORCE INDEX, like STALE_BATCH_SCAN_INDEX.
+ */
+export const CENSUS_REPLACEMENT_SCAN_INDEX = 'idx_censusid';
 
 /**
  * "Belongs to a batch other than the incoming family" — `batch` itself and its
@@ -275,31 +347,361 @@ function buildNotIncomingFamilyPredicate(column: string): string {
  * makes `deleted < CHUNK_SIZE` permanently false and the loop never ends.
  * Both are failures the caller must see.
  */
-function requireAffectedRows(result: unknown, deleteSQL: string): number {
+function requireAffectedRows(result: unknown, statementSQL: string): number {
   const affectedRows = (result as { affectedRows?: unknown })?.affectedRows;
   const parsed = Number(affectedRows);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error(
-      `Bounded delete could not read a row count from the server: affectedRows=${JSON.stringify(affectedRows)} ` +
-        `is not a non-negative integer. Statement: ${deleteSQL.replace(/\s+/g, ' ').trim().slice(0, 200)}`
+      `Statement could not read a row count from the server: affectedRows=${JSON.stringify(affectedRows)} ` +
+        `is not a non-negative integer. Statement: ${statementSQL.replace(/\s+/g, ' ').trim().slice(0, 200)}`
     );
   }
   return parsed;
 }
 
+async function selectCoreMeasurementWindowIDs(
+  connectionManager: ConnectionManager,
+  selectIdsSQL: string,
+  params: unknown[],
+  transactionID: string
+): Promise<number[]> {
+  const idRows = await connectionManager.executeQuery(selectIdsSQL, params, transactionID);
+  return (Array.isArray(idRows) ? idRows : []).map((row: { CoreMeasurementID: number }) => row.CoreMeasurementID);
+}
+
+/** Audits exactly `ids`, then deletes exactly `ids`; both counts asserted (#507). */
+async function auditAndDeleteCoreMeasurements(
+  connectionManager: ConnectionManager,
+  schema: string,
+  ids: number[],
+  changedBy: string | null,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  const tx = transactionExecutorFor(connectionManager, transactionID);
+  const auditedCount = await recordDeletedCoreMeasurementsAudit({ tx, schema, coreMeasurementIDs: ids, changedBy, plotID, censusID });
+  if (auditedCount !== ids.length) {
+    throw new Error(
+      `Audit mismatch: selected ${ids.length} coremeasurements row(s) for deletion but only ` +
+        `audited ${auditedCount}. Refusing to delete — the audit trail and the data would disagree.`
+    );
+  }
+  const deleteSQL = safeFormatQuery(schema, `DELETE FROM ??.coremeasurements WHERE CoreMeasurementID IN (${buildInPlaceholders(ids.length)})`);
+  const deletedRows = requireAffectedRows(await connectionManager.executeQuery(deleteSQL, ids, transactionID), deleteSQL);
+  if (deletedRows !== ids.length) {
+    throw new Error(
+      `Audited delete removed ${deletedRows} coremeasurements row(s) but audited ${ids.length} — ` + `the audit trail and the data would disagree.`
+    );
+  }
+  return deletedRows;
+}
+
+/** The scope's plain form: `whereSQL` reads coremeasurements alone. */
+export const PLAIN_COREMEASUREMENTS_FROM_SQL = '??.coremeasurements';
+/** The clustered key. Window lock statements seek by it only, so no window depends on a secondary index name (#560). */
+export const COREMEASUREMENTS_PRIMARY_INDEX = 'PRIMARY';
+/** The alias a joined scope gives coremeasurements; the window hint makes the join start from it. */
+export const COREMEASUREMENTS_JOIN_ALIAS = 'cm';
+/** The alias the cross-file cleanup gives measurement_error_log; its `IsResolved` flag is part of that predicate. */
+export const MEASUREMENT_ERROR_LOG_JOIN_ALIAS = 'mel';
+/** The only tables a window may lock beside the measurement itself (spec #562 D11). */
+export type CoreMeasurementLockAlias = typeof COREMEASUREMENTS_JOIN_ALIAS | typeof MEASUREMENT_ERROR_LOG_JOIN_ALIAS;
+
+export interface CoreMeasurementDeleteScope {
+  /** The caller's predicate, unchanged. */
+  whereSQL: string;
+  /** Its params in textual order: a joined scope's FROM params come first. */
+  whereParams: unknown[];
+  /** PLAIN_COREMEASUREMENTS_FROM_SQL, or a join that aliases coremeasurements as COREMEASUREMENTS_JOIN_ALIAS. */
+  fromSQL: string;
+  /** Joined scopes only: the aliases whose rows the predicate reads and a window must lock (FOR UPDATE OF). */
+  lockedAliases?: readonly CoreMeasurementLockAlias[];
+}
+
+export class CoreMeasurementWindowTooLargeError extends Error {
+  constructor(windowSize: number) {
+    super(
+      `A coremeasurements delete window holds ${windowSize} ids; the limit is ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE} ` +
+        `(the range-optimizer bound documented on CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE).`
+    );
+    this.name = 'CoreMeasurementWindowTooLargeError';
+  }
+}
+
+interface ScopeStatementParts {
+  selectList: string;
+  idColumn: string;
+  primaryKeyHint: string;
+  lockClause: string;
+}
+
+function scopeStatementParts(scope: CoreMeasurementDeleteScope): ScopeStatementParts {
+  if (scope.fromSQL === PLAIN_COREMEASUREMENTS_FROM_SQL) {
+    return {
+      selectList: 'CoreMeasurementID',
+      idColumn: 'CoreMeasurementID',
+      primaryKeyHint: `/*+ INDEX(coremeasurements ${COREMEASUREMENTS_PRIMARY_INDEX}) */`,
+      lockClause: 'FOR UPDATE'
+    };
+  }
+  const idColumn = `${COREMEASUREMENTS_JOIN_ALIAS}.CoreMeasurementID`;
+  const lockedAliases = scope.lockedAliases ?? [];
+  return {
+    selectList: `DISTINCT ${idColumn}`,
+    idColumn,
+    primaryKeyHint: `/*+ JOIN_PREFIX(${COREMEASUREMENTS_JOIN_ALIAS}) INDEX(${COREMEASUREMENTS_JOIN_ALIAS} ${COREMEASUREMENTS_PRIMARY_INDEX}) */`,
+    lockClause: lockedAliases.length > 0 ? `FOR UPDATE OF ${lockedAliases.join(', ')}` : 'FOR UPDATE'
+  };
+}
+
+export function toCoreMeasurementIDs(rows: unknown): number[] {
+  return (Array.isArray(rows) ? rows : []).map((row: { CoreMeasurementID: unknown }) => Number(row.CoreMeasurementID));
+}
+
+/** Consecutive ascending slices of at most CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE ids. */
+export function sliceIntoDeleteWindows(ids: number[]): number[][] {
+  const windows: number[][] = [];
+  for (let start = 0; start < ids.length; start += CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) {
+    windows.push(ids.slice(start, start + CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE));
+  }
+  return windows;
+}
+
+/** The walk's one read: every id of the scope, ascending, with no lock and no LIMIT (spec #562 D1, D9). */
+export async function selectCoreMeasurementIDsInScope(
+  connectionManager: ConnectionManager,
+  schema: string,
+  scope: CoreMeasurementDeleteScope,
+  transactionID?: string
+): Promise<number[]> {
+  const { selectList, idColumn } = scopeStatementParts(scope);
+  const readSQL = safeFormatQuery(
+    schema,
+    `SELECT ${selectList} FROM ${scope.fromSQL}
+     WHERE ${scope.whereSQL}
+     ORDER BY ${idColumn}`
+  );
+  return toCoreMeasurementIDs(await connectionManager.executeQuery(readSQL, scope.whereParams, transactionID));
+}
+
 /**
- * Runs a `DELETE ... LIMIT n` until it stops filling the limit, returning the
- * total rows removed. The statement is re-issued verbatim: each pass deletes a
- * fresh window because the previous window's rows no longer match.
+ * One window: lock `windowIDs` by primary key with the caller's predicate re-checked under the row locks, then
+ * audit and delete exactly the ids that still match. Ids that stopped matching, or that a peer already deleted,
+ * are neither audited nor deleted; a window whose ids all went returns 0 without another statement.
  */
-async function deleteInBoundedChunks(connectionManager: ConnectionManager, deleteSQL: string, params: unknown[], transactionID: string): Promise<number> {
+export async function lockAuditAndDeleteCoreMeasurementWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  scope: CoreMeasurementDeleteScope,
+  windowIDs: number[],
+  changedBy: string | null,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  if (windowIDs.length > CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) throw new CoreMeasurementWindowTooLargeError(windowIDs.length);
+  if (windowIDs.length === 0) return 0;
+  const { selectList, idColumn, primaryKeyHint, lockClause } = scopeStatementParts(scope);
+  const lockSQL = safeFormatQuery(
+    schema,
+    `SELECT ${primaryKeyHint} ${selectList} FROM ${scope.fromSQL}
+     WHERE (${scope.whereSQL}) AND ${idColumn} IN (${buildInPlaceholders(windowIDs.length)})
+     ORDER BY ${idColumn}
+     ${lockClause}`
+  );
+  const lockedIDs = toCoreMeasurementIDs(await connectionManager.executeQuery(lockSQL, [...scope.whereParams, ...windowIDs], transactionID));
+  if (lockedIDs.length === 0) return 0;
+  return auditAndDeleteCoreMeasurements(connectionManager, schema, lockedIDs, changedBy, plotID, censusID, transactionID);
+}
+
+/**
+ * The walk's locking confirmation: today's window statement, run once per walk. It waits on any uncommitted
+ * matching row it reaches and then returns it, which a non-locking read would miss (spec #562 G2).
+ */
+export async function lockCoreMeasurementConfirmationWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  scope: CoreMeasurementDeleteScope,
+  transactionID: string
+): Promise<number[]> {
+  const { selectList, idColumn, lockClause } = scopeStatementParts(scope);
+  const confirmationSQL = safeFormatQuery(
+    schema,
+    `SELECT ${selectList} FROM ${scope.fromSQL}
+     WHERE ${scope.whereSQL}
+     ORDER BY ${idColumn}
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}
+     ${lockClause}`
+  );
+  return toCoreMeasurementIDs(await connectionManager.executeQuery(confirmationSQL, scope.whereParams, transactionID));
+}
+
+/**
+ * Deletes every coremeasurements row of one scope in the caller's transaction, with a `unifiedchangelog`
+ * DELETE-audit row per row removed (#507).
+ *
+ * Each walk reads the scope's ids once without locks, then locks, audits and deletes them in ascending
+ * windows of at most CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE ids, and ends only after a locking confirmation of
+ * the whole scope returns fewer than a window of rows. Inside one transaction, the old
+ * `ORDER BY ... LIMIT ... FOR UPDATE` per window re-walked every entry earlier windows had delete-marked (the
+ * census-wide recovery) or scanned an index from its first entry every window (the filtered callers), and
+ * collapsed statistics could switch its plan mid-walk (#562, E-1 to E-4).
+ *
+ * A walk can lock a lower id after a higher one (a row that commits mid-walk), so two overlapping walks can
+ * deadlock. A caller that owns its transaction retries it whole (lib/db/deadlock-retry.ts); the others roll
+ * back with their caller.
+ *
+ * Callers (#562): the setup cleanups in lib/uploads/ingest-batch.ts and deleteUnresolvedRowsForBatchFamily run
+ * a walk inside their transaction and hold its row locks until it ends; the failed-first-census recovery uses the
+ * window primitives above directly and commits every window separately.
+ *
+ * `fromSQL` defaults to the plain table. A joined scope aliases coremeasurements as `cm` (ids are selected
+ * `DISTINCT`) and names in `lockedAliases` the tables whose rows its predicate reads and a window must lock.
+ * Deliberately does NOT audit the measurement_error_log/uploadmetrics deletes callers run around it.
+ */
+export async function deleteCoreMeasurementsInBoundedChunksWithAudit(
+  connectionManager: ConnectionManager,
+  schema: string,
+  whereSQL: string,
+  whereParams: unknown[],
+  changedBy: string | null,
+  plotID: number,
+  censusID: number,
+  transactionID: string,
+  fromSQL: string = PLAIN_COREMEASUREMENTS_FROM_SQL,
+  lockedAliases?: readonly CoreMeasurementLockAlias[]
+): Promise<number> {
+  const scope: CoreMeasurementDeleteScope = { whereSQL, whereParams, fromSQL, lockedAliases };
   let totalDeleted = 0;
   for (;;) {
-    const result = await connectionManager.executeQuery(deleteSQL, params, transactionID);
-    const deleted = requireAffectedRows(result, deleteSQL);
-    totalDeleted += deleted;
-    if (deleted < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return totalDeleted;
+    const scopeIDs = await selectCoreMeasurementIDsInScope(connectionManager, schema, scope, transactionID);
+    for (const windowIDs of sliceIntoDeleteWindows(scopeIDs)) {
+      totalDeleted += await lockAuditAndDeleteCoreMeasurementWindow(connectionManager, schema, scope, windowIDs, changedBy, plotID, censusID, transactionID);
+    }
+    const confirmedIDs = await lockCoreMeasurementConfirmationWindow(connectionManager, schema, scope, transactionID);
+    totalDeleted += await lockAuditAndDeleteCoreMeasurementWindow(connectionManager, schema, scope, confirmedIDs, changedBy, plotID, censusID, transactionID);
+    if (confirmedIDs.length < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return totalDeleted;
   }
+}
+
+/** Links first, so the FK cascade has nothing to do and legacy schemas without that FK are cleaned too. */
+async function deleteErrorLinksForMeasurements(connectionManager: ConnectionManager, schema: string, ids: number[], transactionID: string): Promise<void> {
+  const placeholders = buildInPlaceholders(ids.length);
+  try {
+    await connectionManager.executeQuery(
+      safeFormatQuery(schema, `DELETE FROM ??.measurement_error_log WHERE MeasurementID IN (${placeholders})`),
+      ids,
+      transactionID
+    );
+  } catch (error: unknown) {
+    if (!isMissingTableError(error, 'measurement_error_log')) throw error;
+    await connectionManager.executeQuery(safeFormatQuery(schema, `DELETE FROM ??.cmverrors WHERE CoreMeasurementID IN (${placeholders})`), ids, transactionID);
+  }
+}
+
+export interface CensusReplacementChunkResult {
+  deletedRows: number;
+  /** The cursor after this window: its last id, or the incoming cursor when the window was empty. */
+  lastCoreMeasurementID: number;
+}
+
+/**
+ * One measurement window of a census replacement, in the caller's transaction:
+ * lock at most CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE prior ids above
+ * `afterCoreMeasurementID`, delete their error links, audit them, delete them.
+ * Knows nothing about upload sessions.
+ */
+export async function deleteCensusReplacementChunk(
+  connectionManager: ConnectionManager,
+  schema: string,
+  currentBatchID: string,
+  plotID: number,
+  censusID: number,
+  afterCoreMeasurementID: number,
+  changedBy: string | null,
+  transactionID: string
+): Promise<CensusReplacementChunkResult> {
+  const selectIdsSQL = safeFormatQuery(
+    schema,
+    `SELECT /*+ INDEX(coremeasurements ${CENSUS_REPLACEMENT_SCAN_INDEX}) */ CoreMeasurementID FROM ??.coremeasurements
+     WHERE CensusID = ? AND ${buildNotIncomingFamilyPredicate('UploadBatchID')} AND CoreMeasurementID > ?
+     ORDER BY CoreMeasurementID
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}
+     FOR UPDATE`
+  );
+  const ids = await selectCoreMeasurementWindowIDs(
+    connectionManager,
+    selectIdsSQL,
+    [censusID, currentBatchID, buildSubBatchPattern(currentBatchID), afterCoreMeasurementID],
+    transactionID
+  );
+  if (ids.length === 0) return { deletedRows: 0, lastCoreMeasurementID: afterCoreMeasurementID };
+  await deleteErrorLinksForMeasurements(connectionManager, schema, ids, transactionID);
+  const deletedRows = await auditAndDeleteCoreMeasurements(connectionManager, schema, ids, changedBy, plotID, censusID, transactionID);
+  return { deletedRows, lastCoreMeasurementID: ids[ids.length - 1] };
+}
+
+/**
+ * Unit A's termination rule. A full window moves the cursor past its last id.
+ * A short window ends unit A only when it covered the whole scope (cursor 0);
+ * otherwise the walk restarts at 0 for one confirming pass, which catches any
+ * row the cursor passed over. Returns null when unit A is done.
+ */
+export function nextCensusReplacementCursor(currentCursor: number, window: CensusReplacementChunkResult): number | null {
+  if (window.deletedRows === CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return window.lastCoreMeasurementID;
+  return currentCursor === 0 ? null : 0;
+}
+
+export interface CensusReplacementLegacyPassResult {
+  deletedRows: number;
+  /** failedmeasurements does not exist in this schema (every schema built from tablestructures.sql). */
+  legacyTableMissing: boolean;
+}
+
+export async function deleteCensusReplacementLegacyFailuresWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  currentBatchID: string,
+  censusID: number,
+  transactionID: string
+): Promise<CensusReplacementLegacyPassResult> {
+  const deleteFailedSQL = safeFormatQuery(
+    schema,
+    `DELETE FROM ??.failedmeasurements
+     WHERE CensusID = ? AND ${buildNotIncomingFamilyPredicate('BatchID')}
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
+  );
+  try {
+    const result = await connectionManager.executeQuery(deleteFailedSQL, [censusID, currentBatchID, buildSubBatchPattern(currentBatchID)], transactionID);
+    return { deletedRows: requireAffectedRows(result, deleteFailedSQL), legacyTableMissing: false };
+  } catch (error: unknown) {
+    if (!isMissingTableError(error, 'failedmeasurements')) throw error;
+    return { deletedRows: 0, legacyTableMissing: true };
+  }
+}
+
+/** Prior metric rows must go, or the stored procedure's idempotency guard would skip re-ingestion. The incoming family keeps its own. */
+export async function deleteCensusReplacementMetricsWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  currentBatchID: string,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  const deleteMetricsSQL = safeFormatQuery(
+    schema,
+    `DELETE FROM ??.uploadmetrics
+     WHERE plotID = ? AND censusID = ? AND ${buildNotIncomingFamilyPredicate('batchID')}
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
+  );
+  const result = await connectionManager.executeQuery(
+    deleteMetricsSQL,
+    [plotID, censusID, currentBatchID, buildSubBatchPattern(currentBatchID)],
+    transactionID
+  );
+  return requireAffectedRows(result, deleteMetricsSQL);
 }
 
 /**
@@ -308,6 +710,17 @@ async function deleteInBoundedChunks(connectionManager: ConnectionManager, delet
  * any earlier measurement batches for that census, even if the filename changed.
  *
  * Removes: validation error links, coremeasurements, failedmeasurements (if legacy table exists), uploadmetrics
+ *
+ * Runs every window in the caller's one transaction, so the row locks of all
+ * windows are held until that transaction ends. replaceCensusForCleanReupload
+ * is the bounded, separately committed form of the same windows.
+ *
+ * `changedBy` attributes the coremeasurements DELETE audit rows this writes
+ * to `unifiedchangelog` (#507). `null` records an unattributed cleanup rather
+ * than throwing — see recordDeletedCoreMeasurementsAudit. The derivative
+ * measurement_error_log/failedmeasurements/uploadmetrics deletes below are
+ * deliberately NOT audited; see deleteCoreMeasurementsInBoundedChunksWithAudit's
+ * doc comment for why.
  */
 export async function cleanupPreviousFileUploads(
   connectionManager: ConnectionManager,
@@ -316,6 +729,7 @@ export async function cleanupPreviousFileUploads(
   currentBatchID: string,
   plotID: number,
   censusID: number,
+  changedBy: string | null,
   transactionID: string
 ): Promise<number> {
   // SCOPE: the whole target census, minus the incoming batch family.
@@ -335,77 +749,36 @@ export async function cleanupPreviousFileUploads(
   // The incoming batch is excluded as a FAMILY (`batch` and `batch__subNNN`),
   // not just by exact id, so a re-entrant call after this upload has already
   // split cannot delete its own in-flight rows.
-  const incomingSubBatchPattern = buildSubBatchPattern(currentBatchID);
-  const notIncomingFamily = buildNotIncomingFamilyPredicate('%COL%');
-  const familyParams = [currentBatchID, incomingSubBatchPattern];
-
-  // Error links first. The FK is ON DELETE CASCADE in current schemas, but
-  // legacy schemas may lack it, and an explicit scoped delete is cheap.
-  // Expressed as a single-table DELETE over a subquery rather than a
-  // multi-table DELETE ... JOIN, because MySQL rejects LIMIT on the latter and
-  // these deletes must stay bounded (see deleteInBoundedChunks).
-  const deleteValidationErrorsSQL = safeFormatQuery(
-    schema,
-    `DELETE FROM ??.measurement_error_log
-     WHERE MeasurementID IN (
-       SELECT cm.CoreMeasurementID FROM ??.coremeasurements cm
-       WHERE cm.CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'cm.UploadBatchID')}
-     )
-     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
-  );
-  try {
-    await deleteInBoundedChunks(connectionManager, deleteValidationErrorsSQL, [censusID, ...familyParams], transactionID);
-  } catch (error: unknown) {
-    if (!isMissingTableError(error, 'measurement_error_log')) {
-      throw error;
-    }
-
-    const deleteLegacyValidationErrorsSQL = safeFormatQuery(
+  let deletedCmRows = 0;
+  let cursor: number | null = 0;
+  while (cursor !== null) {
+    const window: CensusReplacementChunkResult = await deleteCensusReplacementChunk(
+      connectionManager,
       schema,
-      `DELETE FROM ??.cmverrors
-       WHERE CoreMeasurementID IN (
-         SELECT cm.CoreMeasurementID FROM ??.coremeasurements cm
-         WHERE cm.CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'cm.UploadBatchID')}
-       )
-       LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
+      currentBatchID,
+      plotID,
+      censusID,
+      cursor,
+      changedBy,
+      transactionID
     );
-    await deleteInBoundedChunks(connectionManager, deleteLegacyValidationErrorsSQL, [censusID, ...familyParams], transactionID);
+    deletedCmRows += window.deletedRows;
+    cursor = nextCensusReplacementCursor(cursor, window);
   }
 
-  // Every prior measurement in the census — ingested and unresolved alike.
-  const deleteCmSQL = safeFormatQuery(
-    schema,
-    `DELETE FROM ??.coremeasurements
-     WHERE CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'UploadBatchID')}
-     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
-  );
-  const deletedCmRows = await deleteInBoundedChunks(connectionManager, deleteCmSQL, [censusID, ...familyParams], transactionID);
-
-  const deleteFailedSQL = safeFormatQuery(
-    schema,
-    `DELETE FROM ??.failedmeasurements
-     WHERE CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'BatchID')}
-     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
-  );
-  try {
-    await deleteInBoundedChunks(connectionManager, deleteFailedSQL, [censusID, ...familyParams], transactionID);
-  } catch (error: unknown) {
-    if (!isMissingTableError(error, 'failedmeasurements')) {
-      throw error;
+  for (;;) {
+    const pass = await deleteCensusReplacementLegacyFailuresWindow(connectionManager, schema, currentBatchID, censusID, transactionID);
+    if (pass.legacyTableMissing) {
+      ailogger.info(`Skipping failedmeasurements cleanup for ${fileName}: legacy table does not exist in ${schema}`);
+      break;
     }
-    ailogger.info(`Skipping failedmeasurements cleanup for ${fileName}: legacy table does not exist in ${schema}`);
+    if (pass.deletedRows < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) break;
   }
 
-  // Prior metric rows for this scope must go too, or the stored procedure's
-  // idempotency guard would skip re-ingestion. The incoming upload keeps its
-  // own metrics — those belong to the replacement, not the thing replaced.
-  const deleteMetricsSQL = safeFormatQuery(
-    schema,
-    `DELETE FROM ??.uploadmetrics
-     WHERE plotID = ? AND censusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'batchID')}
-     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
-  );
-  await deleteInBoundedChunks(connectionManager, deleteMetricsSQL, [plotID, censusID, ...familyParams], transactionID);
+  for (;;) {
+    const deletedMetricRows = await deleteCensusReplacementMetricsWindow(connectionManager, schema, currentBatchID, plotID, censusID, transactionID);
+    if (deletedMetricRows < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) break;
+  }
 
   if (deletedCmRows > 0) {
     ailogger.info(
@@ -421,17 +794,21 @@ export async function findDroppedMeasurementCandidates(
   connectionManager: ConnectionManager,
   schema: string,
   fileName: string,
-  batchID: string,
+  rowBatchIDs: readonly string[],
   plotID: number,
   censusID: number,
   chunkRows: FileRow[],
   transactionID: string
 ): Promise<DroppedMeasurementCandidate[]> {
+  if (rowBatchIDs.length !== chunkRows.length) {
+    throw new StagingBatchIDCountMismatchError(`Dropped-row audit for ${fileName} received ${chunkRows.length} row(s) but ${rowBatchIDs.length} BatchID(s)`);
+  }
   const tempTable = 'dropped_row_candidates';
   await connectionManager.executeQuery(`DROP TEMPORARY TABLE IF EXISTS ${tempTable}`, [], transactionID);
   await connectionManager.executeQuery(
     `CREATE TEMPORARY TABLE ${tempTable} (
       RowOrdinal INT NOT NULL PRIMARY KEY,
+      BatchID VARCHAR(36) NOT NULL,
       TreeTag VARCHAR(20) NULL,
       StemTag VARCHAR(10) NULL,
       SpeciesCode VARCHAR(25) NULL,
@@ -439,19 +816,20 @@ export async function findDroppedMeasurementCandidates(
       MeasurementDate DATE NULL,
       INDEX idx_dropped_row_candidates_match (TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate),
       INDEX idx_dropped_row_candidates_duplicate (TreeTag, StemTag, QuadratName)
-    ) ENGINE=MEMORY`,
+    )`,
     [],
     transactionID
   );
 
   try {
-    const insertWidth = 6;
+    const insertWidth = 7;
     const insertBatchSize = 500;
     for (let start = 0; start < chunkRows.length; start += insertBatchSize) {
       const slice = chunkRows.slice(start, start + insertBatchSize);
       const placeholders = slice.map(() => `(${Array(insertWidth).fill('?').join(',')})`).join(', ');
       const params = slice.flatMap((row, index) => [
         start + index + 1,
+        rowBatchIDs[start + index],
         row.tag ?? null,
         row.stemtag || null,
         row.spcode ?? null,
@@ -460,7 +838,7 @@ export async function findDroppedMeasurementCandidates(
       ]);
 
       await connectionManager.executeQuery(
-        `INSERT INTO ${tempTable} (RowOrdinal, TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate) VALUES ${placeholders}`,
+        `INSERT INTO ${tempTable} (RowOrdinal, BatchID, TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate) VALUES ${placeholders}`,
         params,
         transactionID
       );
@@ -479,7 +857,7 @@ export async function findDroppedMeasurementCandidates(
        FROM ${tempTable} drc
        LEFT JOIN ??.temporarymeasurements tm
          ON tm.FileID = ?
-        AND tm.BatchID = ?
+        AND tm.BatchID = drc.BatchID
         AND tm.TreeTag <=> drc.TreeTag
         AND tm.StemTag <=> drc.StemTag
         AND tm.SpeciesCode <=> drc.SpeciesCode
@@ -497,7 +875,7 @@ export async function findDroppedMeasurementCandidates(
        ORDER BY drc.RowOrdinal`
     );
 
-    const results = await connectionManager.executeQuery(droppedRowsSQL, [fileName, batchID, fileName, plotID, censusID], transactionID);
+    const results = await connectionManager.executeQuery(droppedRowsSQL, [fileName, fileName, plotID, censusID], transactionID);
 
     return Array.isArray(results) ? (results as DroppedMeasurementCandidate[]) : [];
   } finally {

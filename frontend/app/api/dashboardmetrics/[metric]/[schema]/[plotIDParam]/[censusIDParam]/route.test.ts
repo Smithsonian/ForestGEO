@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
+import { buildMeasuredStemCountSql, buildMeasuredTreeCountSql } from '@/config/dashboardmetricsqueries';
 // ===== import the handler AFTER mocks =====
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
@@ -216,6 +217,9 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     const [sql, params] = (exec as any).mock.calls[0];
     expect(String(sql)).toMatch(/WITH measured_quads AS/i);
     expect(String(sql)).toMatch(/FROM myschema\.quadrats q/i);
+    // Agreement with the CountStems tile: a quadrat should not read as "populated"
+    // from a soft-deleted measurement/stem that the Stems tile does not count.
+    expect(String(sql)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1/i);
     expect(params).toEqual([9, 3, 3]); // censusID, plotID, plotID
   });
 
@@ -268,7 +272,7 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
   //   expect(getContainerClientMock).toHaveBeenCalledWith('MyPlot-2');
   // });
 
-  it('CountTrees: 200 and proper JSON; SQL + params sanity', async () => {
+  it('CountTrees: 200 and proper JSON; counts only trees with an active measured stem', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ CountTrees: 123 }]);
 
@@ -279,12 +283,19 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     expect(body).toEqual({ CountTrees: 123 });
 
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM myschema\.trees t JOIN myschema\.census c/i);
-    expect(String(sql)).toMatch(/WHERE t\.CensusID = \? AND c\.PlotID = \?/i);
-    expect(params).toEqual([22, 11]);
+    // The query must be byte-for-byte the shared builder's output, so this route
+    // and the aggregated `all` route can never drift from each other again.
+    expect(String(sql)).toBe(buildMeasuredTreeCountSql('myschema'));
+    // Joins through coremeasurements (not a direct trees-table count) and excludes
+    // soft-deleted rows — this is what makes the tile shrink when the last
+    // measurement for a tree's stems is hard-deleted.
+    expect(String(sql)).toMatch(/FROM myschema\.coremeasurements cm/i);
+    expect(String(sql)).toMatch(/COUNT\(DISTINCT t\.TreeID\)/i);
+    expect(String(sql)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1 AND t\.IsActive = 1/i);
+    expect(params).toEqual([22, 11]); // [censusID, plotID]
   });
 
-  it('CountStems: 200 and proper JSON; SQL + params sanity', async () => {
+  it('CountStems: 200 and proper JSON; counts only stems with an active measurement', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ CountStems: 456 }]);
 
@@ -295,9 +306,11 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     expect(body).toEqual({ CountStems: 456 });
 
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM myschema\.stems st JOIN myschema\.census c/i);
-    expect(String(sql)).toMatch(/WHERE st\.CensusID = \? AND c\.PlotID = \?/i);
-    expect(params).toEqual([99, 8]);
+    expect(String(sql)).toBe(buildMeasuredStemCountSql('myschema'));
+    expect(String(sql)).toMatch(/FROM myschema\.coremeasurements cm/i);
+    expect(String(sql)).toMatch(/COUNT\(DISTINCT s\.StemGUID\)/i);
+    expect(String(sql)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1/i);
+    expect(params).toEqual([99, 8]); // [censusID, plotID]
   });
 
   it('unknown metric: returns 200 with empty object', async () => {
@@ -326,7 +339,9 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       // First query: check for previous census - returns NULL (no previous)
       exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
       // Second query: first-census classification (one tree with two measured stems => 30 multi)
-      exec.mockResolvedValueOnce([{ CountMultiStems: 30, CountNewRecruits: 100 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 30 }]);
+      // Third query: the shared measured-stem count, reused as the first-census recruit count
+      exec.mockResolvedValueOnce([{ CountStems: 100 }]);
 
       const res = await callGET('StemTypes', 'testschema', '1', '1', 'TestPlot');
 
@@ -342,8 +357,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
         isFirstCensus: true
       });
 
-      // Verify only 2 queries ran (previous-census probe + first-census classification)
-      expect(exec).toHaveBeenCalledTimes(2);
+      // Verify only 3 queries ran (previous-census probe, first-census classification, measured-stem count)
+      expect(exec).toHaveBeenCalledTimes(3);
 
       // First query checks for previous census
       const [sql1, params1] = exec.mock.calls[0];
@@ -354,7 +369,16 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       const [sql2, params2] = exec.mock.calls[1];
       expect(String(sql2)).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
       expect(String(sql2)).not.toMatch(/previous_stems/i);
+      // Agreement with the CountStems/CountTrees tiles: a soft-deleted measurement,
+      // stem, or tree must not inflate CountMultiStems/CountNewRecruits above them.
+      expect(String(sql2)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1 AND t\.IsActive = 1/i);
       expect(params2).toEqual([1, 1]); // censusID, censusID
+      expect(String(sql2)).not.toMatch(/CountNewRecruits/i);
+
+      // Recruits come from the same query as the Total Stems tile, so the two are equal by construction
+      const [sql3, params3] = exec.mock.calls[2];
+      expect(String(sql3)).toBe(buildMeasuredStemCountSql('testschema'));
+      expect(params3).toEqual([1, 1]); // censusID, plotID
     });
 
     it('subsequent census: correctly classifies old stems, multi-stems, and new recruits', async () => {
@@ -395,6 +419,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(String(sql2)).toMatch(/COALESCE\(SUM\(CASE/i);
       // Multi-stems must come from the current-census grouping, not the previous-census diff
       expect(String(sql2)).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
+      // Agreement with the CountStems/CountTrees tiles for the current census.
+      expect(String(sql2)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1 AND t\.IsActive = 1/i);
       // Parameters: censusID, censusID, previousCensusID, previousCensusID, previousCensusID
       expect(params2).toEqual([2, 2, 1, 1, 1]);
     });
@@ -486,7 +512,9 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       // First query: no previous census
       exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
       // Second query: classification returns 0 for an empty first census
-      exec.mockResolvedValueOnce([{ CountMultiStems: 0, CountNewRecruits: 0 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 0 }]);
+      // Third query: no measured stems
+      exec.mockResolvedValueOnce([{ CountStems: 0 }]);
 
       const res = await callGET('StemTypes', 'testschema', '1', '1', 'EmptyFirstCensus');
 

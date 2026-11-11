@@ -99,5 +99,18 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-09-09-01-add-upload-session-reference-replacement-marker',
     file: 'schema-contract-repair/2026-09-09-01-add-upload-session-reference-replacement-marker.sql'
+  },
+  {
+    id: '2026-10-14-01-repair-postvalidation-statistics-queries',
+    file: 'schema-contract-repair/2026-10-14-01-repair-postvalidation-statistics-queries.sql'
+  },
+  {
+    id: '2026-10-14-02-backfill-edit-operations-to-unifiedchangelog',
+    file: 'schema-contract-repair/2026-10-14-02-backfill-edit-operations-to-unifiedchangelog.sql'
+  },
+  {
+    id: '2026-10-26-01-rename-specimens-stemguid-to-stemid',
+    file: 'schema-contract-repair/2026-10-26-01-rename-specimens-stemguid-to-stemid.sql',
+    failureCleanup: ['DROP PROCEDURE IF EXISTS mig_2026_10_26_01_raise_contract_conflict']
   }
 ] as const;

@@ -32,6 +32,14 @@ import { DEFAULT_TEST_CONFIG, setupTestDatabase, teardownTestDatabase, type Test
 import type { RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import type { BulkEditPlan, EditPlan, TreeStemResolutionPreviewError } from '@/config/editplan/types';
 
+// The real apply route this suite drives signs invalidRowsIntegrityHash with
+// AUTH_SECRET (shared/invalidrowintegrity.ts) and fails closed without it.
+// The unit suite gets this for free from setup.ts -> tests/mocks/auth-mocks.ts,
+// but vitest.integration.config.mts's setupFiles do not set it. The exact
+// value is irrelevant — only that it stays constant across a test's match+apply
+// call pair.
+process.env.AUTH_SECRET ??= 'test_secret';
+
 // ---------------------------------------------------------------------------
 // Named constants — no magic numbers or strings
 // ---------------------------------------------------------------------------
@@ -539,36 +547,6 @@ describe('editplan bulk hash drift — tampered payload (integration)', () => {
     testData = setup.testData;
     config = setup.config;
     sharedState.connection = connection;
-
-    // upload_sessions and validation_runs are defined in tablestructures.sql
-    // but loadSchema silently skips them because their CREATE TABLE statements
-    // follow comment blocks that begin with '--' after the semicolon split
-    // filter. Create them directly here so assertNoConflictingApplyActivity
-    // can query them without throwing ER_NO_SUCH_TABLE.
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${config.database}\`.upload_sessions (
-        session_id VARCHAR(64) NOT NULL PRIMARY KEY,
-        schema_name VARCHAR(64) NOT NULL,
-        plot_id INT NOT NULL,
-        census_id INT NOT NULL,
-        user_id VARCHAR(255) NOT NULL DEFAULT 'test',
-        state ENUM('initialized','uploading','uploaded','processing','collapsing','completed','failed','abandoned','cleaned_up')
-          NOT NULL DEFAULT 'initialized',
-        last_heartbeat TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
-
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${config.database}\`.validation_runs (
-        RunID INT AUTO_INCREMENT PRIMARY KEY,
-        PlotID INT NOT NULL,
-        CensusID INT NOT NULL,
-        Status ENUM('running','completed','failed') NOT NULL DEFAULT 'running',
-        StartedAt TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
   }, 90000);
 
   afterAll(async () => {
@@ -677,7 +655,11 @@ describe('editplan bulk hash drift — tampered payload (integration)', () => {
         schema: config.database,
         plotID: fixture.plotID,
         censusID: fixture.censusID,
-        bulkPlanHash
+        bulkPlanHash,
+        // Echoed unchanged from match, same as a real client — this test is
+        // about the bulk-plan-hash drift check, not this contract.
+        uploadAttemptID: matchBody.uploadAttemptID,
+        invalidRowsIntegrityHash: matchBody.invalidRowsIntegrityHash
       })
     );
 
@@ -792,7 +774,11 @@ describe('editplan bulk hash drift — tampered payload (integration)', () => {
         schema: config.database,
         plotID: fixture.plotID,
         censusID: fixture.censusID,
-        bulkPlanHash
+        bulkPlanHash,
+        // Echoed unchanged from match, same as a real client — this test is
+        // about the bulk-plan-hash drift check, not this contract.
+        uploadAttemptID: matchBody.uploadAttemptID,
+        invalidRowsIntegrityHash: matchBody.invalidRowsIntegrityHash
       })
     );
 
@@ -868,31 +854,6 @@ describe('editplan P2 preview/apply parity — TreeStemResolution blocking error
     testData = setup.testData;
     config = setup.config;
     sharedState.connection = connection;
-
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${config.database}\`.upload_sessions (
-        session_id VARCHAR(64) NOT NULL PRIMARY KEY,
-        schema_name VARCHAR(64) NOT NULL,
-        plot_id INT NOT NULL,
-        census_id INT NOT NULL,
-        user_id VARCHAR(255) NOT NULL DEFAULT 'test',
-        state ENUM('initialized','uploading','uploaded','processing','collapsing','completed','failed','abandoned','cleaned_up')
-          NOT NULL DEFAULT 'initialized',
-        last_heartbeat TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
-
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${config.database}\`.validation_runs (
-        RunID INT AUTO_INCREMENT PRIMARY KEY,
-        PlotID INT NOT NULL,
-        CensusID INT NOT NULL,
-        Status ENUM('running','completed','failed') NOT NULL DEFAULT 'running',
-        StartedAt TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
   }, 90000);
 
   afterAll(async () => {

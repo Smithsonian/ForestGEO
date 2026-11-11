@@ -3,7 +3,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Chip, Stack, Table, Typography } from '@mui/joy';
 import CallSplitIcon from '@mui/icons-material/CallSplit';
-import { CONTRADICTION_LABELS, CONTRADICTION_REASONS, type ErrorExplorerRow, type RelatedContradictionRow } from '@/config/errorsexplorer';
+import {
+  CONTRADICTION_LABELS,
+  CONTRADICTION_REASONS,
+  DETAILS_SHEET_TEXT,
+  formatFieldsDiffer,
+  type ErrorExplorerRow,
+  type RelatedContradictionRow
+} from '@/config/errorsexplorer';
+import LockedControl from './lockedcontrol';
 
 type ComparableRow = {
   coreMeasurementID: number;
@@ -135,11 +143,15 @@ function ComparisonSummaryCard({ title, row, color }: { title: string; row: Comp
 export default function ContradictionComparisonPanel({
   selectedRow,
   relatedRows,
-  onInspectRow
+  onInspectRow,
+  canInspectRow = row => row.inErrorSet,
+  inspectDisabledReason
 }: {
   selectedRow: ErrorExplorerRow;
   relatedRows: RelatedContradictionRow[];
   onInspectRow: (measurementID: number) => void;
+  canInspectRow?: (row: RelatedContradictionRow) => boolean;
+  inspectDisabledReason?: string | null;
 }) {
   const [comparisonMeasurementID, setComparisonMeasurementID] = useState<number | null>(null);
 
@@ -196,7 +208,7 @@ export default function ContradictionComparisonPanel({
     <Stack spacing={1.25}>
       <Stack spacing={0.5}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-          <Typography level="title-sm">Contradiction Comparison</Typography>
+          <Typography level="title-sm">{DETAILS_SHEET_TEXT.compareTitle}</Typography>
           <Chip size="sm" color="warning" startDecorator={<CallSplitIcon />}>
             {CONTRADICTION_LABELS[activeContradictionType]}
           </Chip>
@@ -270,6 +282,13 @@ export default function ContradictionComparisonPanel({
         </tbody>
       </Table>
 
+      <Typography level="body-sm" data-testid="comparison-differing-fields">
+        {formatFieldsDiffer(
+          visibleFields.filter(field => valuesDiffer(selectedComparisonRow[field.key], comparisonRow[field.key])).length,
+          visibleFields.length
+        )}
+      </Typography>
+
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
         <Card size="sm" variant="outlined" sx={{ flex: 1, minWidth: 0 }}>
           <Typography level="title-sm">Selected row notes</Typography>
@@ -285,22 +304,37 @@ export default function ContradictionComparisonPanel({
         </Card>
       </Stack>
 
-      {comparisonRow.errorMessages && comparisonRow.errorMessages.length > 0 && (
-        <Stack spacing={0.75}>
-          <Typography level="title-sm">Linked row errors</Typography>
-          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
-            {comparisonRow.errorMessages.map(message => (
-              <Chip key={`${comparisonRow.coreMeasurementID}-${message}`} size="sm" variant="soft" color="warning">
-                {message}
-              </Chip>
-            ))}
+      {comparisonRow.inErrorSet === false ? (
+        <Typography level="body-sm">{DETAILS_SHEET_TEXT.noUnresolvedErrors}</Typography>
+      ) : (
+        comparisonRow.errorMessages &&
+        comparisonRow.errorMessages.length > 0 && (
+          <Stack spacing={0.75}>
+            <Typography level="title-sm">Linked row errors</Typography>
+            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
+              {comparisonRow.errorMessages.map(message => (
+                <Chip key={`${comparisonRow.coreMeasurementID}-${message}`} size="sm" variant="soft" color="warning">
+                  {message}
+                </Chip>
+              ))}
+            </Stack>
           </Stack>
-        </Stack>
+        )
       )}
 
-      <Button size="sm" variant="soft" color="warning" onClick={() => onInspectRow(comparisonRow.coreMeasurementID)}>
-        Open linked row details
-      </Button>
+      {canInspectRow(comparisonRow) && (
+        <LockedControl reason={inspectDisabledReason ?? null}>
+          <Button
+            size="sm"
+            variant="soft"
+            color="warning"
+            disabled={Boolean(inspectDisabledReason)}
+            onClick={() => onInspectRow(comparisonRow.coreMeasurementID)}
+          >
+            {DETAILS_SHEET_TEXT.inspectRow}
+          </Button>
+        </LockedControl>
+      )}
     </Stack>
   );
 }

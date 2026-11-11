@@ -2,6 +2,7 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql
 import { ensureBackgroundJobCatalogTables } from './catalog';
 import { BackgroundJobScopeUnavailableError, IdempotencyKeyConflictError, JobFileNotFoundError, WorkerLeaseLostError } from './errors';
 import { releaseSchemaOperationLock, tryAcquireSchemaOperationLock } from '@/lib/provisioning/schema-operation-lock';
+import { buildInPlaceholders } from '@/lib/db/sqlsecurity';
 import type {
   BackgroundJobEventRecord,
   BackgroundJobFileRecord,
@@ -10,7 +11,8 @@ import type {
   BackgroundJobType,
   BackgroundJobWithDetails,
   CreateUploadJobInput,
-  UploadJobPhase
+  UploadJobPhase,
+  UploadJobFailureContext
 } from './types';
 import { UPLOAD_JOB_MAX_RETRIES, UPLOAD_JOB_PHASE_PROGRESS } from './types';
 
@@ -169,8 +171,7 @@ function idempotentRequestMatches(existing: BackgroundJobRow, existingFiles: Bac
       (file.ByteSize === null ? null : Number(file.ByteSize)) === (requested.byteSize ?? null) &&
       (file.ChecksumSHA256 ?? null) === (requested.checksumSha256 ?? null) &&
       (file.SourceFormat ?? null) === (requested.sourceFormat ?? input.sourceFormat ?? null) &&
-      (file.FormType ?? null) === (requested.formType ?? input.formType ?? null) &&
-      (file.ExpectedRows === null ? null : Number(file.ExpectedRows)) === (requested.expectedRows ?? null)
+      (file.FormType ?? null) === (requested.formType ?? input.formType ?? null)
     );
   });
 }
@@ -256,6 +257,53 @@ async function addJobEvent(conn: Pool | PoolConnection, jobID: number, eventType
   ]);
 }
 
+export async function recordSetupDiagnostic(
+  catalogPool: Pool,
+  jobID: number,
+  details: {
+    attemptID: string;
+    fileID: string;
+    batchID: string;
+    schema: string;
+    plotID: number;
+    censusID: number;
+    step: string;
+    durationMs?: number;
+    outcome?: string;
+    rowCount?: number;
+    assignedRows?: number;
+    completedBatches?: number;
+    terminal?: boolean;
+    code?: string;
+    summary?: string;
+    detail?: string;
+  }
+): Promise<void> {
+  const safe = {
+    attemptID: details.attemptID.slice(0, 100),
+    fileID: details.fileID.slice(0, 255),
+    batchID: details.batchID.slice(0, 255),
+    schema: details.schema.slice(0, 64),
+    plotID: details.plotID,
+    censusID: details.censusID,
+    step: details.step.slice(0, 64),
+    ...(Number.isFinite(details.durationMs) ? { durationMs: Math.max(0, Math.min(details.durationMs!, 86_400_000)) } : {}),
+    ...(typeof details.outcome === 'string' ? { outcome: details.outcome.slice(0, 40) } : {}),
+    ...boundedCount('rowCount', details.rowCount),
+    ...boundedCount('assignedRows', details.assignedRows),
+    ...boundedCount('completedBatches', details.completedBatches),
+    ...(details.terminal ? { terminal: true } : {}),
+    ...(details.code && /^[A-Z0-9_]{1,80}$/.test(details.code) ? { code: details.code } : {}),
+    ...(details.summary ? { summary: details.summary.slice(0, 500) } : {}),
+    ...(details.detail ? { detail: details.detail.slice(0, 500) } : {})
+  };
+  await addJobEvent(catalogPool, jobID, 'setup_diagnostic', safe.summary ?? `Setup ${safe.step}`, safe);
+}
+
+function boundedCount(key: 'rowCount' | 'assignedRows' | 'completedBatches', value?: number): Record<string, number> {
+  return Number.isSafeInteger(value) && value! >= 0 && value! <= 1_000_000_000 ? { [key]: value! } : {};
+}
+
 /**
  * Confirms that a worker still holds the lease on a job. Returns true when the
  * lease is intact, false when it is not.
@@ -278,6 +326,52 @@ async function isLeaseIntact(conn: Pool | PoolConnection, jobID: number, workerI
     [jobID, workerID, ...FENCED_WRITE_STATUSES]
   );
   return rows.length > 0;
+}
+
+/** Run one small catalog transition without returning an uncertain connection to the pool. */
+async function withCatalogTransition<T>(pool: Pool, operation: (conn: PoolConnection) => Promise<T>): Promise<T> {
+  const conn = await pool.getConnection();
+  let begun = false;
+  let commitStarted = false;
+  let reusable = true;
+  let result!: T;
+  let primaryError: unknown;
+  try {
+    await conn.beginTransaction();
+    begun = true;
+    result = await operation(conn);
+    commitStarted = true;
+    await conn.commit();
+  } catch (error) {
+    primaryError = error;
+    if (begun && !commitStarted) {
+      try {
+        await conn.rollback();
+      } catch {
+        reusable = false;
+      }
+    } else {
+      // A lost COMMIT acknowledgement has an unknown server outcome.
+      reusable = false;
+    }
+  } finally {
+    if (reusable) {
+      try {
+        conn.release();
+      } catch {
+        reusable = false;
+      }
+    }
+    if (!reusable) {
+      try {
+        conn.destroy();
+      } catch {
+        /* cleanup must not replace the transition outcome */
+      }
+    }
+  }
+  if (primaryError !== undefined) throw primaryError;
+  return result;
 }
 
 export async function createUploadBackgroundJob(catalogPool: Pool, input: CreateUploadJobInput, createdBy: string): Promise<BackgroundJobRecord> {
@@ -408,6 +502,94 @@ export async function getBackgroundJobWithDetails(catalogPool: Pool, jobID: numb
   };
 }
 
+const FAILURE_STEPS = new Set(['discovery', 'lock_wait', 'recovery', 'cleanup', 'splitting', 'commit']);
+const FAILURE_CONTEXT_EVENT_WINDOW = 100;
+const FAILURE_TRANSITIONS = new Set(['failed', 'waiting_retry', 'cancelled']);
+
+/** Resolve status text only from the event for the current authoritative transition and its attempt. */
+export function selectFailureContext(job: BackgroundJobRecord, events: BackgroundJobEventRecord[]): UploadJobFailureContext | null {
+  if (!FAILURE_TRANSITIONS.has(job.status)) return null;
+  const transitionKinds = new Set(['failed', 'waiting_retry', 'cancelled', 'completed', 'claimed', 'reclaimed']);
+  const latestTransition = events.find(event => transitionKinds.has(event.eventType));
+  const transitionMatches =
+    latestTransition?.eventType === job.status || (latestTransition?.eventType === 'reclaimed' && latestTransition.details?.finalStatus === job.status);
+  const transition = transitionMatches ? latestTransition : undefined;
+  if (!transition) return job.lastError ? { summary: job.lastError.slice(0, 500) } : null;
+  const transitionDetails = transition.details ?? {};
+  const transitionAttempt = typeof transitionDetails.attemptID === 'string' ? transitionDetails.attemptID : undefined;
+  const transitionFile = typeof transitionDetails.fileID === 'string' ? transitionDetails.fileID : undefined;
+  const transitionBatch = typeof transitionDetails.batchID === 'string' ? transitionDetails.batchID : undefined;
+  const embedded = transitionDetails.failureContext;
+  if (embedded && typeof embedded === 'object' && !Array.isArray(embedded)) {
+    const value = embedded as Record<string, unknown>;
+    if (
+      (typeof value.attemptID === 'string' && value.attemptID !== transitionAttempt) ||
+      !transitionFile ||
+      !transitionBatch ||
+      value.fileID !== transitionFile ||
+      value.batchID !== transitionBatch
+    ) {
+      return job.lastError ? { summary: job.lastError.slice(0, 500) } : null;
+    }
+    const hasSafeSummary = typeof value.summary === 'string' && value.summary.length > 0;
+    const step = hasSafeSummary && typeof value.step === 'string' && FAILURE_STEPS.has(value.step) ? value.step : undefined;
+    return {
+      ...(typeof value.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(value.code) ? { code: value.code } : {}),
+      summary: typeof value.summary === 'string' ? value.summary.slice(0, 500) : (job.lastError ?? 'Upload processing failed').slice(0, 500),
+      ...(step ? { step } : {}),
+      ...(typeof value.detail === 'string' ? { detail: value.detail.slice(0, 500) } : {}),
+      ...(transitionAttempt ? { attemptID: transitionAttempt } : {}),
+      ...(typeof value.fileID === 'string' ? { fileID: value.fileID.slice(0, 255) } : {}),
+      ...(typeof value.batchID === 'string' ? { batchID: value.batchID.slice(0, 255) } : {})
+    };
+  }
+  if (transitionAttempt && transitionFile && transitionBatch) {
+    const diagnostics = events.filter(
+      event =>
+        event.eventType === 'setup_diagnostic' &&
+        event.details?.attemptID === transitionAttempt &&
+        event.details?.fileID === transitionFile &&
+        event.details?.batchID === transitionBatch
+    );
+    const terminal = diagnostics.find(event => event.details?.terminal === true);
+    if (terminal && terminal.details && terminal.details.outcome === 'failed') {
+      const d = terminal.details;
+      const hasSafeSummary = typeof d.summary === 'string' && d.summary.length > 0;
+      const step = hasSafeSummary && typeof d.step === 'string' && FAILURE_STEPS.has(d.step) ? d.step : undefined;
+      return {
+        ...(typeof d.code === 'string' ? { code: d.code.slice(0, 80) } : {}),
+        summary: typeof d.summary === 'string' ? d.summary.slice(0, 500) : (job.lastError ?? 'Upload processing failed').slice(0, 500),
+        ...(step ? { step } : {}),
+        ...(typeof d.detail === 'string' ? { detail: d.detail.slice(0, 500) } : {}),
+        attemptID: transitionAttempt,
+        ...(typeof d.fileID === 'string' ? { fileID: d.fileID.slice(0, 255) } : {}),
+        ...(typeof d.batchID === 'string' ? { batchID: d.batchID.slice(0, 255) } : {})
+      };
+    }
+  }
+  return job.lastError ? { summary: job.lastError.slice(0, 500) } : null;
+}
+
+/** Bounded event lookup for the jobs that can carry failure context; other jobs cost no query. */
+export async function attachFailureContexts(catalogPool: Pool, jobs: BackgroundJobRecord[]): Promise<BackgroundJobRecord[]> {
+  const failingJobIDs = jobs.filter(job => FAILURE_TRANSITIONS.has(job.status)).map(job => job.jobID);
+  if (failingJobIDs.length === 0) return jobs;
+  const [rows] = await catalogPool.query<BackgroundJobEventRow[]>(
+    `SELECT EventID, JobID, EventType, Message, Details, CreatedAt FROM (
+       SELECT EventID, JobID, EventType, Message, Details, CreatedAt,
+         ROW_NUMBER() OVER (PARTITION BY JobID ORDER BY EventID DESC) AS rowRank
+       FROM catalog.background_job_events WHERE JobID IN (${buildInPlaceholders(failingJobIDs.length)})
+     ) ranked WHERE rowRank <= ${FAILURE_CONTEXT_EVENT_WINDOW} ORDER BY JobID, EventID DESC`,
+    failingJobIDs
+  );
+  const grouped = new Map<number, BackgroundJobEventRecord[]>();
+  for (const row of rows) {
+    const event = mapEvent(row);
+    grouped.set(event.jobID, [...(grouped.get(event.jobID) ?? []), event]);
+  }
+  return jobs.map(job => (FAILURE_TRANSITIONS.has(job.status) ? { ...job, failureContext: selectFailureContext(job, grouped.get(job.jobID) ?? []) } : job));
+}
+
 export interface ListBackgroundJobsOptions {
   userID: string;
   includeAllUsers?: boolean;
@@ -461,15 +643,17 @@ export async function listBackgroundJobs(catalogPool: Pool, options: ListBackgro
 
 export async function cancelBackgroundJob(catalogPool: Pool, jobID: number, cancelledBy: string): Promise<boolean> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const [result] = await catalogPool.query<ResultSetHeader>(
-    `UPDATE catalog.background_jobs
-     SET Status = 'cancelled', Phase = 'cancelled', FinishedAt = NOW(), LastError = NULL
-     WHERE JobID = ? AND Status IN ('queued', 'waiting_retry')`,
-    [jobID]
-  );
-  if (result.affectedRows === 0) return false;
-  await addJobEvent(catalogPool, jobID, 'cancelled', 'Upload job cancelled', { cancelledBy });
-  return true;
+  return withCatalogTransition(catalogPool, async conn => {
+    const [result] = await conn.query<ResultSetHeader>(
+      `UPDATE catalog.background_jobs
+       SET Status = 'cancelled', Phase = 'cancelled', FinishedAt = NOW(), LastError = NULL
+       WHERE JobID = ? AND Status IN ('queued', 'waiting_retry')`,
+      [jobID]
+    );
+    if (result.affectedRows === 0) return false;
+    await addJobEvent(conn, jobID, 'cancelled', 'Upload job cancelled', { cancelledBy });
+    return true;
+  });
 }
 
 /**
@@ -481,15 +665,15 @@ export async function cancelBackgroundJob(catalogPool: Pool, jobID: number, canc
  */
 export async function requestBackgroundJobCancel(catalogPool: Pool, jobID: number, requestedBy: string): Promise<boolean> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const [result] = await catalogPool.query<ResultSetHeader>(
-    `UPDATE catalog.background_jobs
-     SET Status = 'cancel_requested'
-     WHERE JobID = ? AND Status = 'running'`,
-    [jobID]
-  );
-  if (result.affectedRows === 0) return false;
-  await addJobEvent(catalogPool, jobID, 'cancel_requested', 'Upload job cancellation requested', { requestedBy });
-  return true;
+  return withCatalogTransition(catalogPool, async conn => {
+    const [result] = await conn.query<ResultSetHeader>(
+      `UPDATE catalog.background_jobs SET Status = 'cancel_requested' WHERE JobID = ? AND Status = 'running'`,
+      [jobID]
+    );
+    if (result.affectedRows === 0) return false;
+    await addJobEvent(conn, jobID, 'cancel_requested', 'Upload job cancellation requested', { requestedBy });
+    return true;
+  });
 }
 
 export async function setBackgroundJobStatus(
@@ -506,6 +690,7 @@ export async function setBackgroundJobStatus(
     eventType?: string;
     eventMessage?: string;
     eventDetails?: Record<string, unknown>;
+    attemptID?: string;
   }
 ): Promise<void> {
   await ensureBackgroundJobCatalogTables(catalogPool);
@@ -517,30 +702,40 @@ export async function setBackgroundJobStatus(
   // The worker only observes cancellation at stage boundaries, so progress
   // writes can land while the cancel flag is set. Terminal/explicit statuses
   // (cancelled/failed/completed/waiting_retry) still overwrite normally.
-  const [result] = await catalogPool.query<ResultSetHeader>(
-    `UPDATE catalog.background_jobs
+  let affectedRows = 0;
+  await withCatalogTransition(catalogPool, async conn => {
+    const [result] = await conn.query<ResultSetHeader>(
+      `UPDATE catalog.background_jobs
      SET Status = IF(Status = 'cancel_requested' AND ? = 'running', 'cancel_requested', ?),
          Phase = ?, PercentComplete = COALESCE(?, PercentComplete),
          ProcessedRows = COALESCE(?, ProcessedRows), FailedRows = COALESCE(?, FailedRows),
          LastError = ?, StartedAt = IF(StartedAt IS NULL AND ? = 'running', NOW(), StartedAt),
          FinishedAt = IF(?, NOW(), FinishedAt)
      WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')})`,
-    [
-      update.status,
-      update.status,
-      update.phase,
-      update.percentComplete ?? null,
-      update.processedRows ?? null,
-      update.failedRows ?? null,
-      update.lastError ?? null,
-      update.status,
-      terminal,
-      jobID,
-      workerID,
-      ...FENCED_WRITE_STATUSES
-    ]
-  );
-  if (result.affectedRows === 0) {
+      [
+        update.status,
+        update.status,
+        update.phase,
+        update.percentComplete ?? null,
+        update.processedRows ?? null,
+        update.failedRows ?? null,
+        update.lastError ?? null,
+        update.status,
+        terminal,
+        jobID,
+        workerID,
+        ...FENCED_WRITE_STATUSES
+      ]
+    );
+    affectedRows = result.affectedRows;
+    if (affectedRows > 0 && update.eventType) {
+      await addJobEvent(conn, jobID, update.eventType, update.eventMessage, {
+        ...(update.eventDetails ?? {}),
+        attemptID: update.attemptID ?? workerID
+      });
+    }
+  });
+  if (affectedRows === 0) {
     // Under this pool's CLIENT_FOUND_ROWS flag affectedRows counts matched rows,
     // so 0 strictly means the lease predicate (JobID + WorkerID + Status IN
     // fenced list) did not match. The isLeaseIntact confirm below exists as
@@ -552,9 +747,6 @@ export async function setBackgroundJobStatus(
     // flags change and affectedRows reverts to "changed rows" semantics.
     // Accept silently; skip event to avoid duplicate progress entries on retry.
     return;
-  }
-  if (update.eventType) {
-    await addJobEvent(catalogPool, jobID, update.eventType, update.eventMessage, update.eventDetails);
   }
 }
 
@@ -573,8 +765,10 @@ export async function setBackgroundJobStatus(
  */
 export async function claimBackgroundJobForWorker(catalogPool: Pool, jobID: number, workerID: string): Promise<BackgroundJobWithDetails | null> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const [result] = await catalogPool.query<ResultSetHeader>(
-    `UPDATE catalog.background_jobs
+  let claimed = false;
+  await withCatalogTransition(catalogPool, async conn => {
+    const [result] = await conn.query<ResultSetHeader>(
+      `UPDATE catalog.background_jobs
      SET Status = 'running',
          Phase = 'staging',
          WorkerID = ?,
@@ -584,11 +778,15 @@ export async function claimBackgroundJobForWorker(catalogPool: Pool, jobID: numb
      WHERE JobID = ?
        AND Status IN ('queued', 'waiting_retry')
        AND (NextAttemptAt IS NULL OR NextAttemptAt <= NOW())`,
-    [workerID, jobID]
-  );
+      [workerID, jobID]
+    );
 
-  if (result.affectedRows === 0) return null;
-  await addJobEvent(catalogPool, jobID, 'claimed', 'Upload job claimed by worker', { workerID });
+    claimed = result.affectedRows > 0;
+    if (claimed) {
+      await addJobEvent(conn, jobID, 'claimed', 'Upload job claimed by worker', { workerID, attemptID: workerID });
+    }
+  });
+  if (!claimed) return null;
   return getBackgroundJobWithDetails(catalogPool, jobID);
 }
 
@@ -610,6 +808,8 @@ export interface WaitingRetryOptions {
    * plot/census scope) where the job itself did nothing wrong. Defaults to true.
    */
   incrementRetry?: boolean;
+  attemptID?: string;
+  failureContext?: UploadJobFailureContext;
 }
 
 /**
@@ -647,9 +847,11 @@ export async function markBackgroundJobWaitingRetryAsWorker(
   await ensureBackgroundJobCatalogTables(catalogPool);
   const incrementRetry = opts.incrementRetry !== false;
   const nextAttemptAt = new Date(Date.now() + Math.max(retryDelaySeconds, 1) * 1000);
-
-  const [result] = await catalogPool.query<ResultSetHeader>(
-    `UPDATE catalog.background_jobs
+  let affectedRows = 0;
+  let transitionedJob: BackgroundJobRecord | null = null;
+  await withCatalogTransition(catalogPool, async conn => {
+    const [result] = await conn.query<ResultSetHeader>(
+      `UPDATE catalog.background_jobs
      SET Phase = IF(Status = 'cancel_requested', 'cancelled', IF(RetryCount + IF(?, 1, 0) >= MaxRetries, 'failed', 'staging')),
          LastError = ?,
          NextAttemptAt = IF(Status = 'cancel_requested' OR RetryCount + IF(?, 1, 0) >= MaxRetries, NULL, ?),
@@ -659,10 +861,25 @@ export async function markBackgroundJobWaitingRetryAsWorker(
          Status = IF(Status = 'cancel_requested', 'cancelled', IF(RetryCount + IF(?, 1, 0) >= MaxRetries, 'failed', 'waiting_retry')),
          RetryCount = RetryCount + IF(?, 1, 0)
      WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')})`,
-    [incrementRetry, error.message, incrementRetry, nextAttemptAt, incrementRetry, incrementRetry, incrementRetry, jobID, workerID, ...FENCED_WRITE_STATUSES]
-  );
+      [incrementRetry, error.message, incrementRetry, nextAttemptAt, incrementRetry, incrementRetry, incrementRetry, jobID, workerID, ...FENCED_WRITE_STATUSES]
+    );
 
-  if (result.affectedRows === 0) {
+    affectedRows = result.affectedRows;
+    if (affectedRows > 0) {
+      const [rows] = await conn.query<BackgroundJobRow[]>(`SELECT * FROM catalog.background_jobs WHERE JobID = ?`, [jobID]);
+      transitionedJob = rows.length ? mapJob(rows[0]) : null;
+      const eventType = transitionedJob?.status === 'failed' ? 'failed' : transitionedJob?.status === 'cancelled' ? 'cancelled' : 'waiting_retry';
+      await addJobEvent(conn, jobID, eventType, error.message, {
+        attemptID: opts.attemptID ?? workerID,
+        ...(opts.failureContext ? { failureContext: opts.failureContext, fileID: opts.failureContext.fileID, batchID: opts.failureContext.batchID } : {}),
+        retryCount: transitionedJob?.retryCount ?? null,
+        incrementRetry,
+        nextAttemptAt: transitionedJob?.status === 'waiting_retry' ? nextAttemptAt.toISOString() : null
+      });
+    }
+  });
+
+  if (affectedRows === 0) {
     // See setBackgroundJobStatus for the CLIENT_FOUND_ROWS rationale: 0 matched
     // rows means the lease predicate did not match. Confirm before throwing.
     const leaseIntact = await isLeaseIntact(catalogPool, jobID, workerID);
@@ -670,21 +887,14 @@ export async function markBackgroundJobWaitingRetryAsWorker(
     return getBackgroundJob(catalogPool, jobID);
   }
 
-  const job = await getBackgroundJob(catalogPool, jobID);
-  const eventType = job?.status === 'failed' ? 'failed' : job?.status === 'cancelled' ? 'cancelled' : 'waiting_retry';
-  await addJobEvent(catalogPool, jobID, eventType, error.message, {
-    retryCount: job?.retryCount ?? null,
-    incrementRetry,
-    nextAttemptAt: job?.status === 'waiting_retry' ? nextAttemptAt.toISOString() : null
-  });
-  return job;
+  return transitionedJob;
 }
 
 export async function markBackgroundJobCompleted(
   catalogPool: Pool,
   jobID: number,
   workerID: string,
-  outcome: { failedRows?: number; unresolvedRows?: number } = {}
+  outcome: { failedRows?: number; unresolvedRows?: number; attemptID?: string } = {}
 ): Promise<void> {
   const unresolvedRows = outcome.unresolvedRows ?? 0;
   await setBackgroundJobStatus(catalogPool, jobID, workerID, {
@@ -694,17 +904,32 @@ export async function markBackgroundJobCompleted(
     ...(outcome.failedRows !== undefined ? { failedRows: outcome.failedRows } : {}),
     lastError: null,
     eventType: 'completed',
-    eventMessage: unresolvedRows > 0 ? `Upload job completed with ${unresolvedRows} row(s) preserved as unresolved failures for review` : 'Upload job completed'
+    attemptID: outcome.attemptID,
+    eventMessage:
+      unresolvedRows > 0 ? `Upload job completed with ${unresolvedRows} row(s) preserved as unresolved failures for review` : 'Upload job completed',
+    eventDetails: outcome.attemptID ? { attemptID: outcome.attemptID } : undefined
   });
 }
 
-export async function markBackgroundJobFailed(catalogPool: Pool, jobID: number, workerID: string, error: Error): Promise<void> {
+export async function markBackgroundJobFailed(
+  catalogPool: Pool,
+  jobID: number,
+  workerID: string,
+  error: Error,
+  attemptID?: string,
+  failureContext?: UploadJobFailureContext
+): Promise<void> {
   await setBackgroundJobStatus(catalogPool, jobID, workerID, {
     status: 'failed',
     phase: 'failed',
     lastError: error.message,
     eventType: 'failed',
-    eventMessage: error.message
+    eventMessage: error.message,
+    attemptID,
+    eventDetails: {
+      ...(attemptID ? { attemptID } : {}),
+      ...(failureContext ? { failureContext, fileID: failureContext.fileID, batchID: failureContext.batchID } : {})
+    }
   });
 }
 
@@ -725,10 +950,17 @@ export async function finalizeJobAsSystem(
   nextAttemptAt?: Date
 ): Promise<boolean> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const phase = status === 'failed' ? 'failed' : 'staging';
-  const isTerminal = status === 'failed';
-  const [result] = await catalogPool.query<ResultSetHeader>(
-    `UPDATE catalog.background_jobs
+  let transitioned = false;
+  await withCatalogTransition(catalogPool, async conn => {
+    const [claimRows] = await conn.query<RowDataPacket[]>(`SELECT WorkerID FROM catalog.background_jobs WHERE JobID = ? AND Status = 'running' FOR UPDATE`, [
+      jobID
+    ]);
+    if (!claimRows.length) return false;
+    const displacedWorkerID = typeof claimRows[0].WorkerID === 'string' ? claimRows[0].WorkerID : undefined;
+    const phase = status === 'failed' ? 'failed' : 'staging';
+    const isTerminal = status === 'failed';
+    const [result] = await conn.query<ResultSetHeader>(
+      `UPDATE catalog.background_jobs
      SET Status = ?,
          Phase = ?,
          LastError = ?,
@@ -739,11 +971,18 @@ export async function finalizeJobAsSystem(
          FinishedAt = IF(?, NOW(), FinishedAt),
          UpdatedAt = NOW()
      WHERE JobID = ? AND Status = 'running'`,
-    [status, phase, reason, nextAttemptAt ?? null, isTerminal, jobID]
-  );
-  if (result.affectedRows === 0) return false;
-  await addJobEvent(catalogPool, jobID, 'reclaimed', reason, { finalStatus: status, nextAttemptAt: nextAttemptAt?.toISOString() ?? null });
-  return true;
+      [status, phase, reason, status === 'failed' ? null : (nextAttemptAt ?? null), isTerminal, jobID]
+    );
+    transitioned = result.affectedRows > 0;
+    if (transitioned) {
+      await addJobEvent(conn, jobID, 'reclaimed', reason, {
+        finalStatus: status,
+        nextAttemptAt: status === 'waiting_retry' ? (nextAttemptAt?.toISOString() ?? null) : null,
+        ...(displacedWorkerID ? { displacedWorkerID, attemptID: displacedWorkerID } : {})
+      });
+    }
+  });
+  return transitioned;
 }
 
 export interface StaleRunningJob {
@@ -831,6 +1070,49 @@ export async function updateBackgroundJobFileStatus(
     if (fileRows.length === 0) throw new JobFileNotFoundError(jobID, jobFileID);
     // File exists and lease is intact — genuine no-op (only reachable if pool flags change).
   }
+}
+
+/**
+ * Records a file's parsed row count and recomputes the job's TotalRows from its files, inside the
+ * worker lease fence. The count is set, never added, so a retry that re-parses a file overwrites it.
+ * Files not parsed yet contribute their client value (NULL counts as 0). Status is never written.
+ */
+export async function updateBackgroundJobFileExpectedRows(
+  catalogPool: Pool,
+  jobID: number,
+  workerID: string,
+  jobFileID: number,
+  expectedRows: number
+): Promise<void> {
+  await ensureBackgroundJobCatalogTables(catalogPool);
+  await withCatalogTransition(catalogPool, async conn => {
+    // The fence every worker write uses, taken as a row lock (like finalizeJobAsSystem).
+    const [leaseRows] = await conn.query<RowDataPacket[]>(
+      `SELECT JobID FROM catalog.background_jobs
+       WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')})
+       FOR UPDATE`,
+      [jobID, workerID, ...FENCED_WRITE_STATUSES]
+    );
+    if (leaseRows.length === 0) throw new WorkerLeaseLostError(jobID, workerID);
+
+    const [fileUpdate] = await conn.query<ResultSetHeader>(`UPDATE catalog.background_job_files SET ExpectedRows = ? WHERE JobFileID = ? AND JobID = ?`, [
+      expectedRows,
+      jobFileID,
+      jobID
+    ]);
+    if (fileUpdate.affectedRows === 0) {
+      const [fileRows] = await conn.query<RowDataPacket[]>(`SELECT 1 FROM catalog.background_job_files WHERE JobFileID = ? AND JobID = ?`, [jobFileID, jobID]);
+      if (fileRows.length === 0) throw new JobFileNotFoundError(jobID, jobFileID);
+    }
+
+    // TotalRows is INT NOT NULL (catalog migration 2026-07-27-01), hence the COALESCE.
+    await conn.query(
+      `UPDATE catalog.background_jobs
+       SET TotalRows = (SELECT COALESCE(SUM(ExpectedRows), 0) FROM catalog.background_job_files WHERE JobID = ?)
+       WHERE JobID = ?`,
+      [jobID, jobID]
+    );
+  });
 }
 
 /**

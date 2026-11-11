@@ -19,25 +19,22 @@ import {
   Typography
 } from '@mui/joy';
 import React from 'react';
+import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 import WarningIcon from '@mui/icons-material/Warning';
 
 export default function RenderGridFormExplanations({ datagridType }: { datagridType: DatagridType }) {
-  const categoryRegex = /alive(?:-not measured)?|dead|missing|broken below|stem dead/g;
-  const matches = HeadersByDatagridType[datagridType].find(obj => obj.label === 'Status')?.explanation?.match(categoryRegex);
+  const statusList = AttributeStatusOptions.join(', ');
   const cleanedString = HeadersByDatagridType[datagridType]
     .find(obj => obj.label === 'Status')
-    ?.explanation?.replace(categoryRegex, '')
-    .replace(/\s*,\s*/g, '')
+    ?.explanation?.replace(statusList, '')
     .trim();
 
   const mappedForm = getFormForDataGrid(datagridType);
   const mappedFormHeaders = mappedForm ? TableHeadersByFormType[mappedForm] : [];
 
-  const formMatches = mappedFormHeaders.find(obj => obj.label === 'status')?.explanation?.match(categoryRegex);
   const formCleanedString = mappedFormHeaders
     .find(obj => obj.label === 'status')
-    ?.explanation?.replace(categoryRegex, '')
-    .replace(/\s*,\s*/g, '')
+    ?.explanation?.replace(statusList, '')
     .trim();
 
   return (
@@ -209,7 +206,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                           {cleanedString}
                         </Typography>
                         <Box role="list" aria-label="Grid status categories" sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                          {matches?.map((category, idx) => (
+                          {AttributeStatusOptions.map((category, idx) => (
                             <Chip key={idx} role="listitem" aria-label={category} variant="soft">
                               {category}
                             </Chip>
@@ -276,7 +273,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                           {formCleanedString}
                         </Typography>
                         <Box role="list" aria-label="Form status categories" sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                          {formMatches?.map((category, idx) => (
+                          {AttributeStatusOptions.map((category, idx) => (
                             <Chip key={idx} role="listitem" aria-label={category} variant="soft">
                               {category}
                             </Chip>

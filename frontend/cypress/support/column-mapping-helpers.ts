@@ -50,6 +50,14 @@ type MappingTable = Record<string, string>;
 
 interface MappingUploadFlowOptions {
   sqlpacketload?: object;
+  /**
+   * Existing-row count the stubbed GET /api/uploads/replacement-preview reports for the
+   * CLEAN_REUPLOAD measurements confirmation gate (issue #504 -- UploadParent's
+   * requestCleanMeasurementsReplacementConfirmation). Defaults to 0 so every mapping
+   * journey that does not care about the gate proceeds straight to UPLOAD_SQL with no
+   * MeasurementReplacementConfirmDialog. Set > 0 to exercise an occupied target census.
+   */
+  existingRowCount?: number;
 }
 
 interface PreflightInterceptResponse {
@@ -102,6 +110,15 @@ Cypress.Commands.add('applyColumnMapping', (mapping: MappingTable) => {
 });
 
 Cypress.Commands.add('interceptMappingUploadFlow', (options: MappingUploadFlowOptions = {}) => {
+  // GET /api/uploads/replacement-preview -- the Clean Re-Upload confirmation gate
+  // (issue #504) UploadParent's handleInitialSubmit awaits BEFORE it ever advances to
+  // UPLOAD_SQL. Stubbed first/unconditionally (not just when a spec cares about it) so
+  // every mapping journey that drives a CLEAN_REUPLOAD measurements Continue click past
+  // this gate gets a deterministic answer instead of hitting the real (auth-gated) route.
+  cy.intercept('GET', '/api/uploads/replacement-preview**', {
+    statusCode: 200,
+    body: { existingRowCount: options.existingRowCount ?? 0 }
+  }).as('replacementPreview');
   cy.intercept('GET', '/api/setupbulkprocessor/**', { statusCode: 200, body: { message: 'ok' } }).as('setupProcessor');
   cy.intercept('POST', '/api/sqlpacketload', {
     statusCode: 200,
@@ -141,7 +158,11 @@ declare global {
       enterUploadParseStep(fixture: string, options?: EnterUploadParseStepOptions): Chainable<void>;
       /** Drives the mapping dialog: assigns each canonicalField -> source column, then Applies. */
       applyColumnMapping(mapping: MappingTable): Chainable<void>;
-      /** Stubs the bulk-upload pipeline routes hit after a mapped CSV upload. */
+      /**
+       * Stubs the Clean Re-Upload replacement-preview gate (issue #504, aliased
+       * `replacementPreview`, `existingRowCount` defaults to 0 so no confirmation dialog
+       * appears) plus the bulk-upload pipeline routes hit after a mapped CSV upload.
+       */
       interceptMappingUploadFlow(options?: MappingUploadFlowOptions): Chainable<void>;
       /** Stubs the ArcGIS preflight route with the supplied response. */
       interceptMappingPreflight(response: PreflightInterceptResponse): Chainable<void>;

@@ -14,7 +14,7 @@ export default function MultilineAttributesDataGrid(props: DataGridSignals) {
     id: 0,
     code: '',
     description: '',
-    status: ''
+    status: null
   };
   const [refresh, setRefresh] = useState(false);
 

@@ -1,7 +1,10 @@
+import { buildFileUploadChangelogRecordID } from '@/lib/uploads/file-names';
+import { handleUpsert } from '@/config/utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib/ingestion/temporary-measurements';
+import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
 
 /**
  * Unified Changelog Tracking System Tests
@@ -137,7 +140,8 @@ vi.mock('@/config/uploadsessiontracker', () => ({
   UploadSessionState: {
     INITIALIZED: 'initialized',
     UPLOADING: 'uploading'
-  }
+  },
+  ACTIVE_UPLOAD_SESSION_STATES: ['initialized', 'uploading', 'uploaded', 'processing', 'collapsing']
 }));
 
 // Import handlers AFTER mocks
@@ -148,6 +152,8 @@ import { POST as SQLPACKETLOAD_POST } from '../sqlpacketload/route';
 // ========== Helpers ==========
 // A reference-table clean re-upload is always sent under an upload session, as the upload client does.
 const SUPPORTING_DATA_UPLOAD_SESSION_ID = 'unifiedchangelog-attributes-session';
+const TEST_UPLOAD_SESSION_ID = 'unifiedchangelog-measurements-session';
+const MEASUREMENT_UPLOAD_HEADERS = { 'x-upload-session-id': TEST_UPLOAD_SESSION_ID };
 
 function makeRequest(url: string, method: string = 'GET', body?: any, extraHeaders: Record<string, string> = {}): any {
   const req: any = new Request(url, {
@@ -167,24 +173,31 @@ function makeParams(dataType: string, slugs?: string[]): { params: Promise<{ dat
 function mockMeasurementUploadQueries(
   exec: any,
   options: {
-    preInsertCount?: number;
-    postInsertCount?: number;
+    insertedRowCount?: number;
     existingEntry?: any[];
     changelogResult?: unknown;
     changelogError?: Error;
   } = {}
 ) {
-  const { preInsertCount = 1, postInsertCount = preInsertCount + 1, existingEntry = [], changelogResult = {}, changelogError } = options;
+  const { insertedRowCount = 1, existingEntry = [], changelogResult = {}, changelogError } = options;
 
   exec
     .mockResolvedValueOnce([{ PlotID: 1 }])
-    .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+    // sqlpacketload family scope sample: nothing staged for this batch family yet.
+    .mockResolvedValueOnce([])
+    // ensureUploadSessionReplacementMarkerColumn: upload_sessions exists and already has the marker column.
+    .mockResolvedValueOnce([{ tableCount: 1, columnCount: 1 }])
+    // uploadSessionHasCompletedReplacement: this session has not replaced the census yet.
+    .mockResolvedValueOnce([{ census_replacement_completed_at: null }])
+    // replaceCensusForCleanReupload's familyHasStagedRows: an earlier chunk is already staged, so the replacement ends as upload_in_progress.
+    .mockResolvedValueOnce([{ staged: 1 }])
     // ensureTemporaryMeasurementsSourceFormatColumn: information_schema column existence check
     // (count > 0 means the SourceFormat column already exists, so no ALTER TABLE runs).
     .mockResolvedValueOnce([{ count: 1 }])
-    .mockResolvedValueOnce([{ count: preInsertCount }])
-    .mockResolvedValueOnce({})
-    .mockResolvedValueOnce([{ count: postInsertCount }]);
+    // stageMeasurementChunk's familyHasStagedRows: the same answer, so no stale cleanup runs.
+    .mockResolvedValueOnce([{ staged: 1 }])
+    // temporarymeasurements INSERT: the server reports the rows it inserted.
+    .mockResolvedValueOnce({ affectedRows: insertedRowCount });
 
   if (changelogError) {
     exec.mockRejectedValueOnce(changelogError);
@@ -199,6 +212,9 @@ describe('Unified Changelog Tracking System', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    resetUploadSessionReplacementMarkerCacheForTests();
+    vi.spyOn(ConnectionManager.getInstance(), 'acquireApplicationLock').mockResolvedValue(true);
+    vi.mocked(handleUpsert).mockResolvedValue({ id: 1, operation: 'inserted' });
   });
 
   describe('1. Single-Row UPDATE via EditToolbar', () => {
@@ -378,8 +394,6 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       const exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
-        preInsertCount: 1,
-        postInsertCount: 2,
         existingEntry: [],
         changelogResult: { insertId: 1 }
       });
@@ -400,15 +414,20 @@ describe('Unified Changelog Tracking System', () => {
         }
       };
 
-      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'measurements.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet
-      });
+      const req = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'measurements.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       const res = await SQLPACKETLOAD_POST(req);
 
@@ -444,7 +463,7 @@ describe('Unified Changelog Tracking System', () => {
         const params = changelogInsert[1] as any[];
         expect(params).toBeDefined();
         expect(params[0]).toBe('file_upload'); // TableName
-        expect(params[1]).toBe('measurements.csv'); // RecordID (fileName)
+        expect(params[1]).toBe(buildFileUploadChangelogRecordID('measurements.csv', TEST_UPLOAD_SESSION_ID)); // RecordID (fileName::upload session)
         expect(params[2]).toBe('INSERT'); // Operation
         // params[3] is the JSON metadata
         const metadata = JSON.parse(params[3]);
@@ -462,8 +481,6 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       const exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
-        preInsertCount: 1,
-        postInsertCount: 2,
         existingEntry: [
           {
             ChangeID: 1,
@@ -471,7 +488,8 @@ describe('Unified Changelog Tracking System', () => {
               fileName: 'measurements.csv',
               formType: 'measurements',
               rowCount: 1,
-              batchCount: 1
+              batchCount: 1,
+              chunksByIdentity: { 'prior-chunk': { rowCount: 1, droppedCount: 0 } }
             })
           }
         ],
@@ -494,15 +512,20 @@ describe('Unified Changelog Tracking System', () => {
         }
       };
 
-      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'measurements.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet
-      });
+      const req = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'measurements.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       const res = await SQLPACKETLOAD_POST(req);
 
@@ -510,7 +533,7 @@ describe('Unified Changelog Tracking System', () => {
       expect(res!.status).toBe(HTTPResponses.OK);
 
       // Verify changelog UPDATE was called (not INSERT)
-      const changelogUpdate = exec.mock.calls.find(call => String(call[0]).includes('UPDATE') && String(call[0]).includes('unifiedchangelog'));
+      const changelogUpdate = exec.mock.calls.find(call => String(call[0]).trimStart().startsWith('UPDATE') && String(call[0]).includes('unifiedchangelog'));
       expect(changelogUpdate).toBeDefined();
 
       // Verify accumulated counts
@@ -535,6 +558,7 @@ describe('Unified Changelog Tracking System', () => {
       const exec = vi.spyOn(cm, 'executeQuery').mockImplementation(async (sql: unknown) => {
         const text = String(sql);
         if (text.includes('reference_replacement_completed_at FROM')) return [{ reference_replacement_completed_at: null }];
+        if (text.trimStart().startsWith('SELECT')) return [];
         return { affectedRows: 1, insertId: 1 };
       });
 
@@ -564,7 +588,9 @@ describe('Unified Changelog Tracking System', () => {
       expect(res!.status, `response body: ${await res!.clone().text()}`).toBe(HTTPResponses.OK);
 
       // Verify ONE changelog entry was created, carrying this file's counts
-      const changelogStatements = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      const changelogStatements = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog') && call[1]?.[0] === 'file_upload');
+      const rowAudits = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog') && call[1]?.[0] === 'attributes');
+      expect(rowAudits).toHaveLength(2);
       expect(changelogStatements).toHaveLength(1);
       expect(String(changelogStatements[0][0])).toContain('INSERT INTO');
       const metadata = JSON.parse((changelogStatements[0][1] as unknown[])[3] as string);
@@ -579,21 +605,24 @@ describe('Unified Changelog Tracking System', () => {
       let _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       let _exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
-        preInsertCount: 1,
-        postInsertCount: 2,
         existingEntry: [],
         changelogResult: {}
       });
 
-      const req1 = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'file1.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
-      });
+      const req1 = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'file1.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       const res1 = await SQLPACKETLOAD_POST(req1);
       expect(res1).toBeDefined();
@@ -603,27 +632,31 @@ describe('Unified Changelog Tracking System', () => {
       // The SourceFormat column check caches per schema; reset so the second upload
       // re-issues it and consumes the mock response queued by mockMeasurementUploadQueries.
       resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+      resetUploadSessionReplacementMarkerCacheForTests();
 
       // Second file upload
       _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9b');
       _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       _exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
-        preInsertCount: 1,
-        postInsertCount: 2,
         existingEntry: [],
         changelogResult: {}
       });
 
-      const req2 = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'file2.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet: { 'row-1': { tag: '200', stemtag: '1', spcode: 'sp2', quadrat: 'Q02' } }
-      });
+      const req2 = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'file2.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet: { 'row-1': { tag: '200', stemtag: '1', spcode: 'sp2', quadrat: 'Q02' } }
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       const res2 = await SQLPACKETLOAD_POST(req2);
       expect(res2).toBeDefined();
@@ -683,60 +716,67 @@ describe('Unified Changelog Tracking System', () => {
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-11');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
-        preInsertCount: 1,
-        postInsertCount: 2,
         existingEntry: [],
         changelogResult: {}
       });
 
-      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'test.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'john.doe@example.com',
-        fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
-      });
+      const req = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'test.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'john.doe@example.com',
+          fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       await SQLPACKETLOAD_POST(req);
 
       // Verify ChangedBy field is populated
       const changelogInsert = exec.mock.calls.find(call => String(call[0]).includes('INSERT INTO') && String(call[0]).includes('unifiedchangelog'));
 
-      if (changelogInsert) {
-        const params = changelogInsert[1];
-        expect(params).toContain('john.doe@example.com');
-      }
+      expect(changelogInsert).toBeDefined();
+      expect(changelogInsert![1]).toContain('test@example.com');
+      expect(changelogInsert![1]).not.toContain('john.doe@example.com');
     });
 
-    it('should not fail upload if changelog tracking fails', async () => {
+    it('rolls back the upload if its changelog write fails', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
+      vi.spyOn(cm, 'rollbackTransaction').mockResolvedValue(undefined);
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-12');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       // Mock changelog insert failure but upload succeeds
       const _exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
-        preInsertCount: 1,
-        postInsertCount: 2,
         changelogError: new Error('Changelog table locked')
       });
 
-      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'test.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
-      });
+      const req = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'test.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       const res = await SQLPACKETLOAD_POST(req);
 
-      // Upload should still succeed even if changelog fails
-      expect(res!.status).toBe(HTTPResponses.OK);
+      expect(res!.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+      expect(cm.rollbackTransaction).toHaveBeenCalledWith('tx-12');
+      expect(_commit).not.toHaveBeenCalled();
     });
   });
 });

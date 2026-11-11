@@ -167,6 +167,38 @@ describe('/api/administrative/fetch/[type] auth gate', () => {
     expect(insertQuery).not.toContain('isNew');
   });
 
+  it('POST → returns the generated identifier so the grid can address the row it just created', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    mocks.executeQuery.mockResolvedValueOnce({ insertId: 314 } as any);
+    const res = await POST(makeReq('http://x/api/administrative/fetch/sites', { newRow: { isNew: true, siteName: 'BCI' } }), params('sites'));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ createdIDs: { sites: 314 } });
+  });
+
+  it('POST → omits createdIDs when the insert produced no usable identifier', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    mocks.executeQuery.mockResolvedValueOnce({ insertId: 0 } as any);
+    const res = await POST(
+      makeReq('http://x/api/administrative/fetch/usersiterelations', { newRow: { isNew: true, userID: 1, siteID: 2 } }),
+      params('usersiterelations')
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.not.toHaveProperty('createdIDs');
+  });
+
+  it('POST → reports the new user identifier under both the legacy and grid-facing keys', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    mocks.executeQuery.mockResolvedValueOnce({ insertId: 51 } as any);
+    const res = await POST(
+      makeReq('http://x/api/administrative/fetch/users', {
+        newRow: { firstName: 'Ada', lastName: 'Lovelace', email: 'ada@x.org', userStatus: 'field crew', notifications: false }
+      }),
+      params('users')
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ userID: 51, createdIDs: { users: 51 } });
+  });
+
   it('PATCH → 403 when non-admin', async () => {
     mocks.auth.mockResolvedValue({ user: { email: 'f@x', userStatus: 'field crew' } });
     const res = await PATCH(

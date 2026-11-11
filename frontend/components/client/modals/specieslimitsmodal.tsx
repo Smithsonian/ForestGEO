@@ -29,6 +29,22 @@ import NorthIcon from '@mui/icons-material/North';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { Info } from '@mui/icons-material';
 import ailogger from '@/ailogger';
+import { readResponsePayload } from '@/components/uploadsystemhelpers/uploadsessionconflicts';
+
+export type SpeciesLimitsSaveOutcome = { status: 'saved' | 'failed'; message: string };
+
+export const SPECIES_LIMITS_SAVED_MESSAGE = 'Species limits saved.';
+export const SPECIES_LIMITS_SAVE_FAILED_MESSAGE = 'Species limits could not be saved. Please try again.';
+
+/** The write handlers return their reason as a JSON `error` or `message` string; anything else gets the fallback. */
+function describeSpeciesLimitsSaveFailure(payload: unknown): string {
+  if (payload !== null && typeof payload === 'object') {
+    const { error, message } = payload as { error?: unknown; message?: unknown };
+    if (typeof error === 'string' && error.trim() !== '') return error;
+    if (typeof message === 'string' && message.trim() !== '') return message;
+  }
+  return SPECIES_LIMITS_SAVE_FAILED_MESSAGE;
+}
 
 export default function SpeciesLimitsModal(props: {
   openSpeciesLimitsModal: boolean;
@@ -36,9 +52,10 @@ export default function SpeciesLimitsModal(props: {
   incomingSpecies: SpeciesRDS;
   allSpeciesLimits: SpeciesLimitsRDS[];
   setRefresh: Dispatch<SetStateAction<boolean>>;
+  onSaveOutcome: (outcome: SpeciesLimitsSaveOutcome) => void;
 }) {
   const BUFFER = 10;
-  const { openSpeciesLimitsModal, handleCloseSpeciesLimitsModal, incomingSpecies, allSpeciesLimits, setRefresh } = props;
+  const { openSpeciesLimitsModal, handleCloseSpeciesLimitsModal, incomingSpecies, allSpeciesLimits, setRefresh, onSaveOutcome } = props;
   const defaultLower = allSpeciesLimits.reduce((min, limit) => Math.min(min, limit.lowerBound || Infinity), 10);
   const defaultUpper = allSpeciesLimits.reduce((max, limit) => Math.max(max, limit.upperBound || -Infinity), 100);
   const originalLimit = allSpeciesLimits.find(limit => limit.speciesID === incomingSpecies.speciesID);
@@ -51,6 +68,7 @@ export default function SpeciesLimitsModal(props: {
   });
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<'enable' | 'disable' | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -125,30 +143,45 @@ export default function SpeciesLimitsModal(props: {
   }
 
   async function handleSave() {
+    if (isSaving) return;
+    setIsSaving(true);
     try {
-      const submittedSpeciesLimit: SpeciesLimitsRDS = {
-        ...newSpeciesLimit,
-        limitType: 'DBH',
-        censusID: currentCensus?.dateRanges?.[0]?.censusID,
-        plotID: currentPlot?.plotID,
-        speciesLimitID: 0
-      };
-      const method = newSpeciesLimit !== undefined ? (originalLimit ? 'PATCH' : 'POST') : 'DELETE'; // if an original limit exists, use PATCH, otherwise use POST
-      const endpoint = `/api/fixeddata/specieslimits/${currentSite?.schemaName}/speciesLimitID/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}`;
-      const response = await fetch(endpoint, {
+      await saveSpeciesLimit();
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveSpeciesLimit() {
+    const submittedSpeciesLimit: SpeciesLimitsRDS = {
+      ...newSpeciesLimit,
+      limitType: 'DBH',
+      censusID: currentCensus?.dateRanges?.[0]?.censusID,
+      plotID: currentPlot?.plotID,
+      speciesLimitID: 0
+    };
+    const method = newSpeciesLimit !== undefined ? (originalLimit ? 'PATCH' : 'POST') : 'DELETE'; // if an original limit exists, use PATCH, otherwise use POST
+    const endpoint = `/api/fixeddata/specieslimits/${currentSite?.schemaName}/speciesLimitID/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}`;
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
         method: method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldRow: originalLimit, newRow: newSpeciesLimit !== undefined ? submittedSpeciesLimit : originalLimit })
       });
-      if (response.ok) {
-        alert('Species limits saved successfully!');
-      }
-    } catch (error: any) {
-      ailogger.error('Error saving species limits:', error);
-    } finally {
-      setRefresh(true);
-      closeModal();
+    } catch (networkError: unknown) {
+      // fetch only rejects on a network failure; the draft stays so Save can be retried.
+      ailogger.error('Error saving species limits:', networkError instanceof Error ? networkError : new Error(String(networkError)));
+      onSaveOutcome({ status: 'failed', message: SPECIES_LIMITS_SAVE_FAILED_MESSAGE });
+      return;
     }
+    if (!response.ok) {
+      onSaveOutcome({ status: 'failed', message: describeSpeciesLimitsSaveFailure(await readResponsePayload(response)) });
+      return;
+    }
+    setRefresh(true);
+    onSaveOutcome({ status: 'saved', message: SPECIES_LIMITS_SAVED_MESSAGE });
+    closeModal();
   }
 
   function closeModal() {
@@ -161,7 +194,7 @@ export default function SpeciesLimitsModal(props: {
 
   return (
     <Modal open={openSpeciesLimitsModal} onClose={handleCloseSpeciesLimitsModal}>
-      <ModalDialog sx={{ display: 'flex', flex: 1 }}>
+      <ModalDialog sx={{ width: 'min(640px, calc(100vw - 32px))' }}>
         <DialogTitle>
           <Stack direction="row" spacing={2} sx={{ width: '100%', height: '100%' }}>
             <FormControl orientation="horizontal" sx={{ width: '100%', height: '100%', justifyContent: 'space-between' }}>
@@ -198,29 +231,33 @@ export default function SpeciesLimitsModal(props: {
                   <Input aria-label={'species limits dbh input'} value={'DBH'} disabled />
                   <FormHelperText>Only DBH limits can be set!</FormHelperText>
                 </FormControl>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                  <FormControl id={'set-species-lower-limit'}>
-                    <FormLabel htmlFor={'set-species-lower-limit'}>Lower Limit</FormLabel>
+                <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, mb: 2 }}>
+                  <FormControl id={'set-species-lower-limit'} sx={{ flex: 1, minWidth: 0 }}>
+                    <FormLabel id={'set-species-lower-limit-label'} htmlFor={'set-species-lower-limit'}>
+                      Lower Limit
+                    </FormLabel>
                     <Input
-                      aria-labelledby={'set-species-lower-limit'}
+                      aria-labelledby={'set-species-lower-limit-label'}
                       type="number"
                       value={newSpeciesLimit?.lowerBound}
                       onChange={e => handleInputChange(e.target.value, 'lower')}
-                      sx={{ display: 'flex', flex: 1 }}
+                      fullWidth
                       startDecorator={<SouthIcon />}
                       endDecorator={<Typography level={'body-md'}>{currentPlot?.defaultDBHUnits}</Typography>}
                     />
                     <FormHelperText>All values BELOW this limit will be flagged!</FormHelperText>
                   </FormControl>
                   <Typography level="body-md">to</Typography>
-                  <FormControl id={'set-species-upper-limit'}>
-                    <FormLabel htmlFor={'set-species-upper-limit'}>Upper Limit</FormLabel>
+                  <FormControl id={'set-species-upper-limit'} sx={{ flex: 1, minWidth: 0 }}>
+                    <FormLabel id={'set-species-upper-limit-label'} htmlFor={'set-species-upper-limit'}>
+                      Upper Limit
+                    </FormLabel>
                     <Input
-                      aria-labelledby={'set-species-upper-limit'}
+                      aria-labelledby={'set-species-upper-limit-label'}
                       type="number"
                       value={newSpeciesLimit?.upperBound}
                       onChange={e => handleInputChange(e.target.value, 'upper')}
-                      sx={{ display: 'flex', flex: 1 }}
+                      fullWidth
                       startDecorator={<NorthIcon />}
                       endDecorator={<Typography level={'body-md'}>{currentPlot?.defaultDBHUnits}</Typography>}
                     />
@@ -255,7 +292,7 @@ export default function SpeciesLimitsModal(props: {
           >
             Cancel
           </Button>
-          <Button variant={'soft'} onClick={handleSave}>
+          <Button variant={'soft'} onClick={handleSave} loading={isSaving} disabled={isSaving}>
             Save
           </Button>
         </DialogActions>

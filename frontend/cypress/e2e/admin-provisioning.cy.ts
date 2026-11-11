@@ -26,31 +26,41 @@ const SITE_NAME = 'Rabi';
 const SCHEMA_NAME = 'forestgeo_rabi_e2e';
 const PLOT_NAME = 'Main';
 
-function buildSteps(status: 'pending' | 'running' | 'completed' | 'failed') {
-  return STEP_KEYS.map((key, index) => ({
-    stepId: index + 1,
-    runId: RUN_ID,
-    stepIndex: index,
-    stepKey: key,
-    status:
-      status === 'failed' && index === 1
-        ? ('failed' as const)
-        : status === 'failed' && index < 1
-          ? ('completed' as const)
-          : status === 'failed'
-            ? ('pending' as const)
-            : status === 'running' && index === 0
-              ? ('completed' as const)
-              : status === 'running' && index === 1
-                ? ('running' as const)
-                : status === 'running'
-                  ? ('pending' as const)
-                  : status,
-    errorMessage: status === 'failed' && index === 1 ? 'Synthetic failure' : null,
-    errorStack: status === 'failed' && index === 1 ? 'Error: Synthetic failure' : null,
-    startedAt: status !== 'pending' && (index === 0 || ((status === 'running' || status === 'failed') && index === 1)) ? new Date().toISOString() : null,
-    finishedAt: status === 'completed' || (status === 'running' && index === 0) || (status === 'failed' && index <= 1) ? new Date().toISOString() : null
-  }));
+type StepStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+const CREATE_SCHEMA_STEP_INDEX = STEP_KEYS.indexOf('create_schema');
+const INIT_TABLES_STEP_INDEX = STEP_KEYS.indexOf('init_tables');
+
+function stepStatusAt(runStatus: StepStatus, index: number, failedStepIndex: number): StepStatus {
+  if (runStatus === 'failed') {
+    if (index < failedStepIndex) return 'completed';
+    if (index === failedStepIndex) return 'failed';
+    return 'pending';
+  }
+  if (runStatus === 'running') {
+    if (index === 0) return 'completed';
+    if (index === 1) return 'running';
+    return 'pending';
+  }
+  return runStatus;
+}
+
+function buildSteps(runStatus: StepStatus, failedStepIndex: number = CREATE_SCHEMA_STEP_INDEX) {
+  return STEP_KEYS.map((key, index) => {
+    const status = stepStatusAt(runStatus, index, failedStepIndex);
+    const failedHere = status === 'failed';
+    return {
+      stepId: index + 1,
+      runId: RUN_ID,
+      stepIndex: index,
+      stepKey: key,
+      status,
+      errorMessage: failedHere ? 'Synthetic failure' : null,
+      errorStack: failedHere ? 'Error: Synthetic failure' : null,
+      startedAt: status === 'pending' ? null : new Date().toISOString(),
+      finishedAt: status === 'completed' || failedHere ? new Date().toISOString() : null
+    };
+  });
 }
 
 function buildRunRecord(status: 'running' | 'completed' | 'failed' | 'aborted') {
@@ -255,7 +265,7 @@ describe('Admin: site provisioning wizard', () => {
     cy.intercept('GET', `/api/admin/provision/${RUN_ID}`, req => {
       req.reply({
         run: buildRunRecord(aborted ? 'aborted' : 'failed'),
-        steps: buildSteps('failed'),
+        steps: buildSteps('failed', INIT_TABLES_STEP_INDEX),
         stuckStepIndex: null
       });
     }).as('pollStatus');
@@ -284,5 +294,28 @@ describe('Admin: site provisioning wizard', () => {
     cy.wait('@abortRun');
     cy.wait('@pollStatus');
     cy.contains('aborted').should('be.visible');
+  });
+
+  it('offers a plain abort that leaves the schema alone when the run never created it', () => {
+    cy.intercept('GET', `/api/admin/provision/${RUN_ID}`, {
+      run: buildRunRecord('failed'),
+      steps: buildSteps('failed', CREATE_SCHEMA_STEP_INDEX),
+      stuckStepIndex: null
+    }).as('pollStatus');
+
+    cy.viewport(1600, 1000);
+    cy.clock(Date.now(), ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout']);
+    cy.visit(`/admin/provision/${RUN_ID}`);
+    cy.wait('@pollStatus');
+
+    cy.contains('button', 'Abort & drop schema').should('not.exist');
+    cy.contains('button', 'Abort run').click();
+
+    cy.get('[role="alertdialog"]').within(() => {
+      cy.contains('left untouched').should('be.visible');
+      cy.contains('button', 'Abort run').should('be.disabled');
+      cy.get('[aria-label="Confirm schema name"]').type(SCHEMA_NAME);
+      cy.contains('button', 'Abort run').should('not.be.disabled');
+    });
   });
 });

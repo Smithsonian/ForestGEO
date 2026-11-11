@@ -190,6 +190,20 @@ export interface EditToolbarCustomProps {
   setHidingEmpty?: Dispatch<SetStateAction<boolean>>;
 }
 
+// Return contract for `editFlowOverride`. An override (e.g. the failed-measurements
+// preview/apply flow) is the only production path that bypasses the standard PATCH -
+// it must therefore report `changed` explicitly rather than leaving persistRow to
+// guess, or a save that did nothing (empty diff, remaining failures) would report the
+// same "Row successfully updated!" toast as a real save (#481 follow-up, finding A1).
+// `infoMessage`, when present, is surfaced by describeSaveOutcome ahead of (a no-op) or
+// appended to (a real save) the standard toast text - e.g. explaining that a typed edit
+// rounded to the existing value at server precision and was not itself persisted.
+export interface EditFlowPersistResult {
+  row: GridRowModel;
+  changed: boolean;
+  infoMessage?: string;
+}
+
 export interface IsolatedDataGridCommonProps {
   gridType: string;
   gridColumns: GridColDef[];
@@ -207,7 +221,7 @@ export interface IsolatedDataGridCommonProps {
   defaultHideEmpty?: boolean;
   apiRef?: RefObject<GridApiCommunity>;
   adminEmail?: string;
-  editFlowOverride?: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
+  editFlowOverride?: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<EditFlowPersistResult>;
   enablePageJump?: boolean;
   enableInfiniteScroll?: boolean;
 }

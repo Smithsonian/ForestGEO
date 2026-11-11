@@ -32,6 +32,13 @@ const MEMBER_EMAIL = 'member@forestgeo.test';
 const TEST_FILE_ID = 'file.csv';
 const TEST_BATCH_ID = 'batch-1';
 const TEST_SESSION_ID = 'session-1';
+const TEST_PLOT_ID = 22;
+const TEST_CENSUS_ID = 6;
+
+function familyRow(batchID: string, rowCount: number) {
+  return { BatchID: batchID, PlotID: TEST_PLOT_ID, CensusID: TEST_CENSUS_ID, rowCount, plotCount: 1, censusCount: 1 };
+}
+const EXACT_ONLY_FAMILY = [familyRow(TEST_BATCH_ID, 3)];
 
 vi.mock('@/auth', () => ({
   auth: vi.fn(async () => ({ user: { email: ADMIN_EMAIL, userStatus: 'global', sites: [] } }))
@@ -59,17 +66,15 @@ vi.mock('@/config/uploadsessiontracker', () => ({
 }));
 
 const transferSpies = vi.hoisted(() => ({
-  moveTemporaryBatchToFailedMeasurements: vi.fn(async () => 3),
-  moveTemporarySubBatchesToFailedMeasurements: vi.fn(async () => 0)
+  moveTemporaryBatchToFailedMeasurements: vi.fn(async () => 3)
 }));
 
 vi.mock('@/lib/batchfailuretransfer', () => ({
-  moveTemporaryBatchToFailedMeasurements: transferSpies.moveTemporaryBatchToFailedMeasurements,
-  moveTemporarySubBatchesToFailedMeasurements: transferSpies.moveTemporarySubBatchesToFailedMeasurements
+  moveTemporaryBatchToFailedMeasurements: transferSpies.moveTemporaryBatchToFailedMeasurements
 }));
 
 const dbSpies = vi.hoisted(() => ({
-  executeQuery: vi.fn(async () => [{ PlotID: 22, CensusID: 6 }]),
+  executeQuery: vi.fn(async () => EXACT_ONLY_FAMILY),
   closeConnection: vi.fn(async () => undefined)
 }));
 
@@ -98,7 +103,7 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] authz', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
-    dbSpies.executeQuery.mockResolvedValue([{ PlotID: 22, CensusID: 6 }]);
+    dbSpies.executeQuery.mockResolvedValue(EXACT_ONLY_FAMILY);
     transferSpies.moveTemporaryBatchToFailedMeasurements.mockResolvedValue(3);
   });
 
@@ -138,7 +143,9 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] authz', () => {
       TEST_FILE_ID,
       TEST_BATCH_ID,
       'Batch moved after max attempts',
-      'sql_exception'
+      'sql_exception',
+      undefined,
+      expect.objectContaining({ plotID: TEST_PLOT_ID, censusID: TEST_CENSUS_ID, changedBy: expect.any(String) })
     );
   });
 });
@@ -157,7 +164,7 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] failure-kind classificati
   beforeEach(() => {
     vi.clearAllMocks();
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
-    dbSpies.executeQuery.mockResolvedValue([{ PlotID: 22, CensusID: 6 }]);
+    dbSpies.executeQuery.mockResolvedValue(EXACT_ONLY_FAMILY);
     transferSpies.moveTemporaryBatchToFailedMeasurements.mockResolvedValue(3);
   });
 
@@ -177,7 +184,9 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] failure-kind classificati
       TEST_FILE_ID,
       TEST_BATCH_ID,
       INTERRUPTION_REASON,
-      'interrupted_upload'
+      'interrupted_upload',
+      undefined,
+      expect.objectContaining({ plotID: TEST_PLOT_ID, censusID: TEST_CENSUS_ID, changedBy: expect.any(String) })
     );
   });
 
@@ -197,30 +206,39 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] failure-kind classificati
       TEST_FILE_ID,
       TEST_BATCH_ID,
       GENUINE_SQL_REASON,
-      'sql_exception'
+      'sql_exception',
+      undefined,
+      expect.objectContaining({ plotID: TEST_PLOT_ID, censusID: TEST_CENSUS_ID, changedBy: expect.any(String) })
     );
   });
 
-  it('carries the same kind into the sub-batch fallback transfer', async () => {
+  it('moves every discovered family member in its own transaction, with the same kind and no rediscovery', async () => {
     const { auth } = await import('@/auth');
     vi.mocked(auth).mockResolvedValueOnce({
       user: { email: MEMBER_EMAIL, userStatus: 'field crew', sites: [{ schemaName: MEMBER_SCHEMA }] }
     } as any);
-    // No exact-match rows: the route falls back to moving every sub-batch.
-    transferSpies.moveTemporaryBatchToFailedMeasurements.mockResolvedValueOnce(0);
-    transferSpies.moveTemporarySubBatchesToFailedMeasurements.mockResolvedValueOnce(5);
+    const mixedFamily = [familyRow(TEST_BATCH_ID, 1), familyRow(`${TEST_BATCH_ID}__sub001`, 4), familyRow(`${TEST_BATCH_ID}__sub002`, 2)];
+    dbSpies.executeQuery.mockResolvedValueOnce(mixedFamily);
 
     const { GET } = await import('@/app/api/setupbulkfailure/[fileID]/[batchID]/route');
     const res = await GET(buildRequest(MEMBER_SCHEMA, INTERRUPTION_REASON), makeContext());
 
+    const movedBatchIDs = transferSpies.moveTemporaryBatchToFailedMeasurements.mock.calls.map(call => (call as unknown[])[3]);
+    console.log('[mixed-family] status=', res.status, 'route queries=', dbSpies.executeQuery.mock.calls.length, 'moved members=', movedBatchIDs);
     expect(res.status).toBe(HTTP_OK);
-    expect(transferSpies.moveTemporarySubBatchesToFailedMeasurements).toHaveBeenCalledWith(
-      expect.anything(),
-      MEMBER_SCHEMA,
-      TEST_FILE_ID,
-      TEST_BATCH_ID,
-      INTERRUPTION_REASON,
-      'interrupted_upload'
-    );
+    expect(dbSpies.executeQuery).toHaveBeenCalledTimes(1);
+    expect(movedBatchIDs).toEqual(mixedFamily.map(row => row.BatchID));
+    for (const row of mixedFamily) {
+      expect(transferSpies.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledWith(
+        expect.anything(),
+        MEMBER_SCHEMA,
+        TEST_FILE_ID,
+        row.BatchID,
+        INTERRUPTION_REASON,
+        'interrupted_upload',
+        undefined,
+        expect.objectContaining({ plotID: TEST_PLOT_ID, censusID: TEST_CENSUS_ID, changedBy: expect.any(String) })
+      );
+    }
   });
 });
