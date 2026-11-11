@@ -101,19 +101,30 @@ const rawErrorRows = [
   }
 ];
 
+const duplicateMemberGroupRows = rawErrorRows.map(rawRow => ({
+  RequestedMeasurementID: rawRow.CoreMeasurementID,
+  CensusID: rawRow.CensusID,
+  TreeTag: 'TREE101',
+  StemTag: '1',
+  MeasurementIDs: '101,102',
+  MemberCount: 2,
+  MemberListComplete: SQL_TRUE
+}));
+
 function makeConnection() {
   return {
-    executeQuery: vi.fn(async (query: string) => {
-      if (query.includes('measurement_error_log')) {
-        return rawErrorRows;
+    executeQuery: vi.fn(async (query: string, params: unknown[] = []) => {
+      const label = readStatementLabel(query);
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows) {
+        return rawErrorRows.map(rawRow => ({ ...rawRow, HasDuplicate: SQL_TRUE, HasSameBatch: SQL_FALSE }));
       }
-      if (query.includes('GROUP_CONCAT(DISTINCT ms.CoreMeasurementID')) {
-        return [{ TreeTag: 'TREE101', StemTag: '1', MeasurementIDs: '101,102' }];
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups) {
+        return duplicateMemberGroupRows.filter(group => params.includes(group.RequestedMeasurementID));
       }
-      if (query.includes('GROUP_CONCAT(DISTINCT cm.CoreMeasurementID')) {
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups) {
         return [];
       }
-      throw new Error(`Unexpected query in contract test: ${query}`);
+      throw new Error(`Unexpected statement in test: ${label}`);
     })
   } as any;
 }
@@ -143,7 +154,22 @@ function makeRequest(overrides: Partial<ErrorExplorerQueryRequest> = {}): ErrorE
 
 describe('API response shape contracts', () => {
   it('keeps Errors Explorer query rows aligned with the UI contract', async () => {
-    const response = await queryErrorExplorer(makeConnection(), makeRequest());
+    const connection = makeConnection();
+    const response = await queryErrorExplorer(connection, makeRequest());
+
+    const statementLabels = connection.executeQuery.mock.calls.map(([query]: [string]) => readStatementLabel(query));
+    expect(
+      statementLabels.filter((label: string | null) => label === ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows),
+      'one scope raw-rows statement'
+    ).toHaveLength(1);
+    expect(statementLabels, 'the Node path never reads the catalog').not.toContain(ERROR_EXPLORER_STATEMENT_LABELS.catalog);
+    expect([...statementLabels].sort()).toEqual(
+      [
+        ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows,
+        ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups,
+        ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups
+      ].sort()
+    );
 
     expect(response).toMatchObject({
       totalRows: 2,

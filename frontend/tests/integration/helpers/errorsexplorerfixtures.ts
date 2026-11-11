@@ -1104,3 +1104,35 @@ export async function seedDistinctSignatureMeasurements(connection: Connection):
     await connection.query('SET FOREIGN_KEY_CHECKS = 1');
   }
 }
+
+// ---- GROUP_CONCAT truncation witness (T15, spec Testing section 3, D4) ----
+
+export const TRUNCATION_ERROR_ID = 1;
+export const TRUNCATION_UNRELATED_ERROR_ROW_ID = 100;
+export const TRUNCATION_DUPLICATE_MEMBER_IDS: readonly number[] = [1001, 1002, 1003];
+export const TRUNCATION_DUPLICATE_TREE_TAG = 'DUP';
+export const TRUNCATION_UNRELATED_TREE_TAG = 'SOLO';
+export const TRUNCATION_STEM_TAG = '1';
+/** "1001,1002,1003" is 14 characters; each smaller limit cuts the member list at a different place relative to the separators. */
+export const TRUNCATION_LIMITS = { whole: 14, cutInsideThirdID: 13, cutAtSeparator: 10, cutInsideSecondID: 9 } as const;
+
+/** Measurement 100 is an error row that shares no tag pair; 1001 to 1003 share one tag pair, so the three form one duplicate group. Every row carries one unresolved log of error type 1. */
+export function groupConcatTruncationFixture(): ExplorerFixture {
+  const memberOf = (coreMeasurementID: number, treeTag: string): FixtureMeasurement => ({
+    ...signatureFixtureMeasurement(coreMeasurementID),
+    treeTag,
+    stemTag: TRUNCATION_STEM_TAG
+  });
+  const measurements = [
+    memberOf(TRUNCATION_UNRELATED_ERROR_ROW_ID, TRUNCATION_UNRELATED_TREE_TAG),
+    ...TRUNCATION_DUPLICATE_MEMBER_IDS.map(memberID => memberOf(memberID, TRUNCATION_DUPLICATE_TREE_TAG))
+  ];
+  return {
+    plotIDs: [MAIN_PLOT_ID],
+    censuses: [{ ...SIGNATURE_FIXTURE_CENSUS }],
+    errorTypes: [generatedErrorType(TRUNCATION_ERROR_ID)],
+    validations: [],
+    measurements,
+    logs: measurements.map(measurement => ({ measurementID: measurement.coreMeasurementID, errorID: TRUNCATION_ERROR_ID, isResolved: false }))
+  };
+}
