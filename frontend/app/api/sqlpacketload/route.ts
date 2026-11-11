@@ -22,11 +22,14 @@ import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { assertSchemaAccess } from '@/lib/authz';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import {
+  CensusReplacementIncompleteError,
   EmptyMeasurementUploadError,
   InvalidFirstRowOrdinalError,
   MeasurementChunkResolutionError,
   parseFirstRowOrdinal,
-  stageMeasurementChunk
+  replaceCensusForCleanReupload,
+  stageMeasurementChunk,
+  type CensusReplacementParams
 } from '@/lib/uploads/stage-measurements';
 import {
   BatchIDContainsSubBatchSeparatorError,
@@ -47,9 +50,14 @@ import {
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
 import { ReferenceReplacementInProgressError } from '@/lib/uploads/upload-session-replacement-marker';
 import { referenceUploadRowLimitError } from '@/lib/uploads/reference-upload-limits';
+import { TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 
 const REFERENCE_REPLACEMENT_IN_PROGRESS_CODE = 'REFERENCE_REPLACEMENT_IN_PROGRESS';
 const UPLOAD_SCOPE_REQUIRED_CODE = 'UPLOAD_SCOPE_REQUIRED';
+const UPLOAD_SESSION_CONFLICT_MESSAGE = 'Upload session conflict';
+const COMMIT_OUTCOME_UNKNOWN_MESSAGE =
+  'The database did not confirm whether the last part of this file was saved. Check the uploaded data before sending this file again.';
+const CENSUS_REPLACEMENT_INCOMPLETE_MESSAGE = 'The previous data for this census has not finished being replaced. Please retry the upload.';
 
 /**
  * Generate idempotency key for a batch of data
@@ -171,6 +179,7 @@ async function rollbackPreservingOriginalError(connectionManager: ConnectionMana
 }
 
 function isRetryableUploadError(error: unknown): boolean {
+  if (error instanceof TransactionCommitOutcomeUnknownError) return false;
   if (!(error instanceof Error)) return false;
 
   const candidate = error as Error & { code?: string };
@@ -519,33 +528,35 @@ export async function POST(request: NextRequest) {
           ? crypto.createHash('sha256').update(JSON.stringify(rawRows)).digest('hex')
           : hashChunkContent(fileRowSet);
 
+    const chunkParams: CensusReplacementParams = {
+      schema,
+      fileName,
+      batchID,
+      plotID: resolvedPlotID,
+      censusID: resolvedCensusID,
+      uploadMode,
+      sourceFormat,
+      rawRows: rawRows ?? [],
+      csvHeaders,
+      delimiter: csvDelimiter,
+      storedMapping: isColumnMappingShape(clientMapping) ? clientMapping : undefined,
+      uploadSessionID: sessionId,
+      firstRowOrdinal,
+      preKeyedRows: useServerResolution ? undefined : Object.values(fileRowSet ?? {}),
+      changedBy,
+      chunkIdentity,
+      onInvalidRows: invalidRows => {
+        resolutionInvalidRows = invalidRows;
+      }
+    };
+
     // Retry logic for database operations
     while (retryCount <= maxRetries) {
       try {
+        await replaceCensusForCleanReupload(connectionManager, chunkParams);
         transactionID = await connectionManager.beginTransaction();
 
-        const stageResult = await stageMeasurementChunk(connectionManager, {
-          schema,
-          fileName,
-          batchID,
-          plotID: resolvedPlotID,
-          censusID: resolvedCensusID,
-          uploadMode,
-          sourceFormat,
-          rawRows: rawRows ?? [],
-          csvHeaders,
-          delimiter: csvDelimiter,
-          storedMapping: isColumnMappingShape(clientMapping) ? clientMapping : undefined,
-          uploadSessionID: sessionId,
-          transactionID,
-          firstRowOrdinal,
-          preKeyedRows: useServerResolution ? undefined : Object.values(fileRowSet ?? {}),
-          changedBy,
-          chunkIdentity,
-          onInvalidRows: invalidRows => {
-            resolutionInvalidRows = invalidRows;
-          }
-        });
+        const stageResult = await stageMeasurementChunk(connectionManager, { ...chunkParams, transactionID });
         mappingDiagnostics = stageResult.diagnostics;
 
         await connectionManager.commitTransaction(transactionID);
@@ -591,6 +602,24 @@ export async function POST(request: NextRequest) {
           });
         }
 
+        if (e instanceof TransactionCommitOutcomeUnknownError) {
+          ailogger.error(`COMMIT outcome unknown while staging ${fileName}-${batchID}; not retrying a non-idempotent chunk`, e);
+          return NextResponse.json({ code: e.code, responseMessage: COMMIT_OUTCOME_UNKNOWN_MESSAGE, fileName, batchID }, { status: HTTPResponses.CONFLICT });
+        }
+
+        if (e instanceof UploadSessionOwnershipError) {
+          ailogger.warn(`Rejected measurement upload for ${fileName}-${batchID} during the census replacement: ${e.message}`);
+          return new NextResponse(JSON.stringify({ responseMessage: UPLOAD_SESSION_CONFLICT_MESSAGE, error: e.message, fileName, batchID }), {
+            status: e.status
+          });
+        }
+        if (e instanceof CensusReplacementIncompleteError) {
+          ailogger.error(`Refused to stage ${fileName}-${batchID} before its census replacement completed: ${e.message}`);
+          return new NextResponse(
+            JSON.stringify({ responseMessage: UPLOAD_SESSION_CONFLICT_MESSAGE, error: CENSUS_REPLACEMENT_INCOMPLETE_MESSAGE, fileName, batchID }),
+            { status: HTTPResponses.CONFLICT }
+          );
+        }
         if (e instanceof MeasurementChunkResolutionError) {
           return new NextResponse(JSON.stringify({ responseMessage: 'Header plan misalignment for the uploaded file', fileName, batchID }), {
             status: HTTPResponses.UNPROCESSABLE_ENTITY
@@ -804,6 +833,11 @@ export async function POST(request: NextRequest) {
             uploadMode,
             branch: 'fixed-data'
           });
+        }
+
+        if (error instanceof TransactionCommitOutcomeUnknownError) {
+          ailogger.error(`COMMIT outcome unknown for ${formType} upload ${fileName}; not retrying a non-idempotent write`, error);
+          return NextResponse.json({ code: error.code, responseMessage: COMMIT_OUTCOME_UNKNOWN_MESSAGE, fileName }, { status: HTTPResponses.CONFLICT });
         }
 
         // Unacknowledged overlaps are a confirm-and-retry condition, not a data error: the

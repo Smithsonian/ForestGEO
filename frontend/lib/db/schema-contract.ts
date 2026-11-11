@@ -32,6 +32,13 @@ export const TARGET_TEXT_COLLATION = 'utf8mb4_0900_ai_ci';
  * exactly what happened on forestgeo_panama/mpala/serc, whose viewfulltable kept
  * the pre-rename StemID column from the 2025-09 identity rename until 2026-08
  * because no gate compared these tables (repaired by migration 2026-08-07-01).
+ *
+ * specimens is critical because bulkingestionprocess reads specimens.StemID on
+ * every batch (the #489 leftover-stems guard). In 2026-10 forestgeo_mpala,
+ * forestgeo_panama, forestgeo_serc and forestgeo_testing carried StemGUID
+ * instead, with no gate to see it, so every measurement upload there failed with
+ * Error 1054 (#552, repaired by migration 2026-10-26-01). A critical table is
+ * compared column by column, and an absent one fails rather than being skipped.
  */
 export const CRITICAL_TABLES = [
   'temporarymeasurements',
@@ -44,7 +51,8 @@ export const CRITICAL_TABLES = [
   'uploadintegrityalerts',
   'uploadmetrics',
   'measurementssummary',
-  'viewfulltable'
+  'viewfulltable',
+  'specimens'
 ] as const;
 
 /**

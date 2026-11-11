@@ -4,6 +4,7 @@ import { FileRow } from '@/config/macros/formdetails';
 import { canonicalizeRowForHash, RowMode } from '@/config/editplan/canonicalrow';
 import { parseFiniteBase10Number } from '@/config/editplan/fieldpolicy';
 import { STORED_DECIMAL_SCALE } from '@/config/editplan/storedfieldcomparison';
+import { toCalendarDayString } from '@/config/dateformats';
 
 export const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments', 'spcode', 'quadrat', 'lx', 'ly', 'px', 'py', 'tag', 'stemtag'] as const;
 
@@ -210,17 +211,6 @@ export function isBlankOrNullPlaceholder(value: unknown): boolean {
   return trimmed === '' || trimmed.toUpperCase() === 'NULL';
 }
 
-export function normalizeDateToString(value: Date | string | null): string | null {
-  if (value === null || value === undefined) return null;
-  if (value instanceof Date) {
-    const year = value.getFullYear();
-    const month = String(value.getMonth() + 1).padStart(2, '0');
-    const day = String(value.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-  return String(value).slice(0, 10);
-}
-
 function areEquivalentNumericValues(csvValue: unknown, dbValue: unknown): boolean {
   const parsedCsvValue = parseFiniteBase10Number(csvValue);
   const parsedDbValue = parseFiniteBase10Number(dbValue);
@@ -331,7 +321,7 @@ export function compareSourceRows(a: FileRow, b: FileRow): SourceRowComparison {
 export function readDbValueForDisplay(field: UpdatableField, dbRow: ExistingMeasurementRow): unknown {
   const descriptor = FIELD_DESCRIPTORS[field];
   if (descriptor.compareKind === 'date') {
-    return normalizeDateToString(dbRow.MeasurementDate as Date | string | null);
+    return toCalendarDayString(dbRow.MeasurementDate);
   }
   const raw = dbRow[descriptor.dbProperty];
   // Stringify numeric DB values for the `from` slot so consumers (UI,

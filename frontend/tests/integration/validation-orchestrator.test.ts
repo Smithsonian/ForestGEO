@@ -131,7 +131,15 @@ vi.mock('@/ailogger', () => ({
 }));
 
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
+import {
+  replaceCensusForCleanReupload,
+  stageMeasurementChunk,
+  type CensusReplacementParams,
+  type StageMeasurementChunkParams
+} from '@/lib/uploads/stage-measurements';
+import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
+import { startFreshUploadSession } from '../setup/upload-session-fixtures';
 import { ingestBatch } from '@/lib/uploads/ingest-batch';
 import {
   COORDINATE_DRIFT_PROCEDURE,
@@ -206,13 +214,18 @@ describe('runCensusValidations — integration', () => {
     plotID = testData.plots[0].plotID;
     censusID = testData.census[0].censusID;
     sharedState.connection = connection;
+    await ensureUploadSessionsTable(schema);
 
     console.log(`[setup] schema=${schema} plotID=${plotID} censusID=${censusID}`);
   }, 120000);
 
   afterAll(async () => {
     sharedState.connection = null;
-    await teardownTestDatabase(connection, config);
+    try {
+      await getPoolMonitorInstance().closeAllConnections();
+    } finally {
+      await teardownTestDatabase(connection, config);
+    }
   });
 
   beforeEach(async () => {
@@ -231,8 +244,7 @@ describe('runCensusValidations — integration', () => {
   // -------------------------------------------------------------------------
 
   async function stageAndIngestRows(rows: Record<string, string>[], expectedInserted: number): Promise<void> {
-    const transactionID = await connectionManager.beginTransaction();
-    const params: StageMeasurementChunkParams = {
+    const replacementParams: CensusReplacementParams = {
       schema,
       fileName: FILE_NAME,
       batchID: BATCH_ID,
@@ -244,10 +256,14 @@ describe('runCensusValidations — integration', () => {
       csvHeaders: CSV_HEADERS,
       delimiter: CSV_DELIMITER,
       uploadSessionID: UPLOAD_SESSION_ID,
-      transactionID,
       firstRowOrdinal: null,
       changedBy: CHANGED_BY
     };
+    await startFreshUploadSession(connection, { schema, sessionID: UPLOAD_SESSION_ID, plotID, censusID });
+    const replacement = await replaceCensusForCleanReupload(connectionManager, replacementParams);
+    console.log(`[replace] outcome=${replacement.outcome} deletedRows=${replacement.deletedRows} windowCount=${replacement.windowCount}`);
+    const transactionID = await connectionManager.beginTransaction();
+    const params: StageMeasurementChunkParams = { ...replacementParams, transactionID };
     const stageResult = await stageMeasurementChunk(connectionManager, params);
     await connectionManager.commitTransaction(transactionID);
     console.log(`[stage] insertedCount=${stageResult.insertedCount} invalidRows=${stageResult.invalidRows.length}`);

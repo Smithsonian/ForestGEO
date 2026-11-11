@@ -63,6 +63,9 @@ inserting your rows, the system **deletes the data already there**:
 - For **fixed data** such as species or stem codes, all currently active records of that type
   are removed.
 
+If a measurements Clean Re-Upload is interrupted, part of the old census may already have been
+removed. Running the same upload again finishes the replacement.
+
 Use this when you are loading a census for the first time, or when you genuinely intend to
 replace a census wholesale and have confirmed nothing else depends on the current rows.
 

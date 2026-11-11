@@ -107,5 +107,10 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-10-14-02-backfill-edit-operations-to-unifiedchangelog',
     file: 'schema-contract-repair/2026-10-14-02-backfill-edit-operations-to-unifiedchangelog.sql'
+  },
+  {
+    id: '2026-10-26-01-rename-specimens-stemguid-to-stemid',
+    file: 'schema-contract-repair/2026-10-26-01-rename-specimens-stemguid-to-stemid.sql',
+    failureCleanup: ['DROP PROCEDURE IF EXISTS mig_2026_10_26_01_raise_contract_conflict']
   }
 ] as const;

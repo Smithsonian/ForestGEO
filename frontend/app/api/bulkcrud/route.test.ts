@@ -178,7 +178,7 @@ describe('bulkcrud POST route', () => {
   ])('accepts site-level $gridType rows with no plot or census selected (#502)', async ({ gridType, rows }) => {
     const instance = (ConnectionManager as any).getInstance();
     vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-site-level');
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
     const res = await POST(makeRequest({ gridType, schema: 'forestgeo_testing', fileRowSet: rows }));
 
     expect(res.status, `body: ${await res.clone().text()}`).toBe(HTTPResponses.OK);
@@ -211,8 +211,8 @@ describe('bulkcrud POST route', () => {
 
     const beginSpy = vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-1');
     const execSpy = vi.spyOn(instance, 'executeQuery');
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
-    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
     const closeSpy = vi.spyOn(instance, 'closeConnection');
 
     // ✅ Make both DB calls succeed
@@ -310,6 +310,8 @@ describe('bulkcrud POST route', () => {
   it('measurementssummary path: audits with the authenticated session identity, ignoring a forged body.user field', async () => {
     const instance = (ConnectionManager as any).getInstance();
     vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-forge');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
+    vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
     const execSpy = vi.spyOn(instance, 'executeQuery');
     execSpy.mockResolvedValueOnce({ affectedRows: 1 }); // INSERT into temporarymeasurements
     execSpy.mockResolvedValueOnce([]); // SET caller-owns-transaction flag
@@ -335,6 +337,7 @@ describe('bulkcrud POST route', () => {
     const [, auditParams] = execSpy.mock.calls[4];
     expect(auditParams[0]).toBe('bulkcrud-test@forestgeo.test');
     expect(auditParams[0]).not.toBe('attacker@evil.test');
+    expect(commitSpy).toHaveBeenCalledWith('tx-forge');
   });
 
   /**
@@ -347,8 +350,8 @@ describe('bulkcrud POST route', () => {
     const instance = (ConnectionManager as any).getInstance();
     vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-audit-fail');
     const execSpy = vi.spyOn(instance, 'executeQuery');
-    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValueOnce(undefined);
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
     const closeSpy = vi.spyOn(instance, 'closeConnection');
 
     execSpy.mockResolvedValueOnce({ affectedRows: 1 }); // INSERT into temporarymeasurements
@@ -421,8 +424,8 @@ describe('bulkcrud POST route', () => {
     const instance = (ConnectionManager as any).getInstance();
     const beginSpy = vi.spyOn(instance, 'beginTransaction');
     const execSpy = vi.spyOn(instance, 'executeQuery');
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
-    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
     const closeSpy = vi.spyOn(instance, 'closeConnection');
 
     beginSpy.mockResolvedValueOnce('tx-2');
@@ -484,6 +487,8 @@ describe('bulkcrud POST route', () => {
   it('generic path: ignores a forged body field and uses the authenticated session identity for fullName', async () => {
     const instance = (ConnectionManager as any).getInstance();
     vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-generic-forge');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
+    vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
 
     const req = makeRequest({
       gridType: 'species',
@@ -500,6 +505,7 @@ describe('bulkcrud POST route', () => {
     const [props] = (insertOrUpdate as any).mock.calls[0];
     expect(props.fullName).toBe('bulkcrud-test@forestgeo.test');
     expect(props.fullName).not.toBe('attacker@evil.test');
+    expect(commitSpy).toHaveBeenCalledWith('tx-generic-forge');
   });
 
   /**
@@ -517,8 +523,8 @@ describe('bulkcrud POST route', () => {
     const instance = (ConnectionManager as any).getInstance();
     const beginSpy = vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-err');
     const execSpy = vi.spyOn(instance, 'executeQuery').mockRejectedValueOnce(new Error('kaboom'));
-    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction');
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
     const closeSpy = vi.spyOn(instance, 'closeConnection');
 
     // Force the summary path so we hit executeQuery early
@@ -567,8 +573,8 @@ describe('bulkcrud POST route', () => {
     execSpy.mockResolvedValueOnce({}); // CALL bulkingestionprocess
     execSpy.mockRejectedValueOnce(clearError); // helper: CLEAR caller-owns-transaction flag
     const discardSpy = vi.spyOn(instance, 'discardTransaction').mockImplementation(() => undefined);
-    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValueOnce(undefined);
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
 
     const res = await POST(
       makeRequest({

@@ -22,10 +22,17 @@ const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   fetch: vi.fn(),
   stage: vi.fn(),
+  replace: vi.fn(),
   countStaged: vi.fn(),
   ingest: vi.fn(),
   collapse: vi.fn(),
   validations: vi.fn(),
+  MeasurementChunkResolutionError: class MeasurementChunkResolutionError extends Error {
+    constructor(fileName: string, batchID: string) {
+      super(`Header resolution misaligned for ${fileName} (batch ${batchID})`);
+      this.name = 'MeasurementChunkResolutionError';
+    }
+  },
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }));
 
@@ -72,7 +79,12 @@ vi.mock('@/config/uploadsessiontracker', () => ({
     FAILED: 'failed'
   }
 }));
-vi.mock('@/lib/uploads/stage-measurements', () => ({ stageMeasurementChunk: mocks.stage, countStagedRows: mocks.countStaged }));
+vi.mock('@/lib/uploads/stage-measurements', () => ({
+  stageMeasurementChunk: mocks.stage,
+  replaceCensusForCleanReupload: mocks.replace,
+  countStagedRows: mocks.countStaged,
+  MeasurementChunkResolutionError: mocks.MeasurementChunkResolutionError
+}));
 vi.mock('@/lib/uploads/ingest-batch', () => ({
   ingestBatch: mocks.ingest,
   IngestBatchAbortedError: class extends Error {},
@@ -85,6 +97,7 @@ vi.mock('@/lib/uploads/collapse-census', () => ({ collapseCensus: mocks.collapse
 vi.mock('@/lib/uploads/validation-orchestrator', () => ({ runCensusValidations: mocks.validations }));
 
 import { runJobIfClaimable } from './worker';
+import { NonRetryableJobError } from './errors';
 import { OversizedSubBatchError } from '@/lib/uploads/ingest-batch';
 import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-failure';
 
@@ -133,6 +146,7 @@ beforeEach(() => {
     return [];
   });
   mocks.assignBatch.mockResolvedValue('batch-8');
+  mocks.replace.mockResolvedValue({ outcome: 'not_applicable', deletedRows: 0, windowCount: 0 });
   mocks.stage.mockResolvedValue({ insertedCount: 1, expectedCount: 1, droppedCount: 0, invalidRows: [] });
   mocks.countStaged.mockResolvedValue(1);
   mocks.ingest.mockImplementation(async (_cm: unknown, params: { onSetupProgress: (d: typeof diagnostic) => void }) => {
@@ -234,5 +248,32 @@ describe('optional setup diagnostic persistence', () => {
       fileID: file.fileName,
       batchID: 'batch-8'
     });
+  });
+});
+
+describe('a header-plan misalignment fails the job without spending the retry budget', () => {
+  const failFromReplacement = () => mocks.replace.mockRejectedValue(misalignment());
+  const failFromStaging = () => mocks.stage.mockRejectedValue(misalignment());
+  const misalignment = () => new mocks.MeasurementChunkResolutionError(file.fileName, 'batch-8');
+
+  it.each([
+    ['the census replacement', failFromReplacement, 0],
+    ['staging', failFromStaging, 1]
+  ])('%s raising MeasurementChunkResolutionError fails the job and is not retried', async (stageName, injectFailure, expectedStageCalls) => {
+    injectFailure();
+
+    await runJobIfClaimable(72, { fetchFileText: mocks.fetch });
+
+    const failureCause = mocks.fail.mock.calls[0]?.[3];
+    console.log(
+      `[chunk-resolution:${stageName}] retry calls=${mocks.retry.mock.calls.length} fail calls=${mocks.fail.mock.calls.length} ` +
+        `failed with=${String(failureCause)} replace calls=${mocks.replace.mock.calls.length} stage calls=${mocks.stage.mock.calls.length}`
+    );
+    expect(mocks.retry, 'a deterministic misalignment must not be retried').not.toHaveBeenCalled();
+    expect(mocks.fail).toHaveBeenCalledOnce();
+    expect(failureCause).toBeInstanceOf(NonRetryableJobError);
+    expect(failureCause.cause).toBeInstanceOf(mocks.MeasurementChunkResolutionError);
+    expect(mocks.stage, 'staging runs only if the census replacement did not refuse').toHaveBeenCalledTimes(expectedStageCalls);
+    expect(mocks.complete).not.toHaveBeenCalled();
   });
 });

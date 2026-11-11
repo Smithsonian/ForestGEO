@@ -22,7 +22,12 @@ import { FileRow } from '@/config/macros/formdetails';
 import { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
-import { deleteCoreMeasurementsInBoundedChunksWithAudit } from '@/lib/ingestion/temporary-measurements';
+import {
+  deleteCoreMeasurementsInBoundedChunksWithAudit,
+  PLAIN_COREMEASUREMENTS_FROM_SQL,
+  type CoreMeasurementDeleteScope
+} from '@/lib/ingestion/temporary-measurements';
+import { retryWholeTransactionOnDeadlock } from '@/lib/db/deadlock-retry';
 import { transactionExecutorFor, type BulkIngestionExecutor } from '@/lib/ingestion/bulk-ingestion-call';
 
 /** Thrown by deleteUnresolvedRowsForBatchFamily when an omitted `plotID` cannot be resolved because no census row exists for `censusID`. */
@@ -214,6 +219,22 @@ export async function recordFailedMeasurementRows(
   return measurementIDs.length;
 }
 
+export const UNRESOLVED_BATCH_FAMILY_CLEANUP_TRANSACTION = 'unresolved_batch_family_cleanup';
+
+/** Unresolved rows of one batch family (the original BatchID and its `__subNNN` members), minus `preserveBatchIDs` (C4). */
+export function batchFamilyUnresolvedScope(fileID: string, batchID: string, censusID: number, preserveBatchIDs: string[]): CoreMeasurementDeleteScope {
+  const preserveClause = preserveBatchIDs.length > 0 ? `AND UploadBatchID NOT IN (${preserveBatchIDs.map(() => '?').join(', ')})` : '';
+  return {
+    whereSQL: `UploadFileID = ?
+       AND CensusID = ?
+       AND StemGUID IS NULL
+       AND (UploadBatchID = ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
+       ${preserveClause}`,
+    whereParams: [fileID, censusID, batchID, buildSubBatchPattern(batchID), ...preserveBatchIDs],
+    fromSQL: PLAIN_COREMEASUREMENTS_FROM_SQL
+  };
+}
+
 /**
  * Deletes coremeasurements parse-reject rows (StemGUID IS NULL) for a
  * file+batch+census, auditing each removed row before deleting it. Called
@@ -234,6 +255,10 @@ export async function recordFailedMeasurementRows(
  * unattributed cleanup. `plotID`, if omitted, is resolved from the census row
  * (see resolvePlotIDFromCensus). Neither is ever accepted from client input.
  *
+ * Without a `transactionID` it runs in its own transaction, which is re-run whole on a deadlock (at most
+ * `DEADLOCK_RETRY_MAX_ATTEMPTS` attempts); `withOwnOrCallerTransaction` itself is unchanged, so `recordInvalidRows`
+ * and `recordFailedMeasurementRows` do not retry.
+ *
  * Returns the count of rows deleted.
  */
 export async function deleteUnresolvedRowsForBatchFamily(
@@ -247,25 +272,27 @@ export async function deleteUnresolvedRowsForBatchFamily(
   changedBy: string | null = null,
   plotID?: number
 ): Promise<number> {
-  const preserveClause = preserveBatchIDs.length > 0 ? `AND UploadBatchID NOT IN (${preserveBatchIDs.map(() => '?').join(', ')})` : '';
-  const whereSQL = `UploadFileID = ?
-       AND CensusID = ?
-       AND StemGUID IS NULL
-       AND (UploadBatchID = ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
-       ${preserveClause}`;
-  const whereParams = [fileID, censusID, batchID, buildSubBatchPattern(batchID), ...preserveBatchIDs];
-
-  return withOwnOrCallerTransaction(connectionManager, transactionID, async activeTransactionID => {
+  const scope = batchFamilyUnresolvedScope(fileID, batchID, censusID, preserveBatchIDs);
+  const deleteFamilyRows = async (activeTransactionID: string): Promise<number> => {
     const resolvedPlotID = plotID ?? (await resolvePlotIDFromCensus(transactionExecutorFor(connectionManager, activeTransactionID), schema, censusID));
     return deleteCoreMeasurementsInBoundedChunksWithAudit(
       connectionManager,
       schema,
-      whereSQL,
-      whereParams,
+      scope.whereSQL,
+      scope.whereParams,
       changedBy,
       resolvedPlotID,
       censusID,
-      activeTransactionID
+      activeTransactionID,
+      scope.fromSQL
     );
-  });
+  };
+
+  // A caller's transaction is the caller's to retry. Our own one is re-run whole on a deadlock: two walks over
+  // one family (a worker job's old and new attempt after a lease reclaim) can lock rows in opposite orders, and
+  // the re-run re-reads the scope, so rows the winner deleted are simply absent (spec #562 §7, N2).
+  if (transactionID) return withOwnOrCallerTransaction(connectionManager, transactionID, deleteFamilyRows);
+  return retryWholeTransactionOnDeadlock(UNRESOLVED_BATCH_FAMILY_CLEANUP_TRANSACTION, () =>
+    withOwnOrCallerTransaction(connectionManager, undefined, deleteFamilyRows)
+  );
 }

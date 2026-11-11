@@ -5,6 +5,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery, safeEscapeId } from '@/lib/db/sqlsecurity';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
 import type { UpsertOperation } from '@/config/utils';
 import { recordMutation, ChangelogOperation, type ChangelogRowState } from '@/lib/changelog/record-mutation';
@@ -414,6 +415,10 @@ function isRetryableValidationLockError(error: any) {
 }
 
 function isRetryableValidationConnectionError(error: any) {
+  // A rerun converges: prepareValidationRun resets this validation's flags and links under locking statements
+  // before re-inserting with ON DUPLICATE KEY UPDATE, so replaying after an unknown COMMIT outcome is safe (#563).
+  if (error instanceof TransactionCommitOutcomeUnknownError) return true;
+
   const message = String(error?.message ?? '');
 
   return (

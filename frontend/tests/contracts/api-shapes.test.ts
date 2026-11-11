@@ -74,6 +74,9 @@ const rawErrorRows = [
 function makeConnection() {
   return {
     executeQuery: vi.fn(async (query: string) => {
+      if (query.includes('SELECT COUNT(*) AS n')) {
+        return [{ n: 0 }];
+      }
       if (query.includes('measurement_error_log')) {
         return rawErrorRows;
       }
@@ -104,18 +107,9 @@ describe('API response shape contracts', () => {
   it('keeps Errors Explorer query rows aligned with the UI contract', async () => {
     const response = await queryErrorExplorer(makeConnection(), makeRequest());
 
-    expect(response).toMatchObject({
-      totalRows: 2,
-      summary: {
-        total: 2,
-        validation: 1,
-        ingestion: 1,
-        contradictions: 2,
-        duplicateTagStem: 2,
-        sameBatchConflict: 0
-      }
-    });
-
+    console.log('[view-errors contract query]', JSON.stringify({ keys: Object.keys(response), totalRows: response.totalRows }));
+    expect(Object.keys(response).sort(), 'the query response is exactly rows and totalRows').toEqual(['rows', 'totalRows']);
+    expect(response.totalRows).toBe(2);
     expect(response.rows).toHaveLength(2);
     expect(response.rows[0]).toMatchObject({
       id: 101,
@@ -158,17 +152,20 @@ describe('API response shape contracts', () => {
   it('keeps Errors Explorer facets stable for filters and chips', async () => {
     const facets = await buildErrorExplorerFacets(makeConnection(), makeRequest());
 
+    console.log('[view-errors contract facets]', JSON.stringify(facets));
     expect(facets).toEqual({
-      messages: [
-        { value: 'Invalid species reference', count: 1 },
-        { value: 'Species mismatch', count: 1 }
+      errorTypes: [
+        { source: 'ingestion', code: 'INVALID_SPECIES', message: 'Invalid species reference', fields: ['speciesCode'], count: 1, hasContradiction: true },
+        { source: 'validation', code: '21', message: 'Species mismatch', fields: ['speciesCode'], count: 1, hasContradiction: true }
       ],
-      fields: [{ value: 'speciesCode', count: 2 }],
-      sourceCounts: {
+      censusTotals: {
+        affectedMeasurements: 2,
+        activeMeasurements: 0,
+        errorTypeCount: 2,
         validation: 1,
-        ingestion: 1
-      },
-      contradictionCounts: {
+        ingestion: 1,
+        failedMeasurements: 1,
+        contradictions: 2,
         duplicateTagStem: 2,
         sameBatchConflict: 0
       }

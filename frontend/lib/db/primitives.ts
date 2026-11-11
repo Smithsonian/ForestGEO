@@ -3,6 +3,13 @@ import chalk from 'chalk';
 import { escape } from 'mysql2';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import ailogger from '@/ailogger';
+import {
+  ConnectionQuarantinedError,
+  isConnectionQuarantined,
+  quarantineConnection,
+  settleWithinDeadline,
+  trackManagedStatement
+} from '@/lib/db/connectionquarantine';
 
 // JS-side backstop for statements MySQL cannot bound on its own:
 // MAX_EXECUTION_TIME applies only to top-level SELECTs, so a long CALL or
@@ -91,13 +98,26 @@ export const MYSQL_ERRNO_CONNECTION_KILLED = 1927;
  */
 const KILL_CONNECTION_ACQUIRE_TIMEOUT_MS = 5_000;
 
+/** Deadline for the KILL QUERY statement's reply. A kill connection that does not answer in time is quarantined. */
+export const KILL_STATEMENT_DEADLINE_MS = 5_000;
+
+export const KILL_DEADLINE_EXCEEDED_EVENT = 'db.kill.deadline_exceeded';
+
+/**
+ * Statements MySQL cannot prepare (E6), or that mysql2's execute() cannot carry: CALL, savepoints, USE and
+ * START TRANSACTION go over the text protocol.
+ */
+const TEXT_PROTOCOL_STATEMENT = /^\s*(?:CALL\b|SAVEPOINT\b|RELEASE\s+SAVEPOINT\b|ROLLBACK\s+TO\s+(?:SAVEPOINT\s+)?|USE\b|START\s+TRANSACTION\b)/i;
+
 export type KillQueryOutcome =
   /** KILL QUERY was accepted by the server. */
   | { status: 'killed' }
   /** The server rejected the KILL — almost always because the statement had just finished. */
   | { status: 'statement_already_settled'; message: string }
   /** No connection was available to issue the KILL from; the statement runs on server-side. */
-  | { status: 'no_kill_connection'; reason: 'timeout' | 'failed'; message: string };
+  | { status: 'no_kill_connection'; reason: 'timeout' | 'failed'; message: string }
+  /** The KILL was sent but its reply did not arrive in time; the kill connection was quarantined. */
+  | { status: 'kill_deadline_exceeded'; message: string };
 
 /** True for the error MySQL reports on the client whose statement was KILLed. */
 export function isKilledStatementError(error: unknown): boolean {
@@ -150,69 +170,105 @@ export async function killQueryOnThread(threadId: number, context: string): Prom
   }
 
   const killConnection: PoolConnection = acquisition.connection;
-  try {
-    await killConnection.query(`KILL QUERY ${threadId}`);
+  const settlement = await settleWithinDeadline(killConnection.query(`KILL QUERY ${threadId}`), KILL_STATEMENT_DEADLINE_MS, late => {
+    ailogger.info(`KILL QUERY for thread ${threadId} settled (${late.status}) after its ${KILL_STATEMENT_DEADLINE_MS}ms deadline (${context})`);
+  });
+
+  if (settlement.status === 'deadline_exceeded') {
+    quarantineConnection(killConnection, `KILL QUERY ${threadId} got no reply within ${KILL_STATEMENT_DEADLINE_MS}ms`);
+    const message =
+      `KILL QUERY for thread ${threadId} got no reply within ${KILL_STATEMENT_DEADLINE_MS}ms (${context}); ` +
+      `the kill connection was quarantined and the server may or may not have applied the KILL.`;
+    ailogger.error(KILL_DEADLINE_EXCEEDED_EVENT, undefined, { threadId, context, deadlineMs: KILL_STATEMENT_DEADLINE_MS, detail: message });
+    return { status: 'kill_deadline_exceeded', message };
+  }
+
+  killConnection.release();
+  if (settlement.status === 'settled') {
     ailogger.warn(chalk.yellow(`KILL QUERY issued for thread ${threadId} (${context})`));
     return { status: 'killed' };
-  } catch (killError: unknown) {
-    // Expected race, not a failure: the statement finished between the timeout
-    // firing and the KILL landing, so the thread is no longer running a query.
-    const message = killError instanceof Error ? killError.message : String(killError);
-    ailogger.info(`KILL QUERY for thread ${threadId} was rejected — the statement had already settled (${context}): ${message}`);
-    return { status: 'statement_already_settled', message };
-  } finally {
-    killConnection.release();
   }
+  // Expected race, not a failure: the statement finished between the timeout
+  // firing and the KILL landing, so the thread is no longer running a query.
+  const message = settlement.error instanceof Error ? settlement.error.message : String(settlement.error);
+  ailogger.info(`KILL QUERY for thread ${threadId} was rejected — the statement had already settled (${context}): ${message}`);
+  return { status: 'statement_already_settled', message };
+}
+
+function logOrphanedStatementSettlement(
+  inFlight: Promise<unknown> | undefined,
+  threadId: number | undefined,
+  query: string,
+  trigger: 'timeout' | 'quarantine'
+): void {
+  inFlight?.then(
+    () => {
+      if (trigger === 'quarantine') {
+        ailogger.warn(`Statement COMPLETED after its connection was quarantined (thread ${threadId ?? 'unknown'}). Query: ${query}`);
+        return;
+      }
+      ailogger.warn(
+        chalk.yellow(
+          `Orphaned statement COMPLETED after query timeout — the KILL landed too late and the server ` +
+            `committed its work (thread ${threadId ?? 'unknown'}). Anything that treats the timeout as ` +
+            `"did not happen" is wrong for this statement. Query: ${query}`
+        )
+      );
+    },
+    (orphanError: unknown) => {
+      const message = orphanError instanceof Error ? orphanError.message : String(orphanError);
+      const label =
+        trigger === 'timeout'
+          ? 'Orphaned statement settled after query timeout (expected after KILL)'
+          : 'Statement settled after its connection was quarantined';
+      ailogger.warn(`${label}: ${message}`);
+    }
+  );
 }
 
 export async function runQuery(connection: PoolConnection, query: string, params?: any[], timeoutMs: number = DEFAULT_QUERY_TIMEOUT_MS): Promise<any> {
   const threadId = (connection as PoolConnectionWithThreadId).threadId;
+  if (isConnectionQuarantined(connection)) {
+    throw new ConnectionQuarantinedError(threadId, 'connection was already quarantined');
+  }
   let timeoutHandle: NodeJS.Timeout | undefined;
   const timer = new Promise<never>((_, reject) => {
     timeoutHandle = setTimeout(() => reject(new QueryTimeoutError(timeoutMs, threadId)), timeoutMs);
   });
+  let cancelStatement: (reason: string) => void = () => undefined;
+  const cancelled = new Promise<never>((_, reject) => {
+    cancelStatement = reason => reject(new ConnectionQuarantinedError(threadId, reason));
+  });
+  const untrackStatement = trackManagedStatement(connection, reason => cancelStatement(reason));
   let inFlight: Promise<unknown> | undefined;
   try {
     if (params) {
       params = params.map(param => (param === undefined ? null : param));
     }
     // mysql2's execute() uses prepared statements, which don't support
-    // bulk VALUES arrays, CALL, or savepoint commands. Use query() for those.
+    // bulk VALUES arrays, CALL, savepoint commands, USE or START TRANSACTION.
     const hasBulkValues = params?.some(p => Array.isArray(p) && p.length > 0 && Array.isArray(p[0]));
-    const requiresTextProtocol = /^\s*(?:CALL\b|SAVEPOINT\b|RELEASE\s+SAVEPOINT\b|ROLLBACK\s+TO\s+(?:SAVEPOINT\s+)?)/i.test(query);
-    const useTextProtocol = requiresTextProtocol || hasBulkValues;
+    const useTextProtocol = TEXT_PROTOCOL_STATEMENT.test(query) || hasBulkValues;
     inFlight = useTextProtocol ? connection.query(query, params) : connection.execute(query, params);
-    const [rows] = (await Promise.race([inFlight, timer])) as [any, unknown];
+    const [rows] = (await Promise.race([inFlight, timer, cancelled])) as [any, unknown];
     return rows;
   } catch (error: any) {
     if (error instanceof QueryTimeoutError) {
       // The raced statement is still executing server-side. Log its eventual
       // settlement either way, so it can never surface as an unhandled
       // rejection AND so the killed-too-late case is visible.
-      inFlight?.then(
-        () => {
-          ailogger.warn(
-            chalk.yellow(
-              `Orphaned statement COMPLETED after query timeout — the KILL landed too late and the server ` +
-                `committed its work (thread ${threadId ?? 'unknown'}). Anything that treats the timeout as ` +
-                `"did not happen" is wrong for this statement. Query: ${query}`
-            )
-          );
-        },
-        (orphanError: unknown) => {
-          const message = orphanError instanceof Error ? orphanError.message : String(orphanError);
-          ailogger.warn(`Orphaned statement settled after query timeout (expected after KILL): ${message}`);
-        }
-      );
+      logOrphanedStatementSettlement(inFlight, threadId, query, 'timeout');
       // Quarantine BEFORE the kill, not after. destroy() frees this connection's
       // pool slot, so the KILL acquisition below is not competing with the very
-      // saturation that produced the timeout — and the poisoned connection can
-      // never re-enter the pool even if the KILL path throws. A later release()
-      // on a destroyed connection is a safe no-op.
-      connection.destroy();
+      // saturation that produced the timeout, and every other statement queued
+      // on this connection is cancelled now instead of waiting on its own timer.
+      quarantineConnection(connection, 'query timeout');
       if (typeof threadId === 'number') {
         await killQueryOnThread(threadId, 'query timeout');
       }
+    } else if (error instanceof ConnectionQuarantinedError) {
+      // Whoever quarantined the connection owns the KILL decision.
+      logOrphanedStatementSettlement(inFlight, threadId, query, 'quarantine');
     } else if (isKilledStatementError(error) || isKilledConnectionError(error)) {
       // A KILLed statement leaves the session in an unknown state: a stored
       // procedure's EXIT HANDLER did not complete, so its internal
@@ -222,7 +278,7 @@ export async function runQuery(connection: PoolConnection, query: string, params
       // it here, at the DB boundary, so ConnectionManager's finally-release
       // becomes a no-op and no caller ever has to manage the raw connection.
       // A killed CONNECTION (1927) is already gone; destroying makes that explicit.
-      connection.destroy();
+      quarantineConnection(connection, 'statement was killed');
       ailogger.warn(chalk.yellow(`Destroyed a connection whose statement was KILLed (thread ${threadId ?? 'unknown'}); it will not return to the pool.`));
     }
     ailogger.error(chalk.red(`Error executing query: ${query}`));
@@ -230,6 +286,7 @@ export async function runQuery(connection: PoolConnection, query: string, params
     throw error;
   } finally {
     clearTimeout(timeoutHandle);
+    untrackStatement();
     getPoolMonitorInstance().signalActivity();
   }
 }

@@ -1,5 +1,12 @@
 import type { ErrorExplorerQueryRequest, ErrorExplorerRow } from '../../config/errorsexplorer';
-import { buildErrorsExplorerDetails, buildErrorsExplorerQueryResponse } from './errors-explorer-helpers';
+import { DEFAULT_ERROR_EXPLORER_FILTERS } from '../../config/errorsexplorer';
+import {
+  buildErrorsExplorerDetails,
+  buildErrorsExplorerQueryResponse,
+  deriveCensusTotals,
+  deriveErrorTypes,
+  MOCK_ACTIVE_MEASUREMENTS
+} from './errors-explorer-helpers';
 import type { MeasurementValidationFailure } from './grid-api-helpers';
 import { canonicalDiffToRowPatch, mockEditPlanFlow } from './edit-plan-helpers';
 
@@ -142,16 +149,8 @@ function buildFacetEntries(values: string[]) {
 
 function buildErrorFacets(rows: ErrorExplorerRow[]) {
   return {
-    messages: buildFacetEntries(rows.flatMap(row => row.errorMessages)),
-    fields: buildFacetEntries(rows.flatMap(row => row.errorFields)),
-    sourceCounts: {
-      validation: rows.filter(row => row.errorSources.includes('validation')).length,
-      ingestion: rows.filter(row => row.errorSources.includes('ingestion')).length
-    },
-    contradictionCounts: {
-      duplicateTagStem: rows.filter(row => row.contradictionTypes.includes('duplicate_tag_stem')).length,
-      sameBatchConflict: rows.filter(row => row.contradictionTypes.includes('same_batch_conflict')).length
-    }
+    errorTypes: deriveErrorTypes(rows, DEFAULT_ERROR_EXPLORER_FILTERS),
+    censusTotals: deriveCensusTotals(rows, MOCK_ACTIVE_MEASUREMENTS)
   };
 }
 

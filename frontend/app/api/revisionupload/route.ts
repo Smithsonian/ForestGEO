@@ -12,6 +12,7 @@ import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from 
 import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
 import { canonicalizeRowForHash } from '@/config/editplan/canonicalrow';
+import { toCalendarDayString } from '@/config/dateformats';
 import { DuplicateDeletion } from '@/config/editplan/types';
 import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 import {
@@ -24,7 +25,6 @@ import {
   loadMeasurementsByStemID,
   loadMeasurementsByTagStemTag,
   MatchStrategy,
-  normalizeDateToString,
   readExplicitSpeciesCode
 } from './shared/matchdiff';
 import { computeInvalidRowsIntegrityHash, isValidUploadAttemptID, REVISION_UPLOAD_FILE_ID } from './shared/invalidrowintegrity';
@@ -269,7 +269,7 @@ function buildExistingValues(row: ExistingMeasurementRow): RevisionMatchedRow['e
   return {
     measuredDBH: row.MeasuredDBH,
     measuredHOM: row.MeasuredHOM,
-    measurementDate: normalizeDateToString(row.MeasurementDate as Date | string | null),
+    measurementDate: toCalendarDayString(row.MeasurementDate),
     rawCodes: row.RawCodes,
     description: row.Description
   };

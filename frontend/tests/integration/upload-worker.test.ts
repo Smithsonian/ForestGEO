@@ -87,7 +87,9 @@ const sharedState = vi.hoisted(() => ({
   // Test hook: awaited before every schema-side query so a test can inject
   // state changes (e.g. flip the job to cancel_requested) at a deterministic
   // point inside the worker's pipeline. Reset to null in beforeEach.
-  onSchemaQuery: null as null | ((query: string, params: unknown[]) => Promise<void> | void)
+  onSchemaQuery: null as null | ((query: string, params: unknown[]) => Promise<void> | void),
+  // Every schema-side statement in issue order, with the transaction it ran in (null = autocommit).
+  statementLog: [] as Array<{ transactionID: string | null; sql: string }>
 }));
 
 // ConnectionManager mock — mirrors the ingest-batch/collapse-census pattern.
@@ -103,6 +105,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
         throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
+      sharedState.statementLog.push({ transactionID: transactionID ?? null, sql: query });
       if (sharedState.onSchemaQuery) await sharedState.onSchemaQuery(query, (params as unknown[]) ?? []);
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
@@ -209,6 +212,8 @@ import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
 import { recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 import { buildSubBatchID, buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { testDbServerOptions } from '../setup/test-db-connection';
+import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
+import { CENSUS_REPLACEMENT_STATEMENT, CENSUS_REPLACEMENT_WRITE_PATTERNS } from '../setup/census-replacement-statement-patterns';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -317,6 +322,7 @@ describe('runJobIfClaimable — integration', () => {
 
   beforeEach(async () => {
     sharedState.onSchemaQuery = null;
+    sharedState.statementLog = [];
     if (sharedState.activeTransactionID) {
       await connection.rollback();
       sharedState.activeTransactionID = null;
@@ -1990,5 +1996,195 @@ describe('runJobIfClaimable — integration', () => {
       expect(fileExpectedRows).toBe(0);
       expect(finishedJob!.totalRows).toBe(0);
     }, 120000);
+  });
+  // -------------------------------------------------------------------------
+  // Issue #555 — the census is replaced in its own transactions, before staging
+  // -------------------------------------------------------------------------
+
+  describe('issue #555 — census replacement runs before the staging transaction', () => {
+    const PRIOR_CENSUS_BATCH_ID = 'prior-census-batch';
+    const PRIOR_CENSUS_FILE_ID = 'prior.csv';
+    const PRIOR_BATCH_AUDIT_JSON_PATH = '$.UploadBatchID';
+    const PRIOR_ROWS_BEYOND_ONE_WINDOW = 37;
+    const PRIOR_ROW_COUNT = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE + PRIOR_ROWS_BEYOND_ONE_WINDOW;
+    const CONTROL_ROW_COUNT = 5;
+    const CONTROL_PLOT_CENSUS_NUMBER = 98;
+    const CONTROL_FILE_ID = 'control.csv';
+    const CONTROL_BATCH_ID = 'control-batch';
+    const FAILED_WINDOW_ORDINAL = 2;
+    const SESSION_STATE_FAILED = 'failed';
+    const JOB_STATUS_WAITING_RETRY = 'waiting_retry';
+    const JOB_STATUS_COMPLETED = 'completed';
+    const INJECTED_FAULT_MESSAGE = 'injected fault in the second census-replacement window';
+
+    class InjectedReplacementFault extends Error {
+      constructor() {
+        super(INJECTED_FAULT_MESSAGE);
+        this.name = 'InjectedReplacementFault';
+      }
+    }
+
+    let controlCensusID: number;
+
+    beforeAll(async () => {
+      const controlCensus = await createAdditionalCensus(connection, testData, {
+        plotCensusNumber: CONTROL_PLOT_CENSUS_NUMBER,
+        startDate: '2022-01-01',
+        endDate: '2022-12-31'
+      });
+      controlCensusID = controlCensus.censusID;
+    });
+
+    /** Parked rows (StemGUID NULL), each with one error link, as an earlier upload attempt leaves them. */
+    async function seedPriorCensusRows(count: number): Promise<void> {
+      await connection.query(`SET SESSION cte_max_recursion_depth = ?`, [count + 1]);
+      await connection.query(
+        `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+           UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, IsActive)
+         WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
+         SELECT ?, NULL, FALSE, '2024-03-15', 1.0, 1.0, ?, ?, CONCAT('P', n), n, 1 FROM seq`,
+        [count, censusID, PRIOR_CENSUS_FILE_ID, PRIOR_CENSUS_BATCH_ID]
+      );
+      await connection.query(
+        `INSERT INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES ('ingestion','SQL_EXCEPTION','Ingestion SQL exception')
+         ON DUPLICATE KEY UPDATE ErrorID = LAST_INSERT_ID(ErrorID)`
+      );
+      await connection.query(
+        `INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved, CreatedAt)
+         SELECT CoreMeasurementID, LAST_INSERT_ID(), FALSE, NOW() FROM coremeasurements WHERE CensusID = ? AND UploadBatchID = ?`,
+        [censusID, PRIOR_CENSUS_BATCH_ID]
+      );
+    }
+
+    async function seedControlCensusRows(): Promise<void> {
+      for (let rowIndex = 1; rowIndex <= CONTROL_ROW_COUNT; rowIndex++) {
+        await connection.query(
+          `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+             UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, IsActive)
+           VALUES (?, NULL, FALSE, '2024-03-15', 1.0, 1.0, ?, ?, ?, ?, 1)`,
+          [controlCensusID, CONTROL_FILE_ID, CONTROL_BATCH_ID, `C${rowIndex}`, rowIndex]
+        );
+      }
+    }
+
+    async function fingerprintCensus(fingerprintCensusID: number): Promise<{ rows: number; contentCrc: string; deleteAudits: number }> {
+      const [measurement] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS total,
+                COALESCE(SUM(CRC32(CONCAT_WS('#', CoreMeasurementID, StemGUID, MeasurementDate, MeasuredDBH, MeasuredHOM, RawTreeTag, IsActive))), 0) AS contentCrc
+         FROM coremeasurements WHERE CensusID = ?`,
+        [fingerprintCensusID]
+      );
+      const [audits] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS total FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND Operation = 'DELETE' AND CensusID = ?`,
+        [fingerprintCensusID]
+      );
+      return { rows: Number(measurement[0].total), contentCrc: String(measurement[0].contentCrc), deleteAudits: Number(audits[0].total) };
+    }
+
+    async function countPriorRows(): Promise<number> {
+      const [rows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ? AND UploadBatchID = ?`, [
+        censusID,
+        PRIOR_CENSUS_BATCH_ID
+      ]);
+      return Number(rows[0].total);
+    }
+
+    /** Only the replacement's DELETE audits: ingesting the job's own files can write unrelated ones. */
+    async function readPriorBatchDeleteAudits(): Promise<{ audits: number; distinctRecords: number }> {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS audits, COUNT(DISTINCT RecordID) AS distinctRecords FROM unifiedchangelog
+         WHERE TableName = 'coremeasurements' AND Operation = 'DELETE' AND CensusID = ?
+           AND JSON_UNQUOTE(JSON_EXTRACT(OldRowState, ?)) = ?`,
+        [censusID, PRIOR_BATCH_AUDIT_JSON_PATH, PRIOR_CENSUS_BATCH_ID]
+      );
+      return { audits: Number(rows[0].audits), distinctRecords: Number(rows[0].distinctRecords) };
+    }
+
+    async function readWorkerSessionMarkers(jobID: number): Promise<Array<{ state: string; markerSet: boolean }>> {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT state, census_replacement_completed_at IS NOT NULL AS markerSet FROM upload_sessions WHERE file_id = ? ORDER BY created_at`,
+        [`async-job-${jobID}`]
+      );
+      return rows.map(row => ({ state: String(row.state), markerSet: Number(row.markerSet) === 1 }));
+    }
+
+    it('the transaction that stages chunk 0 issues no census-replacement statement (catches: worker not wired; replacement left inside the staging transaction)', async () => {
+      await seedPriorCensusRows(PRIOR_ROW_COUNT);
+      await seedControlCensusRows();
+      const controlBefore = await fingerprintCensus(controlCensusID);
+      const jobID = await createTwoFileJob();
+
+      await runJobIfClaimable(jobID, healthyDeps());
+
+      const job = await getBackgroundJob(catalogPool, jobID);
+      const firstStagingInsert = sharedState.statementLog.find(entry => TEMPORARY_MEASUREMENTS_INSERT.test(entry.sql));
+      expect(firstStagingInsert, 'the job must have staged at least one chunk').toBeDefined();
+      const stagingTransactionID = firstStagingInsert!.transactionID;
+      const stagingStatements = sharedState.statementLog.filter(entry => entry.transactionID === stagingTransactionID);
+      const replacementWritesInStagingTransaction = stagingStatements.filter(entry =>
+        CENSUS_REPLACEMENT_WRITE_PATTERNS.some(pattern => pattern.test(entry.sql))
+      );
+      const priorAudits = await readPriorBatchDeleteAudits();
+      const controlAfter = await fingerprintCensus(controlCensusID);
+      console.log(
+        `[#555 W1] job=${job?.status} stagingTransaction=${stagingTransactionID} statementsInIt=${stagingStatements.length} ` +
+          `replacementWritesInIt=${replacementWritesInStagingTransaction.length} priorRowsLeft=${await countPriorRows()} priorAudits=${JSON.stringify(priorAudits)}`
+      );
+      console.log(
+        `[#555 W1] statements of the staging transaction:\n${stagingStatements.map(entry => entry.sql.replace(/\s+/g, ' ').slice(0, 140)).join('\n')}`
+      );
+      console.log(`[#555 W1] control before=${JSON.stringify(controlBefore)} after=${JSON.stringify(controlAfter)}`);
+
+      expect(job!.status).toBe(JOB_STATUS_COMPLETED);
+      expect(await countPriorRows()).toBe(0);
+      expect(priorAudits).toEqual({ audits: PRIOR_ROW_COUNT, distinctRecords: PRIOR_ROW_COUNT });
+      expect(replacementWritesInStagingTransaction.map(entry => entry.sql)).toEqual([]);
+      expect(controlAfter).toEqual(controlBefore);
+    }, 180000);
+
+    it('an attempt that fails mid-replacement keeps its finished windows and the retry finishes the rest (catches: non-resumable retry; double audit; marker on the failed session)', async () => {
+      await seedPriorCensusRows(PRIOR_ROW_COUNT);
+      await seedControlCensusRows();
+      const controlBefore = await fingerprintCensus(controlCensusID);
+      const jobID = await createTwoFileJob();
+      let measurementDeletesSeen = 0;
+      sharedState.onSchemaQuery = query => {
+        if (!CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE.test(query)) return;
+        measurementDeletesSeen += 1;
+        if (measurementDeletesSeen === FAILED_WINDOW_ORDINAL) throw new InjectedReplacementFault();
+      };
+
+      await runJobIfClaimable(jobID, healthyDeps());
+      sharedState.onSchemaQuery = null;
+
+      const parked = await getBackgroundJob(catalogPool, jobID);
+      const auditsAfterFailure = await readPriorBatchDeleteAudits();
+      const sessionsAfterFailure = await readWorkerSessionMarkers(jobID);
+      console.log(
+        `[#555 W2] after attempt 1: job=${parked?.status} lastError=${parked?.lastError} priorRowsLeft=${await countPriorRows()} ` +
+          `audits=${JSON.stringify(auditsAfterFailure)} sessions=${JSON.stringify(sessionsAfterFailure)} measurementDeletesSeen=${measurementDeletesSeen}`
+      );
+      expect(parked!.status).toBe(JOB_STATUS_WAITING_RETRY);
+      expect(parked!.lastError).toContain(INJECTED_FAULT_MESSAGE);
+      expect(await countPriorRows()).toBe(PRIOR_ROWS_BEYOND_ONE_WINDOW);
+      expect(auditsAfterFailure).toEqual({ audits: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE, distinctRecords: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE });
+      expect(sessionsAfterFailure).toEqual([{ state: SESSION_STATE_FAILED, markerSet: false }]);
+      expect(await countTempRows(FILE1_NAME)).toBe(0);
+
+      await setNextAttemptPast(jobID);
+      await runJobIfClaimable(jobID, healthyDeps());
+
+      const completed = await getBackgroundJob(catalogPool, jobID);
+      const auditsAfterRetry = await readPriorBatchDeleteAudits();
+      const controlAfter = await fingerprintCensus(controlCensusID);
+      console.log(
+        `[#555 W2] after attempt 2: job=${completed?.status} priorRowsLeft=${await countPriorRows()} audits=${JSON.stringify(auditsAfterRetry)} ` +
+          `sessions=${JSON.stringify(await readWorkerSessionMarkers(jobID))} control before=${JSON.stringify(controlBefore)} after=${JSON.stringify(controlAfter)}`
+      );
+      expect(completed!.status).toBe(JOB_STATUS_COMPLETED);
+      expect(await countPriorRows()).toBe(0);
+      expect(auditsAfterRetry).toEqual({ audits: PRIOR_ROW_COUNT, distinctRecords: PRIOR_ROW_COUNT });
+      expect(controlAfter).toEqual(controlBefore);
+    }, 180000);
   });
 });

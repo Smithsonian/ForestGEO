@@ -123,14 +123,13 @@ async function findStaleTemporaryMeasurements(schema: string, _maxAgeHours: numb
 }
 
 /**
- * Clear stale transactions from ConnectionManager
+ * Reap abandoned transactions in this process and return how many were reaped
  */
 async function clearStaleTransactions(): Promise<number> {
   try {
     // Import dynamically to avoid circular dependencies
     const { default: ConnectionManager } = await import('@/lib/db/connectionmanager');
-    await ConnectionManager.getInstance().cleanupStaleTransactions();
-    return 1; // Cleanup was attempted
+    return await ConnectionManager.getInstance().cleanupStaleTransactions();
   } catch (error: unknown) {
     ailogger.error('[Cleanup API] Failed to clear stale transactions:', error instanceof Error ? error : new Error(String(error)));
     return 0;

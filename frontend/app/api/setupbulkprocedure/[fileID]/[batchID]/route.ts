@@ -129,8 +129,8 @@ async function handler(request: NextRequest, context: RouteContext) {
     if (error instanceof IngestBatchAbortedError) {
       return new NextResponse(JSON.stringify({ error: 'Client disconnected', aborted: true }), { status: HTTP_CLIENT_CLOSED_REQUEST });
     }
-    // Only Phase-1 (setup) errors escape ingestBatch; sub-batch failures are
-    // handled internally by moving rows to unresolved coremeasurements.
+    // Phase-1 (setup) errors and an unknown COMMIT outcome (#563) escape ingestBatch; other sub-batch
+    // failures are handled internally by moving rows to unresolved coremeasurements.
     if (error instanceof OversizedSubBatchError) {
       ailogger.warn(`Oversized sub-batch for ${fileID}-${batchID}: ${error.message}`);
       return new NextResponse(
@@ -140,8 +140,8 @@ async function handler(request: NextRequest, context: RouteContext) {
         }
       );
     }
-    ailogger.error(`Setup phase failed for ${fileID}-${batchID}: ${error.message}`, error);
-    return new NextResponse(JSON.stringify({ error: `Setup failed: ${error.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
+    ailogger.error(`Ingestion failed for ${fileID}-${batchID}: ${error.message}`, error);
+    return new NextResponse(JSON.stringify({ error: `Ingestion failed: ${error.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
   }
 
   if (result.noDataFound) {

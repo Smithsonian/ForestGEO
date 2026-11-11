@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib/ingestion/temporary-measurements';
+import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
 
 /**
  * Unified Changelog Tracking System Tests
@@ -139,7 +140,8 @@ vi.mock('@/config/uploadsessiontracker', () => ({
   UploadSessionState: {
     INITIALIZED: 'initialized',
     UPLOADING: 'uploading'
-  }
+  },
+  ACTIVE_UPLOAD_SESSION_STATES: ['initialized', 'uploading', 'uploaded', 'processing', 'collapsing']
 }));
 
 // Import handlers AFTER mocks
@@ -150,6 +152,8 @@ import { POST as SQLPACKETLOAD_POST } from '../sqlpacketload/route';
 // ========== Helpers ==========
 // A reference-table clean re-upload is always sent under an upload session, as the upload client does.
 const SUPPORTING_DATA_UPLOAD_SESSION_ID = 'unifiedchangelog-attributes-session';
+const TEST_UPLOAD_SESSION_ID = 'unifiedchangelog-measurements-session';
+const MEASUREMENT_UPLOAD_HEADERS = { 'x-upload-session-id': TEST_UPLOAD_SESSION_ID };
 
 function makeRequest(url: string, method: string = 'GET', body?: any, extraHeaders: Record<string, string> = {}): any {
   const req: any = new Request(url, {
@@ -181,10 +185,16 @@ function mockMeasurementUploadQueries(
     .mockResolvedValueOnce([{ PlotID: 1 }])
     // sqlpacketload family scope sample: nothing staged for this batch family yet.
     .mockResolvedValueOnce([])
+    // ensureUploadSessionReplacementMarkerColumn: upload_sessions exists and already has the marker column.
+    .mockResolvedValueOnce([{ tableCount: 1, columnCount: 1 }])
+    // uploadSessionHasCompletedReplacement: this session has not replaced the census yet.
+    .mockResolvedValueOnce([{ census_replacement_completed_at: null }])
+    // replaceCensusForCleanReupload's familyHasStagedRows: an earlier chunk is already staged, so the replacement ends as upload_in_progress.
+    .mockResolvedValueOnce([{ staged: 1 }])
     // ensureTemporaryMeasurementsSourceFormatColumn: information_schema column existence check
     // (count > 0 means the SourceFormat column already exists, so no ALTER TABLE runs).
     .mockResolvedValueOnce([{ count: 1 }])
-    // familyHasStagedRows: an earlier chunk of this file is already staged, so no stale cleanup runs.
+    // stageMeasurementChunk's familyHasStagedRows: the same answer, so no stale cleanup runs.
     .mockResolvedValueOnce([{ staged: 1 }])
     // temporarymeasurements INSERT: the server reports the rows it inserted.
     .mockResolvedValueOnce({ affectedRows: insertedRowCount });
@@ -202,6 +212,7 @@ describe('Unified Changelog Tracking System', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    resetUploadSessionReplacementMarkerCacheForTests();
     vi.spyOn(ConnectionManager.getInstance(), 'acquireApplicationLock').mockResolvedValue(true);
     vi.mocked(handleUpsert).mockResolvedValue({ id: 1, operation: 'inserted' });
   });
@@ -403,15 +414,20 @@ describe('Unified Changelog Tracking System', () => {
         }
       };
 
-      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'measurements.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet
-      });
+      const req = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'measurements.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       const res = await SQLPACKETLOAD_POST(req);
 
@@ -447,7 +463,7 @@ describe('Unified Changelog Tracking System', () => {
         const params = changelogInsert[1] as any[];
         expect(params).toBeDefined();
         expect(params[0]).toBe('file_upload'); // TableName
-        expect(params[1]).toBe(buildFileUploadChangelogRecordID('measurements.csv', 'test-batch-id')); // RecordID (fileName)
+        expect(params[1]).toBe(buildFileUploadChangelogRecordID('measurements.csv', TEST_UPLOAD_SESSION_ID)); // RecordID (fileName::upload session)
         expect(params[2]).toBe('INSERT'); // Operation
         // params[3] is the JSON metadata
         const metadata = JSON.parse(params[3]);
@@ -496,15 +512,20 @@ describe('Unified Changelog Tracking System', () => {
         }
       };
 
-      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'measurements.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet
-      });
+      const req = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'measurements.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       const res = await SQLPACKETLOAD_POST(req);
 
@@ -588,15 +609,20 @@ describe('Unified Changelog Tracking System', () => {
         changelogResult: {}
       });
 
-      const req1 = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'file1.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
-      });
+      const req1 = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'file1.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       const res1 = await SQLPACKETLOAD_POST(req1);
       expect(res1).toBeDefined();
@@ -606,6 +632,7 @@ describe('Unified Changelog Tracking System', () => {
       // The SourceFormat column check caches per schema; reset so the second upload
       // re-issues it and consumes the mock response queued by mockMeasurementUploadQueries.
       resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+      resetUploadSessionReplacementMarkerCacheForTests();
 
       // Second file upload
       _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9b');
@@ -616,15 +643,20 @@ describe('Unified Changelog Tracking System', () => {
         changelogResult: {}
       });
 
-      const req2 = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'file2.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet: { 'row-1': { tag: '200', stemtag: '1', spcode: 'sp2', quadrat: 'Q02' } }
-      });
+      const req2 = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'file2.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet: { 'row-1': { tag: '200', stemtag: '1', spcode: 'sp2', quadrat: 'Q02' } }
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       const res2 = await SQLPACKETLOAD_POST(req2);
       expect(res2).toBeDefined();
@@ -688,15 +720,20 @@ describe('Unified Changelog Tracking System', () => {
         changelogResult: {}
       });
 
-      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'test.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'john.doe@example.com',
-        fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
-      });
+      const req = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'test.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'john.doe@example.com',
+          fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       await SQLPACKETLOAD_POST(req);
 
@@ -720,15 +757,20 @@ describe('Unified Changelog Tracking System', () => {
         changelogError: new Error('Changelog table locked')
       });
 
-      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'measurements',
-        fileName: 'test.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
-      });
+      const req = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'measurements',
+          fileName: 'test.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
+        },
+        MEASUREMENT_UPLOAD_HEADERS
+      );
 
       const res = await SQLPACKETLOAD_POST(req);
 

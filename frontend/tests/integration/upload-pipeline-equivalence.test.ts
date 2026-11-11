@@ -163,12 +163,13 @@ import { UploadMode } from '@/config/uploadmodes';
 import { generateShortBatchID } from '@/config/utils';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { detectDelimiter } from '@/lib/uploads/detect-delimiter';
-import { stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
+import { replaceCensusForCleanReupload, stageMeasurementChunk, type CensusReplacementParams } from '@/lib/uploads/stage-measurements';
 import { ingestBatch } from '@/lib/uploads/ingest-batch';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
 import type { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
 import { testDbServerOptions } from '../setup/test-db-connection';
+import { startFreshUploadSession } from '../setup/upload-session-fixtures';
 
 // ---------------------------------------------------------------------------
 // Fixture — ONE CSV through both pipelines.
@@ -179,6 +180,7 @@ import { testDbServerOptions } from '../setup/test-db-connection';
 
 const FILE_NAME = 'equivalence-fixture.csv';
 const TEST_USER = 'equivalence-test@forestgeo.test';
+const SYNC_UPLOAD_SESSION_ID = 'equivalence-sync-upload-session';
 const BLOB_CONTAINER = 'equivalence-test-container';
 const MEASUREMENT_DATE = '2024-03-15';
 
@@ -426,29 +428,32 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
     // delimiter, storedMapping undefined (no client mapping), preKeyedRows
     // undefined, caller-owned transaction.
     let invalidRows: FileRow[] = [];
+    const replacementParams: CensusReplacementParams = {
+      schema,
+      fileName: FILE_NAME,
+      batchID,
+      plotID: plotA,
+      censusID: censusA,
+      uploadMode: UploadMode.CLEAN_REUPLOAD,
+      sourceFormat: SourceFormat.csv,
+      rawRows,
+      csvHeaders,
+      delimiter,
+      storedMapping: undefined,
+      uploadSessionID: SYNC_UPLOAD_SESSION_ID,
+      firstRowOrdinal: null,
+      changedBy: TEST_USER,
+      onInvalidRows: rows => {
+        invalidRows = rows;
+      }
+    };
+    await startFreshUploadSession(connection, { schema, sessionID: SYNC_UPLOAD_SESSION_ID, plotID: plotA, censusID: censusA });
+    const replacement = await replaceCensusForCleanReupload(connectionManager, replacementParams);
+    console.log(`[sync] replacement outcome=${replacement.outcome} deletedRows=${replacement.deletedRows} windowCount=${replacement.windowCount}`);
     const stagingTxn = await connectionManager.beginTransaction();
     let stageResult;
     try {
-      stageResult = await stageMeasurementChunk(connectionManager, {
-        schema,
-        fileName: FILE_NAME,
-        batchID,
-        plotID: plotA,
-        censusID: censusA,
-        uploadMode: UploadMode.CLEAN_REUPLOAD,
-        sourceFormat: SourceFormat.csv,
-        rawRows,
-        csvHeaders,
-        delimiter,
-        storedMapping: undefined,
-        uploadSessionID: null,
-        transactionID: stagingTxn,
-        firstRowOrdinal: null,
-        changedBy: TEST_USER,
-        onInvalidRows: rows => {
-          invalidRows = rows;
-        }
-      });
+      stageResult = await stageMeasurementChunk(connectionManager, { ...replacementParams, transactionID: stagingTxn });
       await connectionManager.commitTransaction(stagingTxn);
     } catch (error) {
       await connectionManager.rollbackTransaction(stagingTxn);

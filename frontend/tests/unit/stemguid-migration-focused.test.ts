@@ -305,12 +305,6 @@ describe('StemGUID Migration - Focused Edge Case Validation', () => {
           parentKey: 'StemGUID',
           childTable: 'coremeasurements',
           childKey: 'StemGUID'
-        },
-        {
-          parentTable: 'stems',
-          parentKey: 'StemGUID',
-          childTable: 'specimens',
-          childKey: 'StemGUID'
         }
       ];
 

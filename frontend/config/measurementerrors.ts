@@ -1,17 +1,15 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { MAX_STORED_DECIMAL, parseFiniteBase10Number } from '@/config/editplan/fieldpolicy';
+import { INGESTION_STAGE_ERROR_CODES } from '@/config/errorsexplorer';
+import { toTxExecutor } from '@/config/utils';
+import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutation';
 
 export const INGESTION_ERROR_SOURCE = 'ingestion' as const;
 export const VALIDATION_ERROR_SOURCE = 'validation' as const;
 
-/**
- * ErrorCodes emitted only by hardcoded bulk-ingestion SQL (Stage 10 soft
- * validations, storedprocedures.sql:3418/3457) with no corresponding
- * `sitespecificvalidations` Definition — no revalidation pass can recompute them.
- */
-export const INGESTION_STAGE_ERROR_CODES = ['20', '21'] as const;
+export { INGESTION_STAGE_ERROR_CODES };
 
 export const FALLBACK_FAILURE_REASON = 'Unknown parse error';
 // coremeasurements.Description is varchar(255); an over-length bind under strict
@@ -1147,4 +1145,174 @@ export function buildFailedMeasurementsSelectQuery(schema: string): string {
         cm.UploadFileID, cm.UploadBatchID
     ) fm
   `;
+}
+
+export class ClearMeasurementNotFoundError extends Error {
+  constructor(measurementID: number) {
+    super(`measurement ${measurementID} is not an active row of this plot/census`);
+    this.name = 'ClearMeasurementNotFoundError';
+  }
+}
+
+export class FailedMeasurementNotClearableError extends Error {
+  constructor(measurementID: number) {
+    super(`measurement ${measurementID} failed ingestion (StemGUID IS NULL); correct and re-ingest it instead`);
+    this.name = 'FailedMeasurementNotClearableError';
+  }
+}
+
+/**
+ * r3 (View Data R2): no clearable validation entry, so a Clear would only reset a passed or pending row, or a row
+ * whose only flags are ingestion-stage codes (20, 21) that no validation run can recreate or clear.
+ */
+export class NothingToClearError extends Error {
+  constructor(measurementID: number) {
+    super(`measurement ${measurementID} has no clearable validation error and is not a marked-invalid row without a logged error`);
+    this.name = 'NothingToClearError';
+  }
+}
+
+/** `IsValidated + 0` of the BIT column for a row validation marked invalid. */
+const IS_VALIDATED_FAILED = 0;
+
+export interface ClearValidationErrorsInput {
+  schema: string;
+  plotID: number;
+  censusID: number;
+  measurementID: number;
+  /** `unifiedchangelog.ChangedBy` for the audit row; the signed-in user, never a cookie. */
+  changedBy: string;
+}
+
+interface RemovedValidationError {
+  ErrorCode: string;
+  ErrorMessage: string;
+}
+
+const COREMEASUREMENTS_TABLE_NAME = 'coremeasurements';
+
+function readAffectedRows(result: unknown): number {
+  const affectedRows =
+    result !== null && typeof result === 'object' && 'affectedRows' in result ? Number((result as { affectedRows: unknown }).affectedRows) : Number.NaN;
+  if (!Number.isSafeInteger(affectedRows) || affectedRows < 0) throw new Error(`DELETE returned no affected-row count: ${JSON.stringify(result)}`);
+  return affectedRows;
+}
+
+async function countUnresolvedIngestionStageEntries(cm: ConnectionManager, input: ClearValidationErrorsInput, transactionID: string): Promise<number> {
+  const rows = await cm.executeQuery(
+    safeFormatQuery(
+      input.schema,
+      `SELECT COUNT(*) AS retainedCount
+         FROM ??.measurement_error_log mel
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+        WHERE mel.MeasurementID = ? AND me.ErrorSource = ? AND me.ErrorCode IN (${buildInPlaceholders(INGESTION_STAGE_ERROR_CODES.length)})
+          AND mel.IsResolved = FALSE`
+    ),
+    [input.measurementID, VALIDATION_ERROR_SOURCE, ...INGESTION_STAGE_ERROR_CODES],
+    transactionID
+  );
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error(`ingestion-stage entry count returned no row for measurement ${input.measurementID}`);
+  return Number(rows[0].retainedCount);
+}
+
+/** With nothing deleted, only a marked-invalid row that logs no unresolved error at all is still worth resetting. */
+async function assertIsTrueFallbackRow(cm: ConnectionManager, input: ClearValidationErrorsInput, isValidated: unknown, transactionID: string): Promise<void> {
+  const markedInvalid = isValidated !== null && Number(isValidated) === IS_VALIDATED_FAILED;
+  if (!markedInvalid || (await countUnresolvedIngestionStageEntries(cm, input, transactionID)) > 0) throw new NothingToClearError(input.measurementID);
+}
+
+async function readClearableValidationErrors(
+  cm: ConnectionManager,
+  input: ClearValidationErrorsInput,
+  transactionID: string
+): Promise<RemovedValidationError[]> {
+  const rows = await cm.executeQuery(
+    safeFormatQuery(
+      input.schema,
+      `SELECT me.ErrorCode AS ErrorCode, me.ErrorMessage AS ErrorMessage
+         FROM ??.measurement_error_log mel
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+        WHERE mel.MeasurementID = ? AND me.ErrorSource = ? AND me.ErrorCode NOT IN (${buildInPlaceholders(INGESTION_STAGE_ERROR_CODES.length)})
+          AND mel.IsResolved = FALSE
+        ORDER BY me.ErrorCode ASC`
+    ),
+    [input.measurementID, VALIDATION_ERROR_SOURCE, ...INGESTION_STAGE_ERROR_CODES],
+    transactionID
+  );
+  if (!Array.isArray(rows)) throw new Error(`validation error read returned no row set for measurement ${input.measurementID}`);
+  return rows.map(row => ({ ErrorCode: String(row.ErrorCode), ErrorMessage: String(row.ErrorMessage) }));
+}
+
+async function recordClearInChangelog(
+  cm: ConnectionManager,
+  input: ClearValidationErrorsInput,
+  transactionID: string,
+  previousIsValidated: unknown,
+  removedErrors: RemovedValidationError[]
+): Promise<void> {
+  await recordMutation({
+    tx: toTxExecutor(cm, transactionID),
+    schema: input.schema,
+    tableName: COREMEASUREMENTS_TABLE_NAME,
+    recordID: input.measurementID,
+    operation: ChangelogOperation.UPDATE,
+    oldRowState: { IsValidated: previousIsValidated === null ? null : Number(previousIsValidated), ValidationErrors: removedErrors },
+    newRowState: { IsValidated: null },
+    changedBy: input.changedBy,
+    plotID: input.plotID,
+    censusID: input.censusID
+  });
+}
+
+/**
+ * Inside the caller's transaction: locks the row, refuses a failed or out-of-scope row, deletes its unresolved
+ * validation-source log entries except the ingestion-stage codes (20, 21), which no validation run can recreate, and
+ * sets IsValidated = NULL so the next validation run checks it again. A row with nothing deleted is reset only when it
+ * is marked invalid and has no unresolved ingestion-stage entry either (the true fallback row); otherwise
+ * NothingToClearError, and the caller rolls back. Last, it writes one unifiedchangelog row, scoped by the request and
+ * attributed to input.changedBy, holding the previous IsValidated and the removed errors; the connection logger skips
+ * the reset, so this row is the only record. The caller rebuilds the stored views on the same transaction before committing.
+ */
+export async function clearUnresolvedValidationErrors(
+  cm: ConnectionManager,
+  input: ClearValidationErrorsInput,
+  transactionID: string
+): Promise<{ clearedErrorCount: number }> {
+  const rows = await cm.executeQuery(
+    safeFormatQuery(
+      input.schema,
+      `SELECT cm.CoreMeasurementID, cm.StemGUID, cm.IsValidated + 0 AS isValidated
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON c.CensusID = cm.CensusID
+        WHERE cm.CoreMeasurementID = ? AND cm.CensusID = ? AND c.PlotID = ? AND cm.IsActive = 1
+        FOR UPDATE`
+    ),
+    [input.measurementID, input.censusID, input.plotID],
+    transactionID
+  );
+  if (!Array.isArray(rows) || rows.length === 0) throw new ClearMeasurementNotFoundError(input.measurementID);
+  if (rows[0].StemGUID === null) throw new FailedMeasurementNotClearableError(input.measurementID);
+
+  const removedErrors = await readClearableValidationErrors(cm, input, transactionID);
+  const deleted = await cm.executeQuery(
+    safeFormatQuery(
+      input.schema,
+      `DELETE mel
+         FROM ??.measurement_error_log mel
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+        WHERE mel.MeasurementID = ? AND me.ErrorSource = ? AND me.ErrorCode NOT IN (${buildInPlaceholders(INGESTION_STAGE_ERROR_CODES.length)})
+          AND mel.IsResolved = FALSE`
+    ),
+    [input.measurementID, VALIDATION_ERROR_SOURCE, ...INGESTION_STAGE_ERROR_CODES],
+    transactionID
+  );
+  const clearedErrorCount = readAffectedRows(deleted);
+  if (clearedErrorCount === 0) await assertIsTrueFallbackRow(cm, input, rows[0].isValidated, transactionID);
+  await cm.executeQuery(
+    safeFormatQuery(input.schema, '/* skip_changelog */ UPDATE ??.coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?'),
+    [input.measurementID],
+    transactionID
+  );
+  await recordClearInChangelog(cm, input, transactionID, rows[0].isValidated, removedErrors);
+  return { clearedErrorCount };
 }

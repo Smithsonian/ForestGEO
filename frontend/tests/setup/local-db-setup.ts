@@ -1552,7 +1552,7 @@ export interface MeasurementFactoryOptions {
  * Simple seeded pseudo-random number generator (Mulberry32).
  * Provides deterministic "random" values for reproducible tests.
  */
-function seededRandom(seed: number): () => number {
+export function seededRandom(seed: number): () => number {
   return function () {
     let t = (seed += 0x6d2b79f5);
     t = Math.imul(t ^ (t >>> 15), t | 1);

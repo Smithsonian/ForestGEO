@@ -4,15 +4,21 @@ import {
   CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   cleanupPreviousFileUploads,
   cleanupStaleMeasurementBatchesForFile,
+  CoreMeasurementWindowTooLargeError,
+  CENSUS_REPLACEMENT_SCAN_INDEX,
+  deleteCensusReplacementChunk,
+  deleteCoreMeasurementsInBoundedChunksWithAudit,
   familyHasStagedRows,
   findDroppedMeasurementCandidates,
   isUnsignedIntFieldInvalid,
+  lockAuditAndDeleteCoreMeasurementWindow,
   MYSQL_UNSIGNED_INT_MAX,
   parseUnsignedIntField
 } from './temporary-measurements';
 import { SourceFormat } from '@/config/macros/formdetails';
 import type ConnectionManager from '@/lib/db/connectionmanager';
 import type { FileRow } from '@/config/macros/formdetails';
+import { buildSubBatchPattern } from '@/lib/uploads/batch-family';
 
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
@@ -259,7 +265,7 @@ describe('cleanupPreviousFileUploads bounded-delete loop control', () => {
   // audit them, then DELETE by id — so every chunk's audit rows and deleted
   // rows are provably the same row set. These markers identify each of the
   // three statements in the executeQuery call log.
-  const SELECT_IDS_MARKER = 'SELECT CoreMeasurementID FROM `forestgeo_testing`.coremeasurements';
+  const SELECT_IDS_MARKER = `SELECT /*+ INDEX(coremeasurements ${CENSUS_REPLACEMENT_SCAN_INDEX}) */ CoreMeasurementID FROM \`forestgeo_testing\`.coremeasurements`;
   const AUDIT_INSERT_MARKER = 'INSERT INTO `forestgeo_testing`.unifiedchangelog';
   const CM_DELETE_MARKER = 'DELETE FROM `forestgeo_testing`.coremeasurements WHERE CoreMeasurementID IN';
   const NOTHING_DELETED = { affectedRows: 0 };
@@ -328,20 +334,32 @@ describe('cleanupPreviousFileUploads bounded-delete loop control', () => {
     return executeQuery.mock.calls.filter(call => String(call[0]).includes(AUDIT_INSERT_MARKER)).length;
   }
 
-  it('keeps requesting pages while the server keeps filling the limit, then stops on the first short page', async () => {
+  it('keeps requesting pages while the server keeps filling the limit, then stops after a short page and one confirming pass at cursor 0', async () => {
     const { connectionManager, executeQuery } = makeConnectionManager([
       makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE),
       makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE),
-      makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE - 1)
+      makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE - 1),
+      []
     ]);
 
     const deleted = await runCleanup(connectionManager);
 
+    const selectCursors = executeQuery.mock.calls
+      .filter(call => String(call[0]).includes(SELECT_IDS_MARKER))
+      .map(call => (call as unknown[])[1] as unknown[])
+      .map(params => params[params.length - 1]);
+    console.log('[U2] cursor sent with each window SELECT:', selectCursors);
     expect(deleted, 'returned total must be the sum of every page, not just the last').toBe(
       CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE * 2 + (CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE - 1)
     );
-    expect(countCoreMeasurementDeletes(executeQuery), 'one DELETE per page').toBe(3);
+    expect(countCoreMeasurementDeletes(executeQuery), 'one DELETE per non-empty page').toBe(3);
     expect(countAuditInserts(executeQuery), 'one audit INSERT per page, matching the DELETE count 1:1').toBe(3);
+    expect(selectCursors, 'start at 0, advance past each full page, restart at 0 for the confirming pass').toEqual([
+      0,
+      CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
+      CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
+      0
+    ]);
   });
 
   it('stops after one page when the very first page is short', async () => {
@@ -427,5 +445,358 @@ describe('cleanupPreviousFileUploads bounded-delete loop control', () => {
     expect(auditCall, 'audit INSERT was never issued').toBeDefined();
     const [, auditParams] = auditCall!;
     expect(auditParams[0]).toBe(TEST_CHANGED_BY);
+  });
+});
+
+describe('deleteCensusReplacementChunk — one measurement window (#555)', () => {
+  const SCHEMA = 'forestgeo_testing';
+  const BATCH_ID = 'incoming-batch-0001';
+  const PLOT_ID = 22;
+  const CENSUS_ID = 32;
+  const CHANGED_BY = 'window-test-user';
+  const TRANSACTION_ID = 'tx-u1';
+  const CURSOR = 4242;
+  const HINTED_SELECT_PREFIX = `SELECT /*+ INDEX(coremeasurements ${CENSUS_REPLACEMENT_SCAN_INDEX}) */ CoreMeasurementID FROM \`${SCHEMA}\`.coremeasurements`;
+  const STATEMENTS_PER_NON_EMPTY_WINDOW = 4;
+  const LEGACY_FALLBACK_WINDOW_SIZE = 3;
+
+  function windowIDs(count: number): number[] {
+    return Array.from({ length: count }, (_, index) => CURSOR + 1 + index);
+  }
+
+  function makeRecorder(ids: number[], options: { linkTableMissing?: boolean } = {}) {
+    const calls: Array<{ sql: string; params: unknown[]; transactionID: string | undefined }> = [];
+    const executeQuery = vi.fn(async (sql: string, params: unknown[] = [], transactionID?: string) => {
+      calls.push({ sql: String(sql), params, transactionID });
+      const text = String(sql).trimStart();
+      if (text.startsWith('SELECT')) return ids.map(id => ({ CoreMeasurementID: id }));
+      if (options.linkTableMissing && text.includes('.measurement_error_log')) {
+        throw Object.assign(new Error(`Table '${SCHEMA}.measurement_error_log' doesn't exist`), { code: 'ER_NO_SUCH_TABLE' });
+      }
+      return { affectedRows: ids.length };
+    });
+    return { connectionManager: { executeQuery } as unknown as ConnectionManager, calls };
+  }
+
+  // Catches: the link delete reverting to the census-wide subquery; the audit after the delete;
+  // an IN-list longer than the window; the index hint or the cursor dropped.
+  it('locks the window above the cursor, then deletes its links by id, audits it, and deletes it, in one transaction', async () => {
+    const ids = windowIDs(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
+    const { connectionManager, calls } = makeRecorder(ids);
+
+    const result = await deleteCensusReplacementChunk(connectionManager, SCHEMA, BATCH_ID, PLOT_ID, CENSUS_ID, CURSOR, CHANGED_BY, TRANSACTION_ID);
+
+    console.log(
+      '[U1] statements:',
+      calls.map(call => `${call.transactionID} ${call.sql.replace(/\s+/g, ' ').trim().slice(0, 140)}`)
+    );
+    expect(calls.map(call => call.transactionID)).toEqual(Array(STATEMENTS_PER_NON_EMPTY_WINDOW).fill(TRANSACTION_ID));
+    const [select, linkDelete, audit, measurementDelete] = calls;
+    expect(select.sql.replace(/\s+/g, ' ').trimStart().startsWith(HINTED_SELECT_PREFIX), 'hinted keyset SELECT').toBe(true);
+    expect(select.sql).toContain('AND CoreMeasurementID > ?');
+    expect(select.sql).toMatch(new RegExp(`ORDER BY CoreMeasurementID\\s+LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}\\s+FOR UPDATE\\s*$`));
+    expect(select.params).toEqual([CENSUS_ID, BATCH_ID, buildSubBatchPattern(BATCH_ID), CURSOR]);
+    expect(linkDelete.sql).toMatch(/^\s*DELETE FROM `forestgeo_testing`\.measurement_error_log WHERE MeasurementID IN \(/);
+    expect(linkDelete.sql, 'no census-wide subquery').not.toMatch(/SELECT/i);
+    expect(linkDelete.params).toEqual(ids);
+    expect(audit.sql).toMatch(/^\s*INSERT INTO `forestgeo_testing`\.unifiedchangelog/);
+    expect(audit.params.slice(3)).toEqual(ids);
+    expect(measurementDelete.sql).toMatch(/^\s*DELETE FROM `forestgeo_testing`\.coremeasurements WHERE CoreMeasurementID IN \(/);
+    expect(measurementDelete.params).toEqual(ids);
+    expect(result).toEqual({ deletedRows: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE, lastCoreMeasurementID: ids[ids.length - 1] });
+  });
+
+  it('issues only the SELECT for an empty window and hands the cursor back unchanged', async () => {
+    const { connectionManager, calls } = makeRecorder([]);
+    const result = await deleteCensusReplacementChunk(connectionManager, SCHEMA, BATCH_ID, PLOT_ID, CENSUS_ID, CURSOR, CHANGED_BY, TRANSACTION_ID);
+    console.log(
+      '[U1-empty] statements:',
+      calls.map(call => call.sql.trim().slice(0, 80))
+    );
+    expect(calls).toHaveLength(1);
+    expect(result).toEqual({ deletedRows: 0, lastCoreMeasurementID: CURSOR });
+  });
+
+  it('falls back to a per-id cmverrors delete when measurement_error_log is missing (legacy schema)', async () => {
+    const ids = windowIDs(LEGACY_FALLBACK_WINDOW_SIZE);
+    const { connectionManager, calls } = makeRecorder(ids, { linkTableMissing: true });
+    await deleteCensusReplacementChunk(connectionManager, SCHEMA, BATCH_ID, PLOT_ID, CENSUS_ID, CURSOR, CHANGED_BY, TRANSACTION_ID);
+    const legacy = calls.find(call => call.sql.includes('.cmverrors'));
+    console.log(
+      '[U1-legacy] statements:',
+      calls.map(call => call.sql.trim().slice(0, 80))
+    );
+    expect(legacy?.sql).toMatch(/^\s*DELETE FROM `forestgeo_testing`\.cmverrors WHERE CoreMeasurementID IN \(/);
+    expect(legacy?.params).toEqual(ids);
+  });
+});
+
+describe('deleteCoreMeasurementsInBoundedChunksWithAudit — one read, primary-key windows, locking confirmation (#562)', () => {
+  const WINDOW = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE;
+  const SCHEMA = 'forestgeo_testing';
+  const PLOT_ID = 22;
+  const CENSUS_ID = 32;
+  const CHANGED_BY = 'window-walk-unit-test';
+  const TRANSACTION_ID = 'tx-walk';
+  const PARTIAL_WINDOW_ROWS = 500;
+  const AUDIT_PREFIX_PARAM_COUNT = 3; // recordDeletedCoreMeasurementsAudit binds [changedBy, plotID, censusID, ...ids]
+  const PLAIN_WHERE_SQL = 'CensusID = ? AND StemGUID IS NULL AND UploadFileID = ?';
+  const PLAIN_WHERE_PARAMS = [CENSUS_ID, 'stale.csv'];
+  const JOINED_FROM_SQL = `??.coremeasurements cm
+     INNER JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID AND mel.IsResolved = FALSE
+     INNER JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID AND me.ErrorSource = 'ingestion'
+     INNER JOIN ??.temporarymeasurements tm ON tm.CensusID = cm.CensusID AND tm.FileID = ? AND (tm.BatchID = ? OR tm.BatchID LIKE ?)`;
+  const JOINED_WHERE_SQL = 'cm.CensusID = ? AND cm.StemGUID IS NULL AND NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ?))';
+  const JOINED_WHERE_PARAMS = ['incoming.csv', 'batch-1', 'batch-1\\_\\_sub%', CENSUS_ID, 'incoming.csv', 'batch-1', 'batch-1\\_\\_sub%'];
+  const JOINED_LOCKED_ALIASES = ['cm', 'mel'] as const;
+
+  type WalkStatementKind = 'read' | 'lock' | 'confirmation' | 'audit' | 'delete';
+  interface LoggedStatement {
+    kind: WalkStatementKind;
+    sql: string;
+    params: unknown[];
+    transactionID: string | undefined;
+  }
+  interface WalkScript {
+    reads: number[][];
+    confirmations: number[][];
+    /** Which of the requested ids the lock statement "finds" (default: all of them). */
+    lockFilter?: (requestedIDs: number[]) => number[];
+    auditResult?: (lockedIDs: number[]) => unknown;
+    deleteResult?: (lockedIDs: number[]) => unknown;
+  }
+
+  function classifyWalkStatement(sql: string): WalkStatementKind {
+    if (sql.includes('.unifiedchangelog')) return 'audit';
+    if (/^\s*DELETE FROM/.test(sql)) return 'delete';
+    if (sql.includes('/*+')) return 'lock';
+    if (/\sLIMIT\s+\d+\s+FOR UPDATE/.test(sql)) return 'confirmation';
+    if (/^\s*SELECT/.test(sql) && !sql.includes('FOR UPDATE') && !/\sLIMIT\s/.test(sql)) return 'read';
+    throw new Error(`the walk issued a statement this test does not know: ${sql.replace(/\s+/g, ' ')}`);
+  }
+
+  function makeScriptedManager(whereParamCount: number, script: WalkScript) {
+    const log: LoggedStatement[] = [];
+    const reads = [...script.reads];
+    const confirmations = [...script.confirmations];
+    let lastLockedIDs: number[] = [];
+    const executeQuery = vi.fn(async (sql: string, params: unknown[] = [], transactionID?: string) => {
+      const kind = classifyWalkStatement(String(sql));
+      log.push({ kind, sql: String(sql), params, transactionID });
+      if (kind === 'read') {
+        const next = reads.shift();
+        if (!next) throw new Error(`the walk read its scope more often than scripted. Log:\n${render(log)}`);
+        return next.map(id => ({ CoreMeasurementID: id }));
+      }
+      if (kind === 'confirmation') {
+        const next = confirmations.shift();
+        if (!next) throw new Error(`the walk confirmed more often than scripted. Log:\n${render(log)}`);
+        return next.map(id => ({ CoreMeasurementID: id }));
+      }
+      if (kind === 'lock') {
+        const requested = params.slice(whereParamCount) as number[];
+        lastLockedIDs = script.lockFilter ? script.lockFilter(requested) : requested;
+        return lastLockedIDs.map(id => ({ CoreMeasurementID: id }));
+      }
+      if (kind === 'audit') return script.auditResult ? script.auditResult(lastLockedIDs) : { affectedRows: params.length - AUDIT_PREFIX_PARAM_COUNT };
+      return script.deleteResult ? script.deleteResult(lastLockedIDs) : { affectedRows: params.length };
+    });
+    return { connectionManager: { executeQuery } as unknown as ConnectionManager, log };
+  }
+
+  function render(log: LoggedStatement[]): string {
+    return log.map(entry => `${entry.transactionID} ${entry.kind} ${entry.sql.replace(/\s+/g, ' ').slice(0, 140)} params#${entry.params.length}`).join('\n');
+  }
+
+  function ids(from: number, count: number): number[] {
+    return Array.from({ length: count }, (_, index) => from + index);
+  }
+
+  function runPlainWalk(connectionManager: ConnectionManager) {
+    return deleteCoreMeasurementsInBoundedChunksWithAudit(
+      connectionManager,
+      SCHEMA,
+      PLAIN_WHERE_SQL,
+      PLAIN_WHERE_PARAMS,
+      CHANGED_BY,
+      PLOT_ID,
+      CENSUS_ID,
+      TRANSACTION_ID
+    );
+  }
+
+  it('U1: reads once, locks W, W, 500 ascending slices by primary key with the predicate first, then confirms (catches: a re-read per window; overlapping or unordered slices; ids before the predicate params; a missing locking confirmation)', async () => {
+    const scopeIDs = ids(1, 2 * WINDOW + PARTIAL_WINDOW_ROWS);
+    const { connectionManager, log } = makeScriptedManager(PLAIN_WHERE_PARAMS.length, { reads: [scopeIDs], confirmations: [[]] });
+
+    const deleted = await runPlainWalk(connectionManager);
+    console.log(`[U1] deleted=${deleted}\n${render(log)}`);
+
+    expect(
+      log.map(entry => entry.kind),
+      render(log)
+    ).toEqual(['read', 'lock', 'audit', 'delete', 'lock', 'audit', 'delete', 'lock', 'audit', 'delete', 'confirmation']);
+    expect(
+      log.every(entry => entry.transactionID === TRANSACTION_ID),
+      'every statement runs in the caller transaction'
+    ).toBe(true);
+    const [read] = log;
+    expect(read.sql).toMatch(/ORDER BY CoreMeasurementID\s*$/);
+    expect(read.params).toEqual(PLAIN_WHERE_PARAMS);
+    const locks = log.filter(entry => entry.kind === 'lock');
+    const slices = locks.map(lock => lock.params.slice(PLAIN_WHERE_PARAMS.length) as number[]);
+    expect(slices.map(slice => slice.length)).toEqual([WINDOW, WINDOW, PARTIAL_WINDOW_ROWS]);
+    expect(slices.flat(), 'slices are disjoint, ascending and cover the read exactly').toEqual(scopeIDs);
+    for (const lock of locks) {
+      expect(lock.sql).toContain('/*+ INDEX(coremeasurements PRIMARY) */');
+      expect(lock.sql).toContain(`WHERE (${PLAIN_WHERE_SQL}) AND CoreMeasurementID IN (`);
+      expect(lock.sql).toMatch(/ORDER BY CoreMeasurementID\s+FOR UPDATE\s*$/);
+      expect(lock.params.slice(0, PLAIN_WHERE_PARAMS.length), 'the predicate params come first').toEqual(PLAIN_WHERE_PARAMS);
+    }
+    const confirmation = log[log.length - 1];
+    expect(confirmation.sql).toMatch(new RegExp(`ORDER BY CoreMeasurementID\\s+LIMIT ${WINDOW}\\s+FOR UPDATE\\s*$`));
+    expect(confirmation.params).toEqual(PLAIN_WHERE_PARAMS);
+    expect(deleted).toBe(2 * WINDOW + PARTIAL_WINDOW_ROWS);
+  });
+
+  it('U2: a joined scope reads DISTINCT cm ids, pins the join to cm on PRIMARY, keeps the 7 join+predicate params first, and locks only cm and mel (catches: param misalignment; unpinned join order; locking me/tm)', async () => {
+    const scopeIDs = [11, 12, 13];
+    const { connectionManager, log } = makeScriptedManager(JOINED_WHERE_PARAMS.length, { reads: [scopeIDs], confirmations: [[]] });
+
+    const deleted = await deleteCoreMeasurementsInBoundedChunksWithAudit(
+      connectionManager,
+      SCHEMA,
+      JOINED_WHERE_SQL,
+      JOINED_WHERE_PARAMS,
+      CHANGED_BY,
+      PLOT_ID,
+      CENSUS_ID,
+      TRANSACTION_ID,
+      JOINED_FROM_SQL,
+      JOINED_LOCKED_ALIASES
+    );
+    console.log(`[U2] deleted=${deleted}\n${render(log)}`);
+
+    const [read, lock] = log;
+    expect(read.sql).toMatch(/^\s*SELECT DISTINCT cm\.CoreMeasurementID FROM/);
+    expect(read.sql).toMatch(/ORDER BY cm\.CoreMeasurementID\s*$/);
+    expect(lock.sql).toMatch(/^\s*SELECT \/\*\+ JOIN_PREFIX\(cm\) INDEX\(cm PRIMARY\) \*\/ DISTINCT cm\.CoreMeasurementID FROM/);
+    expect(lock.sql).toContain(`WHERE (${JOINED_WHERE_SQL}) AND cm.CoreMeasurementID IN (?, ?, ?)`);
+    expect(lock.sql).toMatch(/FOR UPDATE OF cm, mel\s*$/);
+    expect(lock.params).toEqual([...JOINED_WHERE_PARAMS, ...scopeIDs]);
+    const confirmation = log[log.length - 1];
+    expect(confirmation.kind).toBe('confirmation');
+    expect(confirmation.sql).toMatch(new RegExp(`LIMIT ${WINDOW}\\s+FOR UPDATE OF cm, mel\\s*$`));
+    expect(
+      log.filter(entry => entry.sql.includes('/*+')).every(entry => !/INDEX\((?!cm PRIMARY|coremeasurements PRIMARY)/.test(entry.sql)),
+      'no hint names a secondary index'
+    ).toBe(true);
+    expect(deleted).toBe(scopeIDs.length);
+  });
+
+  it('U3: audits and deletes only the ids the lock statement returned (catches: auditing the read’s ids)', async () => {
+    const stillMatching = [2, 4];
+    const { connectionManager, log } = makeScriptedManager(PLAIN_WHERE_PARAMS.length, {
+      reads: [[1, 2, 3, 4]],
+      confirmations: [[]],
+      lockFilter: requested => requested.filter(id => stillMatching.includes(id))
+    });
+
+    const deleted = await runPlainWalk(connectionManager);
+    console.log(`[U3] deleted=${deleted}\n${render(log)}`);
+
+    const audit = log.find(entry => entry.kind === 'audit')!;
+    const deletion = log.find(entry => entry.kind === 'delete')!;
+    expect(audit.params.slice(AUDIT_PREFIX_PARAM_COUNT)).toEqual(stillMatching);
+    expect(deletion.params).toEqual(stillMatching);
+    expect(deleted).toBe(stillMatching.length);
+  });
+
+  it('U4a: a full confirmation is deleted and followed by a new read (catches: ending on a full locking window)', async () => {
+    const lateRows = ids(1_000_001, WINDOW);
+    const { connectionManager, log } = makeScriptedManager(PLAIN_WHERE_PARAMS.length, { reads: [[1, 2, 3, 4, 5], []], confirmations: [lateRows, []] });
+
+    const deleted = await runPlainWalk(connectionManager);
+    console.log(`[U4a] deleted=${deleted}\n${render(log)}`);
+
+    expect(log.map(entry => entry.kind)).toEqual(['read', 'lock', 'audit', 'delete', 'confirmation', 'lock', 'audit', 'delete', 'read', 'confirmation']);
+    expect(deleted).toBe(5 + WINDOW);
+  });
+
+  it('U4b: a short confirmation is deleted and ends the walk (catches: an extra confirmation after a short one)', async () => {
+    const { connectionManager, log } = makeScriptedManager(PLAIN_WHERE_PARAMS.length, { reads: [[1, 2, 3, 4, 5]], confirmations: [[6, 7, 8]] });
+
+    const deleted = await runPlainWalk(connectionManager);
+    console.log(`[U4b] deleted=${deleted}\n${render(log)}`);
+
+    expect(log.map(entry => entry.kind)).toEqual(['read', 'lock', 'audit', 'delete', 'confirmation', 'lock', 'audit', 'delete']);
+    expect(deleted).toBe(8);
+  });
+
+  it('U5: an empty scope costs one read and one confirmation, nothing else (catches: wasted statements)', async () => {
+    const { connectionManager, log } = makeScriptedManager(PLAIN_WHERE_PARAMS.length, { reads: [[]], confirmations: [[]] });
+
+    expect(await runPlainWalk(connectionManager)).toBe(0);
+    console.log(`[U5]\n${render(log)}`);
+    expect(log.map(entry => entry.kind)).toEqual(['read', 'confirmation']);
+  });
+
+  describe('U6: one window’s guards', () => {
+    const PLAIN_SCOPE = { whereSQL: PLAIN_WHERE_SQL, whereParams: PLAIN_WHERE_PARAMS, fromSQL: '??.coremeasurements' };
+
+    it('a lock statement that finds nothing returns 0 with no audit and no DELETE (catches: EmptyInListError on a stale slice — G3)', async () => {
+      const { connectionManager, log } = makeScriptedManager(PLAIN_WHERE_PARAMS.length, { reads: [], confirmations: [], lockFilter: () => [] });
+      const deleted = await lockAuditAndDeleteCoreMeasurementWindow(
+        connectionManager,
+        SCHEMA,
+        PLAIN_SCOPE,
+        [7, 8, 9],
+        CHANGED_BY,
+        PLOT_ID,
+        CENSUS_ID,
+        TRANSACTION_ID
+      );
+      console.log(`[U6 empty lock] deleted=${deleted}\n${render(log)}`);
+      expect(deleted).toBe(0);
+      expect(log.map(entry => entry.kind)).toEqual(['lock']);
+    });
+
+    it('rejects a window longer than CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE before any statement (catches: IN lists past the range-optimizer limit)', async () => {
+      const { connectionManager, log } = makeScriptedManager(PLAIN_WHERE_PARAMS.length, { reads: [], confirmations: [] });
+      await expect(
+        lockAuditAndDeleteCoreMeasurementWindow(connectionManager, SCHEMA, PLAIN_SCOPE, ids(1, WINDOW + 1), CHANGED_BY, PLOT_ID, CENSUS_ID, TRANSACTION_ID)
+      ).rejects.toBeInstanceOf(CoreMeasurementWindowTooLargeError);
+      expect(log).toHaveLength(0);
+    });
+
+    it('an empty window issues no statement and returns 0 (catches: buildInPlaceholders(0) reaching SQL)', async () => {
+      const { connectionManager, log } = makeScriptedManager(PLAIN_WHERE_PARAMS.length, { reads: [], confirmations: [] });
+      await expect(
+        lockAuditAndDeleteCoreMeasurementWindow(connectionManager, SCHEMA, PLAIN_SCOPE, [], CHANGED_BY, PLOT_ID, CENSUS_ID, TRANSACTION_ID)
+      ).resolves.toBe(0);
+      expect(log, 'no statement may run for an empty window').toHaveLength(0);
+    });
+
+    it.each([
+      ['a missing DELETE affectedRows', { deleteResult: () => ({}) }, /could not read a row count/i],
+      ['a non-numeric DELETE affectedRows', { deleteResult: () => ({ affectedRows: 'many' }) }, /could not read a row count/i],
+      ['a negative DELETE affectedRows', { deleteResult: () => ({ affectedRows: -1 }) }, /could not read a row count/i],
+      ['a fractional DELETE affectedRows', { deleteResult: () => ({ affectedRows: 1.5 }) }, /could not read a row count/i],
+      ['an audit that writes fewer rows than locked', { auditResult: (locked: number[]) => ({ affectedRows: locked.length - 1 }) }, /audit mismatch/i],
+      [
+        'a DELETE that removes fewer rows than audited',
+        { deleteResult: (locked: number[]) => ({ affectedRows: locked.length - 1 }) },
+        /audit trail and the data would disagree/i
+      ]
+    ])('the #507 guard still rejects %s on the new path (catches: dropped integrity guards)', async (_label, overrides, expectedMessage) => {
+      const { connectionManager, log } = makeScriptedManager(PLAIN_WHERE_PARAMS.length, { reads: [[1, 2, 3]], confirmations: [[]], ...overrides });
+      await expect(runPlainWalk(connectionManager)).rejects.toThrow(expectedMessage);
+      console.log(`[U6 guard]\n${render(log)}`);
+      if (String(expectedMessage).includes('audit mismatch'))
+        expect(
+          log.some(entry => entry.kind === 'delete'),
+          'must not delete rows the audit failed to record'
+        ).toBe(false);
+    });
   });
 });

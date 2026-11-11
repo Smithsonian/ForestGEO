@@ -1,17 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Box, Button, Card, CardContent, Divider, Stack, Tooltip, Typography, Avatar } from '@mui/joy';
-import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
-import AssessmentIcon from '@mui/icons-material/Assessment';
-import TrackChangesIcon from '@mui/icons-material/TrackChanges';
-import CloudCircleIcon from '@mui/icons-material/CloudCircle';
-import FactCheckIcon from '@mui/icons-material/FactCheck';
-import HistoryIcon from '@mui/icons-material/History';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import { Alert, Box, Button, Stack, Typography } from '@mui/joy';
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,
@@ -21,11 +11,14 @@ import {
   useSiteContext
 } from '@/app/contexts/compat-hooks';
 import { useLoading } from '@/app/contexts/loadingprovider';
-import { useRouter } from 'next/navigation';
-import CensusStatsView from '@/components/dashboard/censusstatsview';
+import CensusStatTiles from '@/components/dashboard/censusstattiles';
+import CensusSummaryPanels from '@/components/dashboard/censussummarypanels';
+import PublishBlockerCallout from '@/components/dashboard/publishblockercallout';
+import CensusOverviewActionsMenu from '@/components/dashboard/censusoverviewactionsmenu';
+import { useCensusOverviewSummary } from '@/app/hooks/usecensusoverviewsummary';
+import { getDateRangeCensusIDs } from '@/lib/censusscope';
 import DataQualityCard from '@/components/dashboard/dataqualitycard';
 import PublishCensusButton from '@/components/dashboard/publishcensusbutton';
-import RebuildViewFullTableButton from '@/components/dashboard/rebuildviewfulltablebutton';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import { createAndUpdateCensusList, OrgCensusRDS, reconcileCurrentCensusSelection } from '@/lib/db/definitions/timekeeping';
 import ailogger from '@/ailogger';
@@ -37,7 +30,7 @@ import {
   getCensusDeleteBlockReason,
   readCensusDeleteRejectionMessage
 } from '@/config/censusdeletion';
-import { formatDisplayDate } from '@/config/dateformats';
+import { CENSUS_OVERVIEW_TEXT, formatCensusDateRange } from '@/config/censusoverview';
 
 interface ProgressTachoType {
   TotalQuadrats: number;
@@ -53,20 +46,7 @@ interface StemTypesType {
   isFirstCensus: boolean;
 }
 
-const CENSUS_DELETE_ENABLED_TOOLTIP = 'Delete all measurement data for this census';
-
-const CENSUS_HUB_LINKS = [
-  { label: 'View Data', href: '/measurementshub/summary', icon: VisibilityIcon, description: 'Browse measurement records' },
-  { label: 'View Errors', href: '/measurementshub/errors', icon: ErrorOutlineIcon, description: 'Review failed measurements' },
-  { label: 'Post-Census Statistics', href: '/measurementshub/postvalidation', icon: AssessmentIcon, description: 'Validation results and quality checks' },
-  { label: 'Recent Changes', href: '/measurementshub/recentchanges', icon: TrackChangesIcon, description: 'Changelog and activity history' },
-  { label: 'Uploaded Files', href: '/measurementshub/uploadedfiles', icon: CloudCircleIcon, description: 'View uploaded data files' },
-  { label: 'View All Historical Data', href: '/measurementshub/viewfulltable', icon: HistoryIcon, description: 'Full historical measurement data' },
-  { label: 'Validations', href: '/measurementshub/validations', icon: FactCheckIcon, description: 'Data validation rules and results' }
-];
-
 export default function CensusOverviewPage() {
-  const router = useRouter();
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -85,7 +65,6 @@ export default function CensusOverviewPage() {
 
   const [countTrees, setCountTrees] = useState(0);
   const [countStems, setCountStems] = useState(0);
-  const [activeUsers, setActiveUsers] = useState(0);
   // CountOldStems starts null so the tile shows the "no comparison" placeholder
   // instead of a confident 0 until real data arrives.
   const [stemTypes, setStemTypes] = useState<StemTypesType>({ CountOldStems: null, CountMultiStems: 0, CountNewRecruits: 0, isFirstCensus: false });
@@ -96,6 +75,13 @@ export default function CensusOverviewPage() {
     UnpopulatedQuadrats: []
   });
   const [isLoading, setIsLoading] = useState(false);
+  const censusSummary = useCensusOverviewSummary({
+    schema: currentSite?.schemaName,
+    plotID: currentPlot?.plotID,
+    censusID: currentCensus?.dateRanges?.[0]?.censusID,
+    errorCensusIDs: getDateRangeCensusIDs(currentCensus)
+  });
+  const refetchCensusSummary = censusSummary.refetch;
 
   useEffect(() => {
     return () => {
@@ -127,7 +113,6 @@ export default function CensusOverviewPage() {
         PopulatedPercent: data.progressTachometer.PopulatedPercent,
         UnpopulatedQuadrats: data.progressTachometer.UnpopulatedQuadrats ? data.progressTachometer.UnpopulatedQuadrats.split(';') : []
       });
-      setActiveUsers(data.activeUsers.CountActiveUsers);
       setCountTrees(data.countTrees.CountTrees);
       setCountStems(data.countStems.CountStems);
       setStemTypes({
@@ -222,6 +207,7 @@ export default function CensusOverviewPage() {
           throw new Error(`Failed to clear census: ${response.status}`);
         }
         setCensusToDelete(null);
+        refetchCensusSummary();
         // The deletion has already committed; a refresh failure must not be
         // reported as a failed delete (retrying the delete would 404).
         try {
@@ -238,7 +224,7 @@ export default function CensusOverviewPage() {
         setIsDeletingCensus(false);
       }
     },
-    [censusToDelete, currentSite?.schemaName, refreshCensusList, setLoading]
+    [censusToDelete, currentSite?.schemaName, refreshCensusList, setLoading, refetchCensusSummary]
   );
 
   const deleteErrorAlert = deleteError && (
@@ -264,30 +250,27 @@ export default function CensusOverviewPage() {
   const userStatus = session?.user?.userStatus;
   const canReload = userStatus === 'global' || userStatus === 'db admin';
   const censusDeleteBlockReason = getCensusDeleteBlockReason(currentCensus, censusListContext, userStatus);
+  const summary = censusSummary.summary;
+  const hasSummaryScope = Boolean(censusID);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, width: '100%' }}>
       {deleteErrorAlert}
 
-      {/* Header */}
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ justifyContent: 'space-between' }}>
-        <Stack direction="row" alignItems="center" spacing={2}>
-          <Avatar alt="Census overview icon" sx={{ bgcolor: 'primary.softBg', color: 'primary.solidBg', width: 48, height: 48 }}>
-            <CalendarMonthIcon />
-          </Avatar>
-          <Box>
-            <Typography level="h3" sx={{ fontWeight: 600 }}>
-              Census {currentCensus.plotCensusNumber} Overview
-            </Typography>
-            <Typography level="body-md" color="neutral">
-              {currentPlot.plotName} &mdash; {currentSite.siteName}
-              {startDate && ` — ${formatDisplayDate(startDate)}`}
-              {endDate && ` to ${formatDisplayDate(endDate)}`}
-            </Typography>
-          </Box>
-        </Stack>
+      <Stack component="header" direction="row" useFlexGap flexWrap="wrap" alignItems="flex-end" justifyContent="space-between" spacing={2}>
+        <Box>
+          <Typography level="body-sm" color="neutral" data-testid="census-overview-scope">
+            {`${currentSite.siteName}${CENSUS_OVERVIEW_TEXT.scopeSeparator}${currentPlot.plotName}`}
+          </Typography>
+          <Typography level="h2" component="h1">
+            {`${CENSUS_OVERVIEW_TEXT.censusTitlePrefix} ${currentCensus.plotCensusNumber}`}
+          </Typography>
+          <Typography level="body-sm" data-testid="census-overview-dates">
+            {formatCensusDateRange(startDate, endDate)}
+          </Typography>
+        </Box>
         {currentSite.schemaName && currentPlot.plotID && censusID && (
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} alignItems="center">
             <PublishCensusButton
               schema={currentSite.schemaName}
               appPlotId={currentPlot.plotID}
@@ -295,122 +278,71 @@ export default function CensusOverviewPage() {
               plotCensusNumber={currentCensus.plotCensusNumber ?? ''}
               canReload={canReload}
             />
-            <RebuildViewFullTableButton schema={currentSite.schemaName} />
-            <Tooltip title={censusDeleteBlockReason ?? CENSUS_DELETE_ENABLED_TOOLTIP} placement="top">
-              <span>
-                <Button
-                  color="danger"
-                  variant="outlined"
-                  startDecorator={<DeleteForeverIcon />}
-                  disabled={censusDeleteBlockReason !== null}
-                  onClick={() => handleCensusDelete(currentCensus)}
-                  data-testid="census-overview-delete-button"
-                >
-                  Delete Census
-                </Button>
-              </span>
-            </Tooltip>
+            <CensusOverviewActionsMenu
+              schema={currentSite.schemaName}
+              deleteBlockReason={censusDeleteBlockReason}
+              onDelete={() => handleCensusDelete(currentCensus)}
+            />
           </Stack>
         )}
       </Stack>
 
-      {/* Census Stats */}
-      <CensusStatsView
+      {summary && <PublishBlockerCallout blockers={summary.blockers} />}
+
+      <CensusStatTiles
         countTrees={countTrees}
         countStems={countStems}
         stemTypes={stemTypes}
-        progressTacho={progressTacho}
-        activeUsers={activeUsers}
-        isLoading={isLoading}
+        isMetricsLoading={isLoading}
+        quadrats={{ total: progressTacho.TotalQuadrats, populated: progressTacho.PopulatedQuadrats }}
+        errorOverview={summary?.errorOverview ?? null}
+        isErrorOverviewLoading={hasSummaryScope && censusSummary.isLoading}
       />
 
-      {/* Data Quality */}
-      <Box>
-        <Typography level="title-lg" sx={{ fontWeight: 600, mb: 2 }}>
-          Data Quality
-        </Typography>
-        <DataQualityCard
-          schema={currentSite.schemaName}
-          plotID={currentPlot.plotID}
-          censusID={currentCensus.dateRanges?.[0]?.censusID}
-          isLoading={isLoading}
-          onRefresh={async () => {
-            if (currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
-              const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  plotID: currentPlot.plotID,
-                  censusID: currentCensus.dateRanges[0].censusID,
-                  runPostValidation: true
-                })
-              });
-              if (!response.ok) {
-                throw new Error(`Failed to refresh validations (HTTP ${response.status})`);
-              }
+      {hasSummaryScope &&
+        (censusSummary.errorMessage !== null ? (
+          <Alert
+            color="danger"
+            variant="soft"
+            data-testid="census-overview-summary-error"
+            endDecorator={
+              <Button size="sm" variant="solid" color="danger" onClick={censusSummary.refetch}>
+                {CENSUS_OVERVIEW_TEXT.retry}
+              </Button>
             }
-          }}
-        />
-      </Box>
+          >
+            {censusSummary.errorMessage}
+          </Alert>
+        ) : (
+          <CensusSummaryPanels summary={summary} />
+        ))}
 
-      {/* Quick Navigation */}
-      <Box>
-        <Typography level="title-lg" sx={{ fontWeight: 600, mb: 2 }}>
-          Census Tools
-        </Typography>
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' },
-            gap: 2
-          }}
-        >
-          {CENSUS_HUB_LINKS.map(link => {
-            const LinkIcon = link.icon;
-            return (
-              <Card
-                key={link.href}
-                variant="outlined"
-                role="button"
-                tabIndex={0}
-                sx={{
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  '&:hover': {
-                    borderColor: 'primary.outlinedBorder',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                    transform: 'translateY(-2px)'
-                  }
-                }}
-                onClick={() => router.push(link.href)}
-                onKeyDown={(e: React.KeyboardEvent) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    router.push(link.href);
-                  }
-                }}
-              >
-                <CardContent sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                  <Avatar alt="" size="sm" sx={{ bgcolor: 'primary.softBg', color: 'primary.500' }}>
-                    <LinkIcon sx={{ fontSize: 18 }} />
-                  </Avatar>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography level="title-sm" sx={{ fontWeight: 600 }}>
-                      {link.label}
-                    </Typography>
-                    <Typography level="body-xs" color="neutral">
-                      {link.description}
-                    </Typography>
-                  </Box>
-                  <ArrowForwardIcon sx={{ fontSize: 16, color: 'neutral.400' }} />
-                </CardContent>
-              </Card>
-            );
-          })}
-        </Box>
-      </Box>
+      <DataQualityCard
+        schema={currentSite.schemaName}
+        plotID={currentPlot.plotID}
+        censusID={censusID}
+        isLoading={isLoading}
+        onRefresh={async () => {
+          if (currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
+            const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                plotID: currentPlot.plotID,
+                censusID: currentCensus.dateRanges[0].censusID,
+                runPostValidation: true
+              })
+            });
+            if (!response.ok) {
+              throw new Error(`Failed to refresh validations (HTTP ${response.status})`);
+            }
+            // The refresh rebuilt measurementssummary. This refetch is bound to the scope this
+            // render saw; if the census changed meanwhile it is a no-op (the new scope fetched itself).
+            censusSummary.refetch();
+          }
+        }}
+      />
 
-      {/* Census Delete Confirmation Modal */}
       <CensusDeletionModal
         open={openDeleteCensusModal}
         onClose={() => {

@@ -1182,8 +1182,9 @@ create table if not exists upload_sessions
     error_message     text                                                                                                                                       null,
     idempotency_key   varchar(255)                                                                                                                               null,
     mode              varchar(32)                                                                                                                                null,
-    -- Set once, in the same transaction as the census-wide cleanup, so a second
-    -- file in the same session never re-runs a replacement that already happened.
+    -- Set once, in its own final transaction after every census-cleanup window has
+    -- committed, so a second file in the same session never re-runs a replacement
+    -- that already happened. NULL after an interrupted cleanup: re-running finishes it.
     census_replacement_completed_at timestamp                                                                                                     default null  null,
     -- Reference-table twin of the marker above: set once, in the same transaction
     -- as the species/attributes/personnel reset, so a second file in the same

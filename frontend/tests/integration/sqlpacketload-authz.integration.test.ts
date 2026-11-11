@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib/ingestion/temporary-measurements';
+import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
+import { CENSUS_REPLACEMENT_STATEMENT } from '../setup/census-replacement-statement-patterns';
 
 /**
  * Per-site authorization regression suite for POST /api/sqlpacketload.
@@ -37,6 +39,7 @@ const FAMILY_SCOPE_SAMPLE_SQL_FRAGMENT = 'SELECT PlotID AS plotID, CensusID AS c
 const TEST_CENSUS_ID = 32;
 const TEST_BATCH_ID = 'batch-1';
 const TEST_FILE_NAME = 'SERC_census1_2025.csv';
+const REPLACEMENT_MARKER_TIMESTAMP = '2026-10-27 12:00:00';
 
 const { getCookieMock, authMock, handleUpsertMock } = vi.hoisted(() => ({
   getCookieMock: vi.fn(),
@@ -61,7 +64,13 @@ vi.mock('@/lib/db/connectionmanager', () => {
   const commitTransaction = vi.fn().mockResolvedValue(undefined);
   const rollbackTransaction = vi.fn().mockResolvedValue(undefined);
   const acquireApplicationLock = vi.fn().mockResolvedValue(true);
-  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction, acquireApplicationLock };
+  let replacementTransactionCount = 0;
+  const withTransaction = vi.fn(async (work: (tx: { id: string; query: (sql: string, params?: unknown[]) => Promise<unknown> }) => Promise<unknown>) => {
+    replacementTransactionCount += 1;
+    const id = `tx-replacement-${replacementTransactionCount}`;
+    return work({ id, query: (sql, params) => executeQuery(sql, params, id) });
+  });
+  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction, acquireApplicationLock, withTransaction };
   return { default: { getInstance: () => instance } };
 });
 
@@ -84,7 +93,8 @@ vi.mock('@/config/utils', async importOriginal => {
 vi.mock('@/config/uploadsessiontracker', () => ({
   requireUploadSessionOwnership: requireUploadSessionOwnershipMock,
   UploadSessionOwnershipError: MockUploadSessionOwnershipError,
-  UploadSessionState: { INITIALIZED: 'initialized', UPLOADING: 'uploading' }
+  UploadSessionState: { INITIALIZED: 'initialized', UPLOADING: 'uploading' },
+  ACTIVE_UPLOAD_SESSION_STATES: ['initialized', 'uploading', 'uploaded', 'processing', 'collapsing']
 }));
 
 // insertIngestionFailureRows is mocked (it performs DB writes this suite
@@ -159,6 +169,7 @@ describe('POST /api/sqlpacketload authz', () => {
     // Token check mocked to WOULD-PASS so any 403 must originate from the membership check.
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    resetUploadSessionReplacementMarkerCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
@@ -190,8 +201,18 @@ describe('POST /api/sqlpacketload authz', () => {
     // Staging measures insertedCount as the row-count delta across its INSERT,
     // so the staged-row count must read 0 before and 1 after.
     let stagedRowCount = 0;
+    let replacementMarkerSetAt: string | null = null;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      if (CENSUS_REPLACEMENT_STATEMENT.MARKER_COLUMN_STATE.test(text)) return [{ tableCount: 1, columnCount: 1 }];
+      if (CENSUS_REPLACEMENT_STATEMENT.SESSION_LOCK.test(text)) {
+        return [{ state: 'uploading', plot_id: TEST_PLOT_ID, census_id: TEST_CENSUS_ID, census_replacement_completed_at: replacementMarkerSetAt }];
+      }
+      if (CENSUS_REPLACEMENT_STATEMENT.MARKER_PROBE.test(text)) return [{ census_replacement_completed_at: replacementMarkerSetAt }];
+      if (CENSUS_REPLACEMENT_STATEMENT.MARKER_UPDATE.test(text)) {
+        replacementMarkerSetAt = REPLACEMENT_MARKER_TIMESTAMP;
+        return { affectedRows: 1 };
+      }
       // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
       if (text.includes(FAMILY_SCOPE_SAMPLE_SQL_FRAGMENT)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];

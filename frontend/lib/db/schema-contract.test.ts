@@ -477,3 +477,57 @@ describe('presence-only required columns', () => {
     expect(compareSchemaContracts(canonical, live, { tables: [], requiredIndexesByTable: {} }).failures).toEqual([]);
   });
 });
+
+describe('specimens is a critical contract table (#552)', () => {
+  const canonical = loadCanonicalSchemaContract();
+  const SPECIMENS_TABLE = 'specimens';
+  const CANONICAL_STEM_COLUMN = 'StemID';
+  const DRIFTED_STEM_COLUMN = 'StemGUID';
+
+  // compareSchemaContracts defaults `tables` to CRITICAL_TABLES: exactly what the deploy audit compares.
+  function compareAgainstCanonical(live: SchemaContract) {
+    return compareSchemaContracts(canonical, live);
+  }
+
+  it('lists specimens in CRITICAL_TABLES', () => {
+    expect(
+      CRITICAL_TABLES as readonly string[],
+      '#552: bulkingestionprocess reads specimens.StemID on every batch, so the gate must compare specimens'
+    ).toContain(SPECIMENS_TABLE);
+  });
+
+  it('fails a live schema whose specimens stem column is named StemGUID (the Mpala drift)', () => {
+    const live = clone(canonical);
+    const liveSpecimens = live.tables[SPECIMENS_TABLE];
+    const canonicalStemColumn = liveSpecimens.columns[CANONICAL_STEM_COLUMN.toLowerCase()];
+    expect(canonicalStemColumn, 'canonical DDL must define specimens.StemID').toBeDefined();
+    delete liveSpecimens.columns[CANONICAL_STEM_COLUMN.toLowerCase()];
+    liveSpecimens.columns[DRIFTED_STEM_COLUMN.toLowerCase()] = { ...canonicalStemColumn, name: DRIFTED_STEM_COLUMN };
+
+    const { failures, extras } = compareAgainstCanonical(live);
+    const rendered = formatContractFailures(failures);
+    console.log(
+      `[specimens drift] failures:\n${rendered}\n[specimens drift] extras: ${JSON.stringify(extras.filter(extra => extra.table === SPECIMENS_TABLE))}`
+    );
+
+    expect(rendered).toContain(`[${SPECIMENS_TABLE}] column "${CANONICAL_STEM_COLUMN}" missing`);
+    expect(failures).toContainEqual(expect.objectContaining({ table: SPECIMENS_TABLE, object: CANONICAL_STEM_COLUMN, category: 'column', kind: 'missing' }));
+    expect(extras).toContainEqual(expect.objectContaining({ table: SPECIMENS_TABLE, object: DRIFTED_STEM_COLUMN, category: 'column' }));
+  });
+
+  it('fails, rather than skips, a live schema with no specimens table', () => {
+    // readLiveSchemaContract reports an absent table as one with zero columns. Unlike the
+    // presence-only REQUIRED_COLUMNS_BY_TABLE (which skips such a table), a critical table
+    // must fail: the procedure reads specimens unconditionally and would fail with 1146.
+    const live = clone(canonical);
+    live.tables[SPECIMENS_TABLE] = { name: SPECIMENS_TABLE, columns: {}, indexes: {} };
+
+    const { failures } = compareAgainstCanonical(live);
+    const specimensFailures = failures.filter(failure => failure.table === SPECIMENS_TABLE);
+    const expectedMissing = Object.values(canonical.tables[SPECIMENS_TABLE].columns).map(column => column.name);
+    console.log(`[specimens absent] failures:\n${formatContractFailures(specimensFailures)}`);
+
+    expect(specimensFailures.map(failure => failure.object)).toEqual(expectedMissing);
+    expect(specimensFailures.every(failure => failure.kind === 'missing')).toBe(true);
+  });
+});
