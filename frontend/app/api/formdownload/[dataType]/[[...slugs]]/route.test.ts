@@ -506,7 +506,8 @@ describe('Stem status filter on the measurements Form CSV export', () => {
     console.log('[formdownload stemStatus] dead', response.status, 'queries', exec.mock.calls.length, 'sql has clause', exportSql?.includes('sf_attr'));
     expect(response.status).toBe(HTTPResponses.OK);
     expect(exportSql).toContain("sf_attr.Status IN ('dead')");
-    expect(exportSql).toContain('sf_ca.CoreMeasurementID = cm.CoreMeasurementID');
+    expect(exportSql).toContain('AND cm.CoreMeasurementID IN (');
+    expect(exportSql).not.toContain('sf_ca.CoreMeasurementID = cm.CoreMeasurementID');
     expect(exportSql).toContain(`FROM ${STEM_STATUS_SCHEMA}.cmattributes sf_ca`);
     expect(exportSql).toContain('MAX(effective_attr.IsActive)');
   });
@@ -519,7 +520,9 @@ describe('Stem status filter on the measurements Form CSV export', () => {
     const exportSql = exec.mock.calls[1][0] as string;
     expect(exportSql).toContain("sf_attr.Status IN ('dead', 'alive')");
     expect(exportSql.indexOf('cm.IsValidated')).toBeLessThan(exportSql.indexOf('sf_attr.Status'));
-    expect(exportSql).toMatch(/AND EXISTS \(\s+SELECT 1 FROM forestgeo_testing\.cmattributes sf_ca/);
+    expect(exportSql).toMatch(
+      /AND cm\.CoreMeasurementID IN \(\s+SELECT \/\*\+ SEMIJOIN\(MATERIALIZATION\) \*\/ sf_ca\.CoreMeasurementID FROM forestgeo_testing\.cmattributes sf_ca/
+    );
   });
 
   it('adds no Stem status clause when the filter model carries none', async () => {

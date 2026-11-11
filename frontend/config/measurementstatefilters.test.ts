@@ -24,7 +24,7 @@ describe('measurementstatefilters', () => {
     const sql = buildMeasurementHasUnresolvedErrorsSql('myschema', 'vft');
     console.log('[unresolved errors sql]', sql);
     expect(sql).toContain('vft.CoreMeasurementID IN (');
-    expect(sql).toContain('SELECT mel.MeasurementID');
+    expect(sql).toContain('SELECT /*+ SUBQUERY(MATERIALIZATION) */ mel.MeasurementID');
     expect(sql).toContain('FROM myschema.measurement_error_log mel');
     expect(sql).toContain('COALESCE(mel.IsResolved, FALSE) = FALSE');
     expect(sql).not.toContain('EXISTS');
@@ -290,9 +290,16 @@ describe('buildStemStatusFilterClauseSql', () => {
   it('matches rows where any effective code carries the status', () => {
     const clause = buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead']);
     console.log('[stem status clause]', clause);
-    expect(clause).toMatch(/^ AND EXISTS \(/);
-    expect(clause).toContain(`sf_ca.CoreMeasurementID = ${ALIAS}.CoreMeasurementID`);
+    expect(clause).toMatch(new RegExp(`^ AND ${ALIAS}\\.CoreMeasurementID IN \\(`));
     expect(clause).toContain("sf_attr.Status IN ('dead')");
+  });
+
+  it('materialises the measurement list once and keeps it NULL-free, with no correlated lookup per row', () => {
+    const clause = buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead']);
+    expect(clause).toContain('SELECT /*+ SEMIJOIN(MATERIALIZATION) */ sf_ca.CoreMeasurementID FROM');
+    expect(clause).toContain('sf_ca.CoreMeasurementID IS NOT NULL');
+    expect(clause).not.toContain('EXISTS (\n            SELECT 1 FROM');
+    expect(clause).not.toContain(`sf_ca.CoreMeasurementID = ${ALIAS}`);
   });
 
   it('resolves the status codes once, not through a per-row join to attributes', () => {

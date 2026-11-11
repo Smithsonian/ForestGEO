@@ -330,6 +330,21 @@ describe('measurementssummary branch on real MySQL', () => {
     expect(alive, `${INACTIVE_STATUS_CODE}: active dead, inactive alive`).not.toContain('VD-ZA');
   });
 
+  it('ignores a cmattributes row with a NULL CoreMeasurementID carrying a dead code: no error, no widening of Stem status', async () => {
+    const deadBefore = (await query({ filterModel: { stemStatus: ['dead'] } })).map(row => row.treeTag).sort();
+    const aliveBefore = (await query({ filterModel: { stemStatus: ['alive'] } })).map(row => row.treeTag).sort();
+    const [orphan] = await connection.query<ResultSetHeader>('INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (NULL, ?)', ['D']);
+    try {
+      const deadAfter = (await query({ filterModel: { stemStatus: ['dead'] } })).map(row => row.treeTag).sort();
+      const aliveAfter = (await query({ filterModel: { stemStatus: ['alive'] } })).map(row => row.treeTag).sort();
+      console.log('[viewdata query] NULL-measurement attribute row', JSON.stringify({ deadBefore, deadAfter, aliveBefore, aliveAfter }));
+      expect(deadAfter, 'dead filter must be unchanged by an orphan dead attribute row').toEqual(deadBefore);
+      expect(aliveAfter, 'alive filter must be unchanged by an orphan dead attribute row').toEqual(aliveBefore);
+    } finally {
+      await connection.query('DELETE FROM cmattributes WHERE CMAID = ?', [orphan.insertId]);
+    }
+  });
+
   it('filters by stem state through tss', async () => {
     const rows = await query({ filterModel: { tss: ['old tree'] } });
     expect(rows.map(row => row.treeTag).sort()).toEqual(['VD-DA', 'VD-PASS']);

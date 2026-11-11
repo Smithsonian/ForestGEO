@@ -1,9 +1,12 @@
 import { VisibleFilter } from '@/config/datagridhelpers';
 import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 
+const MATERIALIZE_UNRESOLVED_ERROR_LIST_HINT = '/*+ SUBQUERY(MATERIALIZATION) */';
+const MATERIALIZE_STEM_STATUS_MEASUREMENT_LIST_HINT = '/*+ SEMIJOIN(MATERIALIZATION) */';
+
 export function buildMeasurementHasUnresolvedErrorsSql(schema: string, alias: string): string {
   return `(${alias}.CoreMeasurementID IN (
-            SELECT mel.MeasurementID
+            SELECT ${MATERIALIZE_UNRESOLVED_ERROR_LIST_HINT} mel.MeasurementID
             FROM ${schema}.measurement_error_log mel
             WHERE COALESCE(mel.IsResolved, FALSE) = FALSE
           ))`;
@@ -314,15 +317,15 @@ export function buildMeasurementRowSummaryProjectionSql(schema: string, alias: s
 }
 
 /**
- * " AND EXISTS (...)" matching rows where any effective code carries one of the statuses; '' when none.
+ * " AND <alias>.CoreMeasurementID IN (...)" matching rows where any effective code carries one of the statuses; '' when none.
  * The codes are resolved once in an IN subquery instead of joining attributes per cmattributes row.
  */
 export function buildStemStatusFilterClauseSql(schema: string, alias: string, statuses: readonly string[]): string {
   if (statuses.length === 0) return '';
   const literals = statuses.map(toAttributeStatusLiteral).join(', ');
-  return ` AND EXISTS (
-            SELECT 1 FROM ${schema}.cmattributes sf_ca
-            WHERE sf_ca.CoreMeasurementID = ${alias}.CoreMeasurementID
+  return ` AND ${alias}.CoreMeasurementID IN (
+            SELECT ${MATERIALIZE_STEM_STATUS_MEASUREMENT_LIST_HINT} sf_ca.CoreMeasurementID FROM ${schema}.cmattributes sf_ca
+            WHERE sf_ca.CoreMeasurementID IS NOT NULL
               AND sf_ca.Code IN (
                 SELECT sf_attr.Code FROM ${schema}.attributes sf_attr
                 WHERE sf_attr.Status IN (${literals})
