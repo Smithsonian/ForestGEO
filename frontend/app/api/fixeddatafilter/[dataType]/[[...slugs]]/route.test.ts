@@ -245,8 +245,8 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     const sqlStr = String(paginatedSQL);
     // Verify visible filter conditions were embedded via buildMeasurementVisibleClauseSql
     expect(sqlStr).toMatch(/measurement_error_log mel/);
-    expect(sqlStr).toMatch(/IsValidated = TRUE AND NOT EXISTS/);
-    expect(sqlStr).toMatch(/IsValidated IS NULL AND NOT EXISTS/);
+    expect(sqlStr).toMatch(/IsValidated = TRUE AND NOT \(vft\.CoreMeasurementID IN \(/);
+    expect(sqlStr).toMatch(/IsValidated IS NULL AND NOT \(vft\.CoreMeasurementID IN \(/);
     // Verify TSS filter conditions
     expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('multi stem'\), '\$\.treestemstate'\)/);
     expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('old tree'\), '\$\.treestemstate'\)/);

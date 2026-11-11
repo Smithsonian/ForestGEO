@@ -2,12 +2,11 @@ import { VisibleFilter } from '@/config/datagridhelpers';
 import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 
 export function buildMeasurementHasUnresolvedErrorsSql(schema: string, alias: string): string {
-  return `EXISTS (
-            SELECT 1
+  return `(${alias}.CoreMeasurementID IN (
+            SELECT mel.MeasurementID
             FROM ${schema}.measurement_error_log mel
-            WHERE mel.MeasurementID = ${alias}.CoreMeasurementID
-              AND COALESCE(mel.IsResolved, FALSE) = FALSE
-          )`;
+            WHERE COALESCE(mel.IsResolved, FALSE) = FALSE
+          ))`;
 }
 
 export function buildMeasurementHasUnresolvedValidationErrorsSql(schema: string, alias: string): string {

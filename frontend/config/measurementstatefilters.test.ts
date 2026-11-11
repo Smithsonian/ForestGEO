@@ -20,24 +20,36 @@ import {
 } from './measurementstatefilters';
 
 describe('measurementstatefilters', () => {
-  it('builds the unresolved-error EXISTS clause against measurement_error_log', () => {
-    expect(buildMeasurementHasUnresolvedErrorsSql('myschema', 'vft')).toContain('FROM myschema.measurement_error_log mel');
-    expect(buildMeasurementHasUnresolvedErrorsSql('myschema', 'vft')).toContain('mel.MeasurementID = vft.CoreMeasurementID');
+  it('builds the unresolved-error list once per statement from measurement_error_log, not a correlated EXISTS', () => {
+    const sql = buildMeasurementHasUnresolvedErrorsSql('myschema', 'vft');
+    console.log('[unresolved errors sql]', sql);
+    expect(sql).toContain('vft.CoreMeasurementID IN (');
+    expect(sql).toContain('SELECT mel.MeasurementID');
+    expect(sql).toContain('FROM myschema.measurement_error_log mel');
+    expect(sql).toContain('COALESCE(mel.IsResolved, FALSE) = FALSE');
+    expect(sql).not.toContain('EXISTS');
+    expect(sql).not.toContain('mel.MeasurementID = vft');
   });
 
   it('treats unresolved error-log rows as invalid for visible filters', () => {
-    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'errors')).toContain('vft.StemGUID IS NULL OR vft.IsValidated = FALSE OR EXISTS');
-    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'valid')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT EXISTS');
-    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'pending')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT EXISTS');
+    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'errors')).toContain(
+      'vft.StemGUID IS NULL OR vft.IsValidated = FALSE OR (vft.CoreMeasurementID IN ('
+    );
+    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'valid')).toContain(
+      'vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT (vft.CoreMeasurementID IN ('
+    );
+    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'pending')).toContain(
+      'vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT (vft.CoreMeasurementID IN ('
+    );
   });
 
   it('builds an OR clause when visible filters are present', () => {
     expect(buildMeasurementVisibleClauseSql('myschema', 'vft', ['valid', 'pending'])).toContain(' AND (');
     expect(buildMeasurementVisibleClauseSql('myschema', 'vft', ['valid', 'pending'])).toContain(
-      'vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT EXISTS'
+      'vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT (vft.CoreMeasurementID IN ('
     );
     expect(buildMeasurementVisibleClauseSql('myschema', 'vft', ['valid', 'pending'])).toContain(
-      'vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT EXISTS'
+      'vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT (vft.CoreMeasurementID IN ('
     );
   });
 
@@ -100,7 +112,7 @@ describe('measurementstatefilters', () => {
   describe('missing-stem rows (StemGUID NULL) are always unresolved', () => {
     it('counts them as unresolved and excludes them from failed-no-log, pending and valid buckets', () => {
       const countsSql = buildMeasurementStateCountsSql('myschema', 'vft');
-      expect(countsSql).toContain('WHEN vft.StemGUID IS NULL OR EXISTS');
+      expect(countsSql).toContain('WHEN vft.StemGUID IS NULL OR (vft.CoreMeasurementID IN (');
       for (const alias of ['CountFailedNoLog', 'CountPending', 'CountValid']) {
         const projection = countsSql.split(/,(?=\s*SUM\()/).find(candidate => candidate.includes(`AS ${alias}`))!;
         expect(projection).toContain('vft.StemGUID IS NOT NULL AND');
@@ -140,28 +152,28 @@ describe('measurementstatefilters', () => {
     });
 
     it('counts failed-no-log as IsValidated = FALSE rows WITHOUT an unresolved log entry (disjoint from CountUnresolvedLogged)', () => {
-      expect(statePredicate('CountFailedNoLog')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated = FALSE AND NOT (EXISTS');
+      expect(statePredicate('CountFailedNoLog')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated = FALSE AND NOT ((vft.CoreMeasurementID IN (');
     });
 
-    it('counts unresolved logged errors via the measurement_error_log EXISTS clause', () => {
+    it('counts unresolved logged errors via the measurement_error_log IN list', () => {
       const unresolvedLoggedPredicate = statePredicate('CountUnresolvedLogged');
-      expect(unresolvedLoggedPredicate).toContain('EXISTS');
+      expect(unresolvedLoggedPredicate).toContain('vft.CoreMeasurementID IN (');
       expect(unresolvedLoggedPredicate).toContain('FROM myschema.measurement_error_log mel');
       expect(unresolvedLoggedPredicate).toContain('COALESCE(mel.IsResolved, FALSE) = FALSE');
     });
 
     it('counts pending as not-yet-validated rows without unresolved logged errors', () => {
-      expect(statePredicate('CountPending')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT (EXISTS');
+      expect(statePredicate('CountPending')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT ((vft.CoreMeasurementID IN (');
     });
 
     it('counts valid as validated rows without unresolved logged errors', () => {
-      expect(statePredicate('CountValid')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT (EXISTS');
+      expect(statePredicate('CountValid')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT ((vft.CoreMeasurementID IN (');
     });
 
     it('keeps every non-unresolved bucket disjoint from the unresolved-log bucket via AND NOT (EXISTS', () => {
-      expect(statePredicate('CountFailedNoLog')).toContain('AND NOT (EXISTS');
-      expect(statePredicate('CountPending')).toContain('AND NOT (EXISTS');
-      expect(statePredicate('CountValid')).toContain('AND NOT (EXISTS');
+      expect(statePredicate('CountFailedNoLog')).toContain('AND NOT ((vft.CoreMeasurementID IN (');
+      expect(statePredicate('CountPending')).toContain('AND NOT ((vft.CoreMeasurementID IN (');
+      expect(statePredicate('CountValid')).toContain('AND NOT ((vft.CoreMeasurementID IN (');
     });
 
     it('counts overridable rows with exactly the shared override-eligibility predicate', () => {
