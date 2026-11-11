@@ -253,8 +253,8 @@ Each stem can only have one measurement per census. Duplicates indicate double-e
 
 1. Verify the measurement date is correct
 2. Check the census start and end dates
-3. If measurement date is correct, census dates may need adjustment
-4. Contact administrator to adjust census dates if needed
+3. If the measurement date is correct, the census dates may need adjustment: on the dashboard, open the census card's **⋮** menu and choose **Edit census dates**
+4. Re-run validations after saving; the date change does not clear existing errors by itself
 
 ---
 
