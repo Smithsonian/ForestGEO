@@ -298,7 +298,7 @@ describe('buildStemStatusFilterClauseSql', () => {
     const clause = buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead']);
     expect(clause).toContain('SELECT /*+ SEMIJOIN(MATERIALIZATION) */ sf_ca.CoreMeasurementID FROM');
     expect(clause).toContain('sf_ca.CoreMeasurementID IS NOT NULL');
-    expect(clause).not.toContain('EXISTS (\n            SELECT 1 FROM');
+    expect(clause).not.toMatch(/\bEXISTS\s*\(/);
     expect(clause).not.toContain(`sf_ca.CoreMeasurementID = ${ALIAS}`);
   });
 
