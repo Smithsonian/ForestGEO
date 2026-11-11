@@ -32,8 +32,9 @@ vi.mock('@/app/actions/cookiemanager', () => ({
 }));
 // The CRUD handlers read the session for unifiedchangelog.ChangedBy. withRouteAuthz
 // has already validated it upstream; this models a resolved session.
+const authSession = vi.hoisted(() => ({ current: { user: { email: 'grid-editor@si.edu', userStatus: 'field crew' } } as { user: Record<string, unknown> } }));
 vi.mock('@/auth', () => ({
-  auth: vi.fn(async () => ({ user: { email: TEST_SESSION_EMAIL } }))
+  auth: vi.fn(async () => authSession.current)
 }));
 vi.mock('@/ailogger', () => ({
   default: {
@@ -1825,6 +1826,44 @@ describe('CoreAPIFunctions', () => {
           expect(mapping.primaryKey).not.toBe('');
         });
       });
+    });
+  });
+
+  describe('DELETE rejects pending users before any transaction (D6)', () => {
+    const PENDING_FORBIDDEN_MESSAGE = 'pending users cannot edit measurements';
+    const DELETE_TYPES = [
+      'alltaxonomiesview',
+      'attributes',
+      'census',
+      'personnel',
+      'plots',
+      'quadratpersonnel',
+      'quadrats',
+      'roles',
+      'sitespecificvalidations',
+      'species',
+      'specieslimits',
+      'viewfulltable',
+      'measurementssummary',
+      'failedmeasurements'
+    ];
+
+    afterEach(() => {
+      authSession.current = { user: { email: TEST_SESSION_EMAIL, userStatus: 'field crew' } };
+    });
+
+    it.each(DELETE_TYPES)('answers 403 for a pending user deleting %s and starts no transaction', async dataType => {
+      authSession.current = { user: { email: 'pending@si.edu', userStatus: 'pending' } };
+      const withTransaction = vi.fn();
+      vi.mocked(ConnectionManager.getInstance).mockReturnValue({ withTransaction } as unknown as ConnectionManager);
+      const request = new NextRequest('http://localhost/api/fixeddata', { method: 'DELETE', body: JSON.stringify({ newRow: { id: 1 } }) });
+      const response = await DELETE(request, { params: Promise.resolve({ dataType, slugs: [TEST_SCHEMA, 'id'] }) });
+      const json = await response.json();
+      // eslint-disable-next-line no-console
+      console.log('[DELETE pending]', dataType, response.status, JSON.stringify(json));
+      expect(response.status).toBe(HTTPResponses.FORBIDDEN);
+      expect(json).toEqual({ error: PENDING_FORBIDDEN_MESSAGE });
+      expect(withTransaction).not.toHaveBeenCalled();
     });
   });
 });

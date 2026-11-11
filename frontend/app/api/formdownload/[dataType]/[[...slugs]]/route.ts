@@ -3,7 +3,13 @@ import MapperFactory from '@/config/datamapper';
 import { AttributesRDS } from '@/lib/db/definitions/core';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
+import {
+  buildFilterModelStub,
+  buildSearchStub,
+  resolveFilterLogicOperatorSql,
+  UNSUPPORTED_LOGIC_OPERATOR_MESSAGE,
+  UnsupportedFilterLogicOperatorError
+} from '@/components/processors/processormacros';
 import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
@@ -74,6 +80,13 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
     return new NextResponse(JSON.stringify({ error: filterModel.error }), {
       status: HTTPResponses.INVALID_REQUEST
     });
+  }
+  try {
+    resolveFilterLogicOperatorSql(filterModel?.logicOperator);
+  } catch (error: unknown) {
+    if (!(error instanceof UnsupportedFilterLogicOperatorError)) throw error;
+    ailogger.warn(`[formdownload API] rejected an unsupported filter logic operator for ${dataType}`);
+    return new NextResponse(JSON.stringify({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE }), { status: HTTPResponses.INVALID_REQUEST });
   }
   const connectionManager = ConnectionManager.getInstance();
   let query = '';
