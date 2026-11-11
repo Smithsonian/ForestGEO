@@ -21,7 +21,7 @@ Failed measurements are rows that came in through an upload but didn't pass vali
 
 | Surface | What you see |
 |---|---|
-| **Census Hub → View Errors** | The main place to work. Every row with a validation error, with its consolidated reason and the original CSV codes. |
+| **Census Hub → View Errors** | The main place to work. Errors are grouped by type; open a row's **Details** for every error on it and the original CSV codes. |
 | **Census Hub → View Data** | Failed rows appear in the grid with an Ingestion chip in the Validation column. Set **Show** to **With errors** to list only rows with errors, or use **Fix _n_ failed uploads** to correct and re-ingest them. |
 
 ---
@@ -94,7 +94,7 @@ The grid uses the **unified row-editing pipeline** (rolled out in April–May 20
 4. For **destructive** single-row edits you'll be asked to type `APPLY` as a guard against accidental clicks. The bulk revision screen asks for `APPLY` followed by the row count instead, e.g. `APPLY 42`.
 5. Immediately after Apply, an **Undo** toast appears for about 12 seconds. That is the only one-click way back — once it disappears, correct the row with another edit.
 
-Failed-row edits run validation immediately on Apply, so a row that now passes will move out of the failed state in the same transaction.
+Saving a failed row updates its values and re-checks its upload errors, but it stays unlinked from a stem until it is re-ingested from **Fix failed uploads**. Until then it still counts on the **Failed at ingestion** tile.
 
 ### Method 3 — Revision Upload (CSV)
 

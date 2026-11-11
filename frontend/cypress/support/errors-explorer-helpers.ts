@@ -1,5 +1,6 @@
 import type {
   ContradictionType,
+  ErrorCensusTotals,
   ErrorDetailRecord,
   ErrorExplorerDetailsResponse,
   ErrorExplorerFacetsResponse,
@@ -7,9 +8,17 @@ import type {
   ErrorExplorerQueryRequest,
   ErrorExplorerQueryResponse,
   ErrorExplorerRow,
+  ErrorTypeFacet,
+  ErrorTypeIdentity,
   RelatedContradictionRow
 } from '../../config/errorsexplorer';
+import { buildErrorTypeKey, FALLBACK_ERROR_CODE } from '../../config/errorsexplorer';
+import { compareRowsBySortItem, matchesColumnFilter, type ColumnValueRow } from '../../lib/errorsexplorer/columnquery';
 import { canonicalDiffToRowPatch, mockEditPlanFlow, type EditPlanApplyContext, type EditPlanApplyResponse } from './edit-plan-helpers';
+
+export const MOCK_ACTIVE_MEASUREMENTS = 100;
+const CLEAR_ROUTE_PATTERN = '**/api/validations/clearmeasurementerrors';
+const CLEARED_ERROR_COUNT = 1;
 
 function getContradictionTypes(row: Pick<ErrorExplorerRow, 'contradictionTypes' | 'contradictionType'>): ContradictionType[] {
   if (row.contradictionTypes.length > 0) {
@@ -64,53 +73,78 @@ function filterRows(rows: ErrorExplorerRow[], filters: ErrorExplorerFilters) {
   });
 }
 
-function summarizeRows(rows: ErrorExplorerRow[]): ErrorExplorerQueryResponse['summary'] {
-  return {
-    total: rows.length,
-    validation: rows.filter(row => row.errorSources.includes('validation')).length,
-    ingestion: rows.filter(row => row.errorSources.includes('ingestion')).length,
-    contradictions: rows.filter(row => row.hasContradiction).length,
-    duplicateTagStem: rows.filter(row => getContradictionTypes(row).includes('duplicate_tag_stem')).length,
-    sameBatchConflict: rows.filter(row => getContradictionTypes(row).includes('same_batch_conflict')).length
-  };
-}
-
-function deriveFacets(rows: ErrorExplorerRow[]): ErrorExplorerFacetsResponse {
-  const messageCounts = new Map<string, number>();
-  const fieldCounts = new Map<string, number>();
-
-  rows.forEach(row => {
-    row.errorMessages.forEach(message => {
-      messageCounts.set(message, (messageCounts.get(message) ?? 0) + 1);
-    });
-
-    row.errorFields.forEach(field => {
-      fieldCounts.set(field, (fieldCounts.get(field) ?? 0) + 1);
-    });
-  });
-
-  return {
-    messages: Array.from(messageCounts.entries()).map(([value, count]) => ({ value, count })),
-    fields: Array.from(fieldCounts.entries()).map(([value, count]) => ({ value, count })),
-    sourceCounts: {
-      validation: rows.filter(row => row.errorSources.includes('validation')).length,
-      ingestion: rows.filter(row => row.errorSources.includes('ingestion')).length
-    },
-    contradictionCounts: {
-      duplicateTagStem: rows.filter(row => getContradictionTypes(row).includes('duplicate_tag_stem')).length,
-      sameBatchConflict: rows.filter(row => getContradictionTypes(row).includes('same_batch_conflict')).length
-    },
-    totalMeasurements: rows.length
-  };
-}
-
 function deriveAllErrors(row: ErrorExplorerRow): ErrorDetailRecord[] {
   return row.errorMessages.map((message, index) => ({
     source: row.errorSources[index] ?? row.errorSources[0] ?? 'validation',
-    code: row.errorCodes[index] ?? row.errorCodes[0] ?? 'UNKNOWN',
+    code: row.errorCodes[index] ?? row.errorCodes[0] ?? FALLBACK_ERROR_CODE,
     message,
-    fields: row.errorFields.length > 0 ? row.errorFields : []
+    fields: row.errorFields.length > 0 ? row.errorFields : [],
+    comparison: null
   }));
+}
+
+/** The occurrences the page filters keep: the server's materializeMatchingErrors for Show and the message chips. */
+function deriveMatchingErrors(row: ErrorExplorerRow, filters: ErrorExplorerFilters): ErrorDetailRecord[] {
+  return deriveAllErrors(row).filter(
+    error =>
+      (filters.source === 'all' || error.source === filters.source) && (filters.exactMessages.length === 0 || filters.exactMessages.includes(error.message))
+  );
+}
+
+function toColumnValueRow(row: ErrorExplorerRow): ColumnValueRow {
+  return { ...row, coreMeasurementID: Number(row.coreMeasurementID) };
+}
+
+function matchesErrorType(error: ErrorDetailRecord, identity: ErrorTypeIdentity): boolean {
+  return buildErrorTypeKey(error) === buildErrorTypeKey(identity);
+}
+
+function compareErrorTypeFacets(a: ErrorTypeFacet, b: ErrorTypeFacet): number {
+  return b.count - a.count || a.message.localeCompare(b.message) || a.source.localeCompare(b.source) || a.code.localeCompare(b.code);
+}
+
+interface ErrorTypeAccumulator {
+  identity: ErrorTypeIdentity;
+  measurementIDs: Set<number>;
+  fields: Set<string>;
+  hasContradiction: boolean;
+}
+
+export function deriveErrorTypes(rows: ErrorExplorerRow[], filters: ErrorExplorerFilters): ErrorTypeFacet[] {
+  const byIdentity = new Map<string, ErrorTypeAccumulator>();
+  filterRows(rows, filters).forEach(row => {
+    deriveMatchingErrors(row, filters).forEach(error => {
+      const key = buildErrorTypeKey(error);
+      const entry = byIdentity.get(key) ?? {
+        identity: { source: error.source, code: error.code, message: error.message },
+        measurementIDs: new Set<number>(),
+        fields: new Set<string>(),
+        hasContradiction: false
+      };
+      entry.measurementIDs.add(Number(row.coreMeasurementID));
+      error.fields.forEach(field => entry.fields.add(field));
+      if (row.hasContradiction) entry.hasContradiction = true;
+      byIdentity.set(key, entry);
+    });
+  });
+  return Array.from(byIdentity.values())
+    .map(entry => ({ ...entry.identity, fields: Array.from(entry.fields), count: entry.measurementIDs.size, hasContradiction: entry.hasContradiction }))
+    .sort(compareErrorTypeFacets);
+}
+
+export function deriveCensusTotals(rows: ErrorExplorerRow[], activeMeasurements: number): ErrorCensusTotals {
+  const hasSource = (row: ErrorExplorerRow, source: ErrorTypeIdentity['source']) => deriveAllErrors(row).some(error => error.source === source);
+  return {
+    affectedMeasurements: rows.length,
+    activeMeasurements,
+    errorTypeCount: new Set(rows.flatMap(row => deriveAllErrors(row).map(buildErrorTypeKey))).size,
+    validation: rows.filter(row => hasSource(row, 'validation')).length,
+    ingestion: rows.filter(row => hasSource(row, 'ingestion')).length,
+    failedMeasurements: rows.filter(row => row.isFailedRow).length,
+    contradictions: rows.filter(row => row.hasContradiction).length,
+    duplicateTagStem: rows.filter(row => row.contradictionTypes.includes('duplicate_tag_stem')).length,
+    sameBatchConflict: rows.filter(row => row.contradictionTypes.includes('same_batch_conflict')).length
+  };
 }
 
 function buildRelatedRow(row: ErrorExplorerRow): RelatedContradictionRow {
@@ -131,7 +165,7 @@ function buildRelatedRow(row: ErrorExplorerRow): RelatedContradictionRow {
     primaryErrorMessage: row.primaryErrorMessage,
     errorCount: row.errorCount,
     errorMessages: row.errorMessages,
-    inErrorSet: true
+    inErrorSet: row.errorCount > 0
   };
 }
 
@@ -169,25 +203,36 @@ export function buildErrorsExplorerRow(overrides: Partial<ErrorExplorerRow> = {}
     errorFields: overrides.errorFields ?? ['speciesCode'],
     errorCodes: overrides.errorCodes ?? ['INVALID_SPECIES'],
     errorCount: overrides.errorCount ?? 1,
+    totalErrorCount: overrides.totalErrorCount ?? overrides.errorCount ?? 1,
+    dbhChangePercent: overrides.dbhChangePercent ?? null,
     hasContradiction: overrides.hasContradiction ?? false,
     contradictionTypes: overrides.contradictionTypes ?? (contradictionType ? [contradictionType] : []),
     contradictionType,
     contradictionGroupKey: overrides.contradictionGroupKey ?? null,
     relatedMeasurementIDs: overrides.relatedMeasurementIDs ?? [],
     uploadFileID: overrides.uploadFileID ?? null,
-    uploadBatchID: overrides.uploadBatchID ?? null
+    uploadBatchID: overrides.uploadBatchID ?? null,
+    isFailedRow: overrides.isFailedRow ?? false
   };
 }
 
 export function buildErrorsExplorerQueryResponse(rows: ErrorExplorerRow[], request: ErrorExplorerQueryRequest): ErrorExplorerQueryResponse {
-  const filteredRows = filterRows(rows, request.filters);
+  const { errorType, columnFilters, sortModel } = request;
+  const pageMatchingRows = filterRows(rows, request.filters);
+  const identityRows = errorType
+    ? pageMatchingRows.filter(row => deriveMatchingErrors(row, request.filters).some(error => matchesErrorType(error, errorType)))
+    : pageMatchingRows;
+  const columnFilter = columnFilters?.[0];
+  const columnFilteredRows = columnFilter ? identityRows.filter(row => matchesColumnFilter(toColumnValueRow(row), columnFilter)) : identityRows;
+  const sortItem = sortModel?.[0];
+  const sortedRows = sortItem
+    ? [...columnFilteredRows].sort((a, b) => compareRowsBySortItem(toColumnValueRow(a), toColumnValueRow(b), sortItem))
+    : columnFilteredRows;
   const start = request.page * request.pageSize;
-  const end = start + request.pageSize;
 
   return {
-    rows: filteredRows.slice(start, end),
-    totalRows: filteredRows.length,
-    summary: summarizeRows(filteredRows)
+    rows: sortedRows.slice(start, start + request.pageSize),
+    totalRows: sortedRows.length
   };
 }
 
@@ -206,6 +251,7 @@ export function buildErrorsExplorerDetails(
 export interface MockErrorsExplorerApiOptions {
   rows: ErrorExplorerRow[];
   facets?: ErrorExplorerFacetsResponse;
+  activeMeasurements?: number;
   queryHandler?: (request: ErrorExplorerQueryRequest, rows: ErrorExplorerRow[]) => ErrorExplorerQueryResponse;
   detailsByMeasurementID?: Record<number, ErrorExplorerDetailsResponse>;
   // Invoked when the app POSTs /api/edits/apply (the edit-plan commit). Return a
@@ -221,6 +267,7 @@ export interface MockErrorsExplorerApiOptions {
 export function mockErrorsExplorerApi({
   rows,
   facets,
+  activeMeasurements = MOCK_ACTIVE_MEASUREMENTS,
   queryHandler,
   detailsByMeasurementID = {},
   applyHandler,
@@ -235,13 +282,19 @@ export function mockErrorsExplorerApi({
   }).as('fetchErrorsExplorerRows');
 
   cy.intercept('POST', '**/api/errors/explorer/facets', req => {
-    const request = req.body as ErrorExplorerQueryRequest;
-    const filteredRows = filterRows(currentRows, request.filters);
-    req.reply({
-      statusCode: 200,
-      body: facets ?? deriveFacets(filteredRows)
-    });
+    const request = req.body as Pick<ErrorExplorerQueryRequest, 'filters'>;
+    const body: ErrorExplorerFacetsResponse = facets ?? {
+      errorTypes: deriveErrorTypes(currentRows, request.filters),
+      censusTotals: deriveCensusTotals(currentRows, activeMeasurements)
+    };
+    req.reply({ statusCode: 200, body });
   }).as('fetchErrorFacets');
+
+  cy.intercept('POST', CLEAR_ROUTE_PATTERN, req => {
+    const { measurementID } = req.body as { measurementID: number };
+    currentRows = currentRows.filter(row => row.coreMeasurementID !== measurementID);
+    req.reply({ statusCode: 200, body: { clearedErrorCount: CLEARED_ERROR_COUNT } });
+  }).as('clearValidationErrors');
 
   cy.intercept('GET', '**/api/errors/explorer/details/**', req => {
     const url = new URL(req.url);
@@ -280,4 +333,9 @@ export function mockErrorsExplorerApi({
     statusCode: refreshResponse.statusCode,
     body: refreshResponse.body
   }).as('refreshMeasurementsSummary');
+
+  cy.intercept('POST', '**/api/refreshviews/viewfulltable/*', {
+    statusCode: refreshResponse.statusCode,
+    body: refreshResponse.body
+  }).as('refreshViewFullTable');
 }

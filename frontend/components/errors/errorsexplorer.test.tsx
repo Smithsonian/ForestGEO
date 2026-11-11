@@ -1,21 +1,26 @@
 import React from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The row-edit flow drives beginEdit/UndoToast through an async chain
-// (__triggerRowUpdate -> processRowUpdate -> flow.beginEdit) whose fetches and
+// (saveRowThroughGrid -> processRowUpdate -> flow.beginEdit) whose fetches and
 // view refreshes are slower under CI load than waitFor's 1000ms default. This
 // margin only lengthens the polling window and never affects a passing
 // assertion. It is NOT what makes this file's row-edit tests reliable: the
 // timeouts this once tried to paper over came from a trigger bound to a stale
-// row set, fixed in StyledDataGridMock.
+// row set, which the grid-capture fixture avoids by always reading the latest props.
 configure({ asyncUtilTimeout: 5000 });
 
-import { ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS } from './errorsexplorer';
+import { ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS } from './errorsexplorercolumns';
 import { formatErrorComparison, formatOptionalMeasurement, getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorcodes';
 import type { ApplyResult, EditPlan } from '@/config/editplan/types';
 import type { UseEditPreviewFlowReturn } from '@/app/hooks/useEditPreviewFlow';
 import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
+import type { InfiniteScrollPaginationProps } from '@/components/datagrids/customgridpagination';
+import { VIEW_ERRORS_TEXT, type ErrorCensusTotals, type ErrorExplorerRow } from '@/config/errorsexplorer';
+import { capturedGrids, enterEdit, requireGrid, requireRow, resetCapturedGrids, saveRowThroughGrid } from '@/tests/fixtures/errorsexplorer/grid-capture';
+import { facetOf, facetsResponse, installMemoryStorage, jsonResponse, ROUTES } from '@/tests/fixtures/errorsexplorer/explorer-page';
 import { UNCONFIRMED_OUTCOME_MESSAGE } from '@/lib/editplan/requestrevert';
 import { EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE } from '@/components/datagrids/measurementscommonsutils';
 import ailogger from '@/ailogger';
@@ -132,10 +137,14 @@ describe('formatErrorComparison', () => {
 const TEST_SCHEMA = 'forestgeo_testing_mason';
 const TEST_PLOT_ID = 22;
 const TEST_CENSUS_ID = 6;
+const TEST_SECOND_CENSUS_ID = 7;
 const TEST_CORE_MEASUREMENT_ID = 101;
 const TEST_EDIT_OPERATION_ID = 555;
 const TEST_PLAN_HASH_INITIAL = 'a'.repeat(64);
 const TEST_PLAN_HASH_REFRESH = 'b'.repeat(64);
+const GROUP_GRID = 'example error rows';
+const FLAT_GRID = VIEW_ERRORS_TEXT.flatGridLabel;
+const INFINITE_CHUNK_SIZE = 100;
 
 const GRID_ROW: Record<string, unknown> = {
   id: TEST_CORE_MEASUREMENT_ID,
@@ -170,6 +179,8 @@ const GRID_ROW: Record<string, unknown> = {
   errorFields: ['MeasuredDBH'],
   errorCodes: ['VLD-1'],
   errorCount: 1,
+  totalErrorCount: 1,
+  dbhChangePercent: null,
   hasContradiction: false,
   contradictionTypes: [],
   contradictionType: null,
@@ -209,51 +220,20 @@ const mockFetch = vi.fn();
 const mockBeginEdit = vi.fn();
 const mockConfirmDialog = vi.fn();
 const mockCancelDialog = vi.fn();
+const mockCancelPendingOperation = vi.fn(() => 'none');
 
 let currentDialogState: UseEditPreviewFlowReturn['dialogState'] = { open: false, plan: null, busy: false, wasRefreshed: false };
 let lastEditFlowArgs: Record<string, unknown> | null = null;
+let queryRows: Array<Record<string, unknown>> = [GRID_ROW];
 
-interface RenderedGridProps {
-  rows: Array<Record<string, unknown>>;
-  columns: any[];
-  processRowUpdate?: (newRow: Record<string, unknown>, oldRow: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
-  slots?: any;
-  columnVisibilityModel?: Record<string, boolean>;
-  onColumnVisibilityModelChange?: (model: Record<string, boolean>) => void;
-}
-
-// What the mocked grid most recently committed. Updated from a layout effect so
-// trigger hooks cannot observe either a stale passive effect or an aborted render.
-let latestGridProps: RenderedGridProps | null = null;
-
-// These two report the grid's state instead of returning undefined. A trigger
-// that quietly no-ops turns every downstream assertion into an unexplained
-// waitFor timeout; naming the missing piece is the difference between a
-// five-second mystery and a one-line diagnosis.
-function requireGridProps(): RenderedGridProps & { processRowUpdate: NonNullable<RenderedGridProps['processRowUpdate']> } {
-  if (!latestGridProps) throw new Error('The grid has not rendered yet — no row-update trigger is available.');
-  if (!latestGridProps.processRowUpdate) {
-    throw new Error('The grid rendered without processRowUpdate — row editing is gated off for this session.');
-  }
-  return latestGridProps as RenderedGridProps & { processRowUpdate: NonNullable<RenderedGridProps['processRowUpdate']> };
-}
-
-function findGridRow(rows: Array<Record<string, unknown>>, rowID: number): Record<string, unknown> {
-  const row = rows.find(candidate => Number(candidate.id) === Number(rowID));
-  if (!row) {
-    throw new Error(`No rendered row with id ${rowID}. The grid currently holds: ${JSON.stringify(rows.map(candidate => candidate.id))}`);
-  }
-  return row;
-}
-
-function setDialogState(nextState: UseEditPreviewFlowReturn['dialogState']) {
-  currentDialogState = nextState;
-}
+const censusScope = vi.hoisted(() => ({ census: { dateRanges: [] as Array<{ censusID: number }> } }));
+const paginationCapture = vi.hoisted(() => ({ latest: null as InfiniteScrollPaginationProps | null }));
 
 vi.mock('@/app/contexts/compat-hooks', () => ({
   useSiteContext: () => ({ schemaName: TEST_SCHEMA }),
   usePlotContext: () => ({ plotID: TEST_PLOT_ID }),
-  useOrgCensusContext: () => ({ dateRanges: [{ censusID: TEST_CENSUS_ID }] })
+  useOrgCensusContext: () => censusScope.census,
+  useOrgCensusListContext: () => []
 }));
 
 let mockSessionUserStatus: string = 'global';
@@ -269,19 +249,23 @@ vi.mock('@/components/errors/contradictioncomparisonpanel', () => ({
   default: () => <div data-testid="contradiction-panel" />
 }));
 
-vi.mock('@mui/x-data-grid', () => ({
-  GridActionsCellItem: ({ label, onClick }: { label: string; onClick?: () => void }) => (
-    <button type="button" onClick={onClick}>
-      {label}
-    </button>
-  ),
-  GridRowEditStopReasons: { rowFocusOut: 'rowFocusOut' },
-  GridRowModes: { Edit: 'edit', View: 'view' },
-  useGridApiRef: () => ({ current: { subscribeEvent: () => () => undefined } })
-}));
+// The page imports the real column builder, which needs the real operator helpers; only the cell item and the api ref are stand-ins.
+vi.mock('@mui/x-data-grid', async importOriginal => {
+  const { GridActionsCellItemStub } = await import('@/tests/fixtures/errorsexplorer/grid-capture');
+  const gridApiRef = { current: { hideFilterPanel: () => undefined, scrollToIndexes: () => undefined } };
+  return {
+    ...(await importOriginal<typeof import('@mui/x-data-grid')>()),
+    GridActionsCellItem: GridActionsCellItemStub,
+    useGridApiRef: () => gridApiRef
+  };
+});
 
+// The grid renders the pagination slot with the infinite-scroll descriptor the page gives it; this records it.
 vi.mock('@/components/datagrids/customgridpagination', () => ({
-  default: () => null
+  default: (props: { infiniteScroll?: InfiniteScrollPaginationProps }) => {
+    paginationCapture.latest = props.infiniteScroll ?? null;
+    return null;
+  }
 }));
 
 vi.mock('@/components/datagrids/infinitegridscrollbridge', () => ({
@@ -360,93 +344,71 @@ vi.mock('@/components/editplan/undotoast', () => ({
   )
 }));
 
-vi.mock('@/app/hooks/useEditPreviewFlow', () => ({
+// The real module keeps EditOperationCancelledError, which the row-edit hook tests with instanceof.
+vi.mock('@/app/hooks/useEditPreviewFlow', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/app/hooks/useEditPreviewFlow')>()),
   useEditPreviewFlow: (args: Record<string, unknown>): UseEditPreviewFlowReturn => {
     lastEditFlowArgs = args;
     return {
       beginEdit: mockBeginEdit as unknown as UseEditPreviewFlowReturn['beginEdit'],
       confirmDialog: mockConfirmDialog as unknown as UseEditPreviewFlowReturn['confirmDialog'],
       cancelDialog: mockCancelDialog as unknown as UseEditPreviewFlowReturn['cancelDialog'],
+      cancelPendingOperation: mockCancelPendingOperation as unknown as UseEditPreviewFlowReturn['cancelPendingOperation'],
       dialogState: currentDialogState
     };
   }
 }));
 
-vi.mock('@/config/styleddatagrid', async () => {
-  function StyledDataGridMock(props: any) {
-    const rows = (props.rows || []) as Array<Record<string, unknown>>;
-    const columns = props.columns || [];
+vi.mock('@/config/styleddatagrid', async () => (await import('@/tests/fixtures/errorsexplorer/grid-capture')).styledDataGridCaptureModule());
 
-    React.useLayoutEffect(() => {
-      // Layout effects run in the same commit as the DOM mutation. Unlike the old
-      // passive effect they are visible before waitFor can react to that commit;
-      // unlike a render-time assignment they never publish speculative props.
-      const committedProps = {
-        rows,
-        columns,
-        processRowUpdate: props.processRowUpdate,
-        slots: props.slots,
-        columnVisibilityModel: props.columnVisibilityModel,
-        onColumnVisibilityModelChange: props.onColumnVisibilityModelChange
-      };
-      latestGridProps = committedProps;
+type FetchResponder = (url: string, init?: RequestInit) => Response | undefined;
 
-      // Expose test hooks for both direct processRowUpdate coverage and the
-      // valueGetter/valueSetter transformations MUI performs in row-edit mode.
-      (globalThis as any).__triggerRowUpdate = async (rowID: number, newRow: Record<string, unknown>) => {
-        const { rows: currentRows, processRowUpdate } = requireGridProps();
-        return processRowUpdate(newRow, findGridRow(currentRows, rowID));
-      };
-      (globalThis as any).__triggerMuiRowUpdate = async (rowID: number, changes: Record<string, unknown>) => {
-        const { rows: currentRows, columns: currentColumns, processRowUpdate } = requireGridProps();
-        const oldRow = findGridRow(currentRows, rowID);
+interface ExplorerFetchOptions {
+  rows?: Array<Record<string, unknown>>;
+  totals?: Partial<ErrorCensusTotals>;
+  respond?: FetchResponder;
+}
 
-        const editableColumns = currentColumns.filter((column: any) => column.editable);
-        const editValues = Object.fromEntries(
-          editableColumns.map((column: any) => [
-            column.field,
-            column.valueGetter ? column.valueGetter(oldRow[column.field], oldRow, column) : oldRow[column.field]
-          ])
-        );
-        Object.assign(editValues, changes);
+function urlOf(input: RequestInfo | URL): string {
+  return typeof input === 'string' ? input : input.toString();
+}
 
-        const newRow = editableColumns.reduce((row: Record<string, unknown>, column: any) => {
-          const value = editValues[column.field];
-          return column.valueSetter ? column.valueSetter(value, row, column) : { ...row, [column.field]: value };
-        }, oldRow);
-        return processRowUpdate(newRow, oldRow);
-      };
-      (globalThis as any).__triggerInfiniteToggle = (next: boolean) => {
-        requireGridProps().slots?.pagination?.infiniteScroll?.onToggle?.(next);
-      };
+// Answers like the real routes for a census whose only error type is the first served row's.
+function explorerFetch({ rows, totals, respond }: ExplorerFetchOptions = {}) {
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = urlOf(input);
+    const override = respond?.(url, init);
+    if (override) return override;
+    const servedRows = rows ?? queryRows;
+    if (ROUTES.query.test(url)) return jsonResponse({ rows: servedRows, totalRows: servedRows.length });
+    if (ROUTES.facets.test(url)) {
+      const facets = servedRows.length > 0 ? [facetOf(servedRows[0] as unknown as ErrorExplorerRow, servedRows.length)] : [];
+      return jsonResponse(facetsResponse(facets, totals));
+    }
+    if (ROUTES.details.test(url)) return jsonResponse({ row: servedRows[0] ?? null, allErrors: [], relatedRows: [] });
+    if (ROUTES.revert.test(url)) return jsonResponse(makeApplyResultBody());
+    return jsonResponse({});
+  };
+}
 
-      return () => {
-        if (latestGridProps === committedProps) latestGridProps = null;
-      };
-    }, [rows, columns, props.processRowUpdate, props.slots, props.columnVisibilityModel, props.onColumnVisibilityModelChange]);
+function serveExplorerFetch(options: ExplorerFetchOptions = {}) {
+  mockFetch.mockImplementation(explorerFetch(options));
+}
 
-    return (
-      <div data-testid="styled-grid">
-        <div data-testid="row-state">{JSON.stringify(rows)}</div>
-        <div data-testid="column-editability">{JSON.stringify(Object.fromEntries(columns.map((col: any) => [col.field, Boolean(col.editable)])))}</div>
-        {rows.map(row => {
-          const actionColumn = columns.find((col: any) => typeof col.getActions === 'function');
-          return (
-            <div key={String(row.id)}>
-              <button type="button" data-testid={`select-row-${row.id}`} onClick={() => props.onRowClick?.({ row })}>
-                Select
-              </button>
-              {actionColumn &&
-                actionColumn.getActions({ id: row.id, row }).map((action: React.ReactNode, idx: number) => <React.Fragment key={idx}>{action}</React.Fragment>)}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
+function callsTo(pattern: RegExp): number {
+  return mockFetch.mock.calls.filter(([input]) => pattern.test(urlOf(input))).length;
+}
 
-  return { StyledDataGrid: StyledDataGridMock };
-});
+function queryCallsWithPageSize(pageSize: number): number {
+  return mockFetch.mock.calls.filter(([input, init]) => ROUTES.query.test(urlOf(input)) && init?.body && JSON.parse(String(init.body)).pageSize === pageSize)
+    .length;
+}
+
+function requireRevertBody(): Record<string, unknown> {
+  const revertCall = mockFetch.mock.calls.find(([input]) => ROUTES.revert.test(urlOf(input)));
+  if (!revertCall) throw new Error(`No /api/edits/revert request. Requests: ${JSON.stringify(mockFetch.mock.calls.map(([input]) => urlOf(input)))}`);
+  return JSON.parse(String(revertCall[1]?.body));
+}
 
 async function mountExplorer() {
   const mod = await import('./errorsexplorer');
@@ -454,124 +416,112 @@ async function mountExplorer() {
   return render(<ErrorsExplorer />);
 }
 
+async function waitForGridRow(gridLabel: string, rowID = TEST_CORE_MEASUREMENT_ID) {
+  await waitFor(() => {
+    expect(requireGrid(gridLabel).rows.some(row => Number(row.id) === rowID)).toBe(true);
+  });
+}
+
+// A saved row's reads run after MUI finishes the edit; the grid is unlocked once they have all settled.
+async function waitForEditLockReleased(gridLabel: string) {
+  await waitFor(() => expect(requireGrid(gridLabel).disableColumnSorting).toBe(false));
+}
+
+async function switchToNoGrouping() {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('combobox', { name: VIEW_ERRORS_TEXT.groupRowsLabel }));
+  await user.click(await screen.findByRole('option', { name: VIEW_ERRORS_TEXT.noGrouping }));
+  await waitFor(() => requireGrid(FLAT_GRID));
+}
+
+function toggleInfiniteScroll(next: boolean) {
+  const descriptor = paginationCapture.latest;
+  if (!descriptor) throw new Error('The flat grid has not rendered its pagination slot with an infinite-scroll descriptor.');
+  act(() => descriptor.onToggle(next));
+}
+
+interface MuiEditableColumn {
+  field: string;
+  editable?: boolean;
+  valueGetter?: (value: unknown, row: Record<string, unknown>, column: unknown) => unknown;
+  valueSetter?: (value: unknown, row: Record<string, unknown>, column: unknown) => Record<string, unknown>;
+}
+
+// What MUI does with the edit cells: seed each editable column through valueGetter, apply the user's changes, run valueSetter.
+async function saveRowThroughMuiEditing(gridLabel: string, rowID: number, changes: Record<string, unknown>) {
+  enterEdit(gridLabel, rowID);
+  const grid = requireGrid(gridLabel);
+  const oldRow = requireRow(gridLabel, rowID);
+  const editableColumns = (grid.columns as MuiEditableColumn[]).filter(column => column.editable);
+  const editValues = Object.fromEntries(
+    editableColumns.map(column => [column.field, column.valueGetter ? column.valueGetter(oldRow[column.field], oldRow, column) : oldRow[column.field]])
+  );
+  Object.assign(editValues, changes);
+  const newRow = editableColumns.reduce<Record<string, unknown>>((row, column) => {
+    const value = editValues[column.field];
+    return column.valueSetter ? column.valueSetter(value, row, column) : { ...row, [column.field]: value };
+  }, oldRow);
+  if (!grid.processRowUpdate) throw new Error(`"${gridLabel}" has no processRowUpdate`);
+  await act(async () => {
+    await grid.processRowUpdate?.(newRow, oldRow);
+    requireGrid(gridLabel).onRowModesModelChange?.({});
+  });
+}
+
 describe('ErrorsExplorer — row edit via shared preview flow', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    resetCapturedGrids();
     currentDialogState = { open: false, plan: null, busy: false, wasRefreshed: false };
     lastEditFlowArgs = null;
     mockSessionUserStatus = 'global';
+    queryRows = [GRID_ROW];
+    censusScope.census = { dateRanges: [{ censusID: TEST_CENSUS_ID }] };
+    paginationCapture.latest = null;
+    mockCancelPendingOperation.mockReturnValue('none');
 
     const { loadSelectableOptions } = await import('@/components/client/clientmacros');
-    (loadSelectableOptions as any).mockImplementation(async () => undefined);
+    vi.mocked(loadSelectableOptions).mockImplementation(async () => undefined);
 
-    const localStorageStore = new Map<string, string>();
-    const localStorageStub: Storage = {
-      get length() {
-        return localStorageStore.size;
-      },
-      clear: () => localStorageStore.clear(),
-      getItem: (key: string) => (localStorageStore.has(key) ? (localStorageStore.get(key) as string) : null),
-      key: (index: number) => Array.from(localStorageStore.keys())[index] ?? null,
-      removeItem: (key: string) => {
-        localStorageStore.delete(key);
-      },
-      setItem: (key: string, value: string) => {
-        localStorageStore.set(key, String(value));
-      }
-    };
-    Object.defineProperty(window, 'localStorage', { value: localStorageStub, configurable: true });
-
-    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/errors/explorer/query')) {
-        return {
-          ok: true,
-          json: async () => ({
-            rows: [GRID_ROW],
-            totalRows: 1,
-            summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-          })
-        } as Response;
-      }
-      if (url.includes('/api/errors/explorer/facets')) {
-        return {
-          ok: true,
-          json: async () => ({
-            messages: [],
-            fields: [],
-            sourceCounts: { validation: 1, ingestion: 0 },
-            contradictionCounts: { duplicateTagStem: 0, sameBatchConflict: 0 }
-          })
-        } as Response;
-      }
-      if (url.includes('/api/refreshviews/')) {
-        return { ok: true, json: async () => ({}) } as Response;
-      }
-      if (url.includes('/api/edits/revert')) {
-        return { ok: true, json: async () => makeApplyResultBody() } as Response;
-      }
-      return { ok: true, json: async () => ({}) } as Response;
-    });
-    global.fetch = mockFetch as any;
+    installMemoryStorage();
+    serveExplorerFetch();
+    vi.stubGlobal('fetch', mockFetch);
     undoOutcomeCapture.lastOutcome = undefined;
   });
 
   afterEach(() => {
-    delete (globalThis as any).__triggerRowUpdate;
-    delete (globalThis as any).__triggerMuiRowUpdate;
-    delete (globalThis as any).__triggerInfiniteToggle;
-    // Drop the unmounted grid's props so the next test cannot act on them.
-    latestGridProps = null;
+    resetCapturedGrids();
   });
 
-  it('configures the edit flow with the current scope and default data type', async () => {
+  it('creates the edit flow with the page census and saves a second-census row with that row’s census (P2-3)', async () => {
+    const SECOND_CENSUS_ROW = { ...GRID_ROW, censusID: TEST_SECOND_CENSUS_ID };
+    queryRows = [SECOND_CENSUS_ROW];
+    censusScope.census = { dateRanges: [{ censusID: TEST_CENSUS_ID }, { censusID: TEST_SECOND_CENSUS_ID }] };
     await mountExplorer();
     await waitFor(() => expect(lastEditFlowArgs).not.toBeNull());
-    expect(lastEditFlowArgs).toMatchObject({
-      schema: TEST_SCHEMA,
-      plotID: TEST_PLOT_ID,
-      censusID: TEST_CENSUS_ID,
-      dataType: 'measurementssummary'
-    });
+    expect(lastEditFlowArgs).toMatchObject({ schema: TEST_SCHEMA, plotID: TEST_PLOT_ID, censusID: TEST_CENSUS_ID, dataType: 'measurementssummary' });
+    await waitForGridRow(GROUP_GRID);
+    mockBeginEdit.mockResolvedValueOnce(makeApplyResultBody());
+    await saveRowThroughGrid(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
+    console.log('[view-errors repoint census]', JSON.stringify(mockBeginEdit.mock.calls[0]));
+    expect(mockBeginEdit.mock.calls[0][2]).toMatchObject({ dataType: 'measurementssummary', censusID: TEST_SECOND_CENSUS_ID });
   });
 
   it('links ingestion failures to the failed-measurement recovery modal', async () => {
-    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/errors/explorer/query')) {
-        return {
-          ok: true,
-          json: async () => ({
-            rows: [{ ...GRID_ROW, errorSources: ['ingestion'], isFailedRow: true }],
-            totalRows: 1,
-            summary: { total: 1, validation: 0, ingestion: 1, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-          })
-        } as Response;
-      }
-      if (url.includes('/api/errors/explorer/facets')) {
-        return {
-          ok: true,
-          json: async () => ({
-            messages: [],
-            fields: [],
-            sourceCounts: { validation: 0, ingestion: 1 },
-            contradictionCounts: { duplicateTagStem: 0, sameBatchConflict: 0 }
-          })
-        } as Response;
-      }
-      return { ok: true, json: async () => ({}) } as Response;
-    });
+    const FAILED_ROW = { ...GRID_ROW, errorSources: ['ingestion'], isFailedRow: true };
+    serveExplorerFetch({ rows: [FAILED_ROW], totals: { failedMeasurements: 1, validation: 0, ingestion: 1 } });
 
     const { unmount } = await mountExplorer();
 
-    const recoveryLink = await screen.findByRole('link', { name: /fix failed uploads/i });
+    const recoveryLink = await screen.findByRole('link', { name: 'Fix 1 failed upload' });
+    console.log(`[view-errors repoint recovery link] ${recoveryLink.textContent} -> ${recoveryLink.getAttribute('href')}`);
     expect(recoveryLink).toHaveAttribute('href', '/measurementshub/summary?openFailed=1');
 
     unmount();
     mockSessionUserStatus = 'pending';
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
-    expect(screen.queryByRole('link', { name: /fix failed uploads/i })).not.toBeInTheDocument();
+    await waitForGridRow(GROUP_GRID);
+    expect(screen.queryByRole('link', { name: /fix \d+ failed uploads?/i })).not.toBeInTheDocument();
   });
 
   it('does not call the legacy PATCH endpoint when a row is saved', async () => {
@@ -583,17 +533,14 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     });
 
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    await waitForGridRow(GROUP_GRID);
 
-    const editedRow = { ...GRID_ROW, measuredDBH: 12 };
-    await act(async () => {
-      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, editedRow);
-    });
+    await saveRowThroughGrid(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
 
     const patchCalls = mockFetch.mock.calls.filter(([, init]) => init?.method === 'PATCH');
     expect(patchCalls).toHaveLength(0);
 
-    const urlsCalled = mockFetch.mock.calls.map(([input]) => (typeof input === 'string' ? input : input.toString()));
+    const urlsCalled = mockFetch.mock.calls.map(([input]) => urlOf(input));
     expect(urlsCalled.some(url => url.includes('/api/fixeddata/measurementssummary/'))).toBe(false);
   });
 
@@ -606,18 +553,10 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     });
 
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    await waitForGridRow(GROUP_GRID);
 
     // Edit two editable fields AND a non-editable internal identifier; only editable fields should flow through.
-    const editedRow = {
-      ...GRID_ROW,
-      measuredDBH: 12,
-      attributes: 'L;M',
-      treeID: 999999
-    };
-    await act(async () => {
-      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, editedRow);
-    });
+    await saveRowThroughGrid(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12, attributes: 'L;M', treeID: 999999 });
 
     await waitFor(() => expect(mockBeginEdit).toHaveBeenCalledTimes(1));
     const [targetID, diff] = mockBeginEdit.mock.calls[0];
@@ -635,42 +574,13 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       validationPending: false
     });
 
-    const rowWithDroppedUploadedCode = { ...GRID_ROW, attributes: 'L', rawCodes: 'L;INVALID' };
-    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/errors/explorer/query')) {
-        return {
-          ok: true,
-          json: async () => ({
-            rows: [rowWithDroppedUploadedCode],
-            totalRows: 1,
-            summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-          })
-        } as Response;
-      }
-      if (url.includes('/api/errors/explorer/facets')) {
-        return {
-          ok: true,
-          json: async () => ({
-            messages: [],
-            fields: [],
-            sourceCounts: { validation: 1, ingestion: 0 },
-            contradictionCounts: { duplicateTagStem: 0, sameBatchConflict: 0 }
-          })
-        } as Response;
-      }
-      if (url.includes('/api/refreshviews/')) {
-        return { ok: true, json: async () => ({}) } as Response;
-      }
-      return { ok: true, json: async () => ({}) } as Response;
-    });
+    queryRows = [{ ...GRID_ROW, attributes: 'L', rawCodes: 'L;INVALID' }];
 
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('L;INVALID'));
+    await waitForGridRow(GROUP_GRID);
+    expect(requireRow(GROUP_GRID, TEST_CORE_MEASUREMENT_ID).rawCodes).toBe('L;INVALID');
 
-    await act(async () => {
-      await (globalThis as any).__triggerMuiRowUpdate(TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
-    });
+    await saveRowThroughMuiEditing(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
 
     await waitFor(() => expect(mockBeginEdit).toHaveBeenCalledTimes(1));
     const [, diff] = mockBeginEdit.mock.calls[0];
@@ -689,49 +599,22 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       validationPending: false
     });
 
-    const FAILED_ROW = { ...GRID_ROW, isFailedRow: true };
-    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/errors/explorer/query')) {
-        return {
-          ok: true,
-          json: async () => ({
-            rows: [FAILED_ROW],
-            totalRows: 1,
-            summary: { total: 1, validation: 0, ingestion: 1, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-          })
-        } as Response;
-      }
-      if (url.includes('/api/errors/explorer/facets')) {
-        return {
-          ok: true,
-          json: async () => ({
-            messages: [],
-            fields: [],
-            sourceCounts: { validation: 0, ingestion: 1 },
-            contradictionCounts: { duplicateTagStem: 0, sameBatchConflict: 0 }
-          })
-        } as Response;
-      }
-      if (url.includes('/api/refreshviews/')) return { ok: true, json: async () => ({}) } as Response;
-      return { ok: true, json: async () => ({}) } as Response;
-    });
+    const FAILED_ROW = { ...GRID_ROW, errorSources: ['ingestion'], isFailedRow: true };
+    queryRows = [FAILED_ROW];
 
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"isFailedRow":true'));
+    await waitForGridRow(GROUP_GRID);
+    expect(requireRow(GROUP_GRID, TEST_CORE_MEASUREMENT_ID).isFailedRow).toBe(true);
 
     // Edit speciesCode + measuredDBH + attributes on a failed row. Canonical
     // names on the failedmeasurements surface are SpCode, DBH, Codes (not
     // SpeciesCode, MeasuredDBH, Attributes).
-    const editedRow = { ...FAILED_ROW, speciesCode: 'NEWSP', measuredDBH: 14, attributes: 'L;DEAD' };
-    await act(async () => {
-      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, editedRow);
-    });
+    await saveRowThroughGrid(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, { speciesCode: 'NEWSP', measuredDBH: 14, attributes: 'L;DEAD' });
 
     await waitFor(() => expect(mockBeginEdit).toHaveBeenCalledTimes(1));
     const [, diff, options] = mockBeginEdit.mock.calls[0];
     expect(diff).toEqual({ SpCode: 'NEWSP', DBH: 14, Codes: 'L;DEAD' });
-    expect(options).toEqual({ dataType: 'failedmeasurements' });
+    expect(options).toEqual({ dataType: 'failedmeasurements', censusID: TEST_CENSUS_ID });
   });
 
   it('shows the UndoToast after a successful edit', async () => {
@@ -743,11 +626,9 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     });
 
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    await waitForGridRow(GROUP_GRID);
 
-    await act(async () => {
-      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
-    });
+    await saveRowThroughGrid(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
 
     await waitFor(() => expect(mockBeginEdit).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByTestId(`undo-toast-${TEST_EDIT_OPERATION_ID}`)).toBeInTheDocument());
@@ -765,11 +646,9 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     });
 
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    await waitForGridRow(GROUP_GRID);
 
-    await act(async () => {
-      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
-    });
+    await saveRowThroughGrid(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
 
     await waitFor(() => expect(mockBeginEdit).toHaveBeenCalledTimes(1));
     // No toast under ANY operation ID: a toast rendered with a null/undefined ID
@@ -807,37 +686,22 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     expect(mockCancelDialog).toHaveBeenCalledTimes(1);
   });
 
-  it('undo toast Undo button calls /api/edits/revert with the scope and edit operation ID', async () => {
-    mockBeginEdit.mockResolvedValueOnce({
-      updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
-      applyErrors: [],
-      editOperationID: TEST_EDIT_OPERATION_ID,
-      validationPending: false
-    });
-
+  it('undo toast Undo button calls /api/edits/revert with the operation’s census and edit operation ID', async () => {
+    queryRows = [{ ...GRID_ROW, censusID: TEST_SECOND_CENSUS_ID }];
+    censusScope.census = { dateRanges: [{ censusID: TEST_CENSUS_ID }, { censusID: TEST_SECOND_CENSUS_ID }] };
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
-
-    await act(async () => {
-      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
-    });
-
-    await waitFor(() => expect(screen.getByTestId(`undo-toast-${TEST_EDIT_OPERATION_ID}`)).toBeInTheDocument());
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('undo-toast-undo'));
-    });
-
-    await waitFor(() => {
-      const revertCall = mockFetch.mock.calls.find(([input]) => (typeof input === 'string' ? input : input.toString()).includes('/api/edits/revert'));
-      expect(revertCall).toBeTruthy();
-      const body = JSON.parse((revertCall as [unknown, { body: string }])[1].body);
-      expect(body).toMatchObject({
-        schema: TEST_SCHEMA,
-        plotID: TEST_PLOT_ID,
-        censusID: TEST_CENSUS_ID,
-        editOperationID: TEST_EDIT_OPERATION_ID
-      });
+    await waitForGridRow(GROUP_GRID);
+    mockBeginEdit.mockResolvedValueOnce(makeApplyResultBody());
+    await saveRowThroughGrid(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
+    fireEvent.click(await screen.findByTestId('undo-toast-undo'));
+    await waitFor(() => expect(callsTo(ROUTES.revert)).toBe(1));
+    const revertBody = requireRevertBody();
+    console.log('[view-errors repoint revert census]', JSON.stringify(revertBody));
+    expect(revertBody).toMatchObject({
+      schema: TEST_SCHEMA,
+      plotID: TEST_PLOT_ID,
+      censusID: TEST_SECOND_CENSUS_ID,
+      editOperationID: TEST_EDIT_OPERATION_ID
     });
   });
 
@@ -848,11 +712,16 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     mockSessionUserStatus = 'pending';
 
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    await waitForGridRow(GROUP_GRID);
 
-    expect(screen.getByTestId('errorsexplorer-readonly-banner')).toBeInTheDocument();
+    const banner = screen.getByTestId('errorsexplorer-readonly-banner');
+    expect(banner).toHaveTextContent(`· ${VIEW_ERRORS_TEXT.readOnlySuffix}`);
     // The mocked grid renders action buttons via the actions column's getActions —
-    // when the column is gated out, no Edit/Save/Cancel button appears.
+    // a read-only user is left with Details alone, so no Edit/Save/Cancel appears.
+    const actionNames = screen.getAllByRole('menuitem').map(item => item.getAttribute('aria-label'));
+    console.log(`[view-errors repoint read-only] actions: ${JSON.stringify(actionNames)}, header: ${String(requireGrid(GROUP_GRID).columns[0].headerName)}`);
+    expect(actionNames).toEqual([VIEW_ERRORS_TEXT.detailsAction]);
+    expect(requireGrid(GROUP_GRID).columns[0]).toMatchObject({ field: 'actions', headerName: VIEW_ERRORS_TEXT.detailsColumn });
     expect(screen.queryByText('Edit')).not.toBeInTheDocument();
     expect(screen.queryByText('Save')).not.toBeInTheDocument();
   });
@@ -861,7 +730,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     for (const status of ['global', 'db admin', 'lead technician', 'field crew']) {
       mockSessionUserStatus = status;
       const { unmount } = await mountExplorer();
-      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+      await waitForGridRow(GROUP_GRID);
 
       expect(screen.queryByTestId('errorsexplorer-readonly-banner')).not.toBeInTheDocument();
       expect(screen.getByText('Edit')).toBeInTheDocument();
@@ -871,52 +740,50 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
   });
 
   it('keeps species-code cells editable only for admin roles', async () => {
+    const speciesCodeEditable = () =>
+      (requireGrid(GROUP_GRID).columns.find(column => column.field === 'speciesCode') as MuiEditableColumn | undefined)?.editable;
+
     mockSessionUserStatus = 'field crew';
     const firstRender = await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
-    expect(JSON.parse(screen.getByTestId('column-editability').textContent ?? '{}').speciesCode).toBe(false);
+    await waitForGridRow(GROUP_GRID);
+    expect(speciesCodeEditable()).toBe(false);
     firstRender.unmount();
 
     mockSessionUserStatus = 'db admin';
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
-    expect(JSON.parse(screen.getByTestId('column-editability').textContent ?? '{}').speciesCode).toBe(true);
+    await waitForGridRow(GROUP_GRID);
+    expect(speciesCodeEditable()).toBe(true);
   });
 
   it('shows the plot-coordinate fields used by validation 19 as read-only columns', async () => {
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"stemPlotX":101.23'));
+    await waitForGridRow(GROUP_GRID);
 
-    const columns = requireGridProps().columns;
+    const columns = requireGrid(GROUP_GRID).columns;
     expect(columns.find(column => column.field === 'stemPlotX')).toMatchObject({ headerName: 'Plot X', editable: false });
     expect(columns.find(column => column.field === 'stemPlotY')).toMatchObject({ headerName: 'Plot Y', editable: false });
   });
 
   it('skips the preview flow entirely when the diff is empty', async () => {
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    await waitForGridRow(GROUP_GRID);
 
-    await act(async () => {
-      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW });
-    });
+    await saveRowThroughGrid(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, {});
 
     expect(mockBeginEdit).not.toHaveBeenCalled();
   });
 
   it('selecting infinite via the pagination slot issues a query with pageSize 100', async () => {
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    await waitForGridRow(GROUP_GRID);
+    await switchToNoGrouping();
+    await waitForGridRow(FLAT_GRID);
 
-    await act(async () => {
-      (globalThis as any).__triggerInfiniteToggle(true);
-    });
+    toggleInfiniteScroll(true);
 
     await waitFor(() => {
-      const explorerCalls = mockFetch.mock.calls.filter(([input, init]) => {
-        const url = typeof input === 'string' ? input : input.toString();
-        return url.includes('/api/errors/explorer/query') && init?.body && JSON.parse(String(init.body)).pageSize === 100;
-      });
-      expect(explorerCalls.length).toBeGreaterThan(0);
+      console.log(`[view-errors repoint infinite] queries with pageSize ${INFINITE_CHUNK_SIZE}: ${queryCallsWithPageSize(INFINITE_CHUNK_SIZE)}`);
+      expect(queryCallsWithPageSize(INFINITE_CHUNK_SIZE)).toBeGreaterThan(0);
     });
   });
 
@@ -929,33 +796,23 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     });
 
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    await waitForGridRow(GROUP_GRID);
+    await switchToNoGrouping();
+    await waitForGridRow(FLAT_GRID);
 
-    await act(async () => {
-      (globalThis as any).__triggerInfiniteToggle(true);
-    });
-    await waitFor(() =>
-      expect(
-        mockFetch.mock.calls.some(([input, init]) => {
-          const url = typeof input === 'string' ? input : input.toString();
-          return url.includes('/api/errors/explorer/query') && init?.body && JSON.parse(String(init.body)).pageSize === 100;
-        })
-      ).toBe(true)
-    );
+    toggleInfiniteScroll(true);
+    await waitFor(() => expect(queryCallsWithPageSize(INFINITE_CHUNK_SIZE)).toBeGreaterThan(0));
+    await waitForGridRow(FLAT_GRID);
 
     mockFetch.mockClear();
-    await act(async () => {
-      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
-    });
+    await saveRowThroughGrid(FLAT_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
 
-    await waitFor(() =>
-      expect(
-        mockFetch.mock.calls.some(([input, init]) => {
-          const url = typeof input === 'string' ? input : input.toString();
-          return url.includes('/api/errors/explorer/query') && init?.body && JSON.parse(String(init.body)).pageSize === 100;
-        })
-      ).toBe(true)
-    );
+    await waitFor(() => {
+      console.log(
+        `[view-errors repoint infinite edit] queries with pageSize ${INFINITE_CHUNK_SIZE} after the edit: ${queryCallsWithPageSize(INFINITE_CHUNK_SIZE)}`
+      );
+      expect(queryCallsWithPageSize(INFINITE_CHUNK_SIZE)).toBeGreaterThan(0);
+    });
   });
 
   it('refreshes the infinite row source after undo', async () => {
@@ -967,31 +824,29 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     });
 
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    await waitForGridRow(GROUP_GRID);
+    await switchToNoGrouping();
+    await waitForGridRow(FLAT_GRID);
 
-    await act(async () => {
-      (globalThis as any).__triggerInfiniteToggle(true);
-    });
-    await waitFor(() => expect(mockFetch.mock.calls.some(([, init]) => init?.body && JSON.parse(String(init.body)).pageSize === 100)).toBe(true));
+    toggleInfiniteScroll(true);
+    await waitFor(() => expect(queryCallsWithPageSize(INFINITE_CHUNK_SIZE)).toBeGreaterThan(0));
+    await waitForGridRow(FLAT_GRID);
 
-    await act(async () => {
-      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
-    });
+    await saveRowThroughGrid(FLAT_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
     await waitFor(() => expect(screen.getByTestId(`undo-toast-${TEST_EDIT_OPERATION_ID}`)).toBeInTheDocument());
+    await waitForEditLockReleased(FLAT_GRID);
 
     mockFetch.mockClear();
     await act(async () => {
       fireEvent.click(screen.getByTestId('undo-toast-undo'));
     });
 
-    await waitFor(() =>
-      expect(
-        mockFetch.mock.calls.some(([input, init]) => {
-          const url = typeof input === 'string' ? input : input.toString();
-          return url.includes('/api/errors/explorer/query') && init?.body && JSON.parse(String(init.body)).pageSize === 100;
-        })
-      ).toBe(true)
-    );
+    await waitFor(() => {
+      console.log(
+        `[view-errors repoint infinite undo] queries with pageSize ${INFINITE_CHUNK_SIZE} after the undo: ${queryCallsWithPageSize(INFINITE_CHUNK_SIZE)}`
+      );
+      expect(queryCallsWithPageSize(INFINITE_CHUNK_SIZE)).toBeGreaterThan(0);
+    });
   });
 
   // #427 client wiring: the onUndo callback passed to UndoToast must route
@@ -1005,72 +860,67 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
   it('puts Codes right after Actions for an editor, and first for a user who cannot edit (#525 item 7)', async () => {
     mockSessionUserStatus = 'field crew';
     const editorView = await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
-    const editorFields = (latestGridProps?.columns ?? []).map((column: { field: string }) => column.field);
+    await waitForGridRow(GROUP_GRID);
+    const editorFields = requireGrid(GROUP_GRID).columns.map(column => column.field);
     editorView.unmount();
 
     mockSessionUserStatus = 'pending';
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
-    const readOnlyFields = (latestGridProps?.columns ?? []).map((column: { field: string }) => column.field);
+    await waitForGridRow(GROUP_GRID);
+    const readOnlyColumns = requireGrid(GROUP_GRID).columns;
+    const readOnlyFields = readOnlyColumns.map(column => column.field);
 
     console.log(`[#525 item 7] editor columns: ${editorFields.join(', ')} | read-only columns: ${readOnlyFields.join(', ')}`);
-    expect(editorFields.slice(0, 2)).toEqual(['actions', 'attributes']);
-    expect(readOnlyFields[0]).toBe('attributes');
-    expect(readOnlyFields).not.toContain('actions');
+    expect(editorFields.slice(0, 3)).toEqual(['actions', 'errors', 'attributes']);
+    expect(readOnlyFields.slice(0, 3)).toEqual(['actions', 'errors', 'attributes']);
+    expect(readOnlyColumns[0]).toMatchObject({ field: 'actions', headerName: VIEW_ERRORS_TEXT.detailsColumn });
   });
 
   it('starts with the plot-coordinate and prior-census columns hidden through the controlled column visibility model (#525 item 7)', async () => {
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
-    const visibilityModel = latestGridProps?.columnVisibilityModel;
+    await waitForGridRow(GROUP_GRID);
+    const groupVisibility = requireGrid(GROUP_GRID).columnVisibilityModel;
+    console.log(`[#525 item 7] group columnVisibilityModel: ${JSON.stringify(groupVisibility)}`);
+    expect(groupVisibility).toMatchObject(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS);
 
-    console.log(`[#525 item 7] controlled columnVisibilityModel: ${JSON.stringify(visibilityModel)}`);
-    expect(visibilityModel).toEqual(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS);
+    await switchToNoGrouping();
+    const flatVisibility = requireGrid(FLAT_GRID).columnVisibilityModel;
+    console.log(`[#525 item 7] flat columnVisibilityModel: ${JSON.stringify(flatVisibility)}`);
+    expect(flatVisibility).toEqual(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS);
   });
 
   it('keeps a column the user turned on after the list empties and refills while the page stays open (#525 item 7)', async () => {
     const NO_MATCH_QUICK_SEARCH = 'no-such-measurement';
     const SHOWN_COLUMN = 'priorDBH';
-    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/errors/explorer/query')) {
-        const matchesNothing = JSON.parse(String(init?.body)).filters.quickSearch === NO_MATCH_QUICK_SEARCH;
-        return {
-          ok: true,
-          json: async () => ({
-            rows: matchesNothing ? [] : [GRID_ROW],
-            totalRows: matchesNothing ? 0 : 1,
-            summary: {
-              total: matchesNothing ? 0 : 1,
-              validation: matchesNothing ? 0 : 1,
-              ingestion: 0,
-              contradictions: 0,
-              duplicateTagStem: 0,
-              sameBatchConflict: 0
-            }
-          })
-        } as Response;
-      }
-      return { ok: true, json: async () => ({ messages: [], fields: [], sourceCounts: { validation: 1, ingestion: 0 }, contradictionCounts: {} }) } as Response;
-    });
+    const matchesNothing = (init?: RequestInit) => JSON.parse(String(init?.body)).filters.quickSearch === NO_MATCH_QUICK_SEARCH;
+    mockFetch.mockImplementation(
+      explorerFetch({
+        respond: (url, init) => {
+          if (!(ROUTES.query.test(url) || ROUTES.facets.test(url)) || !matchesNothing(init)) return undefined;
+          return ROUTES.query.test(url) ? jsonResponse({ rows: [], totalRows: 0 }) : jsonResponse(facetsResponse([]));
+        }
+      })
+    );
     await mountExplorer();
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    await waitForGridRow(GROUP_GRID);
 
     act(() => {
-      latestGridProps?.onColumnVisibilityModelChange?.({ ...ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS, [SHOWN_COLUMN]: true });
+      requireGrid(GROUP_GRID).onColumnVisibilityModelChange?.({ ...requireGrid(GROUP_GRID).columnVisibilityModel, [SHOWN_COLUMN]: true });
     });
-    await waitFor(() => expect(latestGridProps?.columnVisibilityModel?.[SHOWN_COLUMN]).toBe(true));
+    await waitFor(() => expect(requireGrid(GROUP_GRID).columnVisibilityModel?.[SHOWN_COLUMN]).toBe(true));
+    const modelBeforeEmpty = requireGrid(GROUP_GRID).columnVisibilityModel;
 
-    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: NO_MATCH_QUICK_SEARCH } });
-    await waitFor(() => expect(screen.getByTestId('errors-explorer-empty-success')).toBeInTheDocument());
-    expect(screen.queryByTestId('styled-grid')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(VIEW_ERRORS_TEXT.searchLabel), { target: { value: NO_MATCH_QUICK_SEARCH } });
+    await waitFor(() => expect(screen.getByTestId('errors-explorer-empty')).toBeInTheDocument());
+    expect(screen.getByTestId('errors-explorer-empty')).toHaveTextContent(VIEW_ERRORS_TEXT.emptyFiltered);
+    expect(capturedGrids.size).toBe(0);
 
-    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: '' } });
-    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    fireEvent.change(screen.getByLabelText(VIEW_ERRORS_TEXT.searchLabel), { target: { value: '' } });
+    await waitForGridRow(GROUP_GRID);
 
-    console.log(`[#525 item 7] columnVisibilityModel after empty and refill: ${JSON.stringify(latestGridProps?.columnVisibilityModel)}`);
-    expect(latestGridProps?.columnVisibilityModel).toEqual({ ...ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS, [SHOWN_COLUMN]: true });
+    console.log(`[#525 item 7] columnVisibilityModel after empty and refill: ${JSON.stringify(requireGrid(GROUP_GRID).columnVisibilityModel)}`);
+    expect(requireGrid(GROUP_GRID).columnVisibilityModel).toEqual(modelBeforeEmpty);
+    expect(requireGrid(GROUP_GRID).columnVisibilityModel?.[SHOWN_COLUMN]).toBe(true);
   });
 
   describe('undo revert outcome handling (#427)', () => {
@@ -1083,16 +933,15 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       });
 
       await mountExplorer();
-      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+      await waitForGridRow(GROUP_GRID);
 
-      await act(async () => {
-        await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
-      });
+      await saveRowThroughGrid(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
       await waitFor(() => expect(screen.getByTestId(`undo-toast-${TEST_EDIT_OPERATION_ID}`)).toBeInTheDocument());
+      await waitForEditLockReleased(GROUP_GRID);
     }
 
     function countExplorerQueryCalls(): number {
-      return mockFetch.mock.calls.filter(([input]) => (typeof input === 'string' ? input : input.toString()).includes('/api/errors/explorer/query')).length;
+      return callsTo(ROUTES.query);
     }
 
     // The regression tests below spy on ailogger.error via vi.spyOn; restore it
@@ -1104,29 +953,17 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     it('does not show success feedback or refresh when the server demands confirmation, and returns the fresh plan to the toast unchanged', async () => {
       await mountExplorerWithUndoToast();
 
-      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-        const url = typeof input === 'string' ? input : input.toString();
-        if (url.includes('/api/edits/revert')) {
-          return {
-            ok: false,
-            status: 409,
-            json: async () => ({
-              error: 'plan drift',
-              freshPlan: { ...makePlan({ planHash: TEST_PLAN_HASH_REFRESH }), fieldChanges: [{ field: 'MeasuredDBH', from: 11, to: 13 }] }
-            })
-          } as Response;
-        }
-        if (url.includes('/api/errors/explorer/query')) {
-          return {
-            ok: true,
-            json: async () => ({
-              rows: [GRID_ROW],
-              totalRows: 1,
-              summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-            })
-          } as Response;
-        }
-        return { ok: true, json: async () => ({}) } as Response;
+      serveExplorerFetch({
+        respond: url =>
+          ROUTES.revert.test(url)
+            ? jsonResponse(
+                {
+                  error: 'plan drift',
+                  freshPlan: { ...makePlan({ planHash: TEST_PLAN_HASH_REFRESH }), fieldChanges: [{ field: 'MeasuredDBH', from: 11, to: 13 }] }
+                },
+                409
+              )
+            : undefined
       });
 
       const queryCallsBeforeUndo = countExplorerQueryCalls();
@@ -1151,23 +988,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       await mountExplorerWithUndoToast();
 
       const SERVER_FAILURE_MESSAGE = 'Revert rejected: edit operation changed during revert';
-      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-        const url = typeof input === 'string' ? input : input.toString();
-        if (url.includes('/api/edits/revert')) {
-          return { ok: false, status: 500, json: async () => ({ error: SERVER_FAILURE_MESSAGE }) } as Response;
-        }
-        if (url.includes('/api/errors/explorer/query')) {
-          return {
-            ok: true,
-            json: async () => ({
-              rows: [GRID_ROW],
-              totalRows: 1,
-              summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-            })
-          } as Response;
-        }
-        return { ok: true, json: async () => ({}) } as Response;
-      });
+      serveExplorerFetch({ respond: url => (ROUTES.revert.test(url) ? jsonResponse({ error: SERVER_FAILURE_MESSAGE }, 500) : undefined) });
 
       const queryCallsBeforeUndo = countExplorerQueryCalls();
 
@@ -1190,12 +1011,12 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
 
       await waitFor(() => expect(undoOutcomeCapture.lastOutcome).toEqual({ status: 'reverted' }));
 
-      const callsTo = (fragment: string) =>
-        mockFetch.mock.calls.filter(([input]) => (typeof input === 'string' ? input : input.toString()).includes(fragment)).length;
-
-      expect(callsTo('/api/refreshviews/measurementssummary/')).toBe(1);
-      expect(callsTo('/api/refreshviews/viewfulltable/')).toBe(1);
-      expect(callsTo('/api/errors/explorer/query')).toBe(1);
+      console.log(
+        `[view-errors repoint undo chain] summary ${callsTo(ROUTES.rebuildSummary)}, fullTable ${callsTo(ROUTES.rebuildFullTable)}, query ${callsTo(ROUTES.query)}, facets ${callsTo(ROUTES.facets)}`
+      );
+      expect(callsTo(ROUTES.rebuildSummary)).toBe(1);
+      expect(callsTo(ROUTES.rebuildFullTable)).toBe(1);
+      expect(callsTo(ROUTES.query)).toBe(1);
     });
 
     // The successful edit path (processRowUpdate) refreshes rows, facets, AND the
@@ -1204,16 +1025,8 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     it('refreshes facets and the selected row details after undo, not just rows', async () => {
       await mountExplorerWithUndoToast();
 
-      await act(async () => {
-        fireEvent.click(screen.getByTestId(`select-row-${TEST_CORE_MEASUREMENT_ID}`));
-      });
-      await waitFor(() =>
-        expect(
-          mockFetch.mock.calls.some(([input]) =>
-            (typeof input === 'string' ? input : input.toString()).includes(`/api/errors/explorer/details/${TEST_CORE_MEASUREMENT_ID}`)
-          )
-        ).toBe(true)
-      );
+      await userEvent.click(screen.getAllByRole('menuitem', { name: VIEW_ERRORS_TEXT.detailsAction })[0]);
+      await waitFor(() => expect(callsTo(new RegExp(`/api/errors/explorer/details/${TEST_CORE_MEASUREMENT_ID}`))).toBeGreaterThan(0));
 
       mockFetch.mockClear();
       await act(async () => {
@@ -1222,12 +1035,9 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
 
       await waitFor(() => expect(undoOutcomeCapture.lastOutcome).toEqual({ status: 'reverted' }));
 
-      const callsTo = (fragment: string) =>
-        mockFetch.mock.calls.filter(([input]) => (typeof input === 'string' ? input : input.toString()).includes(fragment)).length;
-
-      expect(callsTo('/api/errors/explorer/query')).toBeGreaterThan(0);
-      expect(callsTo('/api/errors/explorer/facets')).toBeGreaterThan(0);
-      expect(callsTo(`/api/errors/explorer/details/${TEST_CORE_MEASUREMENT_ID}`)).toBeGreaterThan(0);
+      expect(callsTo(ROUTES.query)).toBeGreaterThan(0);
+      expect(callsTo(ROUTES.facets)).toBeGreaterThan(0);
+      expect(callsTo(new RegExp(`/api/errors/explorer/details/${TEST_CORE_MEASUREMENT_ID}`))).toBeGreaterThan(0);
     });
 
     // Consumer-boundary regression: a REAL failing fetch from the facets endpoint
@@ -1240,29 +1050,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       const FACETS_FAILURE_MESSAGE = 'facets endpoint exploded';
       const errorLogSpy = vi.spyOn(ailogger, 'error').mockImplementation(() => undefined);
 
-      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-        const url = typeof input === 'string' ? input : input.toString();
-        if (url.includes('/api/edits/revert')) {
-          return { ok: true, json: async () => makeApplyResultBody() } as Response;
-        }
-        if (url.includes('/api/refreshviews/')) {
-          return { ok: true, json: async () => ({}) } as Response;
-        }
-        if (url.includes('/api/errors/explorer/facets')) {
-          return { ok: false, status: 500, json: async () => ({ error: FACETS_FAILURE_MESSAGE }) } as Response;
-        }
-        if (url.includes('/api/errors/explorer/query')) {
-          return {
-            ok: true,
-            json: async () => ({
-              rows: [GRID_ROW],
-              totalRows: 1,
-              summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-            })
-          } as Response;
-        }
-        return { ok: true, json: async () => ({}) } as Response;
-      });
+      serveExplorerFetch({ respond: url => (ROUTES.facets.test(url) ? jsonResponse({ error: FACETS_FAILURE_MESSAGE }, 500) : undefined) });
 
       await act(async () => {
         fireEvent.click(screen.getByTestId('undo-toast-undo'));
@@ -1286,17 +1074,9 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
         fireEvent.click(screen.getByTestId('undo-toast-confirm'));
       });
 
-      await waitFor(() => {
-        const revertCall = mockFetch.mock.calls.find(([input]) => (typeof input === 'string' ? input : input.toString()).includes('/api/edits/revert'));
-        expect(revertCall).toBeTruthy();
-      });
+      await waitFor(() => expect(callsTo(ROUTES.revert)).toBe(1));
 
-      const revertCall = mockFetch.mock.calls.find(([input]) => (typeof input === 'string' ? input : input.toString()).includes('/api/edits/revert')) as [
-        unknown,
-        { body: string }
-      ];
-      const body = JSON.parse(revertCall[1].body);
-      expect(body).toEqual({
+      expect(requireRevertBody()).toEqual({
         schema: TEST_SCHEMA,
         plotID: TEST_PLOT_ID,
         censusID: TEST_CENSUS_ID,
@@ -1316,29 +1096,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       const REFRESH_FAILURE_MESSAGE = 'refreshviews measurementssummary exploded';
       const errorLogSpy = vi.spyOn(ailogger, 'error').mockImplementation(() => undefined);
 
-      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-        const url = typeof input === 'string' ? input : input.toString();
-        if (url.includes('/api/edits/revert')) {
-          return { ok: true, json: async () => makeApplyResultBody() } as Response;
-        }
-        if (url.includes('/api/refreshviews/measurementssummary/')) {
-          return { ok: false, status: 500, json: async () => ({ error: REFRESH_FAILURE_MESSAGE }) } as Response;
-        }
-        if (url.includes('/api/refreshviews/viewfulltable/')) {
-          return { ok: true, json: async () => ({}) } as Response;
-        }
-        if (url.includes('/api/errors/explorer/query')) {
-          return {
-            ok: true,
-            json: async () => ({
-              rows: [GRID_ROW],
-              totalRows: 1,
-              summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-            })
-          } as Response;
-        }
-        return { ok: true, json: async () => ({}) } as Response;
-      });
+      serveExplorerFetch({ respond: url => (ROUTES.rebuildSummary.test(url) ? jsonResponse({ error: REFRESH_FAILURE_MESSAGE }, 500) : undefined) });
 
       await act(async () => {
         fireEvent.click(screen.getByTestId('undo-toast-undo'));
@@ -1362,23 +1120,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     it('surfaces the could-not-confirm message without refreshing or claiming success when the server returns a malformed 2xx body', async () => {
       await mountExplorerWithUndoToast();
 
-      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-        const url = typeof input === 'string' ? input : input.toString();
-        if (url.includes('/api/edits/revert')) {
-          return { ok: true, json: async () => ({ ok: true }) } as Response;
-        }
-        if (url.includes('/api/errors/explorer/query')) {
-          return {
-            ok: true,
-            json: async () => ({
-              rows: [GRID_ROW],
-              totalRows: 1,
-              summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-            })
-          } as Response;
-        }
-        return { ok: true, json: async () => ({}) } as Response;
-      });
+      serveExplorerFetch({ respond: url => (ROUTES.revert.test(url) ? jsonResponse({ ok: true }) : undefined) });
 
       const queryCallsBeforeUndo = countExplorerQueryCalls();
 
