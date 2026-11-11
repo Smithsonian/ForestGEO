@@ -877,8 +877,8 @@ describe('Details sheet', () => {
     await openDetailsFor(102);
     act(() => requireGrid(GROUP_LABEL).onFilterModelChange?.({ items: [{ field: 'treeTag', operator: 'contains', value: 'T-101' }] }));
     await waitFor(() => expect(requireGrid(GROUP_LABEL).rows.map(row => Number(row.id))).toEqual([101]));
-    const edit = await screen.findByRole('button', { name: DETAILS_SHEET_TEXT.editThisRow });
-    await waitFor(() => expect(edit).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: DETAILS_SHEET_TEXT.editThisRow })).toBeDisabled());
+    const edit = screen.getByRole('button', { name: DETAILS_SHEET_TEXT.editThisRow });
     await userEvent.hover(edit.parentElement as HTMLElement);
     expect(await screen.findByRole('tooltip')).toHaveTextContent(EDIT_THIS_ROW_UNAVAILABLE_TOOLTIP);
   });
