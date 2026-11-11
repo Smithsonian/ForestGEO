@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import ailogger from '@/ailogger';
 import {
   DEFAULT_ERROR_EXPLORER_FILTERS,
   ERROR_EXPLORER_PRESETS,
@@ -11,6 +12,7 @@ import * as production from '@/app/api/errors/explorer/_shared';
 import {
   buildDuplicateMemberGroupsStatement,
   ERROR_EXPLORER_STATEMENT_LABELS,
+  ID_LIST_SIZE,
   SQL_FALSE,
   SQL_TRUE,
   type DuplicateMemberGroupRow
@@ -41,10 +43,8 @@ const TRUNCATION_DATABASE = `${DEFAULT_TEST_CONFIG.database}_errtrunc`;
 const PAGE_SIZE = 25;
 const FIRST_PAGE = 0;
 const WHOLE_MEMBER_LIST = TRUNCATION_DUPLICATE_MEMBER_IDS.join(',');
-const NO_SIGNATURE_WARNINGS: unknown[] = [];
 const CONTRADICTIONS_PRESET_ID = 'contradictions';
 const DETAILS_FIXED_STATEMENT_COUNT = 3;
-const RELATED_ID_CHUNK_SIZE = 128;
 const NON_POSITIVE_OR_FRACTIONAL_IDS = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 2];
 
 const QUERY_ORDER_ALL_ERRORS = [...TRUNCATION_DUPLICATE_MEMBER_IDS, TRUNCATION_UNRELATED_ERROR_ROW_ID];
@@ -77,6 +77,8 @@ interface LimitRun {
   defaultQueryLabels: Array<string | null>;
   presetQuery: ErrorExplorerQueryResponse;
   facets: ErrorExplorerFacetsResponse;
+  facetsLabels: Array<string | null>;
+  facetsWarnedMessages: unknown[];
   detailsByMeasurementID: Map<number, ErrorExplorerDetailsResponse>;
   detailsStatementCountByMeasurementID: Map<number, number>;
   memberGroupRow: DuplicateMemberGroupRow;
@@ -132,9 +134,16 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       labels: recorded.map(statement => statement.label)
     }));
     const presetQuery = await runWithLimit(limit, executor => production.queryErrorExplorer(executor, queryRequest(CONTRADICTIONS_PRESET_FILTERS)));
-    const facets = await runWithLimit(limit, executor =>
-      production.buildErrorExplorerFacets(executor, { ...requestScope(), filters: DEFAULT_ERROR_EXPLORER_FILTERS })
-    );
+    const warningsBeforeFacets = vi.mocked(ailogger.warn).mock.calls.length;
+    const facetsRun = await runWithLimit(limit, async (executor, recorded) => ({
+      response: await production.buildErrorExplorerFacets(executor, { ...requestScope(), filters: DEFAULT_ERROR_EXPLORER_FILTERS }),
+      labels: recorded.map(statement => statement.label)
+    }));
+    const facetsWarnedMessages = vi
+      .mocked(ailogger.warn)
+      .mock.calls.slice(warningsBeforeFacets)
+      .map(call => call[0]);
+    const facets = facetsRun.response;
     const detailsByMeasurementID = new Map<number, ErrorExplorerDetailsResponse>();
     const detailsStatementCountByMeasurementID = new Map<number, number>();
     for (const measurementID of TRUNCATION_DUPLICATE_MEMBER_IDS) {
@@ -146,7 +155,7 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
     console.log(
       `[truncation] limit=${limit} memberGroup=${JSON.stringify({ list: memberGroupRow.MeasurementIDs, complete: memberGroupRow.MemberListComplete })} ` +
         `defaultQuery=${JSON.stringify(defaultQueryRun.response.rows.map(row => ({ id: row.coreMeasurementID, flagged: row.hasContradiction, related: row.relatedMeasurementIDs })))} ` +
-        `presetIDs=${JSON.stringify(presetQuery.rows.map(row => row.coreMeasurementID))} facets=${JSON.stringify(facets.contradictionCounts)} ` +
+        `presetIDs=${JSON.stringify(presetQuery.rows.map(row => row.coreMeasurementID))} facets=${JSON.stringify(facets.contradictionCounts)} facetsLabels=${JSON.stringify(facetsRun.labels)} facetsWarnings=${JSON.stringify(facetsWarnedMessages)} ` +
         `detailsRelated=${JSON.stringify([...detailsByMeasurementID].map(([id, details]) => [id, details.row?.relatedMeasurementIDs, details.relatedRows.map(row => row.coreMeasurementID)]))}`
     );
     return {
@@ -154,6 +163,8 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       defaultQueryLabels: defaultQueryRun.labels,
       presetQuery,
       facets,
+      facetsLabels: facetsRun.labels,
+      facetsWarnedMessages,
       detailsByMeasurementID,
       detailsStatementCountByMeasurementID,
       memberGroupRow
@@ -214,6 +225,11 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       expect(run.presetQuery.rows.every(row => row.hasContradiction)).toBe(true);
     });
 
+    it('facets are answered by the catalog and the flagged histogram alone: no fallback to the scope raw rows, no warning', () => {
+      expect(run.facetsLabels, 'facets statements').toEqual([ERROR_EXPLORER_STATEMENT_LABELS.catalog, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags]);
+      expect(run.facetsWarnedMessages, 'ailogger.warn messages logged by the facets run').toEqual([]);
+    });
+
     it('facets count all three members as duplicates', () => {
       expect(run.facets.contradictionCounts.duplicateTagStem).toBe(TRUNCATION_DUPLICATE_MEMBER_IDS.length);
       expect(run.facets.contradictionCounts.sameBatchConflict).toBe(0);
@@ -262,7 +278,7 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       TRUNCATION_DUPLICATE_MEMBER_IDS.forEach(measurementID => {
         const relatedCount = expectedRelated(limit, measurementID).length;
         expect(run.detailsStatementCountByMeasurementID.get(measurementID), `member ${measurementID} with ${relatedCount} related IDs`).toBe(
-          DETAILS_FIXED_STATEMENT_COUNT + Math.ceil(relatedCount / RELATED_ID_CHUNK_SIZE)
+          DETAILS_FIXED_STATEMENT_COUNT + Math.ceil(relatedCount / ID_LIST_SIZE)
         );
       });
     });
@@ -278,10 +294,5 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
     const noCensus = await production.buildErrorExplorerDetails(executor, { ...requestScope(), censusID: 0 }, TRUNCATION_DUPLICATE_MEMBER_IDS[0]);
     expect(noCensus).toEqual({ row: null, allErrors: [], relatedRows: [] });
     expect(recorder.statements.map(statement => statement.label)).toEqual([]);
-  });
-
-  it('no warning was logged about a cut error-type signature: only the member lists are cut', async () => {
-    const ailogger = (await import('@/ailogger')).default;
-    expect(vi.mocked(ailogger.warn).mock.calls.map(call => call[0])).toEqual(NO_SIGNATURE_WARNINGS);
   });
 });

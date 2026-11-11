@@ -669,7 +669,8 @@ async function buildMessageCountsOnNodePath(
 /**
  * The message list and measurement total buildErrorExplorerFacets returns under the default filters, read from the
  * signature histogram without the duplicate-tag and same-batch work: contradictions never change which rows are in
- * the error set or what their messages are.
+ * the error set or what their messages are. When a signature is cut or two messages tie under localeCompare it falls back to
+ * the scope raw-rows statement, whose SQL also evaluates the duplicate-tag and same-batch groups; that is the price of the fallback.
  */
 export async function buildErrorMessageCounts(
   connectionManager: ExplorerConnection,

@@ -1118,14 +1118,14 @@ export const TRUNCATION_LIMITS = { whole: 14, cutInsideThirdID: 13, cutAtSeparat
 
 /** Measurement 100 is an error row that shares no tag pair; 1001 to 1003 share one tag pair, so the three form one duplicate group. Every row carries one unresolved log of error type 1. */
 export function groupConcatTruncationFixture(): ExplorerFixture {
-  const memberOf = (coreMeasurementID: number, treeTag: string): FixtureMeasurement => ({
+  const taggedMeasurement = (coreMeasurementID: number, treeTag: string): FixtureMeasurement => ({
     ...signatureFixtureMeasurement(coreMeasurementID),
     treeTag,
     stemTag: TRUNCATION_STEM_TAG
   });
   const measurements = [
-    memberOf(TRUNCATION_UNRELATED_ERROR_ROW_ID, TRUNCATION_UNRELATED_TREE_TAG),
-    ...TRUNCATION_DUPLICATE_MEMBER_IDS.map(memberID => memberOf(memberID, TRUNCATION_DUPLICATE_TREE_TAG))
+    taggedMeasurement(TRUNCATION_UNRELATED_ERROR_ROW_ID, TRUNCATION_UNRELATED_TREE_TAG),
+    ...TRUNCATION_DUPLICATE_MEMBER_IDS.map(memberID => taggedMeasurement(memberID, TRUNCATION_DUPLICATE_TREE_TAG))
   ];
   return {
     plotIDs: [MAIN_PLOT_ID],
