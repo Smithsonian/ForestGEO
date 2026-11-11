@@ -36,7 +36,8 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/app/contexts/compat-hooks', () => ({
   useSiteContext: () => ({ schemaName: TEST_SCHEMA }),
   usePlotContext: () => ({ plotID: TEST_PLOT_ID }),
-  useOrgCensusContext: () => explorerState.census
+  useOrgCensusContext: () => explorerState.census,
+  useOrgCensusListContext: () => []
 }));
 vi.mock('next-auth/react', () => ({
   useSession: () => ({ data: { user: { userStatus: 'global' } } })
@@ -45,10 +46,10 @@ vi.mock('@/components/client/clientmacros', () => ({
   loadSelectableOptions: vi.fn(async () => undefined)
 }));
 vi.mock('@/components/errors/contradictioncomparisonpanel', () => ({ default: () => null }));
-vi.mock('@mui/x-data-grid', () => ({
-  GridActionsCellItem: () => null,
-  GridRowEditStopReasons: { rowFocusOut: 'rowFocusOut' },
-  GridRowModes: { Edit: 'edit', View: 'view' },
+vi.mock('./errorsexplorergrid', () => ({ default: () => <div data-testid="styled-grid" /> }));
+// The page imports the real column builder for its default visibility, which needs the real operator helpers.
+vi.mock('@mui/x-data-grid', async importOriginal => ({
+  ...(await importOriginal<typeof import('@mui/x-data-grid')>()),
   useGridApiRef: () => ({ current: { subscribeEvent: () => () => undefined } })
 }));
 vi.mock('@/components/datagrids/customgridpagination', () => ({ default: () => null }));
@@ -60,10 +61,10 @@ vi.mock('@/app/hooks/useEditPreviewFlow', () => ({
     beginEdit: vi.fn(),
     confirmDialog: vi.fn(),
     cancelDialog: vi.fn(),
+    cancelPendingOperation: vi.fn(),
     dialogState: { open: false, plan: null, busy: false, wasRefreshed: false }
   })
 }));
-vi.mock('@/config/styleddatagrid', () => ({ StyledDataGrid: () => <div data-testid="styled-grid" /> }));
 
 const fetchMock = vi.fn();
 
@@ -90,7 +91,7 @@ function installStorage(): void {
 
 function saveFilters(censusID: number, exactMessages: string[]): void {
   const key = getFilterStorageKey(TEST_SCHEMA, TEST_PLOT_ID, censusID) as string;
-  window.localStorage.setItem(key, JSON.stringify({ ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages, presetId: undefined }));
+  window.localStorage.setItem(key, JSON.stringify({ ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages }));
 }
 
 function savedFilters(censusID: number): ErrorExplorerFilters {
@@ -114,10 +115,11 @@ function lastRequestBody(endpoint: string) {
 async function expectLatestRequestsToFilter(exactMessages: string[]): Promise<void> {
   await waitFor(() => {
     const facets = lastRequestBody(FACETS_ENDPOINT);
-    const query = lastRequestBody(QUERY_ENDPOINT);
-    console.log(`[#547 deep link] facets ${JSON.stringify(facets.filters.exactMessages)}, query ${JSON.stringify(query.filters.exactMessages)}`);
+    const queries = requestBodies(QUERY_ENDPOINT);
+    const lastQuery = queries[queries.length - 1];
+    console.log(`[#547 deep link] facets ${JSON.stringify(facets.filters.exactMessages)}, query ${JSON.stringify(lastQuery?.filters.exactMessages ?? null)}`);
     expect(facets.filters.exactMessages).toEqual(exactMessages);
-    expect(query.filters.exactMessages).toEqual(exactMessages);
+    if (lastQuery) expect(lastQuery.filters.exactMessages).toEqual(exactMessages);
   });
 }
 
@@ -132,22 +134,25 @@ describe('ErrorsExplorer deep links (#547)', () => {
       if (url.includes(QUERY_ENDPOINT)) {
         return {
           ok: true,
-          json: async () => ({
-            rows: [],
-            totalRows: 0,
-            summary: { total: 0, validation: 0, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
-          })
+          json: async () => ({ rows: [], totalRows: 0 })
         } as Response;
       }
       if (url.includes(FACETS_ENDPOINT)) {
         return {
           ok: true,
           json: async () => ({
-            messages: [],
-            fields: [],
-            sourceCounts: { validation: 0, ingestion: 0 },
-            contradictionCounts: { duplicateTagStem: 0, sameBatchConflict: 0 },
-            totalMeasurements: 0
+            errorTypes: [{ source: 'ingestion', code: 'INVALID_SPECIES', message: LINKED_MESSAGE, fields: ['speciesCode'], count: 1, hasContradiction: false }],
+            censusTotals: {
+              affectedMeasurements: 1,
+              activeMeasurements: 10,
+              errorTypeCount: 1,
+              validation: 0,
+              ingestion: 1,
+              failedMeasurements: 1,
+              contradictions: 0,
+              duplicateTagStem: 0,
+              sameBatchConflict: 0
+            }
           })
         } as Response;
       }
@@ -181,7 +186,8 @@ describe('ErrorsExplorer deep links (#547)', () => {
     render(<ErrorsExplorer />);
 
     await expectLatestRequestsToFilter([]);
-    await waitFor(() => expect(savedFilters(FIRST_CENSUS_ID)).toEqual(DEFAULT_ERROR_EXPLORER_FILTERS));
+    const { source, contradictionOnly, quickSearch, exactMessages } = DEFAULT_ERROR_EXPLORER_FILTERS;
+    await waitFor(() => expect(savedFilters(FIRST_CENSUS_ID)).toEqual({ source, contradictionOnly, quickSearch, exactMessages }));
   });
 
   it('goes back to all errors after a type link: mount ?message=X, unmount, mount ?view=all', async () => {
@@ -230,12 +236,13 @@ describe('ErrorsExplorer deep links (#547)', () => {
 
     await waitFor(() => {
       const facets = lastRequestBody(FACETS_ENDPOINT);
-      const query = lastRequestBody(QUERY_ENDPOINT);
+      const queries = requestBodies(QUERY_ENDPOINT);
+      const lastQuery = queries[queries.length - 1];
       console.log(
-        `[#547 errors scope] expected ${JSON.stringify(expectedCensusIDs)}, facets ${JSON.stringify(facets.censusIDs)}, query ${JSON.stringify(query.censusIDs)}`
+        `[#547 errors scope] expected ${JSON.stringify(expectedCensusIDs)}, facets ${JSON.stringify(facets.censusIDs)}, query ${JSON.stringify(lastQuery?.censusIDs ?? null)}`
       );
       expect(facets.censusIDs).toEqual(expectedCensusIDs);
-      expect(query.censusIDs).toEqual(expectedCensusIDs);
+      if (lastQuery) expect(lastQuery.censusIDs).toEqual(expectedCensusIDs);
       expect(facets.censusID, 'the storage/publish census is dateRanges[0]').toBe(9);
     });
   });

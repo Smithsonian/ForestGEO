@@ -13,10 +13,18 @@ interface HarnessProps {
   page: number;
   pageSizeOptions?: Array<number | { value: number; label: string }>;
   onPaginationModelChange?: (model: GridPaginationModel) => void;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 function Harness(props: HarnessProps) {
   const [model, setModel] = React.useState<GridPaginationModel>({ page: props.page, pageSize: props.pageSize });
+  const { disabled, disabledReason } = props;
+  const PaginationSlot = React.useMemo(() => {
+    const Slot = () => <CustomGridPagination disabled={disabled} disabledReason={disabledReason} />;
+    Slot.displayName = 'HarnessPaginationSlot';
+    return Slot;
+  }, [disabled, disabledReason]);
   return (
     <div style={{ height: 320, width: 640 }}>
       <DataGrid
@@ -30,13 +38,26 @@ function Harness(props: HarnessProps) {
           props.onPaginationModelChange?.(next);
         }}
         pageSizeOptions={props.pageSizeOptions ?? PAGE_SIZE_OPTIONS}
-        slots={{ pagination: CustomGridPagination }}
+        slots={{ pagination: PaginationSlot }}
       />
     </div>
   );
 }
 
 describe('CustomGridPagination', () => {
+  it('shows why the footer is disabled', () => {
+    render(<Harness rowCount={100} pageSize={10} page={0} disabled disabledReason="Wait for your edit to finish saving" />);
+    expect(screen.getByRole('button', { name: 'Go to next page' })).toBeDisabled();
+    const footer = screen.getByTestId('custom-grid-pagination');
+    console.log('[view-errors pagination lock] title =', footer.getAttribute('title'));
+    expect(footer).toHaveAttribute('title', 'Wait for your edit to finish saving');
+  });
+
+  it('sets no title when enabled', () => {
+    render(<Harness rowCount={100} pageSize={10} page={0} />);
+    expect(screen.getByTestId('custom-grid-pagination')).not.toHaveAttribute('title');
+  });
+
   it('disables First and Prev on the first page', () => {
     render(<Harness rowCount={100} pageSize={10} page={0} />);
     expect(screen.getByLabelText('Go to first page')).toBeDisabled();

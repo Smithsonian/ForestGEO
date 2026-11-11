@@ -127,6 +127,6 @@ describe('POST /api/errors/explorer/query per-site authz', () => {
     const body = await res.json();
     expect(body).toHaveProperty('rows');
     expect(body).toHaveProperty('totalRows');
-    expect(body).toHaveProperty('summary');
+    expect(body).not.toHaveProperty('summary');
   });
 });

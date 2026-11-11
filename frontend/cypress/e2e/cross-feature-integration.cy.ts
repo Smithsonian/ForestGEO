@@ -297,7 +297,8 @@ describe('Cross-Feature Integration', () => {
     cy.contains('[role="row"]', 'TREE101').should('be.visible');
 
     cy.openCensusHubLink('View Errors');
-    cy.wait('@fetchErrorsExplorerRows');
+    cy.wait('@fetchErrorFacets');
+    cy.get('[data-testid="errors-explorer-empty"]').should('contain', 'No unresolved errors in this census.');
     cy.contains('.MuiDataGrid-row', 'Invalid species reference').should('not.exist');
   });
 

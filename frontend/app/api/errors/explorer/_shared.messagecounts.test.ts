@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildErrorExplorerFacets, buildErrorMessageCounts, type RawErrorOccurrenceRow } from './_shared';
+import { buildErrorExplorerFacets, buildErrorMessageCounts, queryErrorExplorer, type RawErrorOccurrenceRow } from './_shared';
 import { DEFAULT_ERROR_EXPLORER_FILTERS } from '@/config/errorsexplorer';
 
 const SCHEMA = 'forestgeo_testsite';
@@ -7,9 +7,11 @@ const PLOT_ID = 1;
 const FIRST_CENSUS_ID = 11;
 const SECOND_CENSUS_ID = 12;
 const SECOND_PARAM_INDEX = 1;
+const QUERY_PAGE_SIZE = 100;
 const RAW_ERRORS_QUERY_MARKER = 'SELECT ms.CoreMeasurementID';
 const DUPLICATE_GROUPS_QUERY_MARKER = 'GROUP_CONCAT(DISTINCT ms.CoreMeasurementID';
 const SAME_BATCH_QUERY_MARKER = 'GROUP_CONCAT(DISTINCT cm.CoreMeasurementID';
+const ACTIVE_COUNT_QUERY_MARKER = 'SELECT COUNT(*) AS n';
 const FALLBACK_INVALID_MESSAGE = 'Measurement is marked invalid but has no unresolved error log entry.';
 const SHRINKAGE_MESSAGE = 'DBH shrank between censuses';
 const MISSING_SPECIES_MESSAGE = 'Species code is not in the species list';
@@ -55,6 +57,7 @@ function recordingConnection() {
     executeQuery: async (sql: string, params: number[]) => {
       executedQueries.push(sql);
       const censusID = params[SECOND_PARAM_INDEX];
+      if (sql.includes(ACTIVE_COUNT_QUERY_MARKER)) return [{ n: 0 }];
       if (sql.includes(DUPLICATE_GROUPS_QUERY_MARKER)) return DUPLICATE_GROUPS_BY_CENSUS[censusID];
       if (sql.includes(SAME_BATCH_QUERY_MARKER)) return SAME_BATCH_GROUPS_BY_CENSUS[censusID];
       if (sql.includes(RAW_ERRORS_QUERY_MARKER)) return RAW_ROWS_BY_CENSUS[censusID];
@@ -78,29 +81,33 @@ describe('buildErrorMessageCounts', () => {
     expect(executedQueries.every(sql => sql.includes(RAW_ERRORS_QUERY_MARKER))).toBe(true);
   });
 
-  it('returns the facets builder’s measurement total and message list even when contradictions are present', async () => {
+  it("matches the View Errors query: each message's count is that message's totalRows, and the total is censusTotals.affectedMeasurements", async () => {
     const censusIDs = [FIRST_CENSUS_ID, SECOND_CENSUS_ID];
-    const facetsConnection = recordingConnection();
-    const countsConnection = recordingConnection();
-
-    const facets = await buildErrorExplorerFacets(facetsConnection.connection, {
+    const counts = await buildErrorMessageCounts(recordingConnection().connection, { schema: SCHEMA, plotID: PLOT_ID, censusIDs });
+    const facets = await buildErrorExplorerFacets(recordingConnection().connection, {
       schema: SCHEMA,
       plotID: PLOT_ID,
       censusID: FIRST_CENSUS_ID,
       censusIDs,
       filters: DEFAULT_ERROR_EXPLORER_FILTERS
     });
-    const counts = await buildErrorMessageCounts(countsConnection.connection, { schema: SCHEMA, plotID: PLOT_ID, censusIDs });
 
-    console.log(
-      '[message counts] facets',
-      JSON.stringify({ total: facets.totalMeasurements, messages: facets.messages, contradictions: facets.contradictionCounts })
-    );
-    console.log('[message counts] counts', JSON.stringify(counts));
-    expect(facets.contradictionCounts.duplicateTagStem, 'the fixture must actually contain a duplicate-tag contradiction').toBeGreaterThan(0);
-    expect(facets.contradictionCounts.sameBatchConflict, 'the fixture must actually contain a same-batch contradiction').toBeGreaterThan(0);
-    expect(counts.totalMeasurements).toBe(facets.totalMeasurements);
-    expect(counts.messages).toEqual(facets.messages);
+    console.log('[message counts] parity', JSON.stringify({ counts, totals: facets.censusTotals }));
+    expect(facets.censusTotals.duplicateTagStem, 'the fixture must actually contain a duplicate-tag contradiction').toBeGreaterThan(0);
+    expect(facets.censusTotals.sameBatchConflict, 'the fixture must actually contain a same-batch contradiction').toBeGreaterThan(0);
+    expect(counts.totalMeasurements).toBe(facets.censusTotals.affectedMeasurements);
+    for (const { value, count } of counts.messages) {
+      const response = await queryErrorExplorer(recordingConnection().connection, {
+        schema: SCHEMA,
+        plotID: PLOT_ID,
+        censusID: FIRST_CENSUS_ID,
+        censusIDs,
+        page: 0,
+        pageSize: QUERY_PAGE_SIZE,
+        filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages: [value] }
+      });
+      expect(response.totalRows, value).toBe(count);
+    }
   });
 
   it('counts each measurement once per message and sorts by count then message', async () => {
