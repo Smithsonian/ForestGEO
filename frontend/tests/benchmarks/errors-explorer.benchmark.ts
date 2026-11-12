@@ -2,7 +2,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import mysql, { type Connection, type Pool, type RowDataPacket } from 'mysql2/promise';
 import { DEFAULT_ERROR_EXPLORER_FILTERS, ERROR_EXPLORER_PRESETS, type ErrorExplorerFilters } from '@/config/errorsexplorer';
 import * as current from '@/app/api/errors/explorer/_shared';
+import { mergeSignatureRows } from '@/app/api/errors/explorer/errorsetcounts';
+import { ERROR_EXPLORER_STATEMENT_LABELS, type ErrorSignatureRow } from '@/app/api/errors/explorer/errorsetsql';
 import * as oracle from '../oracles/errors-explorer-legacy';
+import { classifyStatement, describeCensusScope, lastPageNumber, pastTheEndPageNumber, UNLABELLED_STATEMENT } from '../setup/errorsetstatements';
 import { DEFAULT_TEST_CONFIG, loadSchema } from '../setup/local-db-setup';
 import { runQueryDispatch } from '../setup/runquerydispatch';
 import {
@@ -20,6 +23,7 @@ import {
   sha256,
   waitForSettledInnoDb
 } from './lib/benchmarkharness';
+import { runMembershipProbe, type MembershipProbeRow } from './lib/membershipprobe';
 
 vi.mock('@/auth', () => ({ auth: vi.fn() }));
 vi.mock('@/ailogger', () => ({ default: { info: () => undefined, warn: () => undefined, error: () => undefined } }));
@@ -41,6 +45,13 @@ const BENCH_GROUP_CONCAT_MAX_LEN = 1_048_576;
 const PAGE_SIZE = 25;
 const WARM_UP_CALLS = 1;
 const MEASURED_CALLS = 5;
+const STATEMENT_TEXT_LIMIT = 9;
+const HISTOGRAM_WITH_FLAGS_LABEL = ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags;
+const HISTOGRAM_WITHOUT_FLAGS_LABEL = ERROR_EXPLORER_STATEMENT_LABELS.histogramWithoutFlags;
+const ORACLE_DUPLICATE_GROUPS_CLASS = 'duplicate-groups';
+const ORACLE_SAME_BATCH_GROUPS_CLASS = 'same-batch-groups';
+const MEASURED_PLOT_ID = 1;
+const MEASURED_CENSUS_IDS = [2];
 const TEST_TIMEOUT_MS = 45 * 60 * 1000;
 const HOOK_TIMEOUT_MS = 5 * 60 * 1000;
 const SEEDED_TABLES = ['census', 'sitespecificvalidations', 'measurement_errors', 'coremeasurements', 'measurementssummary', 'measurement_error_log'];
@@ -78,12 +89,32 @@ function config() {
   };
 }
 
-type BenchStatement = { classification: string; sql: string; params: unknown[]; ms: number; rows: number; jsonBytes: number };
-function classifyStatement(sql: string): string {
-  if (/measurement_error_log mel/i.test(sql)) return 'raw-rows';
-  if (/GROUP_CONCAT\(DISTINCT ms\./i.test(sql)) return 'duplicate-groups';
-  if (/GROUP_CONCAT\(DISTINCT cm\./i.test(sql)) return 'same-batch-groups';
-  return 'unlabelled';
+type BenchStatement = {
+  classification: string;
+  sql: string;
+  params: unknown[];
+  ms: number;
+  rows: number;
+  jsonBytes: number;
+  /** Kept for the signature histograms only, so their chunks can be merged. */
+  histogramRows?: ErrorSignatureRow[];
+};
+type BenchCall = { wallMs: number; hash: string; statements: BenchStatement[] };
+const isHistogram = (classification: string) => classification === HISTOGRAM_WITH_FLAGS_LABEL || classification === HISTOGRAM_WITHOUT_FLAGS_LABEL;
+
+function distinctSignatureCount(statements: readonly BenchStatement[], classification: string): number | null {
+  const chunks = statements.filter(statement => statement.classification === classification).map(statement => statement.histogramRows ?? []);
+  return chunks.length > 0 ? mergeSignatureRows(chunks).length : null;
+}
+function statementP50Ms(calls: readonly BenchCall[], classification: string): number | null {
+  const perCallMs = calls
+    .map(call => call.statements.filter(statement => statement.classification === classification))
+    .filter(matching => matching.length > 0)
+    .map(matching => matching.reduce((sum, statement) => sum + statement.ms, 0));
+  return perCallMs.length > 0 ? median(perCallMs) : null;
+}
+function difference(minuend: number | null, subtrahend: number | null): number | null {
+  return minuend === null || subtrahend === null ? null : minuend - subtrahend;
 }
 function createBenchExecutor(pool: Pool) {
   const statements: BenchStatement[] = [];
@@ -92,13 +123,15 @@ function createBenchExecutor(pool: Pool) {
     executeQuery: async (sql: string, params: unknown[] = []) => {
       const started = performance.now();
       const rows = (await runQueryDispatch(pool, sql, params)) as unknown[];
+      const classification = classifyStatement(sql);
       statements.push({
-        classification: classifyStatement(sql),
+        classification,
         sql,
         params,
         ms: performance.now() - started,
         rows: rows.length,
-        jsonBytes: Buffer.byteLength(JSON.stringify(rows))
+        jsonBytes: Buffer.byteLength(JSON.stringify(rows)),
+        ...(isHistogram(classification) && { histogramRows: rows as ErrorSignatureRow[] })
       });
       return rows;
     }
@@ -276,7 +309,17 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
       await seed(work, options);
       await assertNoOtherActiveSession(session, session.setupConnection as Connection);
       const [[server]] = await work.query<RowDataPacket[]>('SELECT VERSION() AS version, @@innodb_buffer_pool_size AS bufferPoolBytes');
-      const request = { schema: SCHEMA, plotID: 1, censusID: 2, censusIDs: [2], page: 0, pageSize: PAGE_SIZE, filters: DEFAULT_ERROR_EXPLORER_FILTERS };
+      const request = {
+        schema: SCHEMA,
+        plotID: MEASURED_PLOT_ID,
+        censusID: MEASURED_CENSUS_IDS[0],
+        censusIDs: MEASURED_CENSUS_IDS,
+        page: 0,
+        pageSize: PAGE_SIZE,
+        filters: DEFAULT_ERROR_EXPLORER_FILTERS
+      };
+      const censusScope = describeCensusScope(MEASURED_CENSUS_IDS);
+      console.log(`${LOG_PREFIX} scope: ${censusScope.censuses} censuses, ${censusScope.censusChunks} census chunks`);
       const setupExecutor = createBenchExecutor(benchPool);
       const [page, facets] = await Promise.all([
         ORACLE_ARM.queryErrorExplorer(setupExecutor, request),
@@ -298,7 +341,8 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
       const scenarios: Record<string, (arm: ExplorerArm, executor: BenchExecutor) => Promise<unknown>> = {
         pageLoad: (arm, executor) => Promise.all([arm.queryErrorExplorer(executor, request), arm.buildErrorExplorerFacets(executor, request)]),
         queryPage0: (arm, executor) => arm.queryErrorExplorer(executor, request),
-        queryLastPage: (arm, executor) => arm.queryErrorExplorer(executor, { ...request, page: Math.max(0, Math.ceil(page.totalRows / PAGE_SIZE) - 1) }),
+        queryLastPage: (arm, executor) => arm.queryErrorExplorer(executor, { ...request, page: lastPageNumber(page.totalRows, PAGE_SIZE) }),
+        queryPastTheEnd: (arm, executor) => arm.queryErrorExplorer(executor, { ...request, page: pastTheEndPageNumber(page.totalRows, PAGE_SIZE) }),
         queryValidationOnly: (arm, executor) => arm.queryErrorExplorer(executor, { ...request, filters: preset('validation_only') }),
         queryContradictions: (arm, executor) => arm.queryErrorExplorer(executor, { ...request, filters: contradictionFilters }),
         queryMostCommonMessage: (arm, executor) =>
@@ -310,14 +354,16 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
         detailsFirstRow: (arm, executor) => arm.buildErrorExplorerDetails(executor, request, firstID),
         detailsFirstContradictionRow: (arm, executor) => arm.buildErrorExplorerDetails(executor, request, contradictionID),
         messageCounts: (arm, executor) => arm.buildErrorMessageCounts(executor, request),
-        exportDefault: (arm, executor) => arm.exportRows(executor, SCHEMA, 1, [2], request.filters)
+        exportDefault: (arm, executor) => arm.exportRows(executor, SCHEMA, MEASURED_PLOT_ID, MEASURED_CENSUS_IDS, request.filters)
       };
       const arms = [ORACLE_ARM, options.arms === 'oracle-oracle' ? ORACLE_ARM : CURRENT_ARM];
       const explained = new Set<string>();
       const results: Record<string, unknown> = {};
+      const callsByScenario: Record<string, BenchCall[][]> = {};
       const resultRows: string[] = [];
       for (const [name, scenario] of Object.entries(scenarios)) {
-        const calls: Array<Array<{ wallMs: number; hash: string; statements: BenchStatement[] }>> = [[], []];
+        const calls: BenchCall[][] = [[], []];
+        callsByScenario[name] = calls;
         for (let round = -WARM_UP_CALLS; round < MEASURED_CALLS; round++) {
           for (const [index, arm] of arms.entries()) {
             const executor = createBenchExecutor(benchPool);
@@ -332,7 +378,7 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
               for (const statement of call.statements) {
                 if (!explained.has(statement.sql)) {
                   explained.add(statement.sql);
-                  const [plan] = await work.query<RowDataPacket[]>(`EXPLAIN FORMAT=TREE ${statement.sql}`, statement.params);
+                  const plan = (await runQueryDispatch(work, `EXPLAIN FORMAT=TREE ${statement.sql}`, statement.params)) as RowDataPacket[];
                   console.log(`${LOG_PREFIX} EXPLAIN ${statement.classification}\n${statement.sql}\n${String(plan[0].EXPLAIN)}`);
                 }
               }
@@ -351,7 +397,9 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
             maxMs: Math.max(...times),
             rows: group.map(call => call.statements.reduce((sum, statement) => sum + statement.rows, 0)),
             jsonBytes: group.map(call => call.statements.reduce((sum, statement) => sum + statement.jsonBytes, 0)),
-            signatureCount: null,
+            signatureCount:
+              distinctSignatureCount(group[0].statements, HISTOGRAM_WITH_FLAGS_LABEL) ??
+              distinctSignatureCount(group[0].statements, HISTOGRAM_WITHOUT_FLAGS_LABEL),
             sha256: group[0].hash
           };
         });
@@ -360,11 +408,58 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
         const formatArm = (arm: (typeof armResults)[number]) => `${arm.p50Ms.toFixed(2)} / ${arm.minMs.toFixed(2)} / ${arm.maxMs.toFixed(2)}`;
         resultRows.push(`| ${name} | ${formatArm(armResults[0])} | ${formatArm(armResults[1])} | ${ratio.toFixed(2)} |`);
       }
+      const allStatements = Object.values(callsByScenario).flatMap(groups => groups.flatMap(group => group.flatMap(call => call.statements)));
+      const unlabelledStatements = allStatements.filter(statement => statement.classification === UNLABELLED_STATEMENT).length;
+      const currentStatementTexts = new Set(
+        Object.values(callsByScenario).flatMap(groups => groups[1].flatMap(call => call.statements.map(statement => statement.sql)))
+      ).size;
+      console.log(`${LOG_PREFIX} unlabelled statements: ${unlabelledStatements}; second-arm distinct statement texts: ${currentStatementTexts}`);
+      expect(unlabelledStatements, 'every recorded statement carries an explorer label or matches an oracle shape').toBe(0);
+      if (options.arms === 'oracle-current')
+        expect(currentStatementTexts, 'the new implementation sends at most nine distinct texts').toBeLessThanOrEqual(STATEMENT_TEXT_LIMIT);
+
+      const facetsDefaultCalls = callsByScenario.facetsDefault;
+      const messageCountsCalls = callsByScenario.messageCounts;
+      const histogramWithFlagsP50Ms = statementP50Ms(facetsDefaultCalls[1], HISTOGRAM_WITH_FLAGS_LABEL);
+      const histogramWithoutFlagsP50Ms = statementP50Ms(messageCountsCalls[1], HISTOGRAM_WITHOUT_FLAGS_LABEL);
+      const oracleDuplicateGroupsP50Ms = statementP50Ms(facetsDefaultCalls[0], ORACLE_DUPLICATE_GROUPS_CLASS);
+      const oracleSameBatchGroupsP50Ms = statementP50Ms(facetsDefaultCalls[0], ORACLE_SAME_BATCH_GROUPS_CLASS);
+      const m2 = {
+        histogramWithFlagsP50Ms,
+        histogramWithoutFlagsP50Ms,
+        m2Delta: difference(histogramWithFlagsP50Ms, histogramWithoutFlagsP50Ms),
+        oracleGroupsP50:
+          oracleDuplicateGroupsP50Ms === null || oracleSameBatchGroupsP50Ms === null ? null : oracleDuplicateGroupsP50Ms + oracleSameBatchGroupsP50Ms
+      };
+      console.log(`${LOG_PREFIX} m2 inputs ${JSON.stringify(m2)}`);
+
+      const m1 = await runMembershipProbe(
+        { schema: SCHEMA, plotID: MEASURED_PLOT_ID, censusIDs: MEASURED_CENSUS_IDS },
+        async statement => (await runQueryDispatch(benchPool, statement.sql, statement.params)) as MembershipProbeRow[],
+        { measuredRuns: MEASURED_CALLS }
+      );
+      console.log(`${LOG_PREFIX} m1Probe ${JSON.stringify(m1)}`);
+
+      const distinctSignatures = {
+        withFlags: distinctSignatureCount(facetsDefaultCalls[1][0]?.statements ?? [], HISTOGRAM_WITH_FLAGS_LABEL),
+        withoutFlags: distinctSignatureCount(messageCountsCalls[1][0]?.statements ?? [], HISTOGRAM_WITHOUT_FLAGS_LABEL)
+      };
       console.log(
         ['| Scenario | First p50 / min / max (ms) | Second p50 / min / max (ms) | Second / first |', '|---|---:|---:|---:|', ...resultRows].join('\n')
       );
       console.log(
-        `${SUMMARY_LINE_PREFIX} ${JSON.stringify({ ...options, serverVersion: String(server.version), bufferPoolBytes: Number(server.bufferPoolBytes), scenarios: results })}`
+        `${SUMMARY_LINE_PREFIX} ${JSON.stringify({
+          ...options,
+          serverVersion: String(server.version),
+          bufferPoolBytes: Number(server.bufferPoolBytes),
+          scopes: [{ name: 'measured', plotID: MEASURED_PLOT_ID, censusIDs: MEASURED_CENSUS_IDS, ...censusScope }],
+          unlabelledStatements,
+          secondArmStatementTexts: currentStatementTexts,
+          distinctSignatures,
+          m1,
+          m2,
+          scenarios: results
+        })}`
       );
     },
     TEST_TIMEOUT_MS
