@@ -52,6 +52,9 @@ import {
 
 const EQUIVALENCE_DATABASE = `${DEFAULT_TEST_CONFIG.database}_errequiv`;
 const SEED_TEST_TIMEOUT_MS = 10 * 60 * 1000;
+const MILLISECONDS_PER_MINUTE = 60 * 1000;
+const EQUIVALENCE_FILE_RUNTIME_LIMIT_MINUTES = 35;
+const EQUIVALENCE_FILE_RUNTIME_LIMIT_MS = EQUIVALENCE_FILE_RUNTIME_LIMIT_MINUTES * MILLISECONDS_PER_MINUTE;
 const PAGE_SIZES: readonly number[] = [10, 25, 100];
 const IRREGULAR_PAGES: readonly number[] = [NaN, 1.5, Infinity];
 const DERIVATION_PAGE_SIZE = 25;
@@ -226,6 +229,56 @@ const GRID_COMBINATIONS: ScopedFilters[] = [
   ...PLOT_SCOPES.flatMap(scope => PRESET_FILTERS.map(named => ({ scope, named })))
 ];
 const PRESET_COMBINATIONS: ScopedFilters[] = [...SCOPES, ...PLOT_SCOPES].flatMap(scope => PRESET_FILTERS.map(named => ({ scope, named })));
+
+/** A statement that only reads: optional leading comments, then WITH or SELECT. Anything else may change data and so empties the oracle's read cache. */
+const READ_STATEMENT_PATTERN = /^\s*(?:\/\*[\s\S]*?\*\/\s*)*(?:WITH|SELECT)\b/i;
+
+/** structuredClone turns a Buffer (the BIT column IsValidated) into a plain object, so the copy is made by hand. */
+function copyMySQLValue(value: unknown): unknown {
+  if (Buffer.isBuffer(value)) return Buffer.from(value);
+  if (value instanceof Date) return new Date(value.getTime());
+  if (Array.isArray(value)) return value.map(copyMySQLValue);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, member]) => [key, copyMySQLValue(member)]));
+  }
+  return value;
+}
+
+interface OracleReadCache {
+  hits: number;
+  misses: number;
+  clear(): void;
+  read(sql: string, params: unknown[] | undefined, runOnMySQL: () => Promise<unknown>): Promise<unknown>;
+}
+
+/**
+ * The oracle re-reads the same error set for every filter, scope and search value. Within one seed the fixture does not change,
+ * so identical (sql, params) reads return a copy of the stored rows. Only the oracle's executor uses it; production always goes to MySQL.
+ */
+function createOracleReadCache(): OracleReadCache {
+  const rowsByStatement = new Map<string, unknown>();
+  const cache: OracleReadCache = {
+    hits: 0,
+    misses: 0,
+    clear: () => rowsByStatement.clear(),
+    read: async (sql, params, runOnMySQL) => {
+      if (!READ_STATEMENT_PATTERN.test(sql)) {
+        rowsByStatement.clear();
+        return runOnMySQL();
+      }
+      const key = JSON.stringify([sql, params ?? []]);
+      if (rowsByStatement.has(key)) {
+        cache.hits++;
+        return copyMySQLValue(rowsByStatement.get(key));
+      }
+      cache.misses++;
+      const rows = await runOnMySQL();
+      rowsByStatement.set(key, copyMySQLValue(rows));
+      return rows;
+    }
+  };
+  return cache;
+}
 
 function filterStringsOf(filters: ErrorExplorerFilters): string[] {
   const messages = ([] as string[]).concat(filters.exactMessages);
@@ -491,14 +544,24 @@ describe('errors explorer: frozen oracle against production on generated data', 
   const fixtureSession = createFixtureDatabaseSession(EQUIVALENCE_DATABASE);
   const productionStatementLabelByText = new Map<string, string | null>();
 
+  let fileStartedAt = 0;
+
   beforeAll(async () => {
     assertLocalOrRefuse();
+    fileStartedAt = performance.now();
     fixtureDatabase = await fixtureSession.open();
   }, FIXTURE_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     fixtureDatabase = null;
     await fixtureSession.close();
+    const elapsedMs = performance.now() - fileStartedAt;
+    console.log(`[equivalence] file seconds=${(elapsedMs / 1000).toFixed(1)} limit seconds=${EQUIVALENCE_FILE_RUNTIME_LIMIT_MS / 1000}`);
+    if (elapsedMs > EQUIVALENCE_FILE_RUNTIME_LIMIT_MS) {
+      throw new Error(
+        `The equivalence file took ${(elapsedMs / MILLISECONDS_PER_MINUTE).toFixed(1)} minutes; the limit is ${EQUIVALENCE_FILE_RUNTIME_LIMIT_MINUTES}`
+      );
+    }
   }, FIXTURE_HOOK_TIMEOUT_MS);
 
   describe.each(resolveEquivalenceSeeds())('seed %i', seed => {
@@ -520,7 +583,10 @@ describe('errors explorer: frozen oracle against production on generated data', 
         return runQueryDispatch(explorerConnection(), sql, params);
       }
     });
-    const oracleExecutor = (): OracleExecutor => countingExecutor();
+    const oracleReadCache = createOracleReadCache();
+    const oracleExecutor = (): OracleExecutor => ({
+      executeQuery: (sql: string, params?: unknown[]) => oracleReadCache.read(sql, params, () => countingExecutor().executeQuery(sql, params))
+    });
     const productionExecutor = (): ProductionExecutor => countingExecutor() as unknown as ProductionExecutor;
     const witnessIDs = () => new Set(fixture.witnessRowIDs);
 
@@ -648,10 +714,14 @@ describe('errors explorer: frozen oracle against production on generated data', 
       wholeListCache.clear();
       axisMaxima.clear();
       noLogTotals.clear();
+      oracleReadCache.clear();
       maxPageStatementRowsPerSlot = 0;
       maxMemberGroupRowsPerPageRow = 0;
       sqlPathQueryCount = 0;
       await replaceFixture((fixtureDatabase as FixtureDatabase).setupConnection, fixture);
+      oracleReadCache.clear();
+      oracleReadCache.hits = 0;
+      oracleReadCache.misses = 0;
       console.log(
         `[equivalence] seed=${seed} measurements=${fixture.measurements.length} logs=${fixture.logs.length} witness=${fixture.witnessRowIDs.join(',')}`
       );
@@ -1037,7 +1107,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
       productionStatementLabelByText.forEach(label => textsByLabel.set(label, (textsByLabel.get(label) ?? 0) + 1));
       console.log(
         `[statements] seed=${seed} distinctTexts=${productionStatementLabelByText.size} textsByLabel=${JSON.stringify(Object.fromEntries(textsByLabel))} ` +
-          `sqlPathQueries=${sqlPathQueryCount} maxPageStatementRowsPerSlot=${maxPageStatementRowsPerSlot} maxMemberGroupRowsPerPageRow=${maxMemberGroupRowsPerPageRow}`
+          `oracleCacheHits=${oracleReadCache.hits} oracleCacheMisses=${oracleReadCache.misses} sqlPathQueries=${sqlPathQueryCount} maxPageStatementRowsPerSlot=${maxPageStatementRowsPerSlot} maxMemberGroupRowsPerPageRow=${maxMemberGroupRowsPerPageRow}`
       );
       expect(sqlPathQueryCount, 'the query test must have run before this one').toBeGreaterThan(0);
       expect(productionStatementLabelByText.size, 'distinct statement texts over the whole run').toBeLessThanOrEqual(STATEMENT_SHAPE_COUNT);
@@ -1056,6 +1126,51 @@ describe('errors explorer: frozen oracle against production on generated data', 
       expect(axisMaxima.get(MATCHES_NOTHING_AXIS), 'the matches-nothing control must stay empty').toBe(0);
       expect(axisMaxima.get(NO_LOG_AXIS), 'the no-log fallback message needs a positive oracle count').toBeGreaterThan(0);
       expect(emptyAxes).toEqual([]);
+    });
+  });
+
+  describe('oracle read cache can fail', () => {
+    const SELECT_STATEMENT = '/* label */ SELECT 1 FROM t WHERE a IN (?)';
+    const countingRun = (rows: unknown, runs: { count: number }) => async () => {
+      runs.count++;
+      return rows;
+    };
+
+    it('returns a copy for an identical read, and reads again for the same text with other params', async () => {
+      const cache = createOracleReadCache();
+      const runs = { count: 0 };
+      const rows = [{ id: 1, when: new Date(0), isValidated: Buffer.from([1]) }];
+      const first = (await cache.read(SELECT_STATEMENT, [1], countingRun(rows, runs))) as typeof rows;
+      const second = (await cache.read(SELECT_STATEMENT, [1], countingRun(rows, runs))) as typeof rows;
+      const otherParams = await cache.read(SELECT_STATEMENT, [2], countingRun(rows, runs));
+      console.log(`[oracle cache] runs=${runs.count} hits=${cache.hits} misses=${cache.misses}`);
+      expect(runs.count, 'MySQL reads: one per distinct (sql, params)').toBe(2);
+      expect({ hits: cache.hits, misses: cache.misses }).toEqual({ hits: 1, misses: 2 });
+      expect(second).toEqual(first);
+      expect(Buffer.isBuffer(second[0].isValidated), 'a BIT column stays a Buffer in the copy').toBe(true);
+      expect(second[0].when).toBeInstanceOf(Date);
+      expect(second, 'a cache hit is a copy, so the oracle cannot change what the next read sees').not.toBe(first);
+      (second[0] as { id: number }).id = 99;
+      expect(((await cache.read(SELECT_STATEMENT, [1], countingRun(rows, runs))) as typeof rows)[0].id).toBe(1);
+      expect(otherParams).toEqual(rows);
+    });
+
+    it('is emptied by a statement that is not a read', async () => {
+      const cache = createOracleReadCache();
+      const runs = { count: 0 };
+      await cache.read(SELECT_STATEMENT, [1], countingRun([], runs));
+      await cache.read('UPDATE t SET a = 1', [], countingRun([], runs));
+      await cache.read(SELECT_STATEMENT, [1], countingRun([], runs));
+      expect(runs.count, 'the read after the write goes to MySQL again').toBe(3);
+    });
+
+    it('is emptied by clear()', async () => {
+      const cache = createOracleReadCache();
+      const runs = { count: 0 };
+      await cache.read(SELECT_STATEMENT, [1], countingRun([], runs));
+      cache.clear();
+      await cache.read(SELECT_STATEMENT, [1], countingRun([], runs));
+      expect(runs.count).toBe(2);
     });
   });
 
