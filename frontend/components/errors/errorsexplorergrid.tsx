@@ -40,7 +40,7 @@ import {
   type ErrorTypeIdentity
 } from '@/config/errorsexplorer';
 import type { OrgCensus } from '@/lib/db/definitions/timekeeping';
-import { buildErrorsExplorerColumns, FAULTED_CELL_CLASS, resolvePriorDbhHeader } from './errorsexplorercolumns';
+import { buildErrorsExplorerColumns, FAULTED_CELL_CLASS, GROUP_EDIT_REVEAL_FIELDS, resolvePriorDbhHeader } from './errorsexplorercolumns';
 
 // Wide grids column-virtualize off-screen cells out of the DOM, hiding them from Cypress; e2e-only escape hatch.
 const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
@@ -48,6 +48,7 @@ const EXPOSE_GRID_API_FOR_TESTS = process.env.NODE_ENV === 'test';
 const INFINITE_MODE = 'infinite';
 const PAGINATED_MODE = 'paginated';
 const RESIZED_COLUMN_FLEX = 0;
+const EDIT_REVEAL_VISIBILITY: GridColumnVisibilityModel = Object.fromEntries(GROUP_EDIT_REVEAL_FIELDS.map(field => [field, true]));
 
 interface GridPaginationExtras {
   disabled: boolean;
@@ -173,6 +174,12 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
     rowModesModelRef.current = model;
     setRowModesModelState(model);
   }, []);
+  const hasRowInEditMode = Object.values(rowModesModel).some(entry => entry.mode === GridRowModes.Edit);
+  const revealsEditableColumns = isGroup && hasRowInEditMode;
+  const columnVisibilityModel = useMemo(
+    () => (revealsEditableColumns ? { ...models.columnVisibilityModel, ...EDIT_REVEAL_VISIBILITY } : models.columnVisibilityModel),
+    [models.columnVisibilityModel, revealsEditableColumns]
+  );
   const displayedRowsRef = useRef(displayedRows);
   displayedRowsRef.current = displayedRows;
   const findRow = useCallback((rowID: number) => displayedRowsRef.current.find(row => Number(row.id) === rowID), []);
@@ -421,8 +428,11 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
             onFilterModelChange={handleFilterModelChange}
             disableColumnSorting={locked}
             disableColumnFilter={locked}
-            columnVisibilityModel={models.columnVisibilityModel}
-            onColumnVisibilityModelChange={model => onModelsChange({ ...models, columnVisibilityModel: model })}
+            columnVisibilityModel={columnVisibilityModel}
+            onColumnVisibilityModelChange={model => {
+              // While the reveal is on, MUI reports the merged model; saving it would make the reveal permanent.
+              if (!revealsEditableColumns) onModelsChange({ ...models, columnVisibilityModel: model });
+            }}
             editMode="row"
             rowModesModel={rowModesModel}
             onRowModesModelChange={applyRowModes}
