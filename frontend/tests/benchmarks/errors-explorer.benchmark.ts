@@ -6,6 +6,7 @@ import { mergeSignatureRows } from '@/app/api/errors/explorer/errorsetcounts';
 import { ERROR_EXPLORER_STATEMENT_LABELS, type ErrorSignatureRow } from '@/app/api/errors/explorer/errorsetsql';
 import * as oracle from '../oracles/errors-explorer-legacy';
 import { classifyStatement, describeCensusScope, lastPageNumber, pastTheEndPageNumber, UNLABELLED_STATEMENT } from '../setup/errorsetstatements';
+import { EQUIVALENCE_GROUP_CONCAT_MAX_LEN } from '../integration/helpers/errorsexplorerfixtures';
 import { DEFAULT_TEST_CONFIG, loadSchema } from '../setup/local-db-setup';
 import { runQueryDispatch } from '../setup/runquerydispatch';
 import {
@@ -41,7 +42,6 @@ const DEFAULT_ROWS = 466_500;
 const MIN_ROWS = 10_000;
 const ROW_MULTIPLE = 500;
 const POOL_SIZE = 4;
-const BENCH_GROUP_CONCAT_MAX_LEN = 1_048_576;
 const PAGE_SIZE = 25;
 const WARM_UP_CALLS = 1;
 const MEASURED_CALLS = 5;
@@ -283,13 +283,13 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
     pool = mysql.createPool({ ...DEFAULT_TEST_CONFIG, database: SCHEMA, connectionLimit: POOL_SIZE, charset: CONNECTION_CHARSET, timezone: 'Z' });
     pool.pool.on('connection', connection => {
       poolThreadIds.add(connection.threadId);
-      connection.query(`SET SESSION group_concat_max_len = ${BENCH_GROUP_CONCAT_MAX_LEN}`);
+      connection.query(`SET SESSION group_concat_max_len = ${EQUIVALENCE_GROUP_CONCAT_MAX_LEN}`);
     });
     const connections = await Promise.all(Array.from({ length: POOL_SIZE }, () => pool!.getConnection()));
     try {
       for (const connection of connections) {
         const [[row]] = await connection.query<RowDataPacket[]>('SELECT @@session.group_concat_max_len AS value');
-        if (Number(row.value) !== BENCH_GROUP_CONCAT_MAX_LEN) throw new Error(`Unexpected group_concat_max_len on thread ${connection.threadId}`);
+        if (Number(row.value) !== EQUIVALENCE_GROUP_CONCAT_MAX_LEN) throw new Error(`Unexpected group_concat_max_len on thread ${connection.threadId}`);
       }
     } finally {
       connections.forEach(connection => connection.release());
