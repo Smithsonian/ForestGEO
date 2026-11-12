@@ -63,7 +63,13 @@ import PlotCardModal from '@/components/client/modals/plotcardmodal';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import CensusCreationModal, { CensusCreationDetails } from '@/components/client/modals/censuscreationmodal';
 import CensusDatesModal from '@/components/client/modals/censusdatesmodal';
-import { CENSUS_DATES_REFRESH_FAILURE_MESSAGE, CENSUS_DATES_SAVE_FAILURE_MESSAGE, type CensusDates, getCensusWindow } from '@/config/censuswindow';
+import {
+  CENSUS_CREATED_REFRESH_FAILURE_MESSAGE,
+  CENSUS_DATES_REFRESH_FAILURE_MESSAGE,
+  CENSUS_DATES_SAVE_FAILURE_MESSAGE,
+  type CensusDates,
+  getCensusWindow
+} from '@/config/censuswindow';
 import { toCalendarDayString } from '@/config/dateformats';
 import { Plot } from '@/lib/db/definitions/zones';
 import { PlotWithCensusCount } from '@/components/dashboard/plotsoverview';
@@ -557,9 +563,14 @@ export default function DashboardPage() {
           ailogger.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
         }
 
-        // Refresh the census list to show the new census
-        await refreshCensusList();
+        // The census and its rollover have committed; a refresh failure must not read as a failed create.
         setOpenCreateCensusModal(false);
+        try {
+          await refreshCensusList();
+        } catch (refreshError) {
+          ailogger.error('Census created but census list refresh failed', refreshError instanceof Error ? refreshError : undefined);
+          setError(CENSUS_CREATED_REFRESH_FAILURE_MESSAGE);
+        }
 
         // Ensure loading shows for at least 750ms for visual feedback
         const elapsed = Date.now() - startTime;

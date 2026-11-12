@@ -126,6 +126,7 @@ export const CENSUS_END_BEFORE_START_MESSAGE = 'End date cannot be before the st
 export const CENSUS_INVALID_DATE_MESSAGE = 'Census dates must be valid YYYY-MM-DD dates between years 1000 and 9999.';
 export const CENSUS_DATES_SAVE_FAILURE_MESSAGE = 'Failed to save the census dates. Please try again.';
 export const CENSUS_DATES_REFRESH_FAILURE_MESSAGE = 'Census dates saved, but refreshing the census list failed. Reload the page to see the new dates.';
+export const CENSUS_CREATED_REFRESH_FAILURE_MESSAGE = 'Census created, but refreshing the census list failed. Reload the page to see it.';
 
 /** True when both days are set and the end day falls before the start day. */
 export function isCensusEndBeforeStart(start: CalendarDayInput, end: CalendarDayInput): boolean {
