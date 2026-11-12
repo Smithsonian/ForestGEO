@@ -632,6 +632,7 @@ export const VIEW_ERRORS_TEXT = {
   clearFilters: 'Clear filters',
   totalsLoadFailed: "Couldn't load the census totals.",
   totalsStale: 'These totals may be out of date.',
+  groupsUnavailable: 'The error totals could not be loaded, so the rows are shown without grouping.',
   rowsLoadFailed: "Couldn't load these rows.",
   rowsStale: DETAILS_SHEET_TEXT.rowsStale,
   retry: DETAILS_SHEET_TEXT.retry,

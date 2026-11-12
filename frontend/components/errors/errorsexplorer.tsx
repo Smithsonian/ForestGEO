@@ -457,8 +457,10 @@ export default function ErrorsExplorer() {
   const sheetStatus: ErrorRowDetailsStatus = details.isStale ? 'stale' : details.status === 'error' ? 'error' : details.data ? 'ready' : 'loading';
   const panelRow = details.data?.row ? toDetailsPanelRow(details.data.row) : (sheet?.row ?? null);
   const censusHasNoErrors = totals !== null && totals.affectedMeasurements === 0;
-  const showsGroupEmptyState = groupMode === 'byType' && facets.status === 'ready' && errorTypes.length === 0;
-  const showsFlatEmptyState = groupMode === 'none' && view.flatTotalRows === 0;
+  const groupsUnavailable = groupMode === 'byType' && facets.status === 'error' && !facets.data;
+  const effectiveGroupMode: ErrorsExplorerGroupMode = groupsUnavailable ? 'none' : groupMode;
+  const showsGroupEmptyState = effectiveGroupMode === 'byType' && facets.status === 'ready' && errorTypes.length === 0;
+  const showsFlatEmptyState = effectiveGroupMode === 'none' && view.flatTotalRows === 0;
 
   const factsLine = totals ? formatViewErrorsFactsLine(totals.affectedMeasurements, totals.activeMeasurements, totals.errorTypeCount) : null;
 
@@ -560,7 +562,13 @@ export default function ErrorsExplorer() {
         </Stack>
       )}
 
-      {groupMode === 'byType' && !showsGroupEmptyState && facets.data && (
+      {groupsUnavailable && (
+        <Typography level="body-sm" role="status">
+          {VIEW_ERRORS_TEXT.groupsUnavailable}
+        </Typography>
+      )}
+
+      {effectiveGroupMode === 'byType' && !showsGroupEmptyState && facets.data && (
         <ErrorTypeGroupList
           errorTypes={errorTypes}
           exactMessages={filters.exactMessages}
@@ -596,9 +604,11 @@ export default function ErrorsExplorer() {
         />
       )}
 
-      {groupMode === 'none' && <FilteredToChip exactMessages={filters.exactMessages} onClear={clearExactMessages} clearDisabledReason={pageLockReason} />}
+      {effectiveGroupMode === 'none' && (
+        <FilteredToChip exactMessages={filters.exactMessages} onClear={clearExactMessages} clearDisabledReason={pageLockReason} />
+      )}
 
-      {groupMode === 'none' && (
+      {effectiveGroupMode === 'none' && (
         <ErrorsExplorerGrid
           key={`${readScopeKey}::${FLAT_GRID_KEY}`}
           {...gridProps}

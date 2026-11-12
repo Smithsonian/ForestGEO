@@ -1161,6 +1161,40 @@ describe('Per-unit load state', () => {
   });
 });
 
+describe('When the totals call fails', () => {
+  it('shows the rows ungrouped with a notice, then restores the groups once the totals load', async () => {
+    let facetsShouldFail = true;
+    const { network } = await mountPage(
+      defaultRoutes({
+        facets: () =>
+          facetsShouldFail
+            ? jsonResponse({ error: 'Unable to load the error totals' }, 500)
+            : jsonResponse(facetsResponse([VALIDATION_FACET], { affectedMeasurements: 1 }))
+      }),
+      { awaitGroupGrid: false }
+    );
+
+    expect(await screen.findByText(VIEW_ERRORS_TEXT.groupsUnavailable)).toBeInTheDocument();
+    await waitFor(() => expect(requireGrid(FLAT_LABEL).rows.map(row => Number(row.id))).toEqual([101, 102]));
+    const flatQuery = network.bodiesFor(ROUTES.query).at(-1);
+    console.log(`[view errors] fallback query body: ${JSON.stringify(flatQuery)}`);
+    expect(flatQuery).not.toHaveProperty('errorType');
+    expect(capturedGrids.has(GROUP_LABEL), 'no group grid without the totals').toBe(false);
+    expect(screen.getByRole('combobox', { name: VIEW_ERRORS_TEXT.groupRowsLabel }), "the user's grouping choice is kept").not.toHaveTextContent(
+      VIEW_ERRORS_TEXT.noGrouping
+    );
+
+    const totalsAlert = screen.getByText(VIEW_ERRORS_TEXT.totalsLoadFailed).closest<HTMLElement>('[role="alert"]');
+    if (!totalsAlert) throw new Error('The totals tiles show no load-failed alert to retry from');
+    facetsShouldFail = false;
+    await userEvent.click(within(totalsAlert).getByRole('button', { name: VIEW_ERRORS_TEXT.retry }));
+    await waitFor(() => expect(capturedGrids.get(GROUP_LABEL)?.rows.length, 'the group grid is back with its rows').toBeGreaterThan(0));
+    console.log(`[view errors] queries after the totals recovered: ${JSON.stringify(network.bodiesFor(ROUTES.query).map(body => body?.errorType ?? null))}`);
+    expect(screen.queryByText(VIEW_ERRORS_TEXT.groupsUnavailable)).not.toBeInTheDocument();
+    expect(network.bodiesFor(ROUTES.query).at(-1)?.errorType).toMatchObject({ code: VALIDATION_FACET.code });
+  });
+});
+
 describe('Obsolete responses', () => {
   it('keeps the newer search facets when the older response arrives last', async () => {
     const olderFacets = deferred<Response>();
