@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -11,7 +12,14 @@ import {
   type ErrorExplorerSource
 } from '@/config/errorsexplorer';
 import * as production from '@/app/api/errors/explorer/_shared';
-import { ERROR_EXPLORER_STATEMENT_LABELS, NO_LOG_ERROR_CODE, NO_LOG_ERROR_MESSAGE, NO_LOG_ERROR_SOURCE } from '@/app/api/errors/explorer/errorsetsql';
+import { toSliceBounds } from '@/app/api/errors/explorer/errorsetcounts';
+import {
+  CENSUS_LIST_SIZE,
+  ERROR_EXPLORER_STATEMENT_LABELS,
+  NO_LOG_ERROR_CODE,
+  NO_LOG_ERROR_MESSAGE,
+  NO_LOG_ERROR_SOURCE
+} from '@/app/api/errors/explorer/errorsetsql';
 import * as oracle from '../oracles/errors-explorer-legacy';
 import { DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { runQueryDispatch } from '../setup/runquerydispatch';
@@ -82,7 +90,7 @@ const SQL_QUERY_STATEMENT_LABELS: ReadonlySet<string> = new Set([
   LABELS.duplicateMemberGroups,
   LABELS.sameBatchMemberGroups
 ]);
-const PAGE_WINDOW_LIMIT_PARAM_FROM_END = 2;
+const PAGE_WINDOW_PARAM_COUNT = 2;
 const MEMBER_GROUP_KINDS_PER_ROW = 2;
 const BLANK_SEARCH = '';
 /** Every raw-rows statement and the catalog bind these three as the display fallback for a measurement without a log, whatever the filters are. */
@@ -254,6 +262,8 @@ interface OracleReadCache {
 /**
  * The oracle re-reads the same error set for every filter, scope and search value. Within one seed the fixture does not change,
  * so identical (sql, params) reads return a copy of the stored rows. Only the oracle's executor uses it; production always goes to MySQL.
+ * A write that does not go through the oracle executor (the setup connection, a session change on the explorer connection) must call
+ * `oracleReadCache.clear()` first, or the oracle serves rows from before it.
  */
 function createOracleReadCache(): OracleReadCache {
   const rowsByStatement = new Map<string, unknown>();
@@ -628,16 +638,31 @@ describe('errors explorer: frozen oracle against production on generated data', 
       context: Record<string, unknown>,
       statements: readonly RecordedStatement[],
       filters: ErrorExplorerFilters,
-      response: ErrorExplorerQueryResponse
+      response: ErrorExplorerQueryResponse,
+      request: ErrorExplorerQueryRequest
     ): void => {
       observeProduction(context, statements, filters, SQL_QUERY_STATEMENT_LABELS);
       sqlPathQueryCount++;
       const pageStatements = statements.filter(statement => statement.label === LABELS.page);
       if (pageStatements.length > 1) failStatementCheck(context, pageStatements[1], `${pageStatements.length} page statements for one chunk`);
+      if ((request.censusIDs?.length ?? 0) > CENSUS_LIST_SIZE) {
+        failStatementCheck(context, statements[0], 'a scope with more than 8 censuses belongs in the consistency file, where the chunk window is pinned');
+      }
+      const window = toSliceBounds(request.page, request.pageSize);
+      const expectedWindow = [String(window.limit), String(window.offset)];
+      if (window.limit === 0 && pageStatements.length > 0) {
+        failStatementCheck(context, pageStatements[0], 'a request that selects no rows must not send a page statement');
+      }
       for (const pageStatement of pageStatements) {
-        const slots = Number(pageStatement.params[pageStatement.params.length - PAGE_WINDOW_LIMIT_PARAM_FROM_END]);
-        if (pageStatement.rows > slots) failStatementCheck(context, pageStatement, `${pageStatement.rows} page statement rows for ${slots} page slots`);
-        maxPageStatementRowsPerSlot = Math.max(maxPageStatementRowsPerSlot, slots > 0 ? pageStatement.rows / slots : 0);
+        const boundWindow = pageStatement.params.slice(-PAGE_WINDOW_PARAM_COUNT);
+        if (!isDeepStrictEqual(boundWindow, expectedWindow)) {
+          failStatementCheck(
+            context,
+            pageStatement,
+            `the page window ${JSON.stringify(boundWindow)} differs from the requested [limit, offset] ${JSON.stringify(expectedWindow)}`
+          );
+        }
+        maxPageStatementRowsPerSlot = Math.max(maxPageStatementRowsPerSlot, pageStatement.rows / window.limit);
       }
       const memberGroupRows = statements
         .filter(statement => statement.label === LABELS.duplicateMemberGroups || statement.label === LABELS.sameBatchMemberGroups)
@@ -657,10 +682,11 @@ describe('errors explorer: frozen oracle against production on generated data', 
       context: Record<string, unknown>,
       statements: readonly RecordedStatement[],
       filters: ErrorExplorerFilters,
-      response: ErrorExplorerQueryResponse
+      response: ErrorExplorerQueryResponse,
+      request: ErrorExplorerQueryRequest
     ): void => {
       const searchesInNode = filters.quickSearch.trim() !== BLANK_SEARCH;
-      if (!searchesInNode) return observeSqlPathQuery(context, statements, filters, response);
+      if (!searchesInNode) return observeSqlPathQuery(context, statements, filters, response, request);
       observeProduction(context, statements, filters);
       const pageStatement = statements.find(statement => statement.label === LABELS.page || statement.label === LABELS.catalog);
       if (pageStatement) failStatementCheck(context, pageStatement, 'a quick search must stay on the Node path');
@@ -706,7 +732,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
       const startedAt = performance.now();
       await body();
       const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
-      console.log(`[equivalence] seed=${seed} api=${api} calls=${apiCalls} statements=${statementCount} seconds=${seconds}`);
+      console.log(`[equivalence] seed=${seed} api=${api} calls=${apiCalls} mysqlStatementsExcludingOracleCacheHits=${statementCount} seconds=${seconds}`);
     };
 
     beforeAll(async () => {
@@ -923,12 +949,11 @@ describe('errors explorer: frozen oracle against production on generated data', 
             for (const pageSize of PAGE_SIZES) {
               for (const page of pagesFor(whole.totalRows, pageSize)) {
                 apiCalls++;
-                const { result: actual, statements } = await recordProduction(executor =>
-                  production.queryErrorExplorer(executor, queryRequest(scope, filters, page, pageSize))
-                );
+                const request = queryRequest(scope, filters, page, pageSize);
+                const { result: actual, statements } = await recordProduction(executor => production.queryErrorExplorer(executor, request));
                 const context = { scenario: 'queryErrorExplorer', scope: scope.name, filters: label, filterValues: filters, page, pageSize };
                 await compare(context, actual, sliceOracleWholeList(whole, page, pageSize));
-                observeSqlPathQuery(context, statements, filters, actual);
+                observeSqlPathQuery(context, statements, filters, actual, request);
               }
             }
           }
@@ -947,8 +972,9 @@ describe('errors explorer: frozen oracle against production on generated data', 
                 const whole = await oracleWholeList(scope, searchFilters);
                 noteAxisTotals([`search:${quickSearch}`], whole.totalRows);
                 apiCalls++;
+                const wholeRequest = queryRequest(scope, searchFilters, 0, WHOLE_LIST_PAGE_SIZE);
                 const { result: actualWhole, statements: wholeStatements } = await recordProduction(executor =>
-                  production.queryErrorExplorer(executor, queryRequest(scope, searchFilters, 0, WHOLE_LIST_PAGE_SIZE))
+                  production.queryErrorExplorer(executor, wholeRequest)
                 );
                 const wholeContext = {
                   scenario: 'quick search whole list',
@@ -960,14 +986,13 @@ describe('errors explorer: frozen oracle against production on generated data', 
                   pageSize: WHOLE_LIST_PAGE_SIZE
                 };
                 await compare(wholeContext, actualWhole, whole);
-                observeSearchQuery(wholeContext, wholeStatements, searchFilters, actualWhole);
+                observeSearchQuery(wholeContext, wholeStatements, searchFilters, actualWhole, wholeRequest);
                 if (!sweepWithSearch) continue;
                 for (const pageSize of PAGE_SIZES) {
                   for (const page of pagesFor(whole.totalRows, pageSize)) {
                     apiCalls++;
-                    const { result: actual, statements } = await recordProduction(executor =>
-                      production.queryErrorExplorer(executor, queryRequest(scope, searchFilters, page, pageSize))
-                    );
+                    const pageRequest = queryRequest(scope, searchFilters, page, pageSize);
+                    const { result: actual, statements } = await recordProduction(executor => production.queryErrorExplorer(executor, pageRequest));
                     const pageContext = {
                       scenario: 'quick search page',
                       scope: scope.name,
@@ -978,7 +1003,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
                       pageSize
                     };
                     await compare(pageContext, actual, sliceOracleWholeList(whole, page, pageSize));
-                    observeSearchQuery(pageContext, statements, searchFilters, actual);
+                    observeSearchQuery(pageContext, statements, searchFilters, actual, pageRequest);
                   }
                 }
               }

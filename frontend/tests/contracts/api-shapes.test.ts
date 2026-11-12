@@ -150,6 +150,37 @@ function makeConnection() {
   } as any;
 }
 
+const ABSENT_CENSUS_ID = 9001;
+
+/** Records every statement. A page statement that names ABSENT_CENSUS_ID finds no rows; every other page statement returns the two rows. */
+function makeWindowConnection() {
+  return {
+    executeQuery: vi.fn(async (query: string, params: unknown[] = []) => {
+      const label = readStatementLabel(query);
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.catalog) return catalogRows;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.page) return params.includes(ABSENT_CENSUS_ID) ? [] : pageRows;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.totals) return params.includes(ABSENT_CENSUS_ID) ? [{ ...pageTotals, TotalRows: 0 }] : [pageTotals];
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.idRawRows) return rawErrorRows.filter(rawRow => params.includes(rawRow.CoreMeasurementID));
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups) {
+        return duplicateMemberGroupRows.filter(group => params.includes(group.RequestedMeasurementID));
+      }
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups) return [];
+      throw new Error(`Unexpected statement in the window test: ${label}`);
+    })
+  } as any;
+}
+
+function paramsOfStatements(connection: ReturnType<typeof makeWindowConnection>, label: string): unknown[][] {
+  return connection.executeQuery.mock.calls.filter(([query]: [string]) => readStatementLabel(query) === label).map(([, params]: [string, unknown[]]) => params);
+}
+
+const PAGE_WINDOW_PARAM_COUNT = 2;
+const SINGLE_CHUNK_CENSUS_IDS = [5];
+const FIRST_CHUNK_CENSUS_IDS = [5, 101, 102, 103, 104, 105, 106, 107];
+const TWO_CHUNK_CENSUS_IDS = [...FIRST_CHUNK_CENSUS_IDS, 108];
+const SPARSE_CHUNK_CENSUS_IDS = [...FIRST_CHUNK_CENSUS_IDS, ABSENT_CENSUS_ID];
+const ROWS_PER_CHUNK_TOTAL = 2;
+
 function makeFacetsConnection() {
   return {
     executeQuery: vi.fn(async (query: string) => {
@@ -277,5 +308,139 @@ describe('API response shape contracts', () => {
       },
       totalMeasurements: 2
     });
+  });
+});
+
+describe('Errors Explorer query page window', () => {
+  const LABELS = ERROR_EXPLORER_STATEMENT_LABELS;
+  const windowTail = (params: unknown[]) => params.slice(-PAGE_WINDOW_PARAM_COUNT);
+
+  interface WindowCase {
+    name: string;
+    censusIDs: number[];
+    page: number;
+    pageSize: number;
+    expectedPageWindows: string[][];
+    expectedTotalsStatements: number;
+    expectedSummaryTotal: number;
+  }
+
+  const SINGLE_CHUNK_TOTAL = ROWS_PER_CHUNK_TOTAL;
+  const TWO_CHUNK_TOTAL = 2 * ROWS_PER_CHUNK_TOTAL;
+  const windowCases: WindowCase[] = [
+    {
+      name: 'single chunk, page 0 of 10',
+      censusIDs: SINGLE_CHUNK_CENSUS_IDS,
+      page: 0,
+      pageSize: 10,
+      expectedPageWindows: [['10', '0']],
+      expectedTotalsStatements: 0,
+      expectedSummaryTotal: SINGLE_CHUNK_TOTAL
+    },
+    {
+      name: 'single chunk, page 3 of 25',
+      censusIDs: SINGLE_CHUNK_CENSUS_IDS,
+      page: 3,
+      pageSize: 25,
+      expectedPageWindows: [['25', '75']],
+      expectedTotalsStatements: 0,
+      expectedSummaryTotal: SINGLE_CHUNK_TOTAL
+    },
+    {
+      name: 'single chunk, fractional page 1.5 of 25',
+      censusIDs: SINGLE_CHUNK_CENSUS_IDS,
+      page: 1.5,
+      pageSize: 25,
+      expectedPageWindows: [['25', '37']],
+      expectedTotalsStatements: 0,
+      expectedSummaryTotal: SINGLE_CHUNK_TOTAL
+    },
+    {
+      name: 'single chunk, NaN page selects nothing',
+      censusIDs: SINGLE_CHUNK_CENSUS_IDS,
+      page: NaN,
+      pageSize: 10,
+      expectedPageWindows: [],
+      expectedTotalsStatements: 1,
+      expectedSummaryTotal: SINGLE_CHUNK_TOTAL
+    },
+    {
+      name: 'single chunk, Infinity page selects nothing',
+      censusIDs: SINGLE_CHUNK_CENSUS_IDS,
+      page: Infinity,
+      pageSize: 10,
+      expectedPageWindows: [],
+      expectedTotalsStatements: 1,
+      expectedSummaryTotal: SINGLE_CHUNK_TOTAL
+    },
+    {
+      name: 'two chunks, page 3 of 25 reads the first 100 rows of each chunk',
+      censusIDs: TWO_CHUNK_CENSUS_IDS,
+      page: 3,
+      pageSize: 25,
+      expectedPageWindows: [
+        ['100', '0'],
+        ['100', '0']
+      ],
+      expectedTotalsStatements: 0,
+      expectedSummaryTotal: TWO_CHUNK_TOTAL
+    },
+    {
+      name: 'two chunks, fractional page 1.5 of 10 reads the first 25 rows of each chunk',
+      censusIDs: TWO_CHUNK_CENSUS_IDS,
+      page: 1.5,
+      pageSize: 10,
+      expectedPageWindows: [
+        ['25', '0'],
+        ['25', '0']
+      ],
+      expectedTotalsStatements: 0,
+      expectedSummaryTotal: TWO_CHUNK_TOTAL
+    },
+    {
+      name: 'two chunks, NaN page needs one totals statement per chunk',
+      censusIDs: TWO_CHUNK_CENSUS_IDS,
+      page: NaN,
+      pageSize: 10,
+      expectedPageWindows: [],
+      expectedTotalsStatements: 2,
+      expectedSummaryTotal: TWO_CHUNK_TOTAL
+    },
+    {
+      name: 'two chunks, Infinity page needs one totals statement per chunk',
+      censusIDs: TWO_CHUNK_CENSUS_IDS,
+      page: Infinity,
+      pageSize: 10,
+      expectedPageWindows: [],
+      expectedTotalsStatements: 2,
+      expectedSummaryTotal: TWO_CHUNK_TOTAL
+    },
+    {
+      name: 'two chunks, the second finds no rows: it adds nothing and needs no totals statement',
+      censusIDs: SPARSE_CHUNK_CENSUS_IDS,
+      page: 0,
+      pageSize: 10,
+      expectedPageWindows: [
+        ['10', '0'],
+        ['10', '0']
+      ],
+      expectedTotalsStatements: 0,
+      expectedSummaryTotal: SINGLE_CHUNK_TOTAL
+    }
+  ];
+
+  it.each(windowCases)('$name', async ({ censusIDs, page, pageSize, expectedPageWindows, expectedTotalsStatements, expectedSummaryTotal }) => {
+    const connection = makeWindowConnection();
+    const response = await queryErrorExplorer(connection, makeRequest({ censusID: censusIDs[0], censusIDs, page, pageSize }));
+
+    const pageWindows = paramsOfStatements(connection, LABELS.page).map(windowTail);
+    const totalsStatements = paramsOfStatements(connection, LABELS.totals);
+    console.log(
+      `[window] censusIDs=${censusIDs.length} page=${page} size=${pageSize} pageWindows=${JSON.stringify(pageWindows)} totals=${totalsStatements.length} summary.total=${response.summary.total}`
+    );
+    expect(pageWindows, 'LIMIT and OFFSET bound by each page statement').toEqual(expectedPageWindows);
+    expect(totalsStatements, 'totals statements').toHaveLength(expectedTotalsStatements);
+    expect(response.summary.total, 'summary total').toBe(expectedSummaryTotal);
+    expect(response.totalRows, 'totalRows is the summary total').toBe(expectedSummaryTotal);
   });
 });

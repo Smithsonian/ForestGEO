@@ -1149,7 +1149,16 @@ export const MANY_CENSUS_COUNT = 26;
 export const MANY_CENSUS_IDS: readonly number[] = Array.from({ length: MANY_CENSUS_COUNT }, (_, index) => index + 1);
 export const MANY_CENSUS_ROW_ID_BLOCK = 100;
 export const MANY_CENSUS_TREE_TAG_SEARCH = `D${MANY_CENSUS_COUNT}`;
-const MANY_CENSUS_DUPLICATE_MATE_OFFSET = 7;
+export const MANY_CENSUS_ROW_OFFSET = {
+  duplicateFirst: 1,
+  duplicateSecond: 2,
+  sameBatchFirst: 3,
+  sameBatchSecond: 4,
+  sharedMessageFirst: 5,
+  sqlExceptionAndSharedMessageSecond: 6,
+  duplicateNonErrorMate: 7,
+  failed: 8
+} as const;
 const MANY_CENSUS_EQUAL_KEY_DATE = MEASUREMENT_DATES[0];
 
 /**
@@ -1170,16 +1179,31 @@ export function manyCensusesFixture(): ExplorerFixture {
       errorIDs.forEach(errorID => logs.push({ measurementID: coreMeasurementID, errorID, isResolved: false }));
     };
     const duplicateTag = `D${censusID}`;
-    plant(1, { treeTag: duplicateTag, stemTag: '1', measurementDate: rotatingDate }, [ET.tagMismatch]);
-    plant(2, { treeTag: duplicateTag, stemTag: '1', measurementDate: rotatingDate }, [ET.tagMismatch]);
-    plant(3, { treeTag: `S${censusID}`, stemTag: '1', speciesCode: 'AAA', measurementDate: rotatingDate, ...sameBatchUpload }, [ET.invalidSpecies]);
-    plant(4, { treeTag: `S${censusID}`, stemTag: '2', speciesCode: 'BBB', measurementDate: rotatingDate, ...sameBatchUpload }, [ET.invalidSpecies]);
-    plant(5, { treeTag: `P${censusID}`, stemTag: '1', measurementDate: MANY_CENSUS_EQUAL_KEY_DATE }, [ET.sharedMessageFirst]);
-    plant(6, { treeTag: `Q${censusID}`, stemTag: '1', measurementDate: MANY_CENSUS_EQUAL_KEY_DATE }, [ET.sqlException, ET.sharedMessageSecond]);
-    plant(MANY_CENSUS_DUPLICATE_MATE_OFFSET, { treeTag: duplicateTag, stemTag: '1', measurementDate: rotatingDate }, []);
-    plant(8, { treeTag: `F${censusID}`, stemTag: '1', coreStemGUID: null, summaryStemGUID: null, measurementDate: MANY_CENSUS_EQUAL_KEY_DATE }, [
-      ET.invalidSpecies
+    plant(MANY_CENSUS_ROW_OFFSET.duplicateFirst, { treeTag: duplicateTag, stemTag: '1', measurementDate: rotatingDate }, [ET.tagMismatch]);
+    plant(MANY_CENSUS_ROW_OFFSET.duplicateSecond, { treeTag: duplicateTag, stemTag: '1', measurementDate: rotatingDate }, [ET.tagMismatch]);
+    plant(
+      MANY_CENSUS_ROW_OFFSET.sameBatchFirst,
+      { treeTag: `S${censusID}`, stemTag: '1', speciesCode: 'AAA', measurementDate: rotatingDate, ...sameBatchUpload },
+      [ET.invalidSpecies]
+    );
+    plant(
+      MANY_CENSUS_ROW_OFFSET.sameBatchSecond,
+      { treeTag: `S${censusID}`, stemTag: '2', speciesCode: 'BBB', measurementDate: rotatingDate, ...sameBatchUpload },
+      [ET.invalidSpecies]
+    );
+    plant(MANY_CENSUS_ROW_OFFSET.sharedMessageFirst, { treeTag: `P${censusID}`, stemTag: '1', measurementDate: MANY_CENSUS_EQUAL_KEY_DATE }, [
+      ET.sharedMessageFirst
     ]);
+    plant(MANY_CENSUS_ROW_OFFSET.sqlExceptionAndSharedMessageSecond, { treeTag: `Q${censusID}`, stemTag: '1', measurementDate: MANY_CENSUS_EQUAL_KEY_DATE }, [
+      ET.sqlException,
+      ET.sharedMessageSecond
+    ]);
+    plant(MANY_CENSUS_ROW_OFFSET.duplicateNonErrorMate, { treeTag: duplicateTag, stemTag: '1', measurementDate: rotatingDate }, []);
+    plant(
+      MANY_CENSUS_ROW_OFFSET.failed,
+      { treeTag: `F${censusID}`, stemTag: '1', coreStemGUID: null, summaryStemGUID: null, measurementDate: MANY_CENSUS_EQUAL_KEY_DATE },
+      [ET.invalidSpecies]
+    );
   }
   return {
     plotIDs: [MAIN_PLOT_ID],
@@ -1200,17 +1224,23 @@ export const LARGE_GROUP_SOLO_ROW_IDS: readonly number[] = [5001, 5002, 5003];
 const LARGE_GROUP_ERROR_RUN_LENGTH = 3;
 const LARGE_GROUP_ERROR_RUN_PERIOD = 20;
 
+function isLargeGroupErrorMember(memberID: number): boolean {
+  return (memberID - 1) % LARGE_GROUP_ERROR_RUN_PERIOD < LARGE_GROUP_ERROR_RUN_LENGTH;
+}
+
+const LARGE_GROUP_MEMBER_IDS: readonly number[] = Array.from({ length: LARGE_GROUP_MEMBER_COUNT }, (_, index) => index + 1);
+export const LARGE_GROUP_ERROR_MEMBER_IDS: readonly number[] = LARGE_GROUP_MEMBER_IDS.filter(isLargeGroupErrorMember);
+export const LARGE_GROUP_FIRST_NON_ERROR_MEMBER_ID = LARGE_GROUP_MEMBER_IDS.find(memberID => !isLargeGroupErrorMember(memberID)) as number;
+
 /** Members 1..2000 of one duplicate group; members whose ID minus one is below 3 modulo 20 (300 of them) carry an unresolved log, the rest are valid rows. Three solo error rows follow the group in the order. */
 export function largeGroupFixture(): ExplorerFixture {
-  const memberIDs = Array.from({ length: LARGE_GROUP_MEMBER_COUNT }, (_, index) => index + 1);
-  const isInErrorSet = (memberID: number) => (memberID - 1) % LARGE_GROUP_ERROR_RUN_PERIOD < LARGE_GROUP_ERROR_RUN_LENGTH;
-  const members = memberIDs.map(memberID => ({
+  const members = LARGE_GROUP_MEMBER_IDS.map(memberID => ({
     ...signatureFixtureMeasurement(memberID),
     treeTag: LARGE_GROUP_TREE_TAG,
     stemTag: LARGE_GROUP_STEM_TAG
   }));
   const solos = LARGE_GROUP_SOLO_ROW_IDS.map(soloID => ({ ...signatureFixtureMeasurement(soloID), treeTag: `SOLO${soloID}`, stemTag: LARGE_GROUP_STEM_TAG }));
-  const errorRowIDs = [...memberIDs.filter(isInErrorSet), ...LARGE_GROUP_SOLO_ROW_IDS];
+  const errorRowIDs = [...LARGE_GROUP_ERROR_MEMBER_IDS, ...LARGE_GROUP_SOLO_ROW_IDS];
   return {
     plotIDs: [MAIN_PLOT_ID],
     censuses: [{ ...SIGNATURE_FIXTURE_CENSUS }],

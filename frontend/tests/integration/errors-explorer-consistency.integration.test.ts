@@ -10,7 +10,7 @@ import {
   type ErrorExplorerRow
 } from '@/config/errorsexplorer';
 import * as production from '@/app/api/errors/explorer/_shared';
-import { buildRelatedMeasurementIDs } from '@/app/api/errors/explorer/errorsetcounts';
+import { buildRelatedMeasurementIDs, toSliceBounds } from '@/app/api/errors/explorer/errorsetcounts';
 import {
   buildDuplicateMemberGroupsStatement,
   buildSameBatchMemberGroupsStatement,
@@ -41,11 +41,14 @@ import {
   largeGroupFixture,
   LARGE_GROUP_ERROR_SET_COUNT,
   LARGE_GROUP_MEMBER_COUNT,
+  LARGE_GROUP_ERROR_MEMBER_IDS,
+  LARGE_GROUP_FIRST_NON_ERROR_MEMBER_ID,
   LARGE_GROUP_SOLO_ROW_IDS,
   MAIN_PLOT_ID,
   manyCensusesFixture,
   MANY_CENSUS_COUNT,
   MANY_CENSUS_IDS,
+  MANY_CENSUS_ROW_OFFSET,
   MANY_CENSUS_ROW_ID_BLOCK,
   MANY_CENSUS_TREE_TAG_SEARCH,
   replaceFixture,
@@ -76,6 +79,11 @@ const MEMBER_GROUP_KINDS_PER_ROW = 2;
 const DETAILS_FIXED_STATEMENT_COUNT = 3;
 const SHORT_MEMBER_LIST_LIMIT_BYTES = 4096;
 const AFFECTED_ONE_ROW = 1;
+const IRREGULAR_PAGES: readonly number[] = [Number.NaN, 1.5, Number.POSITIVE_INFINITY];
+const ABSENT_CENSUS_ID = MANY_CENSUS_COUNT + 1;
+const SPARSE_CHUNK_CENSUS_IDS: readonly number[] = [...MANY_CENSUS_IDS.slice(0, CENSUS_LIST_SIZE), ABSENT_CENSUS_ID];
+const SPARSE_CHUNK_COUNT = 2;
+const PAGE_WINDOW_PARAM_COUNT = 2;
 const EXPECTED_CHUNK_SIZES = [CENSUS_LIST_SIZE, CENSUS_LIST_SIZE, CENSUS_LIST_SIZE, MANY_CENSUS_COUNT - 3 * CENSUS_LIST_SIZE];
 
 type OracleExecutor = Parameters<typeof oracle.queryErrorExplorer>[0];
@@ -357,7 +365,7 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
       { name: 'Contradictions preset', filters: CONTRADICTIONS_PRESET_FILTERS },
       { name: 'message filter', filters: MESSAGE_FILTERS }
     ];
-    const SEARCHES = [MANY_CENSUS_TREE_TAG_SEARCH, 'tag mismatch'];
+    const SEARCHES = [MANY_CENSUS_TREE_TAG_SEARCH, FIXTURE_MESSAGES.tagMismatchLowerCase];
 
     beforeAll(async () => {
       await loadFixture(manyCensusesFixture());
@@ -367,43 +375,75 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
     const compare = (context: Record<string, unknown>, actual: unknown, expected: unknown) =>
       expectExplorerEqual(explorerConnection(), context, actual, expected);
 
-    it(
-      'query without a search: every page at sizes 10 and 25 and one past the end equals the oracle, reading one catalog and one page statement per chunk',
-      async () => {
-        expect(MANY_CENSUS_IDS.length).toBe(MANY_CENSUS_COUNT);
-        for (const { name, filters } of SQL_PATH_FILTERS) {
-          const whole = await oracle.queryErrorExplorer(oracleExecutor(), request(filters, FIRST_PAGE, WHOLE_LIST_PAGE_SIZE));
-          console.log(`[chunks] ${name}: oracle totalRows=${whole.totalRows} flagged=${whole.summary.contradictions}`);
-          expect(whole.totalRows, `${name} must select rows, or the case proves nothing`).toBeGreaterThan(CENSUS_LIST_SIZE * 2);
-          for (const pageSize of CHUNK_PAGE_SIZES) {
-            for (const page of pagesIncludingOnePastTheEnd(whole.totalRows, pageSize)) {
-              const recorder = createRecordingExecutor(explorerConnection());
-              const actual = await production.queryErrorExplorer(recorder as unknown as ProductionExecutor, request(filters, page, pageSize));
-              const expected = sliceWholeList(whole, page, pageSize);
-              await compare({ scenario: 'chunked query', filters: name, page, pageSize }, actual, expected);
+    async function expectChunkedQueryPages(censusIDs: readonly number[], chunkCount: number, minimumTotalRows: number): Promise<void> {
+      for (const { name, filters } of SQL_PATH_FILTERS) {
+        const whole = await oracle.queryErrorExplorer(oracleExecutor(), queryRequest(censusIDs, filters, FIRST_PAGE, WHOLE_LIST_PAGE_SIZE));
+        console.log(`[chunks] ${name} over ${censusIDs.length} censuses: oracle totalRows=${whole.totalRows} flagged=${whole.summary.contradictions}`);
+        expect(whole.totalRows, `${name} must select rows, or the case proves nothing`).toBeGreaterThan(minimumTotalRows);
+        for (const pageSize of CHUNK_PAGE_SIZES) {
+          for (const page of [...pagesIncludingOnePastTheEnd(whole.totalRows, pageSize), ...IRREGULAR_PAGES]) {
+            const recorder = createRecordingExecutor(explorerConnection());
+            const actual = await production.queryErrorExplorer(recorder as unknown as ProductionExecutor, queryRequest(censusIDs, filters, page, pageSize));
+            await compare({ scenario: 'chunked query', filters: name, page, pageSize }, actual, sliceWholeList(whole, page, pageSize));
 
-              const labels = recorder.statements.map(statement => statement.label);
-              const pageStatements = recorder.statements.filter(statement => statement.label === LABELS.page);
-              const chunksOfPageRows = new Set(actual.rows.map(row => censusChunkIndex(Number(row.censusID))));
-              console.log(
-                `[chunks] ${name} size=${pageSize} page=${page} rows=${actual.rows.length} pageStatementRows=${JSON.stringify(pageStatements.map(statement => statement.rows))} ` +
-                  `windows=${JSON.stringify(pageStatements.map(statement => statement.params.slice(-2)))} pageRowChunks=${[...chunksOfPageRows].join(',')}`
-              );
-              expect(countLabel(recorder.statements, LABELS.catalog), `${name} page ${page}: catalog statements`).toBe(1);
-              expect(pageStatements, `${name} page ${page}: one page statement per chunk`).toHaveLength(EXPECTED_CHUNK_SIZES.length);
-              expect(labels, `${name} page ${page}: no totals statement when a chunk returned rows`).not.toContain(LABELS.totals);
-              const prefixWindow = [String(page * pageSize + pageSize), '0'];
-              pageStatements.forEach(statement =>
-                expect(statement.params.slice(-2), `${name} page ${page}: every chunk reads the first offset+limit rows`).toEqual(prefixWindow)
-              );
-              expect(countLabel(recorder.statements, LABELS.idRawRows), `${name} page ${page}: one raw-rows statement per chunk holding a page row`).toBe(
-                chunksOfPageRows.size
-              );
-              expect(countLabel(recorder.statements, LABELS.duplicateMemberGroups)).toBe(chunksOfPageRows.size);
-              expect(countLabel(recorder.statements, LABELS.sameBatchMemberGroups)).toBe(chunksOfPageRows.size);
+            const bounds = toSliceBounds(page, pageSize);
+            const labels = recorder.statements.map(statement => statement.label);
+            const pageStatements = recorder.statements.filter(statement => statement.label === LABELS.page);
+            const chunksOfPageRows = new Set(actual.rows.map(row => censusChunkIndex(Number(row.censusID))));
+            console.log(
+              `[chunks] ${name} size=${pageSize} page=${page} rows=${actual.rows.length} pageStatementRows=${JSON.stringify(pageStatements.map(statement => statement.rows))} ` +
+                `windows=${JSON.stringify(pageStatements.map(statement => statement.params.slice(-PAGE_WINDOW_PARAM_COUNT)))} totals=${countLabel(recorder.statements, LABELS.totals)} pageRowChunks=${[...chunksOfPageRows].join(',')}`
+            );
+            expect(countLabel(recorder.statements, LABELS.catalog), `${name} page ${page}: catalog statements`).toBe(1);
+            if (bounds.limit === 0) {
+              expect(pageStatements, `${name} page ${page}: a page that selects nothing sends no page statement`).toHaveLength(0);
+              expect(countLabel(recorder.statements, LABELS.totals), `${name} page ${page}: one totals statement per chunk`).toBe(chunkCount);
+              expect(countLabel(recorder.statements, LABELS.idRawRows)).toBe(0);
+              expect(countLabel(recorder.statements, LABELS.duplicateMemberGroups)).toBe(0);
+              expect(countLabel(recorder.statements, LABELS.sameBatchMemberGroups)).toBe(0);
+              continue;
             }
+            expect(pageStatements, `${name} page ${page}: one page statement per chunk`).toHaveLength(chunkCount);
+            expect(labels, `${name} page ${page}: no totals statement when the page statements answer`).not.toContain(LABELS.totals);
+            const prefixWindow = [String(bounds.offset + bounds.limit), '0'];
+            pageStatements.forEach(statement =>
+              expect(statement.params.slice(-PAGE_WINDOW_PARAM_COUNT), `${name} page ${page}: every chunk reads the first offset+limit rows`).toEqual(
+                prefixWindow
+              )
+            );
+            expect(countLabel(recorder.statements, LABELS.idRawRows), `${name} page ${page}: one raw-rows statement per chunk holding a page row`).toBe(
+              chunksOfPageRows.size
+            );
+            expect(countLabel(recorder.statements, LABELS.duplicateMemberGroups)).toBe(chunksOfPageRows.size);
+            expect(countLabel(recorder.statements, LABELS.sameBatchMemberGroups)).toBe(chunksOfPageRows.size);
           }
         }
+      }
+    }
+
+    it(
+      'query without a search: every page at sizes 10 and 25, one past the end and the NaN, 1.5 and Infinity pages equal the oracle, reading one catalog and one page statement per chunk',
+      async () => {
+        expect(MANY_CENSUS_IDS.length).toBe(MANY_CENSUS_COUNT);
+        await expectChunkedQueryPages(MANY_CENSUS_IDS, EXPECTED_CHUNK_SIZES.length, CENSUS_LIST_SIZE * 2);
+      },
+      SLOW_CASE_TIMEOUT_MS
+    );
+
+    it(
+      'a chunk with no matching rows adds nothing to the page or the totals and needs no totals statement',
+      async () => {
+        expect(MANY_CENSUS_IDS, 'the absent census is not one of the fixture censuses').not.toContain(ABSENT_CENSUS_ID);
+        await expectChunkedQueryPages(SPARSE_CHUNK_CENSUS_IDS, SPARSE_CHUNK_COUNT, 0);
+        const recorder = createRecordingExecutor(explorerConnection());
+        await production.queryErrorExplorer(
+          recorder as unknown as ProductionExecutor,
+          queryRequest(SPARSE_CHUNK_CENSUS_IDS, DEFAULT_ERROR_EXPLORER_FILTERS, FIRST_PAGE, SMALL_PAGE_SIZE)
+        );
+        const pageStatementRows = recorder.statements.filter(statement => statement.label === LABELS.page).map(statement => statement.rows);
+        console.log(`[chunks] sparse scope page statement rows per chunk: ${JSON.stringify(pageStatementRows)}`);
+        expect(pageStatementRows[0], 'the populated chunk returns rows').toBeGreaterThan(0);
+        expect(pageStatementRows[1], 'the chunk holding only the absent census returns none').toBe(0);
       },
       SLOW_CASE_TIMEOUT_MS
     );
@@ -447,7 +487,14 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
       'details for rows of the first, middle and last chunks equal the oracle, for every active contradiction type',
       async () => {
         const censusesToCheck = [1, CENSUS_LIST_SIZE, CENSUS_LIST_SIZE + 1, 2 * CENSUS_LIST_SIZE + 1, MANY_CENSUS_COUNT - 1, MANY_CENSUS_COUNT];
-        const rowOffsets = [1, 3, 5, 6, 7, 8];
+        const rowOffsets = [
+          MANY_CENSUS_ROW_OFFSET.duplicateFirst,
+          MANY_CENSUS_ROW_OFFSET.sameBatchFirst,
+          MANY_CENSUS_ROW_OFFSET.sharedMessageFirst,
+          MANY_CENSUS_ROW_OFFSET.sqlExceptionAndSharedMessageSecond,
+          MANY_CENSUS_ROW_OFFSET.duplicateNonErrorMate,
+          MANY_CENSUS_ROW_OFFSET.failed
+        ];
         const activeTypes: Array<ContradictionType | undefined> = [undefined, DUPLICATE, SAME_BATCH];
         for (const censusID of censusesToCheck) {
           for (const offset of rowOffsets) {
@@ -609,7 +656,14 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
     it(
       'details for a first, middle, last and solo error row and a non-error member equal the oracle, reading 3 statements plus one per 128 related IDs',
       async () => {
-        const memberIDs = [1, 1001, 1983, LARGE_GROUP_SOLO_ROW_IDS[0], 4];
+        expect(LARGE_GROUP_ERROR_MEMBER_IDS, 'the derived error members match the fixture count').toHaveLength(LARGE_GROUP_ERROR_SET_COUNT);
+        const memberIDs = [
+          LARGE_GROUP_ERROR_MEMBER_IDS[0],
+          LARGE_GROUP_ERROR_MEMBER_IDS[Math.floor(LARGE_GROUP_ERROR_MEMBER_IDS.length / 2)],
+          LARGE_GROUP_ERROR_MEMBER_IDS[LARGE_GROUP_ERROR_MEMBER_IDS.length - 1],
+          LARGE_GROUP_SOLO_ROW_IDS[0],
+          LARGE_GROUP_FIRST_NON_ERROR_MEMBER_ID
+        ];
         const detailsRequest = { schema: database(), plotID: MAIN_PLOT_ID, censusID: FIRST_CENSUS_ID };
         for (const measurementID of memberIDs) {
           for (const activeType of [undefined, DUPLICATE]) {
