@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AZURE_HOST } from './lib/schema-cli';
 import { cleanupTimingConnections } from '@/tests/setup/stricttestdatabasecleanup';
+import { everyErrorSetStatement } from '@/tests/setup/errorsetstatements';
+import * as oracle from '@/tests/oracles/errors-explorer-legacy';
+import { buildF1MembershipProbe, buildF2MembershipProbe, MEMBERSHIP_PROBE_LABELS } from '@/tests/benchmarks/lib/membershipprobe';
+import { CENSUS_LIST_SIZE, chunkCensusIDs, ERROR_EXPLORER_STATEMENT_LABELS, readStatementLabel } from '@/app/api/errors/explorer/errorsetsql';
 import {
+  classifyStatement,
+  describeCensusScope,
+  lastPageNumber,
+  m1Summary,
+  pastTheEndPageNumber,
   groupIntoWaves,
   criticalPathEstimate,
   diffFieldPaths,
@@ -466,4 +475,232 @@ it('propagates a non-timeout sibling failure after draining a timed-out operatio
   release();
   await expect(followingScenario).rejects.toBe(siblingError);
   expect(f.connection.execute).toHaveBeenCalledTimes(3);
+});
+
+const BUILDER_SCHEMA = 'forestgeo_testsite';
+const MULTI_CHUNK_CENSUS_COUNT = 26;
+const MEASUREMENT_ID_COUNT = 300;
+const range = (count: number, start = 1) => Array.from({ length: count }, (_, index) => start + index);
+const ORACLE_STATEMENT_CLASSES = ['raw-rows', 'duplicate-groups', 'same-batch-groups'];
+
+describe('read-only guard over every builder output', () => {
+  it('accepts every statement of every builder for 26 censuses and 300 measurement IDs', () => {
+    const statements = everyErrorSetStatement(BUILDER_SCHEMA, range(MULTI_CHUNK_CENSUS_COUNT), range(MEASUREMENT_ID_COUNT));
+    console.log(`checking ${statements.length} builder statements; first label ${readStatementLabel(statements[0].sql)}`);
+    expect(statements.length).toBeGreaterThan(Object.keys(ERROR_EXPLORER_STATEMENT_LABELS).length);
+    for (const { sql } of statements) {
+      expect(() => assertReadOnlyStatement(sql), `rejected: ${sql.slice(0, 80)}`).not.toThrow();
+    }
+  });
+
+  it('accepts both membership probes for every census chunk', () => {
+    const chunks = chunkCensusIDs(range(MULTI_CHUNK_CENSUS_COUNT));
+    expect(chunks.map(chunk => chunk.length)).toEqual([8, 8, 8, 2]);
+    for (const censusIDs of chunks) {
+      for (const build of [buildF2MembershipProbe, buildF1MembershipProbe]) {
+        const { sql } = build({ schema: BUILDER_SCHEMA, plotID: 1, censusIDs });
+        expect(() => assertReadOnlyStatement(sql), `rejected: ${sql.slice(0, 80)}`).not.toThrow();
+      }
+    }
+  });
+});
+
+describe('statement classification', () => {
+  it('returns each explorer label for the builder that carries it', () => {
+    const statements = everyErrorSetStatement(BUILDER_SCHEMA, [2], [10]);
+    const classes = statements.map(({ sql }) => classifyStatement(sql));
+    console.log(`classes: ${classes.join(' | ')}`);
+    expect(new Set(classes)).toEqual(new Set(Object.values(ERROR_EXPLORER_STATEMENT_LABELS)));
+    statements.forEach(({ sql }) => expect(classifyStatement(sql)).toBe(readStatementLabel(sql)));
+  });
+
+  it('keeps the legacy classes for the three texts the frozen oracle sends', async () => {
+    const recorded: string[] = [];
+    const recordingExecutor = {
+      executeQuery: async (sql: string) => {
+        recorded.push(sql);
+        return [];
+      }
+    };
+    await oracle.fetchGroupedErrorRows(recordingExecutor as never, BUILDER_SCHEMA, 1, [2]);
+    const classes = recorded.map(classifyStatement);
+    console.log(`oracle statements: ${recorded.length}; classes: ${classes.join(', ')}`);
+    expect([...classes].sort()).toEqual([...ORACLE_STATEMENT_CLASSES].sort());
+  });
+
+  it('classifies a statement with no label and no legacy shape as unlabelled', () => {
+    expect(classifyStatement('SELECT 1')).toBe('unlabelled');
+  });
+
+  it('does not read a membership probe as an explorer statement, so it never counts toward the nine texts', () => {
+    for (const build of [buildF2MembershipProbe, buildF1MembershipProbe]) {
+      const { sql } = build({ schema: BUILDER_SCHEMA, plotID: 1, censusIDs: [2] });
+      expect(readStatementLabel(sql)).toBeNull();
+    }
+  });
+});
+
+describe('m1Summary', () => {
+  it('reports 1.1 as not triggered', () => {
+    expect(m1Summary([10, 11, 12], [10, 10, 10])).toMatchObject({ m1Status: 'comparable', m1Ratio: 1.1, m1Triggered: false });
+  });
+  it('reports 1.3 as triggered', () => {
+    expect(m1Summary([13, 13, 13], [10, 10, 10])).toMatchObject({ m1Status: 'comparable', m1Ratio: 1.3, m1Triggered: true });
+  });
+});
+
+describe('page scenarios on a multi-chunk scope', () => {
+  it.each([
+    { totalRows: 0, last: 0, pastTheEnd: 1 },
+    { totalRows: 1, last: 0, pastTheEnd: 1 },
+    { totalRows: 25, last: 0, pastTheEnd: 1 },
+    { totalRows: 26, last: 1, pastTheEnd: 2 },
+    { totalRows: 50, last: 1, pastTheEnd: 2 },
+    { totalRows: 51, last: 2, pastTheEnd: 3 }
+  ])('totalRows $totalRows: last page $last, one past it $pastTheEnd', ({ totalRows, last, pastTheEnd }) => {
+    expect(lastPageNumber(totalRows, 25)).toBe(last);
+    expect(pastTheEndPageNumber(totalRows, 25)).toBe(pastTheEnd);
+  });
+
+  it.each([
+    { censusCount: 1, censuses: 1, censusChunks: 1 },
+    { censusCount: 8, censuses: 8, censusChunks: 1 },
+    { censusCount: 9, censuses: 9, censusChunks: 2 },
+    { censusCount: 26, censuses: 26, censusChunks: 4 }
+  ])('describes $censusCount censuses as $censusChunks chunks', ({ censusCount, censuses, censusChunks }) => {
+    expect(describeCensusScope(range(censusCount))).toEqual({ censuses, censusChunks });
+  });
+});
+
+describe('a full measurement run over a 26-census scope (fake database)', () => {
+  const PLOT_ID = 1;
+  const RUNS = 1;
+  const PAGE_LIMIT_PARAM_FIRST_PAGE = '25';
+  const PAGE_LIMIT_PARAM_PAST_THE_END = '50';
+  const SETTLE_MS = 1;
+  const ZERO_TOTALS = { TotalRows: 0, ValidationRows: 0, IngestionRows: 0, ContradictionRows: 0, DuplicateTagStemRows: 0, SameBatchConflictRows: 0 };
+  const isProbe = (sql: string) => sql.startsWith(MEMBERSHIP_PROBE_LABELS.f1) || sql.startsWith(MEMBERSHIP_PROBE_LABELS.f2);
+
+  function databaseFake() {
+    const base = fake();
+    const executed: Array<{ sql: string; params: unknown[] }> = [];
+    base.connection.query.mockResolvedValue([[{ readOnly: 1, Value: '1' }], []]);
+    base.connection.execute.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      executed.push({ sql, params });
+      if (isProbe(sql)) {
+        await new Promise(resolve => setTimeout(resolve, SETTLE_MS));
+        const censusIDs = params.slice(1, 1 + CENSUS_LIST_SIZE).filter(param => param !== null);
+        return [censusIDs.map(censusID => ({ CoreMeasurementID: Number(censusID), ErrorID: 1, PriorCensusID: null, PriorDBH: null, PriorHOM: null })), []];
+      }
+      if (readStatementLabel(sql) === ERROR_EXPLORER_STATEMENT_LABELS.totals) return [[ZERO_TOTALS], []];
+      if (sql.includes('AS maxLen')) return [[{ maxLen: 1_048_576 }], []];
+      if (sql.includes('SET_VAR')) return [[{ probe: 4 }], []];
+      if (sql.includes('COUNT(*) AS n')) return [[{ n: 0 }], []];
+      return [[], []];
+    });
+    return { ...base, executed };
+  }
+
+  async function runScope() {
+    const f = databaseFake();
+    const censusArgument = range(MULTI_CHUNK_CENSUS_COUNT).join(',');
+    const result = await runTimingCli(['--schema', BUILDER_SCHEMA, '--plot', String(PLOT_ID), '--census', censusArgument, '--runs', String(RUNS)], f.deps);
+    const output = f.stdout.join('\n');
+    const summaryLine = output.split('\n').find(line => line.startsWith('ERRORS_EXPLORER_TIMING_SUMMARY '));
+    const summary = summaryLine ? JSON.parse(summaryLine.slice('ERRORS_EXPLORER_TIMING_SUMMARY '.length)) : null;
+    return { f, result, output, summary };
+  }
+
+  it('prints the census and chunk counts next to the page scenarios and carries them in the summary', async () => {
+    const { result, output, summary, f } = await runScope();
+    console.log(
+      `exit=${result.exitCode} stderr=${JSON.stringify(f.stderr)}\n${output
+        .split('\n')
+        .filter(line => /scope|queryPastTheEnd run|queryLastPage run/.test(line))
+        .join('\n')}`
+    );
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain('queryLastPage scope: 26 censuses, 4 census chunks');
+    expect(output).toContain('queryPastTheEnd scope: 26 censuses, 4 census chunks');
+    expect(summary.scope).toEqual({ censuses: 26, censusChunks: 4 });
+  });
+
+  it('runs queryPastTheEnd against the oracle and finds the arms identical', async () => {
+    const { output, summary } = await runScope();
+    expect(output).toContain('queryPastTheEnd run 1: identical');
+    expect(Object.keys(summary.scenarios)).toContain('queryPastTheEnd');
+    expect(summary.comparisons.queryPastTheEnd).toEqual([expect.objectContaining({ run: 1, identical: true })]);
+  });
+
+  it('asks every census chunk for the page one past the last, a wider prefix than the first page', async () => {
+    const { f } = await runScope();
+    const pageStatements = f.executed.filter(({ sql }) => readStatementLabel(sql) === ERROR_EXPLORER_STATEMENT_LABELS.page);
+    const limits = pageStatements.map(({ params }) => params[params.length - 2]);
+    const chunkCount = chunkCensusIDs(range(MULTI_CHUNK_CENSUS_COUNT)).length;
+    const roundsPerScenario = RUNS + 1;
+    console.log(`page statements ${pageStatements.length}; limits seen ${JSON.stringify([...new Set(limits)])}`);
+    expect(limits.filter(limit => limit === PAGE_LIMIT_PARAM_PAST_THE_END)).toHaveLength(chunkCount * roundsPerScenario);
+    expect(limits).toContain(PAGE_LIMIT_PARAM_FIRST_PAGE);
+  });
+
+  it('classifies every recorded statement, keeps probes out of the text budget and reports the probe block', async () => {
+    const { output, summary, f } = await runScope();
+    const explorerTexts = new Set(
+      f.executed.map(({ sql }) => sql).filter(sql => Object.values(ERROR_EXPLORER_STATEMENT_LABELS).some(label => sql.startsWith(label)))
+    );
+    const probeCalls = f.executed.filter(({ sql }) => isProbe(sql));
+    console.log(
+      `explorer texts=${explorerTexts.size} budget=${JSON.stringify(summary.budget)} probe calls=${probeCalls.length}\n${output
+        .split('\n')
+        .filter(line => line.startsWith('m1Probe'))
+        .join('\n')}`
+    );
+    expect(output).not.toMatch(/: unlabelled, /);
+    expect(summary.unlabelledStatements).toBe(0);
+    expect(probeCalls.length).toBeGreaterThan(0);
+    expect(summary.budget).toEqual({ count: explorerTexts.size, status: 'PASS' });
+    expect(summary.m1).toMatchObject({ m1Status: 'comparable', f2RowCount: MULTI_CHUNK_CENSUS_COUNT, f1RowCount: MULTI_CHUNK_CENSUS_COUNT });
+    expect(summary.m1.m1Ratio).toBeGreaterThan(0);
+    expect(typeof summary.m1.m1Triggered).toBe('boolean');
+  });
+
+  it('marks the probe inconclusive and carries on when a probe statement times out', async () => {
+    const f = databaseFake();
+    const answer = f.connection.execute.getMockImplementation()!;
+    const TIMEOUT_ERRNO = 3024;
+    f.connection.execute.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (isProbe(sql)) throw { errno: TIMEOUT_ERRNO, code: 'ER_QUERY_TIMEOUT' };
+      return answer(sql, params);
+    });
+    const args = ['--schema', BUILDER_SCHEMA, '--plot', String(PLOT_ID), '--census', range(MULTI_CHUNK_CENSUS_COUNT).join(','), '--runs', String(RUNS)];
+    const result = await runTimingCli(args, f.deps);
+    const output = f.stdout.join('\n');
+    const summary = JSON.parse(
+      output
+        .split('\n')
+        .find(line => line.startsWith('ERRORS_EXPLORER_TIMING_SUMMARY '))!
+        .slice('ERRORS_EXPLORER_TIMING_SUMMARY '.length)
+    );
+    console.log(`exit=${result.exitCode}; m1 line: ${output.split('\n').find(line => line.startsWith('m1Probe'))}; summary m1: ${JSON.stringify(summary.m1)}`);
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain('m1Probe: timed out after');
+    expect(summary.m1).toEqual({ m1Status: 'inconclusive', diagnostic: expect.any(String) });
+  });
+
+  it('explains a page statement over the prepared protocol, because its LIMIT and OFFSET are bound strings', async () => {
+    const f = databaseFake();
+    const args = ['--schema', BUILDER_SCHEMA, '--plot', String(PLOT_ID), '--census', '2', '--runs', String(RUNS), '--explain'];
+    const result = await runTimingCli(args, f.deps);
+    const explained = f.executed.filter(({ sql }) => sql.startsWith('EXPLAIN FORMAT=TREE'));
+    const explainedViaText = f.connection.query.mock.calls.filter(([sql]) => String(sql).startsWith('EXPLAIN'));
+    console.log(`exit=${result.exitCode}; explained over execute: ${explained.length}; over query: ${explainedViaText.length}`);
+    expect(result.exitCode).toBe(0);
+    expect(explained.some(({ sql }) => sql.includes(ERROR_EXPLORER_STATEMENT_LABELS.page))).toBe(true);
+    expect(explainedViaText).toHaveLength(0);
+  });
+
+  it('merges the histogram chunks into the distinct signature count', async () => {
+    const { output } = await runScope();
+    expect(output).toMatch(/distinct signatures: with flags \d+, without flags \d+/);
+  });
 });

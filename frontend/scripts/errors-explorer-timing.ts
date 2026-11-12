@@ -8,6 +8,26 @@ import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { AZURE_HOST, LOCAL_HOSTS, UnexpectedHostError, assertExpectedHost, discoverSiteSchemas } from './lib/schema-cli';
 import * as oracle from '@/tests/oracles/errors-explorer-legacy';
 import * as current from '@/app/api/errors/explorer/_shared';
+import { mergeSignatureRows } from '@/app/api/errors/explorer/errorsetcounts';
+import {
+  buildHistogramWithFlagsStatement,
+  buildHistogramWithoutFlagsStatement,
+  chunkCensusIDs,
+  ERROR_EXPLORER_STATEMENT_LABELS,
+  type ErrorSignatureRow
+} from '@/app/api/errors/explorer/errorsetsql';
+import { classifyStatement, describeCensusScope, lastPageNumber, pastTheEndPageNumber, UNLABELLED_STATEMENT } from '@/tests/setup/errorsetstatements';
+import {
+  M1_INCONCLUSIVE_DIAGNOSTICS,
+  M1_STATUS,
+  MEMBERSHIP_PROBE_LABELS,
+  m1Summary,
+  runMembershipProbe,
+  type M1Result,
+  type MembershipProbeRow
+} from '../tests/benchmarks/lib/membershipprobe';
+
+export { classifyStatement, describeCensusScope, lastPageNumber, m1Summary, pastTheEndPageNumber };
 
 const DEFAULT_MAX_STATEMENT_MS = 60_000;
 const INTERRUPT_EXIT_CODE = 130;
@@ -53,6 +73,7 @@ const SAFE_CONTEXT = new Set([
   'same-batch-groups',
   'queryPage0',
   'queryLastPage',
+  'queryPastTheEnd',
   'queryValidationOnly',
   'queryContradictions',
   'queryMostCommonMessage',
@@ -62,7 +83,10 @@ const SAFE_CONTEXT = new Set([
   'detailsFirstRow',
   'detailsFirstContradictionRow',
   'messageCounts',
-  'exportDefault'
+  'exportDefault',
+  'm1Probe',
+  ...Object.values(ERROR_EXPLORER_STATEMENT_LABELS),
+  ...Object.values(MEMBERSHIP_PROBE_LABELS)
 ]);
 const REQUIRED_ENV = ['AZURE_SQL_SERVER', 'AZURE_SQL_USER', 'AZURE_SQL_PASSWORD', 'AZURE_SQL_PORT'] as const;
 const REQUIRED_TABLES = ['census', 'coremeasurements', 'measurement_error_log', 'measurementssummary'] as const;
@@ -170,13 +194,6 @@ export async function prepareReadOnlySession(connection: Pick<Connection, 'query
   const [rows] = await connection.query<mysql.RowDataPacket[]>(SESSION_SETUP.check);
   if (Number(rows[0]?.readOnly) !== 1) throw new ReadOnlySessionNotConfirmedError();
   await connection.query(SESSION_SETUP.maxTime, [maxStatementMs]);
-}
-
-function classifyStatement(sql: string): string {
-  if (/measurement_error_log\s+mel/i.test(sql)) return 'raw-rows';
-  if (/GROUP_CONCAT\s*\(DISTINCT\s+ms\./i.test(sql)) return 'duplicate-groups';
-  if (/GROUP_CONCAT\s*\(DISTINCT\s+cm\./i.test(sql)) return 'same-batch-groups';
-  return 'unlabelled';
 }
 
 export function createSerializedExecutor(connection: Pick<Connection, 'query' | 'execute'>, onStatement?: (label: string) => void) {
@@ -390,6 +407,7 @@ async function listGroupSizes(executor: Executor, schema: string, censuses: Reco
 
 const DEFAULT_RUNS = 3;
 const PAGE_SIZE = 25;
+const SCOPE_REPORTING_SCENARIOS: readonly string[] = ['queryLastPage', 'queryPastTheEnd'];
 const SHOW_PREPARE = "SHOW SESSION STATUS LIKE 'Com_stmt_prepare'";
 const SHOW_REPREPARE = "SHOW SESSION STATUS LIKE 'Com_stmt_reprepare'";
 const SHOW_GLOBAL_PREPARED = "SHOW GLOBAL STATUS LIKE 'Prepared_stmt_count'";
@@ -456,6 +474,25 @@ export function summarizePageLoad(query: readonly { run: number; criticalMs: num
     ...counts
   };
 }
+async function countDistinctSignatures(executor: Executor, schema: string, plotID: number, censusIDs: number[]) {
+  const countFor = async (buildHistogram: typeof buildHistogramWithFlagsStatement): Promise<number> => {
+    const chunks: ErrorSignatureRow[][] = [];
+    for (const chunk of chunkCensusIDs(censusIDs)) {
+      const statement = buildHistogram({ schema, plotID, censusIDs: chunk });
+      chunks.push((await executor.executeQuery(statement.sql, statement.params)) as ErrorSignatureRow[]);
+    }
+    return mergeSignatureRows(chunks).length;
+  };
+  return { withFlags: await countFor(buildHistogramWithFlagsStatement), withoutFlags: await countFor(buildHistogramWithoutFlagsStatement) };
+}
+function membershipProbeLabelOf(sql: string): string {
+  return sql.startsWith(MEMBERSHIP_PROBE_LABELS.f2) ? MEMBERSHIP_PROBE_LABELS.f2 : MEMBERSHIP_PROBE_LABELS.f1;
+}
+function describeM1(m1: M1Result): string {
+  const counts = `F2 rows ${m1.f2RowCount}; F1 rows ${m1.f1RowCount}`;
+  if (m1.m1Status === M1_STATUS.inconclusive) return `m1Probe: status inconclusive (${m1.diagnostic}); ${counts}`;
+  return `m1Probe: status comparable; ${counts}; p50 F2 ${m1.p50F2Ms.toFixed(2)} ms; p50 F1 ${m1.p50F1Ms.toFixed(2)} ms; ratio ${m1.m1Ratio.toFixed(3)}; triggered ${m1.m1Triggered ? 'yes' : 'no'}`;
+}
 function parsePositive(value: string | undefined): number {
   const number = Number(value);
   if (!value || !/^\d+$/.test(value) || !Number.isSafeInteger(number) || number < 1) throw new Error('Invalid argument');
@@ -471,7 +508,14 @@ async function readStatus(connection: QueryConnection, sql: string): Promise<num
   if (!Number.isFinite(value)) throw new Error('Invalid session status');
   return value;
 }
-async function reportShape(executor: Executor, connection: QueryConnection, schema: string, plotID: number, censusIDs: number[], out: (line: string) => void) {
+async function reportShape(
+  executor: Executor,
+  connection: QueryConnection,
+  schema: string,
+  plotID: number,
+  censusIDs: number[],
+  out: (line: string) => void
+): Promise<{ withFlags: number; withoutFlags: number }> {
   const placeholders = censusIDs.map(() => '?').join(',');
   const scope = `PlotID = ? AND CensusID IN (${placeholders})`;
   const params = [plotID, ...censusIDs];
@@ -511,13 +555,38 @@ async function reportShape(executor: Executor, connection: QueryConnection, sche
     'shape'
   );
   out(`indexes: ${JSON.stringify(indexes)}`);
-  out('distinct signatures: n/a');
+  const distinctSignatures = await countDistinctSignatures(executor, schema, plotID, censusIDs);
+  out(`distinct signatures: with flags ${distinctSignatures.withFlags}, without flags ${distinctSignatures.withoutFlags}`);
   await listGroupSizes(
     executor,
     schema,
     censusIDs.map(CensusID => ({ CensusID })),
     out
   );
+  return distinctSignatures;
+}
+
+async function runM1Probe(
+  executor: Executor,
+  scope: { schema: string; plotID: number; censusIDs: number[] },
+  measuredRuns: number,
+  maxMs: number,
+  out: (line: string) => void
+): Promise<M1Result | { m1Status: typeof M1_STATUS.inconclusive; diagnostic: string }> {
+  try {
+    const m1 = await runMembershipProbe(
+      scope,
+      async statement => (await executor.executeQuery(statement.sql, statement.params, membershipProbeLabelOf(statement.sql))) as MembershipProbeRow[],
+      { measuredRuns }
+    );
+    out(describeM1(m1));
+    return m1;
+  } catch (error) {
+    if (errnoOf(error) !== TIMEOUT_ERRNO) throw error;
+    await executor.drain();
+    out(`m1Probe: timed out after ${maxMs} ms`);
+    return { m1Status: M1_STATUS.inconclusive, diagnostic: M1_INCONCLUSIVE_DIAGNOSTICS.statementTimedOut };
+  }
 }
 
 async function runMeasurements(
@@ -537,7 +606,8 @@ async function runMeasurements(
   const censusIDs = [...new Set(censusArg.split(',').map(parsePositive))];
   const runs = argument(argv, '--runs') === undefined ? DEFAULT_RUNS : parsePositive(argument(argv, '--runs'));
   const request = { schema, plotID, censusID: censusIDs[0], censusIDs, page: 0, pageSize: PAGE_SIZE, filters: DEFAULT_ERROR_EXPLORER_FILTERS };
-  await reportShape(executor, connection, schema, plotID, censusIDs, out);
+  const distinctSignatures = await reportShape(executor, connection, schema, plotID, censusIDs, out);
+  const censusScope = describeCensusScope(censusIDs);
   const page = await oracle.queryErrorExplorer(executor, request);
   const facets = await oracle.buildErrorExplorerFacets(executor, request);
   const grouped = await oracle.fetchGroupedErrorRows(executor, schema, plotID, censusIDs, { withContradictions: false });
@@ -556,7 +626,8 @@ async function runMeasurements(
   const contradictionID = contradiction?.coreMeasurementID;
   const scenarios: TimingScenario[] = [
     { name: 'queryPage0', run: (arm, e) => arm.queryErrorExplorer(e, request) },
-    { name: 'queryLastPage', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, page: Math.max(0, Math.ceil(page.totalRows / PAGE_SIZE) - 1) }) },
+    { name: 'queryLastPage', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, page: lastPageNumber(page.totalRows, PAGE_SIZE) }) },
+    { name: 'queryPastTheEnd', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, page: pastTheEndPageNumber(page.totalRows, PAGE_SIZE) }) },
     { name: 'queryValidationOnly', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, filters: preset('validation_only') }) },
     { name: 'queryContradictions', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, filters: preset('contradictions') }) },
     ...(message
@@ -596,6 +667,8 @@ async function runMeasurements(
   const comparisons: Record<string, Array<{ run: number; identical: boolean; paths: string[]; groupKeysIdentical: boolean }>> = {};
   for (const scenario of scenarios) {
     setScenario(scenario.name);
+    if (SCOPE_REPORTING_SCENARIOS.includes(scenario.name))
+      out(`${scenario.name} scope: ${censusScope.censuses} censuses, ${censusScope.censusChunks} census chunks`);
     const calls: Record<ArmName, CallResult[]> = { oracle: [], current: [] };
     results[scenario.name] = calls;
     for (let round = 0; round <= runs; round++) {
@@ -651,6 +724,9 @@ async function runMeasurements(
       }
     }
   }
+  setScenario('m1Probe');
+  executor.setOperation('m1Probe');
+  const m1 = await runM1Probe(executor, { schema, plotID, censusIDs }, runs, maxMs, out);
   out(table.join('\n'));
   const pageLoad: Partial<Record<ArmName, unknown>> = {};
   for (const arm of ['oracle', 'current'] as const) {
@@ -660,6 +736,8 @@ async function runMeasurements(
     out(`pageLoad ${arm}: ${JSON.stringify(pageLoad[arm])}`);
   }
   const budget = textBudget(currentAttempts.map(record => record.sql));
+  const unlabelledStatements = executor.statements.filter(record => record.label === UNLABELLED_STATEMENT).length;
+  out(`unlabelled statements: ${unlabelledStatements}`);
   out(`distinct-text budget: ${budget.status} (${budget.count})`);
   out(`Com_stmt_prepare delta: ${prepareDelta}; Com_stmt_reprepare delta: ${reprepareDelta}`);
   if (argv.includes('--explain')) {
@@ -669,7 +747,7 @@ async function runMeasurements(
       if (explained.has(record.sql)) continue;
       explained.add(record.sql);
       assertReadOnlyStatement(record.sql);
-      const [rows] = await connection.query<mysql.RowDataPacket[]>(`EXPLAIN FORMAT=TREE ${record.sql}`, normalizeStatementParams(record.params));
+      const [rows] = await connection.execute<mysql.RowDataPacket[]>(`EXPLAIN FORMAT=TREE ${record.sql}`, normalizeStatementParams(record.params));
       out(`EXPLAIN ${explained.size}:\n${redactExplainPlan(String(rows[0]?.EXPLAIN ?? ''))}`);
     }
   }
@@ -680,7 +758,9 @@ async function runMeasurements(
       Object.fromEntries((['oracle', 'current'] as const).map(arm => [arm, result[arm].length ? summarize(result[arm].map(call => call.criticalMs)) : null]))
     ])
   );
-  out(`ERRORS_EXPLORER_TIMING_SUMMARY ${JSON.stringify({ scenarios: summary, comparisons, pageLoad, budget })}`);
+  out(
+    `ERRORS_EXPLORER_TIMING_SUMMARY ${JSON.stringify({ scenarios: summary, comparisons, pageLoad, budget, scope: censusScope, distinctSignatures, unlabelledStatements, m1 })}`
+  );
 }
 
 export async function runTimingCli(argv: readonly string[], deps: TimingDeps = {}): Promise<{ exitCode: number; error: unknown | null }> {
