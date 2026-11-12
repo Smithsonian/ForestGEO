@@ -8,13 +8,13 @@
  *
  * SAFETY: hard-fails before any write if the ConnectionManager pool host is not local.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
 import { CENSUS_END_BEFORE_START_MESSAGE, CENSUS_INVALID_DATE_MESSAGE, CENSUS_START_DATE_REQUIRED_MESSAGE, type CensusDates } from '@/config/censuswindow';
 import { buildCensusDatesPatchBody } from '@/lib/db/definitions/timekeeping';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 vi.mock('@/auth', () => ({ auth: vi.fn() }));
 vi.mock('@/app/actions/cookiemanager', () => ({
@@ -42,6 +42,17 @@ const SEED_END_DATE = '2024-12-31';
 const EDITED_DATES: CensusDates = { startDate: '2024-02-01', endDate: '2025-01-31' };
 const OPEN_ENDED_DATES: CensusDates = { startDate: '2024-03-15', endDate: null };
 const REVERSED_DATES: CensusDates = { startDate: '2024-06-01', endDate: '2024-05-31' };
+const INSIDE_NARROWED_WINDOW_DAY = '2024-06-15';
+const OUTSIDE_NARROWED_WINDOW_DAY = '2024-01-10';
+const NARROWED_DATES: CensusDates = { startDate: '2024-02-01', endDate: '2024-12-31' };
+const OTHER_CENSUS_NUMBER = 99;
+const OTHER_CENSUS_DATES: CensusDates = { startDate: '2030-01-01', endDate: '2030-12-31' };
+const LINKED_TREE_TAG = 'CDP-TREE-1';
+const LINKED_STEM_TAG = '1';
+const VALIDATED = 1;
+const NOT_VALIDATED = 0;
+const ACTIVE = 1;
+const INACTIVE = 0;
 
 interface CensusRowSnapshot extends RowDataPacket {
   CensusID: number;
@@ -107,6 +118,73 @@ async function readCensusChangelog(): Promise<ChangelogRow[]> {
     [CENSUS_TABLE_NAME]
   );
   return rows;
+}
+
+interface ValidationStateRow extends RowDataPacket {
+  CoreMeasurementID: number;
+  IsValidated: number | null;
+}
+
+interface MeasurementSeed {
+  censusID: number;
+  stemGUID: number | null;
+  day: string;
+  isValidated: number | null;
+  isActive: number;
+}
+
+interface LinkedStem {
+  treeID: number;
+  stemGUID: number;
+}
+
+async function insertLinkedStem(): Promise<LinkedStem> {
+  const [tree] = await setupConnection!.query<ResultSetHeader>(
+    `INSERT INTO \`${schema}\`.trees (TreeTag, SpeciesID, CensusID, IsActive)
+     SELECT ?, MIN(SpeciesID), ?, 1 FROM \`${schema}\`.species`,
+    [LINKED_TREE_TAG, censusID]
+  );
+  const [stem] = await setupConnection!.query<ResultSetHeader>(
+    `INSERT INTO \`${schema}\`.stems (TreeID, QuadratID, CensusID, StemTag, IsActive)
+     SELECT ?, MIN(QuadratID), ?, ?, 1 FROM \`${schema}\`.quadrats`,
+    [tree.insertId, censusID, LINKED_STEM_TAG]
+  );
+  return { treeID: tree.insertId, stemGUID: stem.insertId };
+}
+
+async function deleteLinkedStem(stem: LinkedStem): Promise<void> {
+  await setupConnection!.query(`DELETE FROM \`${schema}\`.stems WHERE StemGUID = ?`, [stem.stemGUID]);
+  await setupConnection!.query(`DELETE FROM \`${schema}\`.trees WHERE TreeID = ?`, [stem.treeID]);
+}
+
+async function insertMeasurement(seed: MeasurementSeed): Promise<number> {
+  const [result] = await setupConnection!.query<ResultSetHeader>(
+    `INSERT INTO \`${schema}\`.coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, IsActive) VALUES (?, ?, ?, ?, ?)`,
+    [seed.censusID, seed.stemGUID, seed.isValidated, seed.day, seed.isActive]
+  );
+  return result.insertId;
+}
+
+async function insertCensusInSeededPlot(plotCensusNumber: number, dates: CensusDates): Promise<number> {
+  const [result] = await setupConnection!.query<ResultSetHeader>(
+    `INSERT INTO \`${schema}\`.census (PlotID, PlotCensusNumber, StartDate, EndDate, IsActive)
+     SELECT PlotID, ?, ?, ?, 1 FROM \`${schema}\`.census WHERE CensusID = ?`,
+    [plotCensusNumber, dates.startDate, dates.endDate, censusID]
+  );
+  return result.insertId;
+}
+
+async function deleteCensus(censusIDToDelete: number): Promise<void> {
+  await setupConnection!.query(`DELETE FROM \`${schema}\`.coremeasurements WHERE CensusID = ?`, [censusIDToDelete]);
+  await setupConnection!.query(`DELETE FROM \`${schema}\`.census WHERE CensusID = ?`, [censusIDToDelete]);
+}
+
+async function readValidationStates(ids: number[]): Promise<Map<number, number | null>> {
+  const [rows] = await setupConnection!.query<ValidationStateRow[]>(
+    `SELECT CoreMeasurementID, CAST(IsValidated AS SIGNED) AS IsValidated FROM \`${schema}\`.coremeasurements WHERE CoreMeasurementID IN (?)`,
+    [ids]
+  );
+  return new Map(rows.map(row => [row.CoreMeasurementID, row.IsValidated]));
 }
 
 function describeRow(row: CensusRowSnapshot): string {
@@ -256,5 +334,78 @@ describe('Edit census dates via the production fixeddata PATCH route', () => {
     expect((await response.json()).error).toBe(CENSUS_END_BEFORE_START_MESSAGE);
     expect(await readCensusRow()).toEqual(before);
     expect(await readCensusChangelog()).toHaveLength(0);
+  });
+});
+
+describe('Narrowing the census window re-opens validation for rows it now excludes', () => {
+  const insertedMeasurementIDs: number[] = [];
+  let linkedStem: LinkedStem;
+  let stemGUID: number;
+
+  beforeAll(async () => {
+    linkedStem = await insertLinkedStem();
+    stemGUID = linkedStem.stemGUID;
+  });
+
+  afterAll(async () => {
+    await deleteLinkedStem(linkedStem);
+  });
+
+  afterEach(async () => {
+    if (insertedMeasurementIDs.length) {
+      await setupConnection!.query(`DELETE FROM \`${schema}\`.coremeasurements WHERE CoreMeasurementID IN (?)`, [insertedMeasurementIDs]);
+    }
+    insertedMeasurementIDs.length = 0;
+  });
+
+  it('resets only validated, linked, active rows of this census that fall outside the new window', async () => {
+    const otherCensusID = await insertCensusInSeededPlot(OTHER_CENSUS_NUMBER, OTHER_CENSUS_DATES);
+    try {
+      const outsideValidated = await insertMeasurement({ censusID, stemGUID, day: OUTSIDE_NARROWED_WINDOW_DAY, isValidated: VALIDATED, isActive: ACTIVE });
+      const insideValidated = await insertMeasurement({ censusID, stemGUID, day: INSIDE_NARROWED_WINDOW_DAY, isValidated: VALIDATED, isActive: ACTIVE });
+      const outsideFailedRow = await insertMeasurement({
+        censusID,
+        stemGUID: null,
+        day: OUTSIDE_NARROWED_WINDOW_DAY,
+        isValidated: NOT_VALIDATED,
+        isActive: ACTIVE
+      });
+      const outsideInactive = await insertMeasurement({ censusID, stemGUID, day: OUTSIDE_NARROWED_WINDOW_DAY, isValidated: VALIDATED, isActive: INACTIVE });
+      const outsideOtherCensus = await insertMeasurement({
+        censusID: otherCensusID,
+        stemGUID,
+        day: OUTSIDE_NARROWED_WINDOW_DAY,
+        isValidated: VALIDATED,
+        isActive: ACTIVE
+      });
+      insertedMeasurementIDs.push(outsideValidated, insideValidated, outsideFailedRow, outsideInactive, outsideOtherCensus);
+
+      const response = await patchCensusDates(NARROWED_DATES);
+      const states = await readValidationStates(insertedMeasurementIDs);
+      // eslint-disable-next-line no-console
+      console.log(`[census-dates-patch] narrowed to ${JSON.stringify(NARROWED_DATES)}; IsValidated by row: ${JSON.stringify([...states])}`);
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      expect(states.get(outsideValidated), 'validated row now before the start must be re-opened').toBeNull();
+      expect(states.get(insideValidated), 'row still inside the window keeps its verdict').toBe(VALIDATED);
+      expect(states.get(outsideFailedRow), 'failed rows are not validation candidates').toBe(NOT_VALIDATED);
+      expect(states.get(outsideInactive), 'inactive rows are ignored').toBe(VALIDATED);
+      expect(states.get(outsideOtherCensus), 'another census is untouched').toBe(VALIDATED);
+    } finally {
+      await deleteCensus(otherCensusID);
+    }
+  });
+
+  it('resets nothing when the PATCH is refused', async () => {
+    const outsideValidated = await insertMeasurement({ censusID, stemGUID, day: OUTSIDE_NARROWED_WINDOW_DAY, isValidated: VALIDATED, isActive: ACTIVE });
+    insertedMeasurementIDs.push(outsideValidated);
+
+    const response = await patchCensusDates(REVERSED_DATES);
+    const states = await readValidationStates(insertedMeasurementIDs);
+    // eslint-disable-next-line no-console
+    console.log(`[census-dates-patch] refused PATCH status=${response.status}; IsValidated=${states.get(outsideValidated)}`);
+
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(states.get(outsideValidated)).toBe(VALIDATED);
   });
 });
