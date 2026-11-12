@@ -448,6 +448,10 @@ export function buildErrorTypeKey({ source, code, message }: ErrorTypeIdentity):
   return JSON.stringify([source, code, message]);
 }
 
+export function formatExportErrorType(label: string): string {
+  return `${VIEW_ERRORS_TEXT.exportCsv}: ${label}`;
+}
+
 export function toErrorTypeIdentity({ source, code, message }: ErrorTypeIdentity): ErrorTypeIdentity {
   return { source, code, message };
 }

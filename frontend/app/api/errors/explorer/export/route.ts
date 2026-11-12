@@ -10,14 +10,17 @@ import {
   errorExplorerExportRequestSchema,
   parseExplorerRequest,
   readExplorerRequestJson,
-  type ParsedErrorExplorerScopeRequest
+  type ParsedErrorExplorerExportRequest
 } from '@/lib/errorsexplorer/explorerrequest';
 
 export const runtime = 'nodejs';
 
-type ErrorExplorerExportRequest = Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters'>;
+type ErrorExplorerExportRequest = Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters' | 'errorType'>;
 
-function parseRequest(body: ParsedErrorExplorerScopeRequest): ErrorExplorerExportRequest {
+const FILENAME_UNSAFE_CHARACTERS = /[^A-Za-z0-9_-]/g;
+const FILENAME_REPLACEMENT = '_';
+
+function parseRequest(body: ParsedErrorExplorerExportRequest): ErrorExplorerExportRequest {
   return {
     schema: body.schema ?? '',
     plotID: Number(body.plotID ?? 0),
@@ -29,7 +32,8 @@ function parseRequest(body: ParsedErrorExplorerScopeRequest): ErrorExplorerExpor
       exactMessages: body.filters?.exactMessages ?? [],
       affectedFields: body.filters?.affectedFields ?? [],
       contradictionTypes: body.filters?.contradictionTypes ?? []
-    }
+    },
+    errorType: body.errorType
   };
 }
 
@@ -50,13 +54,15 @@ async function handler(request: NextRequest, _context: RouteContext) {
     const body = parseRequest(parsed.data);
 
     const groupedRows = await fetchGroupedErrorRows(connectionManager, body.schema, body.plotID, body.censusIDs?.length ? body.censusIDs : body.censusID);
-    const exportRows = buildErrorExportRows(groupedRows, body.filters);
+    const exportRows = buildErrorExportRows(groupedRows, body.filters, body.errorType);
     // Excel and other spreadsheet applications execute cells beginning with
     // formula sigils. Every exported text field can ultimately be upload/user
     // controlled, so force Papa Parse's formula escaping for all rows.
     const csv = Papa.unparse(exportRows, { escapeFormulae: true });
     const date = new Date().toISOString().slice(0, 10);
-    const filename = `errors-${body.schema}-plot${body.plotID}-census${body.censusID}-${date}.csv`;
+    // The code is request text going into a response header, so only filename-safe characters are kept.
+    const typeSuffix = body.errorType ? `-${body.errorType.source}-${body.errorType.code.replace(FILENAME_UNSAFE_CHARACTERS, FILENAME_REPLACEMENT)}` : '';
+    const filename = `errors-${body.schema}-plot${body.plotID}-census${body.censusID}${typeSuffix}-${date}.csv`;
     const censusCount = body.censusIDs?.length || 1;
     ailogger.event('ErrorExplorerCsvExported', {
       schema: body.schema,

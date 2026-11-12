@@ -35,6 +35,7 @@ import {
   formatViewErrorsFactsLine,
   resolveErrorsExplorerDeepLinkFilters,
   resolveShowValue,
+  toErrorTypeIdentity,
   VIEW_ERRORS_ALERTS,
   VIEW_ERRORS_TEXT,
   type DetailsPanelRow,
@@ -44,6 +45,7 @@ import {
   type ErrorExplorerRow,
   type ErrorsExplorerReadScope,
   type ErrorTypeFacet,
+  type ErrorTypeIdentity,
   type RelatedContradictionRow,
   type RowMutationScope
 } from '@/config/errorsexplorer';
@@ -66,6 +68,7 @@ import LockedControl from './lockedcontrol';
 export { extractFilenameFromContentDisposition } from '@/lib/errorsexplorer/explorertransport';
 
 const FLAT_GRID_KEY = 'flat';
+const PAGE_EXPORT_KEY = 'page';
 const FILTER_STORAGE_PREFIX = 'errors-explorer-filters';
 
 export function getFilterStorageKey(schema?: string, plotID?: number, censusID?: number) {
@@ -208,7 +211,7 @@ export default function ErrorsExplorer() {
   const [filters, setFilters] = useState<ErrorExplorerFilters>(defaultFilters);
   const [groupMode, setGroupMode] = useState<ErrorsExplorerGroupMode>('byType');
   const [pageAlert, setPageAlert] = useState<string | null>(null);
-  const [isExportingCsv, setIsExportingCsv] = useState(false);
+  const [exportingKey, setExportingKey] = useState<string | null>(null);
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
   const codeOptions = selectableOpts.codes;
   const [clearState, setClearState] = useState<ClearOperationState | null>(null);
@@ -412,14 +415,14 @@ export default function ErrorsExplorer() {
     setViewState(previous => ({ ...previous, flatModels: { ...previous.flatModels, filterModel: { items: [] } } }));
   };
 
-  const handleExportCsv = async () => {
+  const exportCsv = async (key: string, errorType?: ErrorTypeIdentity) => {
     if (!readScope) return;
     clearPageAlert();
-    setIsExportingCsv(true);
+    setExportingKey(key);
     let objectUrl: string | null = null;
     let anchor: HTMLAnchorElement | null = null;
     try {
-      const { blob, filename } = await postErrorsExplorerExport(readScope, filters);
+      const { blob, filename } = await postErrorsExplorerExport(readScope, filters, errorType);
       objectUrl = URL.createObjectURL(blob);
       anchor = document.createElement('a');
       anchor.href = objectUrl;
@@ -431,7 +434,7 @@ export default function ErrorsExplorer() {
     } finally {
       anchor?.remove();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
-      setIsExportingCsv(false);
+      setExportingKey(null);
     }
   };
 
@@ -496,9 +499,9 @@ export default function ErrorsExplorer() {
             variant="outlined"
             color="neutral"
             startDecorator={<FileDownloadOutlinedIcon />}
-            loading={isExportingCsv}
-            disabled={isExportingCsv}
-            onClick={handleExportCsv}
+            loading={exportingKey === PAGE_EXPORT_KEY}
+            disabled={exportingKey !== null}
+            onClick={() => void exportCsv(PAGE_EXPORT_KEY)}
             data-testid="errorsexplorer-export-csv"
           >
             {VIEW_ERRORS_TEXT.exportCsv}
@@ -593,6 +596,8 @@ export default function ErrorsExplorer() {
                 }
                 collapseDisabledReason={rowEdit.reasons.owningGrid(gridKey)}
                 activeMeasurements={totals?.activeMeasurements ?? null}
+                onExport={() => void exportCsv(identityKey, toErrorTypeIdentity(facet))}
+                exporting={exportingKey === identityKey}
                 gridProps={{
                   ...gridProps,
                   models: view.groupModels[identityKey] ?? defaultGroupModelsFor(facet),

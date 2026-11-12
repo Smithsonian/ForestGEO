@@ -175,6 +175,8 @@ function GroupHarness() {
       onToggle={() => undefined}
       collapseDisabledReason={rowEdit.reasons.owningGrid(GROUP_GRID_KEY)}
       activeMeasurements={ACTIVE_MEASUREMENTS}
+      onExport={() => undefined}
+      exporting={false}
       gridProps={gridProps}
     />
   );

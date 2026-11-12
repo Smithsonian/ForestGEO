@@ -14,6 +14,8 @@ import {
   EDIT_THIS_ROW_UNAVAILABLE_TOOLTIP,
   FALLBACK_ERROR_CODE,
   FALLBACK_ERROR_MESSAGE,
+  formatErrorTypeLabel,
+  formatExportErrorType,
   formatShowMoreErrorTypes,
   MARKED_INVALID_NO_ERROR_LOGGED_LABEL,
   VIEW_ERRORS_ALERTS,
@@ -1192,6 +1194,46 @@ describe('When the totals call fails', () => {
     console.log(`[view errors] queries after the totals recovered: ${JSON.stringify(network.bodiesFor(ROUTES.query).map(body => body?.errorType ?? null))}`);
     expect(screen.queryByText(VIEW_ERRORS_TEXT.groupsUnavailable)).not.toBeInTheDocument();
     expect(network.bodiesFor(ROUTES.query).at(-1)?.errorType).toMatchObject({ code: VALIDATION_FACET.code });
+  });
+});
+
+describe('Export one error type', () => {
+  const OBJECT_URL = 'blob:view-errors-test';
+
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+
+  // jsdom's URL has neither method, so they are assigned for the test and put back after it.
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => OBJECT_URL);
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+    vi.restoreAllMocks();
+  });
+
+  it('sends the group identity with the page filters, and the page export sends none', async () => {
+    const SEARCH = 'T-1';
+    const { network } = await mountPage();
+    await userEvent.type(screen.getByRole('textbox', { name: VIEW_ERRORS_TEXT.searchLabel }), SEARCH);
+    await userEvent.click(await screen.findByRole('button', { name: formatExportErrorType(formatErrorTypeLabel(VALIDATION_FACET.message)) }));
+    await waitFor(() => expect(network.bodiesFor(ROUTES.export)).toHaveLength(1));
+    await waitFor(() => expect(screen.getByTestId('errorsexplorer-export-csv')).toBeEnabled());
+    await userEvent.click(screen.getByTestId('errorsexplorer-export-csv'));
+    await waitFor(() => expect(network.bodiesFor(ROUTES.export)).toHaveLength(2));
+
+    const [groupExport, pageExport] = network.bodiesFor(ROUTES.export);
+    console.log(`[view errors] export bodies: ${JSON.stringify([groupExport, pageExport])}`);
+    expect(groupExport?.errorType).toEqual({ source: VALIDATION_FACET.source, code: VALIDATION_FACET.code, message: VALIDATION_FACET.message });
+    expect(groupExport?.filters).toMatchObject({ quickSearch: SEARCH });
+    expect(pageExport).not.toHaveProperty('errorType');
+    expect(pageExport?.filters).toMatchObject({ quickSearch: SEARCH });
+    expect(screen.queryByTestId('errors-explorer-page-alert'), 'neither export failed').toBeNull();
+    expect(HTMLAnchorElement.prototype.click, 'each export hands the browser a download').toHaveBeenCalledTimes(2);
   });
 });
 

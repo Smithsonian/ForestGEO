@@ -55,9 +55,6 @@ const scopeShape = {
   filters: errorExplorerFiltersSchema.prefault({})
 };
 
-export const errorExplorerExportRequestSchema = z.object(scopeShape).strict();
-export const errorExplorerFacetsRequestSchema = z.object(scopeShape).strict();
-
 const errorTypeSchema = z
   .object({
     source: z.enum(ERROR_SOURCE_VALUES),
@@ -65,6 +62,9 @@ const errorTypeSchema = z
     message: z.string().max(MAX_ERROR_TYPE_MESSAGE_LENGTH)
   })
   .strict();
+
+export const errorExplorerExportRequestSchema = z.object({ ...scopeShape, errorType: errorTypeSchema.optional() }).strict();
+export const errorExplorerFacetsRequestSchema = z.object(scopeShape).strict();
 
 const sortItemSchema = z.object({ field: z.enum(ERROR_EXPLORER_COLUMN_FIELDS), sort: z.enum(ERROR_EXPLORER_SORT_DIRECTIONS) }).strict();
 
@@ -107,6 +107,7 @@ export const errorExplorerQueryRequestSchema = z
 
 export type ParsedErrorExplorerQueryRequest = z.output<typeof errorExplorerQueryRequestSchema>;
 export type ParsedErrorExplorerScopeRequest = z.output<typeof errorExplorerFacetsRequestSchema>;
+export type ParsedErrorExplorerExportRequest = z.output<typeof errorExplorerExportRequestSchema>;
 
 export interface ExplorerRequestIssue {
   path: string;
