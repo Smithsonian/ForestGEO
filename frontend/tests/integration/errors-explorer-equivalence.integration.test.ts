@@ -11,6 +11,7 @@ import {
   type ErrorExplorerSource
 } from '@/config/errorsexplorer';
 import * as production from '@/app/api/errors/explorer/_shared';
+import { ERROR_EXPLORER_STATEMENT_LABELS, NO_LOG_ERROR_CODE, NO_LOG_ERROR_MESSAGE, NO_LOG_ERROR_SOURCE } from '@/app/api/errors/explorer/errorsetsql';
 import * as oracle from '../oracles/errors-explorer-legacy';
 import { DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { runQueryDispatch } from '../setup/runquerydispatch';
@@ -45,7 +46,8 @@ import {
   ACCENT_ONLY_TREE_TAG_PAIR,
   type FixtureDatabase,
   type FixtureMeasurement,
-  type GeneratedFixture
+  type GeneratedFixture,
+  type RecordedStatement
 } from './helpers/errorsexplorerfixtures';
 
 const EQUIVALENCE_DATABASE = `${DEFAULT_TEST_CONFIG.database}_errequiv`;
@@ -65,6 +67,23 @@ const PAGE_BOUNDARY_PAGE_SIZES: readonly number[] = [10, 25];
 const DUPLICATE: ContradictionType = 'duplicate_tag_stem';
 const SAME_BATCH: ContradictionType = 'same_batch_conflict';
 const FAILED_NO_LOG_CODE = 'failed_no_log';
+const LABELS = ERROR_EXPLORER_STATEMENT_LABELS;
+const STATEMENT_SHAPE_COUNT = Object.keys(LABELS).length;
+const KNOWN_STATEMENT_LABELS: ReadonlySet<string> = new Set(Object.values(LABELS));
+const DETAILS_STATEMENT_LABELS: ReadonlySet<string> = new Set([LABELS.idRawRows, LABELS.duplicateMemberGroups, LABELS.sameBatchMemberGroups]);
+const SQL_QUERY_STATEMENT_LABELS: ReadonlySet<string> = new Set([
+  LABELS.catalog,
+  LABELS.page,
+  LABELS.totals,
+  LABELS.idRawRows,
+  LABELS.duplicateMemberGroups,
+  LABELS.sameBatchMemberGroups
+]);
+const PAGE_WINDOW_LIMIT_PARAM_FROM_END = 2;
+const MEMBER_GROUP_KINDS_PER_ROW = 2;
+const BLANK_SEARCH = '';
+/** Every raw-rows statement and the catalog bind these three as the display fallback for a measurement without a log, whatever the filters are. */
+const FALLBACK_DISPLAY_PARAMS: ReadonlySet<unknown> = new Set([NO_LOG_ERROR_SOURCE, NO_LOG_ERROR_CODE, NO_LOG_ERROR_MESSAGE]);
 
 type OracleExecutor = Parameters<typeof oracle.queryErrorExplorer>[0];
 type ProductionExecutor = Parameters<typeof production.queryErrorExplorer>[0];
@@ -207,6 +226,22 @@ const GRID_COMBINATIONS: ScopedFilters[] = [
   ...PLOT_SCOPES.flatMap(scope => PRESET_FILTERS.map(named => ({ scope, named })))
 ];
 const PRESET_COMBINATIONS: ScopedFilters[] = [...SCOPES, ...PLOT_SCOPES].flatMap(scope => PRESET_FILTERS.map(named => ({ scope, named })));
+
+function filterStringsOf(filters: ErrorExplorerFilters): string[] {
+  const messages = ([] as string[]).concat(filters.exactMessages);
+  return [...messages, ...filters.affectedFields, filters.quickSearch.trim()].filter(value => value !== BLANK_SEARCH);
+}
+
+/** The schema name is part of every statement text, so it is cut out before the filter strings are looked for. */
+function findFilterStringInStatement(statement: RecordedStatement, schema: string, filterStrings: readonly string[]): string | null {
+  const textWithoutSchema = statement.sql.split(schema).join('');
+  for (const filterString of filterStrings) {
+    if (textWithoutSchema.includes(filterString)) return `the statement text contains "${filterString}"`;
+    const matchingParam = statement.params.find(param => typeof param === 'string' && !FALLBACK_DISPLAY_PARAMS.has(param) && param.includes(filterString));
+    if (matchingParam !== undefined) return `the parameter ${JSON.stringify(matchingParam)} contains "${filterString}"`;
+  }
+  return null;
+}
 
 function pagesFor(totalRows: number, pageSize: number): number[] {
   const lastPage = Math.max(0, Math.ceil(totalRows / pageSize) - 1);
@@ -454,6 +489,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
   let fixtureDatabase: FixtureDatabase | null = null;
 
   const fixtureSession = createFixtureDatabaseSession(EQUIVALENCE_DATABASE);
+  const productionStatementLabelByText = new Map<string, string | null>();
 
   beforeAll(async () => {
     assertLocalOrRefuse();
@@ -472,6 +508,9 @@ describe('errors explorer: frozen oracle against production on generated data', 
     const wholeListCache = new Map<string, Promise<ErrorExplorerQueryResponse>>();
     const axisMaxima = new Map<string, number>();
     const noLogTotals = new Map<string, number>();
+    let maxPageStatementRowsPerSlot = 0;
+    let maxMemberGroupRowsPerPageRow = 0;
+    let sqlPathQueryCount = 0;
 
     const database = () => (fixtureDatabase as FixtureDatabase).database;
     const explorerConnection = () => (fixtureDatabase as FixtureDatabase).explorerConnection;
@@ -484,6 +523,82 @@ describe('errors explorer: frozen oracle against production on generated data', 
     const oracleExecutor = (): OracleExecutor => countingExecutor();
     const productionExecutor = (): ProductionExecutor => countingExecutor() as unknown as ProductionExecutor;
     const witnessIDs = () => new Set(fixture.witnessRowIDs);
+
+    const recordProduction = async <Result>(run: (executor: ProductionExecutor) => Promise<Result>) => {
+      const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });
+      const result = await run(recorder as unknown as ProductionExecutor);
+      statementCount += recorder.statements.length;
+      return { result, statements: recorder.statements };
+    };
+
+    const failStatementCheck = (context: Record<string, unknown>, statement: RecordedStatement, reason: string): never => {
+      const message = [
+        `[statement assertion] seed ${seed}: ${reason}`,
+        `  context: ${JSON.stringify(context)}`,
+        `  label: ${statement.label}`,
+        `  sql: ${statement.sql.slice(0, 400)}`
+      ].join('\n');
+      console.log(message);
+      throw new Error(message);
+    };
+
+    const observeProduction = (
+      context: Record<string, unknown>,
+      statements: readonly RecordedStatement[],
+      filters: ErrorExplorerFilters,
+      allowedLabels: ReadonlySet<string> = KNOWN_STATEMENT_LABELS
+    ): void => {
+      const filterStrings = filterStringsOf(filters);
+      for (const statement of statements) {
+        if (statement.label === null || !allowedLabels.has(statement.label))
+          failStatementCheck(context, statement, `the label ${statement.label} is not allowed here`);
+        productionStatementLabelByText.set(statement.sql, statement.label);
+        const leak = findFilterStringInStatement(statement, database(), filterStrings);
+        if (leak) failStatementCheck(context, statement, `a filter or search string was sent to MySQL: ${leak}`);
+      }
+    };
+
+    const observeSqlPathQuery = (
+      context: Record<string, unknown>,
+      statements: readonly RecordedStatement[],
+      filters: ErrorExplorerFilters,
+      response: ErrorExplorerQueryResponse
+    ): void => {
+      observeProduction(context, statements, filters, SQL_QUERY_STATEMENT_LABELS);
+      sqlPathQueryCount++;
+      const pageStatements = statements.filter(statement => statement.label === LABELS.page);
+      if (pageStatements.length > 1) failStatementCheck(context, pageStatements[1], `${pageStatements.length} page statements for one chunk`);
+      for (const pageStatement of pageStatements) {
+        const slots = Number(pageStatement.params[pageStatement.params.length - PAGE_WINDOW_LIMIT_PARAM_FROM_END]);
+        if (pageStatement.rows > slots) failStatementCheck(context, pageStatement, `${pageStatement.rows} page statement rows for ${slots} page slots`);
+        maxPageStatementRowsPerSlot = Math.max(maxPageStatementRowsPerSlot, slots > 0 ? pageStatement.rows / slots : 0);
+      }
+      const memberGroupRows = statements
+        .filter(statement => statement.label === LABELS.duplicateMemberGroups || statement.label === LABELS.sameBatchMemberGroups)
+        .reduce((total, statement) => total + statement.rows, 0);
+      if (response.rows.length > 0) {
+        const perPageRow = memberGroupRows / response.rows.length;
+        if (perPageRow > MEMBER_GROUP_KINDS_PER_ROW) {
+          failStatementCheck(context, statements[statements.length - 1], `${memberGroupRows} member-group rows for ${response.rows.length} page rows`);
+        }
+        maxMemberGroupRowsPerPageRow = Math.max(maxMemberGroupRowsPerPageRow, perPageRow);
+      } else if (memberGroupRows > 0) {
+        failStatementCheck(context, statements[statements.length - 1], `${memberGroupRows} member-group rows for an empty page`);
+      }
+    };
+
+    const observeSearchQuery = (
+      context: Record<string, unknown>,
+      statements: readonly RecordedStatement[],
+      filters: ErrorExplorerFilters,
+      response: ErrorExplorerQueryResponse
+    ): void => {
+      const searchesInNode = filters.quickSearch.trim() !== BLANK_SEARCH;
+      if (!searchesInNode) return observeSqlPathQuery(context, statements, filters, response);
+      observeProduction(context, statements, filters);
+      const pageStatement = statements.find(statement => statement.label === LABELS.page || statement.label === LABELS.catalog);
+      if (pageStatement) failStatementCheck(context, pageStatement, 'a quick search must stay on the Node path');
+    };
 
     const queryRequest = (scope: Scope, filters: ErrorExplorerFilters, page: number, pageSize: number): ErrorExplorerQueryRequest => ({
       schema: database(),
@@ -533,6 +648,9 @@ describe('errors explorer: frozen oracle against production on generated data', 
       wholeListCache.clear();
       axisMaxima.clear();
       noLogTotals.clear();
+      maxPageStatementRowsPerSlot = 0;
+      maxMemberGroupRowsPerPageRow = 0;
+      sqlPathQueryCount = 0;
       await replaceFixture((fixtureDatabase as FixtureDatabase).setupConnection, fixture);
       console.log(
         `[equivalence] seed=${seed} measurements=${fixture.measurements.length} logs=${fixture.logs.length} witness=${fixture.witnessRowIDs.join(',')}`
@@ -735,12 +853,12 @@ describe('errors explorer: frozen oracle against production on generated data', 
             for (const pageSize of PAGE_SIZES) {
               for (const page of pagesFor(whole.totalRows, pageSize)) {
                 apiCalls++;
-                const actual = await production.queryErrorExplorer(productionExecutor(), queryRequest(scope, filters, page, pageSize));
-                await compare(
-                  { scenario: 'queryErrorExplorer', scope: scope.name, filters: label, filterValues: filters, page, pageSize },
-                  actual,
-                  sliceOracleWholeList(whole, page, pageSize)
+                const { result: actual, statements } = await recordProduction(executor =>
+                  production.queryErrorExplorer(executor, queryRequest(scope, filters, page, pageSize))
                 );
+                const context = { scenario: 'queryErrorExplorer', scope: scope.name, filters: label, filterValues: filters, page, pageSize };
+                await compare(context, actual, sliceOracleWholeList(whole, page, pageSize));
+                observeSqlPathQuery(context, statements, filters, actual);
               }
             }
           }
@@ -759,30 +877,38 @@ describe('errors explorer: frozen oracle against production on generated data', 
                 const whole = await oracleWholeList(scope, searchFilters);
                 noteAxisTotals([`search:${quickSearch}`], whole.totalRows);
                 apiCalls++;
-                const actualWhole = await production.queryErrorExplorer(productionExecutor(), queryRequest(scope, searchFilters, 0, WHOLE_LIST_PAGE_SIZE));
-                await compare(
-                  {
-                    scenario: 'quick search whole list',
-                    scope: scope.name,
-                    filters: label,
-                    filterValues: searchFilters,
-                    quickSearch,
-                    page: 0,
-                    pageSize: WHOLE_LIST_PAGE_SIZE
-                  },
-                  actualWhole,
-                  whole
+                const { result: actualWhole, statements: wholeStatements } = await recordProduction(executor =>
+                  production.queryErrorExplorer(executor, queryRequest(scope, searchFilters, 0, WHOLE_LIST_PAGE_SIZE))
                 );
+                const wholeContext = {
+                  scenario: 'quick search whole list',
+                  scope: scope.name,
+                  filters: label,
+                  filterValues: searchFilters,
+                  quickSearch,
+                  page: 0,
+                  pageSize: WHOLE_LIST_PAGE_SIZE
+                };
+                await compare(wholeContext, actualWhole, whole);
+                observeSearchQuery(wholeContext, wholeStatements, searchFilters, actualWhole);
                 if (!sweepWithSearch) continue;
                 for (const pageSize of PAGE_SIZES) {
                   for (const page of pagesFor(whole.totalRows, pageSize)) {
                     apiCalls++;
-                    const actual = await production.queryErrorExplorer(productionExecutor(), queryRequest(scope, searchFilters, page, pageSize));
-                    await compare(
-                      { scenario: 'quick search page', scope: scope.name, filters: label, filterValues: searchFilters, quickSearch, page, pageSize },
-                      actual,
-                      sliceOracleWholeList(whole, page, pageSize)
+                    const { result: actual, statements } = await recordProduction(executor =>
+                      production.queryErrorExplorer(executor, queryRequest(scope, searchFilters, page, pageSize))
                     );
+                    const pageContext = {
+                      scenario: 'quick search page',
+                      scope: scope.name,
+                      filters: label,
+                      filterValues: searchFilters,
+                      quickSearch,
+                      page,
+                      pageSize
+                    };
+                    await compare(pageContext, actual, sliceOracleWholeList(whole, page, pageSize));
+                    observeSearchQuery(pageContext, statements, searchFilters, actual);
                   }
                 }
               }
@@ -801,12 +927,12 @@ describe('errors explorer: frozen oracle against production on generated data', 
               const searchFilters = { ...named.filters, quickSearch };
               apiCalls += 2;
               const expected = await oracle.buildErrorExplorerFacets(oracleExecutor(), facetRequest(scope, searchFilters));
-              const actual = await production.buildErrorExplorerFacets(productionExecutor(), facetRequest(scope, searchFilters));
-              await compare(
-                { scenario: 'buildErrorExplorerFacets', scope: scope.name, filters: named.label, filterValues: searchFilters, quickSearch },
-                actual,
-                expected
+              const { result: actual, statements } = await recordProduction(executor =>
+                production.buildErrorExplorerFacets(executor, facetRequest(scope, searchFilters))
               );
+              const context = { scenario: 'buildErrorExplorerFacets', scope: scope.name, filters: named.label, filterValues: searchFilters, quickSearch };
+              await compare(context, actual, expected);
+              observeProduction(context, statements, searchFilters);
             }
           }
         }),
@@ -834,6 +960,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
             const actual = await production.buildErrorMessageCounts(productionRecorder as unknown as ProductionExecutor, request);
             statementCount += oracleRecorder.statements.length + productionRecorder.statements.length;
             await compare({ scenario: 'buildErrorMessageCounts', censusIDs }, actual, expected);
+            observeProduction({ scenario: 'buildErrorMessageCounts', censusIDs }, productionRecorder.statements, DEFAULT_FILTERS);
             if (censusIDs.length === 0) {
               expect(oracleRecorder.statements, 'oracle statements for an empty census list').toHaveLength(0);
               expect(productionRecorder.statements, 'production statements for an empty census list').toHaveLength(0);
@@ -865,12 +992,12 @@ describe('errors explorer: frozen oracle against production on generated data', 
               for (const activeType of activeTypes) {
                 apiCalls += 2;
                 const expected = await oracle.buildErrorExplorerDetails(oracleExecutor(), request, measurementID, activeType);
-                const actual = await production.buildErrorExplorerDetails(productionExecutor(), request, measurementID, activeType);
-                await compare(
-                  { scenario: 'buildErrorExplorerDetails', censusID, measurementID, activeContradictionType: activeType ?? null },
-                  actual,
-                  expected
+                const { result: actual, statements } = await recordProduction(executor =>
+                  production.buildErrorExplorerDetails(executor, request, measurementID, activeType)
                 );
+                const context = { scenario: 'buildErrorExplorerDetails', censusID, measurementID, activeContradictionType: activeType ?? null };
+                await compare(context, actual, expected);
+                observeProduction(context, statements, DEFAULT_FILTERS, DETAILS_STATEMENT_LABELS);
               }
             }
           }
@@ -904,6 +1031,20 @@ describe('errors explorer: frozen oracle against production on generated data', 
         }),
       SEED_TEST_TIMEOUT_MS
     );
+
+    it('every production statement was one of the nine shapes, and the SQL query path stayed within one page row per slot and two member-group rows per page row', () => {
+      const textsByLabel = new Map<string | null, number>();
+      productionStatementLabelByText.forEach(label => textsByLabel.set(label, (textsByLabel.get(label) ?? 0) + 1));
+      console.log(
+        `[statements] seed=${seed} distinctTexts=${productionStatementLabelByText.size} textsByLabel=${JSON.stringify(Object.fromEntries(textsByLabel))} ` +
+          `sqlPathQueries=${sqlPathQueryCount} maxPageStatementRowsPerSlot=${maxPageStatementRowsPerSlot} maxMemberGroupRowsPerPageRow=${maxMemberGroupRowsPerPageRow}`
+      );
+      expect(sqlPathQueryCount, 'the query test must have run before this one').toBeGreaterThan(0);
+      expect(productionStatementLabelByText.size, 'distinct statement texts over the whole run').toBeLessThanOrEqual(STATEMENT_SHAPE_COUNT);
+      textsByLabel.forEach((count, label) => expect(count, `distinct texts for the label ${label}`).toBe(1));
+      expect(maxPageStatementRowsPerSlot).toBeLessThanOrEqual(1);
+      expect(maxMemberGroupRowsPerPageRow).toBeLessThanOrEqual(MEMBER_GROUP_KINDS_PER_ROW);
+    });
 
     it('every filter axis value and search value was recorded, and each selects rows in at least one scope except the matches-nothing control', () => {
       const emptyAxes = [...axisMaxima.entries()].filter(([axis, maximum]) => maximum === 0 && axis !== MATCHES_NOTHING_AXIS).map(([axis]) => axis);

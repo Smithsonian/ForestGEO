@@ -447,7 +447,13 @@ export interface RecordingExecutor {
   assertAllHooksFired(): void;
 }
 
-export function createRecordingExecutor(connection: Pick<Connection, 'query' | 'execute'>): RecordingExecutor {
+export interface RecordingExecutorOptions {
+  /** JSON-serialising every result set costs more than the query on the whole-list statements; the equivalence sweep turns it off and records 0. */
+  measureJsonBytes?: boolean;
+}
+
+export function createRecordingExecutor(connection: Pick<Connection, 'query' | 'execute'>, options: RecordingExecutorOptions = {}): RecordingExecutor {
+  const { measureJsonBytes = true } = options;
   const statements: RecordedStatement[] = [];
   const pendingHooks = new Map<string, () => Promise<void>>();
   return {
@@ -470,7 +476,7 @@ export function createRecordingExecutor(connection: Pick<Connection, 'query' | '
         sql,
         params: [...params],
         rows: Array.isArray(rows) ? rows.length : 0,
-        jsonBytes: Buffer.byteLength(JSON.stringify(rows))
+        jsonBytes: measureJsonBytes ? Buffer.byteLength(JSON.stringify(rows)) : 0
       });
       const hook = label === null ? undefined : pendingHooks.get(label);
       if (label !== null && hook) {
@@ -1134,5 +1140,158 @@ export function groupConcatTruncationFixture(): ExplorerFixture {
     validations: [],
     measurements,
     logs: measurements.map(measurement => ({ measurementID: measurement.coreMeasurementID, errorID: TRUNCATION_ERROR_ID, isResolved: false }))
+  };
+}
+
+// ---- census chunks, large group and interleaving fixtures (T16, spec Testing sections 3 and 4) ----
+
+export const MANY_CENSUS_COUNT = 26;
+export const MANY_CENSUS_IDS: readonly number[] = Array.from({ length: MANY_CENSUS_COUNT }, (_, index) => index + 1);
+export const MANY_CENSUS_ROW_ID_BLOCK = 100;
+export const MANY_CENSUS_TREE_TAG_SEARCH = `D${MANY_CENSUS_COUNT}`;
+const MANY_CENSUS_DUPLICATE_MATE_OFFSET = 7;
+const MANY_CENSUS_EQUAL_KEY_DATE = MEASUREMENT_DATES[0];
+
+/**
+ * 26 physical censuses of plot 1, eight rows each: a duplicate pair, a same-batch pair and a non-error duplicate mate (so the duplicate group
+ * has a member outside the error set), a one-error row and a two-error row whose sort keys are equal in every census, and a failed row.
+ * Dates of the grouped rows rotate with the census, so contradiction rows with equal and different keys interleave across the census chunks.
+ */
+export function manyCensusesFixture(): ExplorerFixture {
+  const ET = FIXTURE_ERROR_TYPE_IDS;
+  const measurements: FixtureMeasurement[] = [];
+  const logs: FixtureLog[] = [];
+  const sameBatchUpload = { uploadFileID: UPLOAD_FILES[0], uploadBatchID: UPLOAD_BATCHES[0] };
+  for (const censusID of MANY_CENSUS_IDS) {
+    const rotatingDate = MEASUREMENT_DATES[censusID % MEASUREMENT_DATES.length];
+    const plant = (offset: number, overrides: Partial<FixtureMeasurement>, errorIDs: number[]): void => {
+      const coreMeasurementID = censusID * MANY_CENSUS_ROW_ID_BLOCK + offset;
+      measurements.push({ ...signatureFixtureMeasurement(coreMeasurementID), censusID, ...overrides });
+      errorIDs.forEach(errorID => logs.push({ measurementID: coreMeasurementID, errorID, isResolved: false }));
+    };
+    const duplicateTag = `D${censusID}`;
+    plant(1, { treeTag: duplicateTag, stemTag: '1', measurementDate: rotatingDate }, [ET.tagMismatch]);
+    plant(2, { treeTag: duplicateTag, stemTag: '1', measurementDate: rotatingDate }, [ET.tagMismatch]);
+    plant(3, { treeTag: `S${censusID}`, stemTag: '1', speciesCode: 'AAA', measurementDate: rotatingDate, ...sameBatchUpload }, [ET.invalidSpecies]);
+    plant(4, { treeTag: `S${censusID}`, stemTag: '2', speciesCode: 'BBB', measurementDate: rotatingDate, ...sameBatchUpload }, [ET.invalidSpecies]);
+    plant(5, { treeTag: `P${censusID}`, stemTag: '1', measurementDate: MANY_CENSUS_EQUAL_KEY_DATE }, [ET.sharedMessageFirst]);
+    plant(6, { treeTag: `Q${censusID}`, stemTag: '1', measurementDate: MANY_CENSUS_EQUAL_KEY_DATE }, [ET.sqlException, ET.sharedMessageSecond]);
+    plant(MANY_CENSUS_DUPLICATE_MATE_OFFSET, { treeTag: duplicateTag, stemTag: '1', measurementDate: rotatingDate }, []);
+    plant(8, { treeTag: `F${censusID}`, stemTag: '1', coreStemGUID: null, summaryStemGUID: null, measurementDate: MANY_CENSUS_EQUAL_KEY_DATE }, [
+      ET.invalidSpecies
+    ]);
+  }
+  return {
+    plotIDs: [MAIN_PLOT_ID],
+    censuses: MANY_CENSUS_IDS.map(censusID => ({ censusID, plotID: MAIN_PLOT_ID, plotCensusNumber: censusID })),
+    errorTypes: FIXTURE_ERROR_TYPES.map(type => ({ ...type })),
+    validations: FIXTURE_VALIDATIONS.map(validation => ({ ...validation })),
+    measurements,
+    logs
+  };
+}
+
+export const LARGE_GROUP_MEMBER_COUNT = 2000;
+export const LARGE_GROUP_ERROR_SET_COUNT = 300;
+export const LARGE_GROUP_TREE_TAG = 'BIG';
+export const LARGE_GROUP_STEM_TAG = '1';
+export const LARGE_GROUP_ERROR_ID = 1;
+export const LARGE_GROUP_SOLO_ROW_IDS: readonly number[] = [5001, 5002, 5003];
+const LARGE_GROUP_ERROR_RUN_LENGTH = 3;
+const LARGE_GROUP_ERROR_RUN_PERIOD = 20;
+
+/** Members 1..2000 of one duplicate group; members whose ID minus one is below 3 modulo 20 (300 of them) carry an unresolved log, the rest are valid rows. Three solo error rows follow the group in the order. */
+export function largeGroupFixture(): ExplorerFixture {
+  const memberIDs = Array.from({ length: LARGE_GROUP_MEMBER_COUNT }, (_, index) => index + 1);
+  const isInErrorSet = (memberID: number) => (memberID - 1) % LARGE_GROUP_ERROR_RUN_PERIOD < LARGE_GROUP_ERROR_RUN_LENGTH;
+  const members = memberIDs.map(memberID => ({
+    ...signatureFixtureMeasurement(memberID),
+    treeTag: LARGE_GROUP_TREE_TAG,
+    stemTag: LARGE_GROUP_STEM_TAG
+  }));
+  const solos = LARGE_GROUP_SOLO_ROW_IDS.map(soloID => ({ ...signatureFixtureMeasurement(soloID), treeTag: `SOLO${soloID}`, stemTag: LARGE_GROUP_STEM_TAG }));
+  const errorRowIDs = [...memberIDs.filter(isInErrorSet), ...LARGE_GROUP_SOLO_ROW_IDS];
+  return {
+    plotIDs: [MAIN_PLOT_ID],
+    censuses: [{ ...SIGNATURE_FIXTURE_CENSUS }],
+    errorTypes: [
+      { errorID: LARGE_GROUP_ERROR_ID, source: 'ingestion', code: `${FIXTURE_GENERATED_ROW_CODE}_${LARGE_GROUP_ERROR_ID}`, message: 'Large group message' }
+    ],
+    validations: [],
+    measurements: [...members, ...solos],
+    logs: errorRowIDs.map(measurementID => ({ measurementID, errorID: LARGE_GROUP_ERROR_ID, isResolved: false }))
+  };
+}
+
+export const INTERLEAVING_ERROR_IDS = { messageA: 1, messageB: 2, messageC: 3, editableValidation: 4 } as const;
+export const INTERLEAVING_MESSAGES = {
+  messageA: 'Interleave message A',
+  messageB: 'Interleave message B',
+  messageC: 'Interleave message C',
+  editableValidationOriginal: 'Interleave original description',
+  editableValidationEdited: 'Edited description'
+} as const;
+export const INTERLEAVING_VALIDATION_ID = 40;
+export const INTERLEAVING_ROW_IDS = {
+  carriesAAndB: 101,
+  carriesAOnly: 102,
+  carriesBOnly: 103,
+  carriesEditableValidation: 201,
+  duplicateErrorMember: 301,
+  duplicateMate: 302,
+  earliestWithA: 401,
+  carriesAAndBAfter: 402,
+  carriesAOnlyLast: 403
+} as const;
+export const INTERLEAVING_DUPLICATE_TREE_TAG = 'DUP';
+export const INTERLEAVING_EARLIEST_DATE = '2020-02-15';
+
+/**
+ * Default order: 301 (duplicate), then the two-error rows 101 and 402, then 401 (one error, earliest date), then 102, 103, 201, 403.
+ * Row 401 gains a second error in case (d); sorted afresh it would move ahead of 101 and 402, so the selected order is what the test pins.
+ */
+export function interleavingFixture(): ExplorerFixture {
+  const ids = INTERLEAVING_ROW_IDS;
+  const errorTypeIDs = INTERLEAVING_ERROR_IDS;
+  const ingestionType = (errorID: number, message: string): FixtureErrorType => ({ errorID, source: 'ingestion', code: `INTERLEAVE_${errorID}`, message });
+  const row = (coreMeasurementID: number, overrides: Partial<FixtureMeasurement> = {}): FixtureMeasurement => ({
+    ...signatureFixtureMeasurement(coreMeasurementID),
+    ...overrides
+  });
+  const carriers: Array<{ measurement: FixtureMeasurement; errorIDs: number[] }> = [
+    { measurement: row(ids.carriesAAndB), errorIDs: [errorTypeIDs.messageA, errorTypeIDs.messageB] },
+    { measurement: row(ids.carriesAOnly), errorIDs: [errorTypeIDs.messageA] },
+    { measurement: row(ids.carriesBOnly), errorIDs: [errorTypeIDs.messageB] },
+    { measurement: row(ids.carriesEditableValidation), errorIDs: [errorTypeIDs.editableValidation] },
+    { measurement: row(ids.duplicateErrorMember, { treeTag: INTERLEAVING_DUPLICATE_TREE_TAG }), errorIDs: [errorTypeIDs.messageA] },
+    { measurement: row(ids.duplicateMate, { treeTag: INTERLEAVING_DUPLICATE_TREE_TAG }), errorIDs: [] },
+    { measurement: row(ids.earliestWithA, { measurementDate: INTERLEAVING_EARLIEST_DATE }), errorIDs: [errorTypeIDs.messageA] },
+    { measurement: row(ids.carriesAAndBAfter), errorIDs: [errorTypeIDs.messageA, errorTypeIDs.messageB] },
+    { measurement: row(ids.carriesAOnlyLast), errorIDs: [errorTypeIDs.messageA] }
+  ];
+  return {
+    plotIDs: [MAIN_PLOT_ID],
+    censuses: [{ ...SIGNATURE_FIXTURE_CENSUS }],
+    errorTypes: [
+      ingestionType(errorTypeIDs.messageA, INTERLEAVING_MESSAGES.messageA),
+      ingestionType(errorTypeIDs.messageB, INTERLEAVING_MESSAGES.messageB),
+      ingestionType(errorTypeIDs.messageC, INTERLEAVING_MESSAGES.messageC),
+      {
+        errorID: errorTypeIDs.editableValidation,
+        source: 'validation',
+        code: String(INTERLEAVING_VALIDATION_ID),
+        message: 'Interleave catalog message for the editable validation'
+      }
+    ],
+    validations: [
+      {
+        validationID: INTERLEAVING_VALIDATION_ID,
+        procedureName: 'ValidateInterleaving',
+        description: INTERLEAVING_MESSAGES.editableValidationOriginal,
+        criteria: 'treeTag'
+      }
+    ],
+    measurements: carriers.map(carrier => carrier.measurement),
+    logs: carriers.flatMap(carrier => carrier.errorIDs.map(errorID => ({ measurementID: carrier.measurement.coreMeasurementID, errorID, isResolved: false })))
   };
 }

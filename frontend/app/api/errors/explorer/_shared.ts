@@ -19,23 +19,33 @@ import {
   buildHistogramWithFlagsStatement,
   buildHistogramWithoutFlagsStatement,
   buildIDRawRowsStatement,
+  buildPageStatement,
   buildSameBatchMemberGroupsStatement,
   buildScopeRawRowsStatement,
+  buildTotalsStatement,
   chunkCensusIDs,
   chunkMeasurementIDs,
+  compareSelectedRows,
   SQL_TRUE,
   type BuiltStatement,
   type ContradictionFlagColumns,
   type DuplicateMemberGroupRow,
   type ErrorSetScope,
+  type ErrorSetTotalsRow,
   type ErrorSignatureRow,
   type ErrorTypeCatalogRow,
-  type SameBatchMemberGroupRow
+  type ErrorTypeKeyFilter,
+  type FlagCombinations,
+  type SameBatchMemberGroupRow,
+  type SelectedPageRow
 } from './errorsetsql';
 import {
+  allowedFlagCombinations,
+  anyFlagCombinationAllowed,
   buildErrorTypeCatalog,
   buildRelatedMeasurementIDs,
   computeErrorFacets,
+  computeErrorKeySets,
   computeErrorMessageCounts,
   contradictionFiltersAllow,
   errorMatchesFilters,
@@ -43,10 +53,13 @@ import {
   getOccurrenceFields,
   hasIncompleteSignature,
   hasLocaleCompareTie,
+  isImpossibleKeyFilter,
   mergeSignatureRows,
+  toSliceBounds,
   toWeightedErrorRows,
   type ErrorMessageCounts,
   type ErrorTypeCatalog,
+  type SliceBounds,
   type WeightedErrorRow
 } from './errorsetcounts';
 
@@ -584,12 +597,127 @@ async function queryOnNodePath(
   };
 }
 
-export async function queryErrorExplorer(connectionManager: ExplorerConnection, request: ErrorExplorerQueryRequest): Promise<ErrorExplorerQueryResponse> {
-  return queryOnNodePath(connectionManager, request, requestCensusIDs(request));
-}
-
 async function loadErrorTypeCatalog(connectionManager: ExplorerConnection, schema: string): Promise<ErrorTypeCatalog> {
   return buildErrorTypeCatalog(await runStatement<ErrorTypeCatalogRow>(connectionManager, buildCatalogStatement(schema)));
+}
+
+type QuerySummary = ErrorExplorerQueryResponse['summary'];
+
+interface PageSelection {
+  rows: SelectedPageRow[];
+  summary: QuerySummary;
+}
+
+function emptySummary(): QuerySummary {
+  return { total: 0, validation: 0, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 };
+}
+
+function emptyQueryResponse(): ErrorExplorerQueryResponse {
+  return { rows: [], totalRows: 0, summary: emptySummary() };
+}
+
+function summaryFromTotals(totals: ErrorSetTotalsRow): QuerySummary {
+  return {
+    total: Number(totals.TotalRows ?? 0),
+    validation: Number(totals.ValidationRows ?? 0),
+    ingestion: Number(totals.IngestionRows ?? 0),
+    contradictions: Number(totals.ContradictionRows ?? 0),
+    duplicateTagStem: Number(totals.DuplicateTagStemRows ?? 0),
+    sameBatchConflict: Number(totals.SameBatchConflictRows ?? 0)
+  };
+}
+
+function addSummaries(a: QuerySummary, b: QuerySummary): QuerySummary {
+  return {
+    total: a.total + b.total,
+    validation: a.validation + b.validation,
+    ingestion: a.ingestion + b.ingestion,
+    contradictions: a.contradictions + b.contradictions,
+    duplicateTagStem: a.duplicateTagStem + b.duplicateTagStem,
+    sameBatchConflict: a.sameBatchConflict + b.sameBatchConflict
+  };
+}
+
+async function fetchTotals(
+  connectionManager: ExplorerConnection,
+  scope: ErrorSetScope,
+  keyFilter: ErrorTypeKeyFilter,
+  flags: FlagCombinations
+): Promise<QuerySummary> {
+  const [totals] = await runStatement<ErrorSetTotalsRow>(connectionManager, buildTotalsStatement(scope, keyFilter, flags));
+  return summaryFromTotals(totals);
+}
+
+async function selectSingleChunkPage(
+  connectionManager: ExplorerConnection,
+  scope: ErrorSetScope,
+  keyFilter: ErrorTypeKeyFilter,
+  flags: FlagCombinations,
+  bounds: SliceBounds
+): Promise<PageSelection> {
+  if (bounds.limit === 0) return { rows: [], summary: await fetchTotals(connectionManager, scope, keyFilter, flags) };
+  const rows = await runStatement<SelectedPageRow>(connectionManager, buildPageStatement(scope, keyFilter, flags, bounds));
+  if (rows.length === 0) return { rows, summary: await fetchTotals(connectionManager, scope, keyFilter, flags) };
+  return { rows, summary: summaryFromTotals(rows[0]) };
+}
+
+/** More than CENSUS_LIST_SIZE censuses: each chunk's first offset + limit rows, merged in SQL order (spec §10). */
+async function selectMultiChunkPage(
+  connectionManager: ExplorerConnection,
+  scopes: ErrorSetScope[],
+  keyFilter: ErrorTypeKeyFilter,
+  flags: FlagCombinations,
+  bounds: SliceBounds
+): Promise<PageSelection> {
+  const prefixWindow: SliceBounds = { limit: bounds.offset + bounds.limit, offset: 0 };
+  const candidates: SelectedPageRow[] = [];
+  let summary = emptySummary();
+  for (const scope of scopes) {
+    if (bounds.limit === 0) {
+      summary = addSummaries(summary, await fetchTotals(connectionManager, scope, keyFilter, flags));
+      continue;
+    }
+    const rows = await runStatement<SelectedPageRow>(connectionManager, buildPageStatement(scope, keyFilter, flags, prefixWindow));
+    if (rows.length > 0) {
+      candidates.push(...rows);
+      summary = addSummaries(summary, summaryFromTotals(rows[0]));
+    }
+  }
+  return { rows: candidates.sort(compareSelectedRows).slice(bounds.offset, bounds.offset + bounds.limit), summary };
+}
+
+async function queryOnSqlPath(
+  connectionManager: ExplorerConnection,
+  request: ErrorExplorerQueryRequest,
+  censusIDs: number[]
+): Promise<ErrorExplorerQueryResponse> {
+  const flags = allowedFlagCombinations(request.filters);
+  if (censusIDs.length === 0 || !anyFlagCombinationAllowed(flags)) return emptyQueryResponse();
+  const keyFilter = computeErrorKeySets(await loadErrorTypeCatalog(connectionManager, request.schema), request.filters);
+  if (isImpossibleKeyFilter(keyFilter)) return emptyQueryResponse();
+  const scopes = censusChunkScopes(request.schema, request.plotID, censusIDs);
+  const bounds = toSliceBounds(request.page, request.pageSize);
+  const selection =
+    scopes.length === 1
+      ? await selectSingleChunkPage(connectionManager, scopes[0], keyFilter, flags, bounds)
+      : await selectMultiChunkPage(connectionManager, scopes, keyFilter, flags, bounds);
+  const selectedIDs = selection.rows.map(row => Number(row.CoreMeasurementID));
+  const hydrated = await hydrateRequestedRows(
+    connectionManager,
+    scopes,
+    selection.rows.map(row => ({ measurementID: Number(row.CoreMeasurementID), censusID: Number(row.CensusID) })),
+    null
+  );
+  return {
+    rows: recheckedDisplayRows(selectedIDs, hydrated, request.filters),
+    totalRows: selection.summary.total,
+    summary: selection.summary
+  };
+}
+
+export async function queryErrorExplorer(connectionManager: ExplorerConnection, request: ErrorExplorerQueryRequest): Promise<ErrorExplorerQueryResponse> {
+  const censusIDs = requestCensusIDs(request);
+  return request.filters.quickSearch.trim() ? queryOnNodePath(connectionManager, request, censusIDs) : queryOnSqlPath(connectionManager, request, censusIDs);
 }
 
 async function fetchSignatureRows(connectionManager: ExplorerConnection, scopes: ErrorSetScope[], withFlags: boolean): Promise<ErrorSignatureRow[]> {

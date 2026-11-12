@@ -209,10 +209,12 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       expect(rowById(run.defaultQuery, TRUNCATION_UNRELATED_ERROR_ROW_ID)?.contradictionTypes).toEqual([]);
     });
 
-    it('default query reads one scope raw-rows statement and the two member-group statements, and no id raw-rows statement', () => {
+    it('default query reads the catalog, one page statement, the id raw rows of the page and the two member-group statements, and never the scope raw rows', () => {
       expect([...run.defaultQueryLabels].sort()).toEqual(
         [
-          ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows,
+          ERROR_EXPLORER_STATEMENT_LABELS.catalog,
+          ERROR_EXPLORER_STATEMENT_LABELS.page,
+          ERROR_EXPLORER_STATEMENT_LABELS.idRawRows,
           ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups,
           ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups
         ].sort()

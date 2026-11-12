@@ -111,10 +111,31 @@ const duplicateMemberGroupRows = rawErrorRows.map(rawRow => ({
   MemberListComplete: SQL_TRUE
 }));
 
+const pageTotals = {
+  TotalRows: 2,
+  ValidationRows: 1,
+  IngestionRows: 1,
+  ContradictionRows: 2,
+  DuplicateTagStemRows: 2,
+  SameBatchConflictRows: 0
+};
+// Both rows carry the duplicate flag and one error, so the page statement orders them by measurement date, then ID.
+const pageRows = rawErrorRows.map(rawRow => ({
+  CoreMeasurementID: rawRow.CoreMeasurementID,
+  CensusID: rawRow.CensusID,
+  HasContradiction: SQL_TRUE,
+  OccurrenceCount: 1,
+  MeasurementDate: rawRow.MeasurementDate,
+  ...pageTotals
+}));
+
 function makeConnection() {
   return {
     executeQuery: vi.fn(async (query: string, params: unknown[] = []) => {
       const label = readStatementLabel(query);
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.catalog) return catalogRows;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.page) return pageRows;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.idRawRows) return rawErrorRows.filter(rawRow => params.includes(rawRow.CoreMeasurementID));
       if (label === ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows) {
         return rawErrorRows.map(rawRow => ({ ...rawRow, HasDuplicate: SQL_TRUE, HasSameBatch: SQL_FALSE }));
       }
@@ -159,13 +180,15 @@ describe('API response shape contracts', () => {
 
     const statementLabels = connection.executeQuery.mock.calls.map(([query]: [string]) => readStatementLabel(query));
     expect(
-      statementLabels.filter((label: string | null) => label === ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows),
-      'one scope raw-rows statement'
+      statementLabels.filter((label: string | null) => label === ERROR_EXPLORER_STATEMENT_LABELS.page),
+      'one page statement'
     ).toHaveLength(1);
-    expect(statementLabels, 'the Node path never reads the catalog').not.toContain(ERROR_EXPLORER_STATEMENT_LABELS.catalog);
+    expect(statementLabels, 'the SQL path never reads the whole error set').not.toContain(ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows);
     expect([...statementLabels].sort()).toEqual(
       [
-        ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows,
+        ERROR_EXPLORER_STATEMENT_LABELS.catalog,
+        ERROR_EXPLORER_STATEMENT_LABELS.page,
+        ERROR_EXPLORER_STATEMENT_LABELS.idRawRows,
         ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups,
         ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups
       ].sort()
@@ -220,6 +243,19 @@ describe('API response shape contracts', () => {
       relatedMeasurementIDs: [101],
       isFailedRow: true
     });
+  });
+
+  it('keeps a quick-search Errors Explorer query on the Node path with the same row shape', async () => {
+    const connection = makeConnection();
+    const response = await queryErrorExplorer(connection, makeRequest({ filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, quickSearch: 'TREE101' } }));
+
+    const statementLabels = connection.executeQuery.mock.calls.map(([query]: [string]) => readStatementLabel(query));
+    expect(statementLabels, 'a quick search reads the whole error set once').toContain(ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows);
+    expect(statementLabels).not.toContain(ERROR_EXPLORER_STATEMENT_LABELS.page);
+    expect(statementLabels).not.toContain(ERROR_EXPLORER_STATEMENT_LABELS.catalog);
+    expect(response.rows.map(row => row.coreMeasurementID)).toEqual([101]);
+    expect(response.totalRows).toBe(1);
+    expect(response.rows[0]).toMatchObject({ treeTag: 'TREE101', relatedMeasurementIDs: [102], contradictionTypes: ['duplicate_tag_stem'] });
   });
 
   it('keeps Errors Explorer facets stable for filters and chips', async () => {
