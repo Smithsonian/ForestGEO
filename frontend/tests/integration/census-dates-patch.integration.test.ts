@@ -41,6 +41,7 @@ const CENSUS_GRID_ID = 'censusID';
 const CENSUS_TABLE_NAME = 'census';
 const CHANGELOG_UPDATE_OPERATION = 'UPDATE';
 const TEST_USER_EMAIL = 'census-dates-patch@forestgeo.test';
+const PENDING_USER_STATUS = 'pending';
 const SEEDED_PLOT_CENSUS_NUMBER = 1;
 // local-db-setup seeds census 1 with this window.
 const SEED_START_DATE = '2024-01-01';
@@ -289,6 +290,21 @@ describe('Edit census dates via the production fixeddata PATCH route', () => {
     expect(after.StartDay).toBe(SEED_START_DATE);
     expect(after.EndDay).toBe(SEED_END_DATE);
     expect(await readCensusChangelog()).toHaveLength(0);
+  });
+
+  it('refuses a pending member with 403 and changes nothing', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { ...memberSession().user, userStatus: PENDING_USER_STATUS } } as any);
+
+    const response = await patchCensusDates(EDITED_DATES);
+    const row = await readCensusRow();
+    const changelog = await readCensusChangelog();
+    // eslint-disable-next-line no-console
+    console.log(`[census-dates-patch] pending PATCH -> ${response.status}; row ${describeRow(row)}; changelog rows ${changelog.length}`);
+
+    expect(response.status).toBe(HTTPResponses.FORBIDDEN);
+    expect(row.StartDay).toBe(SEED_START_DATE);
+    expect(row.EndDay).toBe(SEED_END_DATE);
+    expect(changelog).toHaveLength(0);
   });
 
   it('refuses dates that overlap another census number in the plot with a 400 and changes nothing', async () => {

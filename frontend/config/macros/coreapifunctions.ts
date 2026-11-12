@@ -346,6 +346,16 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
   try {
     assertMutableDataType('PATCH', dataType);
+    if (dataType === 'census') {
+      try {
+        assertSessionMayEdit((await auth()) as Session);
+      } catch (error) {
+        if (error instanceof PendingUserEditForbiddenError) {
+          return NextResponse.json({ error: error.message }, { status: HTTPResponses.FORBIDDEN });
+        }
+        throw error;
+      }
+    }
     const { newRow, oldRow } = await readMutationBody(request, 'PATCH');
     const primaryKeyColumn = PRIMARY_KEY_MAP[dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
     const demappedGridID = primaryKeyColumn;
