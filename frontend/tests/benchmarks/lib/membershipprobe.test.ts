@@ -13,7 +13,8 @@ import {
   runMembershipProbe,
   runMembershipProbeRepetition,
   type MembershipProbeRow,
-  type MembershipProbeSample
+  type MembershipProbeSample,
+  type TimedProbeRows
 } from './membershipprobe';
 
 const SCHEMA = 'forestgeo_testsite';
@@ -24,6 +25,7 @@ const EXPECTED_TARGET_DURATION_MS = 10;
 const CENSUS_IDS = Array.from({ length: CENSUS_COUNT }, (_, index) => index + 1);
 const SCOPE: ErrorSetScope = { schema: SCHEMA, plotID: PLOT_ID, censusIDs: CENSUS_IDS };
 const MEASURED_RUNS = 2;
+const WALL_DELAY_MS = 8;
 const CALLS_PER_REPETITION = EXPECTED_CHUNK_LENGTHS.length;
 const MEASUREMENT_ID_FACTOR = 1000;
 const PRIOR_DBH = '12.50';
@@ -53,15 +55,13 @@ interface RecordingRun {
   readonly statements: BuiltStatement[];
   readonly executedLabels: string[];
   maxInFlight: number;
-  readonly clock: () => number;
   readonly buildProbe: (builder: ProbeBuilder) => ProbeBuilder;
-  readonly execute: (statement: BuiltStatement) => Promise<MembershipProbeRow[]>;
+  readonly execute: (statement: BuiltStatement) => Promise<TimedProbeRows>;
 }
 
-/** The injected clock only moves inside execute(): the n-th completed call of a repetition takes n milliseconds. */
+/** The executor reports its own SQL time: the n-th completed call of a repetition takes n milliseconds. No clock is read anywhere else. */
 function recordingRun(options: { rowsForChunk?: (chunk: number[]) => MembershipProbeRow[] } = {}): RecordingRun {
   const rowsForChunk = options.rowsForChunk ?? ((chunk: number[]) => chunk.map(censusID => rowFor(censusID)));
-  let elapsedMs = 0;
   let inFlight = 0;
   let callsInRepetition = 0;
   const run: RecordingRun = {
@@ -69,7 +69,6 @@ function recordingRun(options: { rowsForChunk?: (chunk: number[]) => MembershipP
     statements: [],
     executedLabels: [],
     maxInFlight: 0,
-    clock: () => elapsedMs,
     buildProbe: builder => chunk => {
       const statement = builder(chunk);
       run.chunks.push([...chunk.censusIDs]);
@@ -81,10 +80,9 @@ function recordingRun(options: { rowsForChunk?: (chunk: number[]) => MembershipP
       run.statements.push(statement);
       run.executedLabels.push(statement.sql.slice(0, statement.sql.indexOf('*/') + 2));
       callsInRepetition = (callsInRepetition % CALLS_PER_REPETITION) + 1;
-      elapsedMs += callsInRepetition;
       await Promise.resolve();
       inFlight--;
-      return rowsForChunk(censusIDsOf(statement));
+      return { rows: rowsForChunk(censusIDsOf(statement)), sqlMs: callsInRepetition };
     }
   };
   return run;
@@ -114,7 +112,7 @@ describe('membership probe builders', () => {
 describe('membership probe repetition over a multi-chunk target', () => {
   it.each(PROBE_BUILDERS)('%s runs 26 censuses as sequential chunks of 8/8/8/2 and sums the call durations', async (_name, build) => {
     const run = recordingRun();
-    const sample = await runMembershipProbeRepetition(SCOPE, run.buildProbe(build), run.execute, run.clock);
+    const sample = await runMembershipProbeRepetition(SCOPE, run.buildProbe(build), run.execute);
     console.log(
       `chunks=${JSON.stringify(run.chunks.map(chunk => chunk.length))} maxInFlight=${run.maxInFlight} durationMs=${sample.durationMs} rows=${sample.rowCount}`
     );
@@ -125,9 +123,25 @@ describe('membership probe repetition over a multi-chunk target', () => {
     expect(sample.rowCount).toBe(CENSUS_COUNT);
   });
 
+  it('sums the SQL time the executor reports, whatever wall time passes around the call', async () => {
+    const run = recordingRun();
+    const slowAround = async (statement: BuiltStatement) => {
+      await new Promise(resolve => setTimeout(resolve, WALL_DELAY_MS));
+      const timed = await run.execute(statement);
+      await new Promise(resolve => setTimeout(resolve, WALL_DELAY_MS));
+      return timed;
+    };
+    const startedAt = performance.now();
+    const sample = await runMembershipProbeRepetition(SCOPE, buildF2MembershipProbe, slowAround);
+    const wallMs = performance.now() - startedAt;
+    console.log(`wall=${wallMs.toFixed(1)} ms; reported SQL durationMs=${sample.durationMs}`);
+    expect(wallMs).toBeGreaterThan(EXPECTED_TARGET_DURATION_MS);
+    expect(sample.durationMs).toBe(EXPECTED_TARGET_DURATION_MS);
+  });
+
   it('builds every chunk with at most eight census IDs, as chunkCensusIDs does', async () => {
     const run = recordingRun();
-    await runMembershipProbeRepetition(SCOPE, run.buildProbe(buildF2MembershipProbe), run.execute, run.clock);
+    await runMembershipProbeRepetition(SCOPE, run.buildProbe(buildF2MembershipProbe), run.execute);
     expect(run.chunks).toEqual(chunkCensusIDs(CENSUS_IDS));
   });
 
@@ -135,9 +149,9 @@ describe('membership probe repetition over a multi-chunk target', () => {
     const inOrder = recordingRun();
     const reversed = recordingRun({ rowsForChunk: chunk => chunk.map(censusID => rowFor(censusID)).reverse() });
     const changedValue = recordingRun({ rowsForChunk: chunk => chunk.map(censusID => rowFor(censusID, censusID === 1 ? CHANGED_PRIOR_DBH : PRIOR_DBH)) });
-    const first = await runMembershipProbeRepetition(SCOPE, inOrder.buildProbe(buildF2MembershipProbe), inOrder.execute, inOrder.clock);
-    const second = await runMembershipProbeRepetition(SCOPE, reversed.buildProbe(buildF1MembershipProbe), reversed.execute, reversed.clock);
-    const third = await runMembershipProbeRepetition(SCOPE, changedValue.buildProbe(buildF1MembershipProbe), changedValue.execute, changedValue.clock);
+    const first = await runMembershipProbeRepetition(SCOPE, inOrder.buildProbe(buildF2MembershipProbe), inOrder.execute);
+    const second = await runMembershipProbeRepetition(SCOPE, reversed.buildProbe(buildF1MembershipProbe), reversed.execute);
+    const third = await runMembershipProbeRepetition(SCOPE, changedValue.buildProbe(buildF1MembershipProbe), changedValue.execute);
     console.log(`hashes in-order=${first.hash.slice(0, 12)} reversed=${second.hash.slice(0, 12)} changed=${third.hash.slice(0, 12)}`);
     expect(second.rowCount).toBe(first.rowCount);
     expect(second.hash).toBe(first.hash);
@@ -148,8 +162,8 @@ describe('membership probe repetition over a multi-chunk target', () => {
   it('keeps duplicate rows, so a form that repeats a row cannot match one that does not', async () => {
     const single = recordingRun();
     const duplicated = recordingRun({ rowsForChunk: chunk => chunk.flatMap(censusID => [rowFor(censusID), rowFor(censusID)]) });
-    const one = await runMembershipProbeRepetition(SCOPE, single.buildProbe(buildF2MembershipProbe), single.execute, single.clock);
-    const two = await runMembershipProbeRepetition(SCOPE, duplicated.buildProbe(buildF1MembershipProbe), duplicated.execute, duplicated.clock);
+    const one = await runMembershipProbeRepetition(SCOPE, single.buildProbe(buildF2MembershipProbe), single.execute);
+    const two = await runMembershipProbeRepetition(SCOPE, duplicated.buildProbe(buildF1MembershipProbe), duplicated.execute);
     expect(two.rowCount).toBe(one.rowCount * 2);
     expect(two.hash).not.toBe(one.hash);
   });
@@ -170,8 +184,8 @@ describe('membership probe comparability', () => {
   it('reports a hash mismatch when the counts are equal but a value differs', async () => {
     const f2 = recordingRun();
     const f1 = recordingRun({ rowsForChunk: chunk => chunk.map(censusID => rowFor(censusID, censusID === 1 ? CHANGED_PRIOR_DBH : PRIOR_DBH)) });
-    const f2Sample = await runMembershipProbeRepetition(SCOPE, f2.buildProbe(buildF2MembershipProbe), f2.execute, f2.clock);
-    const f1Sample = await runMembershipProbeRepetition(SCOPE, f1.buildProbe(buildF1MembershipProbe), f1.execute, f1.clock);
+    const f2Sample = await runMembershipProbeRepetition(SCOPE, f2.buildProbe(buildF2MembershipProbe), f2.execute);
+    const f1Sample = await runMembershipProbeRepetition(SCOPE, f1.buildProbe(buildF1MembershipProbe), f1.execute);
     console.log(`warm-up rows F2=${f2Sample.rowCount} F1=${f1Sample.rowCount}`);
     expect(f1Sample.rowCount).toBe(f2Sample.rowCount);
     expect(compareWarmUpSamples(f2Sample, f1Sample)).toBe(M1_INCONCLUSIVE_DIAGNOSTICS.hashMismatch);
@@ -212,7 +226,7 @@ describe('membership probe comparability', () => {
 describe('membership probe scenario', () => {
   it('warms each form once, alternates F2 then F1, and reports comparable timings', async () => {
     const run = recordingRun();
-    const result = await runMembershipProbe(SCOPE, run.execute, { measuredRuns: MEASURED_RUNS, now: run.clock });
+    const result = await runMembershipProbe(SCOPE, run.execute, { measuredRuns: MEASURED_RUNS });
     const labelsPerRepetition = run.executedLabels.filter((_label, index) => index % CALLS_PER_REPETITION === 0);
     console.log(`repetition order=${JSON.stringify(labelsPerRepetition)} result=${JSON.stringify(result)}`);
     expect(labelsPerRepetition).toEqual(Array.from({ length: 1 + MEASURED_RUNS }).flatMap(() => [MEMBERSHIP_PROBE_LABELS.f2, MEMBERSHIP_PROBE_LABELS.f1]));
@@ -223,10 +237,10 @@ describe('membership probe scenario', () => {
   it('stops after the warm-ups and reports inconclusive when the forms return different rows', async () => {
     const run = recordingRun();
     const differing = async (statement: BuiltStatement) => {
-      const rows = await run.execute(statement);
-      return statement.sql.startsWith(MEMBERSHIP_PROBE_LABELS.f1) ? rows.slice(1) : rows;
+      const timed = await run.execute(statement);
+      return statement.sql.startsWith(MEMBERSHIP_PROBE_LABELS.f1) ? { ...timed, rows: timed.rows.slice(1) } : timed;
     };
-    const result = await runMembershipProbe(SCOPE, differing, { measuredRuns: MEASURED_RUNS, now: run.clock });
+    const result = await runMembershipProbe(SCOPE, differing, { measuredRuns: MEASURED_RUNS });
     console.log(`result=${JSON.stringify(result)} executed=${run.executedLabels.length}`);
     expect(result.m1Status).toBe(M1_STATUS.inconclusive);
     expect(result).not.toHaveProperty('m1Ratio');
@@ -237,10 +251,12 @@ describe('membership probe scenario', () => {
   it('never puts rows, SQL or parameters in the diagnostic', async () => {
     const run = recordingRun();
     const differing = async (statement: BuiltStatement) => {
-      const rows = await run.execute(statement);
-      return statement.sql.startsWith(MEMBERSHIP_PROBE_LABELS.f1) ? rows.map(row => ({ ...row, PriorDBH: CHANGED_PRIOR_DBH })) : rows;
+      const timed = await run.execute(statement);
+      return statement.sql.startsWith(MEMBERSHIP_PROBE_LABELS.f1)
+        ? { ...timed, rows: timed.rows.map(row => ({ ...row, PriorDBH: CHANGED_PRIOR_DBH })) }
+        : timed;
     };
-    const result = await runMembershipProbe(SCOPE, differing, { measuredRuns: MEASURED_RUNS, now: run.clock });
+    const result = await runMembershipProbe(SCOPE, differing, { measuredRuns: MEASURED_RUNS });
     const printed = JSON.stringify(result);
     expect(result).toMatchObject({ m1Status: M1_STATUS.inconclusive, diagnostic: M1_INCONCLUSIVE_DIAGNOSTICS.hashMismatch });
     expect(printed).not.toContain(CHANGED_PRIOR_DBH);

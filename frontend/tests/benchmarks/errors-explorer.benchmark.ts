@@ -435,7 +435,11 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
 
       const m1 = await runMembershipProbe(
         { schema: SCHEMA, plotID: MEASURED_PLOT_ID, censusIDs: MEASURED_CENSUS_IDS },
-        async statement => (await runQueryDispatch(benchPool, statement.sql, statement.params)) as MembershipProbeRow[],
+        async statement => {
+          const startedAt = performance.now();
+          const rows = (await runQueryDispatch(benchPool, statement.sql, statement.params)) as MembershipProbeRow[];
+          return { rows, sqlMs: performance.now() - startedAt };
+        },
         { measuredRuns: MEASURED_CALLS }
       );
       console.log(`${LOG_PREFIX} m1Probe ${JSON.stringify(m1)}`);

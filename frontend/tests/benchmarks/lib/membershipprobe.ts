@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { performance } from 'node:perf_hooks';
 import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { CENSUS_LIST_SIZE, chunkCensusIDs, errorOccurrenceSource, type BuiltStatement, type ErrorSetScope } from '@/app/api/errors/explorer/errorsetsql';
 
@@ -71,25 +70,24 @@ export interface MembershipProbeSample {
 }
 
 type ProbeBuilder = (chunk: ErrorSetScope) => BuiltStatement;
-type ProbeExecutor = (statement: BuiltStatement) => Promise<MembershipProbeRow[]>;
+/** The rows and the SQL-only duration, as measured by the caller's executor (telemetry and row serialisation excluded). */
+export interface TimedProbeRows {
+  rows: MembershipProbeRow[];
+  sqlMs: number;
+}
+export type ProbeExecutor = (statement: BuiltStatement) => Promise<TimedProbeRows>;
 
 /**
  * One repetition over the full target: every census chunk runs sequentially, and the repetition's duration is the sum
- * of the chunk calls' wall durations. Row canonicalisation and hashing stay outside the timed region.
+ * of the SQL durations the executor reports for each chunk call. Row canonicalisation and hashing are never timed.
  */
-export async function runMembershipProbeRepetition(
-  scope: ErrorSetScope,
-  buildProbe: ProbeBuilder,
-  execute: ProbeExecutor,
-  now: () => number = () => performance.now()
-): Promise<MembershipProbeSample> {
+export async function runMembershipProbeRepetition(scope: ErrorSetScope, buildProbe: ProbeBuilder, execute: ProbeExecutor): Promise<MembershipProbeSample> {
   let durationMs = 0;
   const canonicalRows: string[] = [];
   for (const censusIDs of chunkCensusIDs(scope.censusIDs)) {
     const statement = buildProbe({ ...scope, censusIDs });
-    const startedAt = now();
-    const rows = await execute(statement);
-    durationMs += now() - startedAt;
+    const { rows, sqlMs } = await execute(statement);
+    durationMs += sqlMs;
     for (const row of rows) {
       canonicalRows.push(JSON.stringify([row.CoreMeasurementID, row.ErrorID, row.PriorCensusID, row.PriorDBH, row.PriorHOM]));
     }
@@ -135,12 +133,8 @@ export type M1Result = M1Summary & { f2RowCount: number; f1RowCount: number };
  * The m1Probe scenario: one warm-up repetition per form (compared by row count and canonical hash), then
  * `measuredRuns` rounds of F2 followed by F1. A warm-up mismatch ends the scenario without measured rounds.
  */
-export async function runMembershipProbe(
-  scope: ErrorSetScope,
-  execute: ProbeExecutor,
-  options: { measuredRuns: number; now?: () => number }
-): Promise<M1Result> {
-  const repeat = (build: ProbeBuilder) => runMembershipProbeRepetition(scope, build, execute, options.now);
+export async function runMembershipProbe(scope: ErrorSetScope, execute: ProbeExecutor, options: { measuredRuns: number }): Promise<M1Result> {
+  const repeat = (build: ProbeBuilder) => runMembershipProbeRepetition(scope, build, execute);
   const f2WarmUp = await repeat(buildF2MembershipProbe);
   const f1WarmUp = await repeat(buildF1MembershipProbe);
   const counts = { f2RowCount: f2WarmUp.rowCount, f1RowCount: f1WarmUp.rowCount };
