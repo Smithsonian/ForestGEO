@@ -63,10 +63,12 @@ import PlotCardModal from '@/components/client/modals/plotcardmodal';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import CensusCreationModal, { CensusCreationDetails } from '@/components/client/modals/censuscreationmodal';
 import CensusDatesModal from '@/components/client/modals/censusdatesmodal';
+import { requestScopeViewRebuilds } from '@/lib/errorsexplorer/viewrebuilds';
 import {
   CENSUS_CREATED_REFRESH_FAILURE_MESSAGE,
   CENSUS_DATES_REFRESH_FAILURE_MESSAGE,
   CENSUS_DATES_SAVE_FAILURE_MESSAGE,
+  CENSUS_DATES_VIEW_REBUILD_FAILURE_MESSAGE,
   type CensusDates,
   type NeighbourCensusWindow,
   getCensusWindow
@@ -471,6 +473,7 @@ export default function DashboardPage() {
     async (dates: CensusDates) => {
       const censusID = censusToEditDates?.dateRanges?.[0]?.censusID;
       if (!censusID || !currentSite?.schemaName) return;
+      const editedPlotID = censusToEditDates?.plotID ?? currentPlot?.plotID;
 
       setIsSavingCensusDates(true);
       setCensusDatesError(null);
@@ -483,18 +486,24 @@ export default function DashboardPage() {
         return;
       }
 
-      // The update has committed; a refresh failure must not read as a failed save.
+      // The update has committed; a refresh or rebuild failure must not read as a failed save.
       setCensusToEditDates(null);
       try {
         await refreshCensusList();
       } catch (refreshError) {
         ailogger.error('Census dates saved but census list refresh failed', refreshError instanceof Error ? refreshError : undefined);
         setError(CENSUS_DATES_REFRESH_FAILURE_MESSAGE);
+      }
+      try {
+        if (editedPlotID) await requestScopeViewRebuilds({ schema: currentSite.schemaName, plotID: editedPlotID, censusID });
+      } catch (rebuildError) {
+        ailogger.error('Census dates saved but measurement view rebuild failed', rebuildError instanceof Error ? rebuildError : undefined);
+        setError(CENSUS_DATES_VIEW_REBUILD_FAILURE_MESSAGE);
       } finally {
         setIsSavingCensusDates(false);
       }
     },
-    [censusToEditDates, currentSite?.schemaName, refreshCensusList]
+    [censusToEditDates, currentPlot?.plotID, currentSite?.schemaName, refreshCensusList]
   );
 
   const censusNumberBeingEdited = censusToEditDates?.plotCensusNumber;

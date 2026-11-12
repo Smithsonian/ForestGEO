@@ -18,7 +18,12 @@ import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useAppStore } from '@/config/store/appstore';
 import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE } from '@/config/censusdeletion';
 import { HTTPResponses } from '@/config/macros';
-import { CENSUS_CREATED_REFRESH_FAILURE_MESSAGE, CENSUS_DATES_REFRESH_FAILURE_MESSAGE, CENSUS_DATES_SAVE_FAILURE_MESSAGE } from '@/config/censuswindow';
+import {
+  CENSUS_CREATED_REFRESH_FAILURE_MESSAGE,
+  CENSUS_DATES_REFRESH_FAILURE_MESSAGE,
+  CENSUS_DATES_SAVE_FAILURE_MESSAGE,
+  CENSUS_DATES_VIEW_REBUILD_FAILURE_MESSAGE
+} from '@/config/censuswindow';
 import { buildCensusDatesPatchBody } from '@/lib/db/definitions/timekeeping';
 
 // Mock dependencies
@@ -984,6 +989,50 @@ describe('Enhanced Dashboard Page', () => {
       expect(screen.getByText('Edit Census 1 Dates')).toBeInTheDocument();
       expect(screen.queryByText('boom')).not.toBeInTheDocument();
       expect(callsAfterThePatch().censusListFetches).toHaveLength(0);
+    });
+
+    const VIEW_REBUILD_URLS = ['/api/refreshviews/measurementssummary/testsite', '/api/refreshviews/viewfulltable/testsite'];
+
+    function viewRebuildCalls() {
+      return vi.mocked(global.fetch).mock.calls.filter(([url]) => VIEW_REBUILD_URLS.includes(String(url)));
+    }
+
+    it('rebuilds both measurement views for the edited census after the save commits', async () => {
+      routeCensusPatchTo(() => Promise.resolve(new Response(JSON.stringify({ message: 'Update successful', changed: true }), { status: HTTPResponses.OK })));
+      const { user } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+
+      await waitFor(() => expect(viewRebuildCalls()).toHaveLength(VIEW_REBUILD_URLS.length));
+      const calls = viewRebuildCalls();
+      console.log(`[edit census dates page] rebuild calls: ${JSON.stringify(calls.map(([url, init]) => [url, (init as RequestInit).body]))}`);
+      expect(calls.map(([url]) => String(url)).sort()).toEqual([...VIEW_REBUILD_URLS].sort());
+      for (const [, init] of calls) {
+        expect((init as RequestInit).method).toBe('POST');
+        expect(JSON.parse(String((init as RequestInit).body))).toEqual({ plotID: EDITABLE_CENSUS.plotID, censusID: EDITABLE_CENSUS_ID });
+      }
+    });
+
+    it('sends no view rebuild when the PATCH fails', async () => {
+      routeCensusPatchTo(() => Promise.resolve(new Response(JSON.stringify({ error: 'boom' }), { status: HTTPResponses.INTERNAL_SERVER_ERROR })));
+      const { user } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+      expect(await screen.findByText(CENSUS_DATES_SAVE_FAILURE_MESSAGE)).toBeInTheDocument();
+      expect(viewRebuildCalls()).toHaveLength(0);
+    });
+
+    it('reports a failed view rebuild without reopening the modal, and still refreshes the list', async () => {
+      vi.mocked(global.fetch).mockImplementation((url: any) => {
+        if (String(url) === CENSUS_PATCH_URL)
+          return Promise.resolve(new Response(JSON.stringify({ message: 'Update successful', changed: true }), { status: HTTPResponses.OK }));
+        if (VIEW_REBUILD_URLS.includes(String(url))) return Promise.resolve(new Response('{}', { status: HTTPResponses.INTERNAL_SERVER_ERROR }));
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response);
+      });
+      const { user } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+
+      expect(await screen.findByText(CENSUS_DATES_VIEW_REBUILD_FAILURE_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText('Edit Census 1 Dates')).not.toBeInTheDocument();
+      expect(callsAfterThePatch().censusListFetches).toHaveLength(1);
     });
 
     it('closes the modal and reports a refresh failure separately when the save committed', async () => {
