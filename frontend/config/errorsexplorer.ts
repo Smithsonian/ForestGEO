@@ -292,6 +292,7 @@ export const DETAILS_SHEET_TEXT = {
   compareTitle: 'Compare with the other row',
   inspectRow: 'Inspect this row',
   codesHeading: 'Codes',
+  descriptionHeading: 'Description',
   uploadedCodes: 'Uploaded',
   materializedCodes: 'Materialized',
   retry: 'Retry',
@@ -300,6 +301,18 @@ export const DETAILS_SHEET_TEXT = {
   ingestionChip: 'Ingestion',
   unavailable: '—'
 } as const;
+
+const FACT_SEPARATOR = ' · ';
+const HOM_CHANGED_SUFFIX = ' (HOM changed)';
+
+export function formatErrorCodeLine(code: string, procedureName: string | null | undefined): string {
+  return procedureName ? `Code ${code}${FACT_SEPARATOR}${procedureName}` : `Code ${code}`;
+}
+
+export function formatPriorHomFact(priorHOM: number | null, homChanged: boolean): string | null {
+  if (priorHOM === null) return null;
+  return `Prior HOM ${priorHOM}${homChanged ? HOM_CHANGED_SUFFIX : ''}`;
+}
 
 export function formatMeasurementHeading(measurementID: number): string {
   return `Measurement ${measurementID}`;

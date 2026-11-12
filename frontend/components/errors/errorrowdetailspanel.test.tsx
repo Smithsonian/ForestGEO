@@ -8,6 +8,8 @@ import {
   EDIT_LOCK_TOOLTIPS,
   FALLBACK_ERROR_CODE,
   FALLBACK_ERROR_MESSAGE,
+  formatErrorCodeLine,
+  formatPriorHomFact,
   MARKED_INVALID_NO_ERROR_LOGGED_LABEL,
   type DetailsPanelRow,
   type ErrorDetailRecord,
@@ -15,6 +17,7 @@ import {
   type ErrorExplorerRow
 } from '@/config/errorsexplorer';
 import ErrorRowDetailsPanel, { type ErrorRowDetailsPanelProps } from './errorrowdetailspanel';
+import { getCodesMismatchMessage } from './errorcodes';
 
 const ROW: DetailsPanelRow = {
   measurementID: 101,
@@ -63,8 +66,8 @@ function renderPanel(overrides: Partial<ErrorRowDetailsPanelProps> = {}) {
     onOpenRelatedRow: vi.fn(),
     ...overrides
   };
-  render(<ErrorRowDetailsPanel {...props} />);
-  return props;
+  const view = render(<ErrorRowDetailsPanel {...props} />);
+  return { ...props, unmount: view.unmount };
 }
 
 describe('ErrorRowDetailsPanel (shared, P5-3, P5-5)', () => {
@@ -91,6 +94,62 @@ describe('ErrorRowDetailsPanel (shared, P5-3, P5-5)', () => {
     expect(screen.getByText('Different species')).toBeInTheDocument();
     expect(screen.getByText('DBH went from 100.00 in Census 3 to 123.40, a change of +23.4%')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: DETAILS_SHEET_TEXT.openAttributes })).toHaveAttribute('href', '/fixeddatainput/attributes');
+  });
+
+  it('shows the code, procedure and prior HOM on an error card, and the row description', () => {
+    const ROW_DESCRIPTION = 'leaning stem';
+    const ATTRIBUTE_ERROR: ErrorDetailRecord = {
+      source: 'validation',
+      code: '14',
+      message: 'Attribute code does not exist in attributes table',
+      fields: ['attributes'],
+      procedureName: 'ValidateFindInvalidAttributeCodes',
+      comparison: { priorCensusID: 4, priorDBH: null, priorHOM: 1.3, homChanged: true }
+    };
+    const INGESTION_ERROR: ErrorDetailRecord = { source: 'ingestion', code: 'INVALID_SPECIES', message: 'Invalid species', fields: [], comparison: null };
+    renderPanel({
+      errorDetails: {
+        row: { ...DETAIL_ROW, description: ROW_DESCRIPTION } as ErrorExplorerRow,
+        allErrors: [ATTRIBUTE_ERROR, INGESTION_ERROR],
+        relatedRows: []
+      }
+    });
+    const [attributeCard, ingestionCard] = screen.getAllByTestId(ERROR_CARD_TEST_ID);
+    console.log('[view-errors sheet card facts]', JSON.stringify([attributeCard.textContent, ingestionCard.textContent]));
+    expect(within(attributeCard).getByText('Code 14 · ValidateFindInvalidAttributeCodes')).toBeInTheDocument();
+    expect(within(attributeCard).getByText('Prior HOM 1.3 (HOM changed)')).toBeInTheDocument();
+    expect(within(ingestionCard).getByText('Code INVALID_SPECIES'), 'no separator without a procedure name').toBeInTheDocument();
+    expect(within(ingestionCard).queryByText(/Prior HOM/), 'no prior HOM without a comparison').toBeNull();
+    expect(screen.getByText(DETAILS_SHEET_TEXT.descriptionHeading)).toBeInTheDocument();
+    expect(screen.getByText(ROW_DESCRIPTION)).toBeInTheDocument();
+  });
+
+  it('shows no description section for a row without one', () => {
+    renderPanel();
+    expect(screen.queryByText(DETAILS_SHEET_TEXT.descriptionHeading)).toBeNull();
+  });
+
+  it('explains a codes mismatch under the codes, and says nothing when the codes agree', () => {
+    const mismatchedRow = { ...DETAIL_ROW, rawCodes: 'L;ZZ', attributes: 'L' } as ErrorExplorerRow;
+    const mismatchMessage = getCodesMismatchMessage(mismatchedRow);
+    const { unmount } = renderPanel({ errorDetails: { ...VALIDATION_DETAILS, row: mismatchedRow } });
+    console.log('[view-errors sheet codes mismatch]', mismatchMessage);
+    expect(mismatchMessage, 'the fixture really is a mismatch').not.toBe('');
+    expect(screen.getByText(mismatchMessage)).toBeInTheDocument();
+    unmount();
+
+    renderPanel();
+    expect(screen.queryByText(mismatchMessage), 'matching codes need no explanation').toBeNull();
+  });
+
+  it('shows none of the card facts for a row marked invalid with no error logged', () => {
+    renderPanel({ row: { ...ROW, isLinkedToStem: false }, errorDetails: FALLBACK_DETAILS });
+    const sheet = screen.getByTestId('error-row-details-sheet');
+    console.log('[view-errors sheet fallback facts]', sheet.textContent);
+    expect(within(sheet).getByTestId(FALLBACK_LINE_TEST_ID)).toBeInTheDocument();
+    expect(within(sheet).queryByText(formatErrorCodeLine(FALLBACK_ERROR_CODE, null))).toBeNull();
+    expect(within(sheet).queryByText(/Prior HOM/)).toBeNull();
+    expect(formatPriorHomFact(null, false), 'a comparison without a prior HOM has no fact to show').toBeNull();
   });
 
   it('shows the fallback line for a linked row flagged by status, and offers Clear', () => {
