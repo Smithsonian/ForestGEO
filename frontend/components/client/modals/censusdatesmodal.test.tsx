@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import CensusDatesModal from './censusdatesmodal';
-import { CENSUS_END_BEFORE_START_MESSAGE, CENSUS_START_DATE_REQUIRED_MESSAGE } from '@/config/censuswindow';
+import { CENSUS_END_BEFORE_START_MESSAGE, CENSUS_START_DATE_REQUIRED_MESSAGE, formatCensusOverlapMessage } from '@/config/censuswindow';
 
 // Joy appends a required-field asterisk to the start label, so match its prefix.
 const START_LABEL = /^Start date/;
@@ -20,6 +20,7 @@ function renderModal(overrides: Partial<React.ComponentProps<typeof CensusDatesM
       censusNumber={3}
       initialStartDate="2024-01-01"
       initialEndDate="2024-12-31"
+      neighbourWindows={[]}
       isSaving={false}
       errorMessage={null}
       onClose={onClose}
@@ -45,6 +46,19 @@ describe('CensusDatesModal', () => {
     expect(screen.getByText('Edit Census 3 Dates')).toBeInTheDocument();
     expect(dateInput(START_LABEL).value).toBe('2024-01-01');
     expect(dateInput(END_LABEL).value).toBe('2024-12-31');
+  });
+
+  it('shows the overlap message and disables Save when the dates overlap another census', () => {
+    const OVERLAPPED_CENSUS_NUMBER = 2;
+    renderModal({ neighbourWindows: [{ plotCensusNumber: OVERLAPPED_CENSUS_NUMBER, start: '2023-01-01', end: '2024-03-01' }] });
+    console.log(`[census dates modal] save disabled=${(screen.getByRole('button', { name: SAVE_BUTTON }) as HTMLButtonElement).disabled}`);
+    expect(screen.getByText(formatCensusOverlapMessage(OVERLAPPED_CENSUS_NUMBER))).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: SAVE_BUTTON })).toBeDisabled();
+  });
+
+  it('allows Save when the neighbouring census ends before these dates start', () => {
+    renderModal({ neighbourWindows: [{ plotCensusNumber: 2, start: '2023-01-01', end: '2023-12-31' }] });
+    expect(screen.getByRole('button', { name: SAVE_BUTTON })).toBeEnabled();
   });
 
   it('shows an empty end date for an open-ended census', () => {

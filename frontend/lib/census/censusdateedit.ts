@@ -1,3 +1,4 @@
+import type { NeighbourCensusWindow } from '@/config/censuswindow';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
@@ -27,4 +28,30 @@ export async function reopenValidationOutsideCensusWindow(tx: TxExecutor, schema
     [censusID, window.startDate, window.endDate]
   );
   return result.affectedRows ?? 0;
+}
+
+export interface CensusIdentity {
+  censusID: number;
+  plotID: number;
+  plotCensusNumber: number;
+}
+
+interface NeighbourCensusRow {
+  PlotCensusNumber: number;
+  StartDate: Date | string | null;
+  EndDate: Date | string | null;
+}
+
+/** Other census numbers in the same plot; rows sharing this census's own number are ranges of the same census. */
+export async function loadNeighbourCensusWindows(tx: TxExecutor, schema: string, census: CensusIdentity): Promise<NeighbourCensusWindow[]> {
+  const rows = await tx.query<NeighbourCensusRow[]>(
+    safeFormatQuery(
+      schema,
+      `SELECT PlotCensusNumber, StartDate, EndDate
+         FROM ??.census
+        WHERE PlotID = ? AND CensusID <> ? AND PlotCensusNumber <> ? AND IsActive = TRUE`
+    ),
+    [census.plotID, census.censusID, census.plotCensusNumber]
+  );
+  return rows.map(row => ({ plotCensusNumber: row.PlotCensusNumber, start: row.StartDate, end: row.EndDate }));
 }

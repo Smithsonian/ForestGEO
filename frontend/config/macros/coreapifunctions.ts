@@ -17,8 +17,8 @@ import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutat
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { trimReferenceTextFields } from '@/lib/reference-text';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
-import { getCensusDatesError } from '@/config/censuswindow';
-import { reopenValidationOutsideCensusWindow } from '@/lib/census/censusdateedit';
+import { getCensusDatesError, getCensusOverlapError } from '@/config/censuswindow';
+import { loadNeighbourCensusWindows, reopenValidationOutsideCensusWindow } from '@/lib/census/censusdateedit';
 import { toCalendarDayString, type CalendarDayInput } from '@/config/dateformats';
 
 // Mapping from dataType to primary key column name
@@ -404,6 +404,13 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         // both as calendar days so SQL formatting cannot shift the untouched date.
         newRowData.StartDate = toCalendarDayString(newRowData.StartDate as CalendarDayInput);
         newRowData.EndDate = toCalendarDayString(newRowData.EndDate as CalendarDayInput);
+        const neighbours = await loadNeighbourCensusWindows(tx, schema, {
+          censusID: Number(previousGridIDKey),
+          plotID: Number(persistedBefore.PlotID),
+          plotCensusNumber: Number(persistedBefore.PlotCensusNumber)
+        });
+        const overlapError = getCensusOverlapError({ startDate: newRowData.StartDate as string, endDate: newRowData.EndDate as string | null }, neighbours);
+        if (overlapError) throw new MutationRequestError(overlapError);
       }
       const { [demappedGridID]: updatedGridIDKey, ...remainingProperties } = newRowData;
 

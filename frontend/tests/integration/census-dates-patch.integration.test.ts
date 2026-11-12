@@ -12,7 +12,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
-import { CENSUS_END_BEFORE_START_MESSAGE, CENSUS_INVALID_DATE_MESSAGE, CENSUS_START_DATE_REQUIRED_MESSAGE, type CensusDates } from '@/config/censuswindow';
+import {
+  CENSUS_END_BEFORE_START_MESSAGE,
+  CENSUS_INVALID_DATE_MESSAGE,
+  CENSUS_START_DATE_REQUIRED_MESSAGE,
+  type CensusDates,
+  formatCensusOverlapMessage
+} from '@/config/censuswindow';
 import { buildCensusDatesPatchBody } from '@/lib/db/definitions/timekeeping';
 import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
@@ -46,6 +52,10 @@ const INSIDE_NARROWED_WINDOW_DAY = '2024-06-15';
 const OUTSIDE_NARROWED_WINDOW_DAY = '2024-01-10';
 const NARROWED_DATES: CensusDates = { startDate: '2024-02-01', endDate: '2024-12-31' };
 const OTHER_CENSUS_NUMBER = 99;
+const NEIGHBOUR_CENSUS_NUMBER = 98;
+const NEIGHBOUR_CENSUS_DATES: CensusDates = { startDate: '2025-06-01', endDate: '2025-12-31' };
+const DATES_ENDING_ON_NEIGHBOUR_START: CensusDates = { startDate: SEED_START_DATE, endDate: NEIGHBOUR_CENSUS_DATES.startDate };
+const DATES_ENDING_BEFORE_NEIGHBOUR_START: CensusDates = { startDate: SEED_START_DATE, endDate: '2025-05-31' };
 const OTHER_CENSUS_DATES: CensusDates = { startDate: '2030-01-01', endDate: '2030-12-31' };
 const LINKED_TREE_TAG = 'CDP-TREE-1';
 const LINKED_STEM_TAG = '1';
@@ -279,6 +289,38 @@ describe('Edit census dates via the production fixeddata PATCH route', () => {
     expect(after.StartDay).toBe(SEED_START_DATE);
     expect(after.EndDay).toBe(SEED_END_DATE);
     expect(await readCensusChangelog()).toHaveLength(0);
+  });
+
+  it('refuses dates that overlap another census number in the plot with a 400 and changes nothing', async () => {
+    const neighbourCensusID = await insertCensusInSeededPlot(NEIGHBOUR_CENSUS_NUMBER, NEIGHBOUR_CENSUS_DATES);
+    try {
+      const response = await patchCensusDates(DATES_ENDING_ON_NEIGHBOUR_START);
+      const body = await response.json();
+      const row = await readCensusRow();
+      // eslint-disable-next-line no-console
+      console.log(`[census-dates-patch] overlap PATCH -> ${response.status} ${JSON.stringify(body)}; row now ${describeRow(row)}`);
+      expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+      expect(body.error).toBe(formatCensusOverlapMessage(NEIGHBOUR_CENSUS_NUMBER));
+      expect(row.StartDay).toBe(SEED_START_DATE);
+      expect(row.EndDay).toBe(SEED_END_DATE);
+      expect(await readCensusChangelog()).toHaveLength(0);
+    } finally {
+      await deleteCensus(neighbourCensusID);
+    }
+  });
+
+  it('accepts dates that end the day before another census in the plot starts', async () => {
+    const neighbourCensusID = await insertCensusInSeededPlot(NEIGHBOUR_CENSUS_NUMBER, NEIGHBOUR_CENSUS_DATES);
+    try {
+      const response = await patchCensusDates(DATES_ENDING_BEFORE_NEIGHBOUR_START);
+      const row = await readCensusRow();
+      // eslint-disable-next-line no-console
+      console.log(`[census-dates-patch] adjacent PATCH -> ${response.status}; row now ${describeRow(row)}`);
+      expect(response.status).toBe(HTTPResponses.OK);
+      expect(row.EndDay).toBe(DATES_ENDING_BEFORE_NEIGHBOUR_START.endDate);
+    } finally {
+      await deleteCensus(neighbourCensusID);
+    }
   });
 
   it.each([

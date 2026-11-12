@@ -148,3 +148,29 @@ export function getCensusDatesError(start: unknown, end: unknown): string | null
   if (isCensusEndBeforeStart(start, end as CalendarDayInput)) return CENSUS_END_BEFORE_START_MESSAGE;
   return null;
 }
+
+export interface NeighbourCensusWindow {
+  plotCensusNumber: number;
+  start: CalendarDayInput;
+  end: CalendarDayInput;
+}
+
+export function formatCensusOverlapMessage(plotCensusNumber: number): string {
+  return `These dates overlap Census ${plotCensusNumber}. Census date ranges in a plot cannot overlap.`;
+}
+
+/** Closed intervals on calendar days; a missing end is an open window. Neighbours without a start are not comparable. */
+export function getCensusOverlapError(dates: CensusDates, neighbours: readonly NeighbourCensusWindow[]): string | null {
+  const start = parseCalendarDay(dates.startDate);
+  if (start === undefined) return null;
+  const end = parseCalendarDay(dates.endDate);
+  for (const neighbour of neighbours) {
+    const neighbourStart = parseCalendarDay(neighbour.start);
+    if (neighbourStart === undefined) continue;
+    const neighbourEnd = parseCalendarDay(neighbour.end);
+    const startsBeforeNeighbourEnds = neighbourEnd === undefined || compareCalendarDays(start, neighbourEnd) <= 0;
+    const endsAfterNeighbourStarts = end === undefined || compareCalendarDays(end, neighbourStart) >= 0;
+    if (startsBeforeNeighbourEnds && endsAfterNeighbourStarts) return formatCensusOverlapMessage(neighbour.plotCensusNumber);
+  }
+  return null;
+}

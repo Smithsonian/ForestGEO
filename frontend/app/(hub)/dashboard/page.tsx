@@ -36,7 +36,7 @@ import {
 } from '@/app/contexts/compat-hooks';
 import { createAndUpdateCensusList, reconcileCurrentCensusSelection, updateCensusDates } from '@/lib/db/definitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/lib/db/definitions/core';
 import { SitesRDS as _SitesRDS, PlotRDS as _PlotRDS } from '@/lib/db/definitions/zones';
 import { OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/lib/db/definitions/timekeeping';
@@ -68,6 +68,7 @@ import {
   CENSUS_DATES_REFRESH_FAILURE_MESSAGE,
   CENSUS_DATES_SAVE_FAILURE_MESSAGE,
   type CensusDates,
+  type NeighbourCensusWindow,
   getCensusWindow
 } from '@/config/censuswindow';
 import { toCalendarDayString } from '@/config/dateformats';
@@ -496,6 +497,18 @@ export default function DashboardPage() {
     [censusToEditDates, currentSite?.schemaName, refreshCensusList]
   );
 
+  const censusNumberBeingEdited = censusToEditDates?.plotCensusNumber;
+  const censusToEditNeighbours = useMemo<NeighbourCensusWindow[]>(
+    () =>
+      (censusListContext ?? []).flatMap(census => {
+        if (!census || census.plotCensusNumber === censusNumberBeingEdited) return [];
+        return (census.dateRanges ?? []).map(range => {
+          const window = getCensusWindow(range);
+          return { plotCensusNumber: census.plotCensusNumber, start: window.start, end: window.end };
+        });
+      }),
+    [censusListContext, censusNumberBeingEdited]
+  );
   const censusToEditWindow = censusToEditDates?.dateRanges?.[0] ? getCensusWindow(censusToEditDates.dateRanges[0]) : undefined;
 
   const handleAddCensus = useCallback(() => {
@@ -1104,6 +1117,7 @@ export default function DashboardPage() {
         censusNumber={censusToEditDates?.plotCensusNumber ?? 0}
         initialStartDate={toCalendarDayString(censusToEditWindow?.start)}
         initialEndDate={toCalendarDayString(censusToEditWindow?.end)}
+        neighbourWindows={censusToEditNeighbours}
         isSaving={isSavingCensusDates}
         errorMessage={censusDatesError}
         onClose={() => setCensusToEditDates(null)}
