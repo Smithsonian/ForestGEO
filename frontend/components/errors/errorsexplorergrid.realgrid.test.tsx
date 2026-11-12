@@ -369,6 +369,42 @@ describe('ErrorsExplorerGrid with the real DataGrid', () => {
     expect((cell('1 rows', 101, 'treeTag').querySelector('input') as HTMLInputElement).value, 'the typed values are still in the row').toBe('T101');
   });
 
+  it.each([
+    ['a fixed-width column', 'measuredDBH'],
+    ['a flex column', 'treeTag']
+  ])('keeps the resized width of %s when the page re-renders with a new columns array', async (_columnKind, resizedField) => {
+    const RESIZED_WIDTH = 333;
+    const SEARCH_THAT_RERENDERS = 'T';
+    const { rerender } = render(<Harness />);
+    await waitFor(() => expect(cell('1 rows', 101, resizedField)).toBeInTheDocument());
+    const api = (
+      window as unknown as {
+        __errorsGridApi: Record<
+          string,
+          { setColumnWidth: (field: string, width: number) => void; getColumn: (field: string) => { width?: number; flex?: number; computedWidth: number } }
+        >;
+      }
+    ).__errorsGridApi[GRID_A];
+    const columnBefore = api.getColumn(resizedField);
+    const widthBefore = columnBefore.computedWidth;
+    const flexBefore = columnBefore.flex;
+
+    act(() => api.setColumnWidth(resizedField, RESIZED_WIDTH));
+    await waitFor(() => expect(api.getColumn(resizedField).width).toBe(RESIZED_WIDTH));
+
+    rerender(<Harness filters={{ ...DEFAULT_ERROR_EXPLORER_FILTERS, quickSearch: SEARCH_THAT_RERENDERS }} />);
+    await waitFor(() => expect(queryBodies(fetchMock).at(-1)?.filters.quickSearch).toBe(SEARCH_THAT_RERENDERS));
+    await waitFor(() => expect(cell('1 rows', 101, resizedField)).toBeInTheDocument());
+
+    const columnAfter = api.getColumn(resizedField);
+    console.log(
+      `[errors grid] ${resizedField} before resize: computedWidth ${widthBefore}, flex ${flexBefore}; after re-render: ` +
+        `computedWidth ${columnAfter.computedWidth}, width ${columnAfter.width}, flex ${columnAfter.flex} (resized to ${RESIZED_WIDTH})`
+    );
+    expect(widthBefore, 'the default width differs from the resized one, so the assertion below can fail').not.toBe(RESIZED_WIDTH);
+    expect(columnAfter.computedWidth).toBe(RESIZED_WIDTH);
+  });
+
   it('gates the flat infinite reads: drops an in-flight response, sends nothing while gated, reads once when the gate lifts (P2-2, A3)', async () => {
     const user = userEvent.setup();
     const heldInfiniteReads: Array<(rows: ErrorExplorerRow[]) => void> = [];

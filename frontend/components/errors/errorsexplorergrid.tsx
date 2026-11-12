@@ -6,6 +6,8 @@ import {
   GridRowEditStopReasons,
   GridRowModes,
   useGridApiRef,
+  type GridColDef,
+  type GridColumnResizeParams,
   type GridColumnVisibilityModel,
   type GridEventListener,
   type GridFilterModel,
@@ -45,6 +47,7 @@ const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true
 const EXPOSE_GRID_API_FOR_TESTS = process.env.NODE_ENV === 'test';
 const INFINITE_MODE = 'infinite';
 const PAGINATED_MODE = 'paginated';
+const RESIZED_COLUMN_FLEX = 0;
 
 interface GridPaginationExtras {
   disabled: boolean;
@@ -285,6 +288,19 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
     ]
   );
 
+  // A new columns prop makes MUI reapply each definition's width and flex, so a user's resize is written back into the definitions.
+  const [resizedWidths, setResizedWidths] = useState<Record<string, number>>({});
+  const handleColumnWidthChange = useCallback((params: GridColumnResizeParams) => {
+    setResizedWidths(previous => ({ ...previous, [params.colDef.field]: params.width }));
+  }, []);
+  const sizedColumns = useMemo<GridColDef[]>(
+    () =>
+      columns.map(column =>
+        resizedWidths[column.field] === undefined ? column : { ...column, width: resizedWidths[column.field], flex: RESIZED_COLUMN_FLEX }
+      ),
+    [columns, resizedWidths]
+  );
+
   const processRowUpdate = useMemo(() => rowEdit.processRowUpdate(gridKey), [rowEdit, gridKey]);
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) event.defaultMuiPrevented = true;
@@ -387,7 +403,8 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
             apiRef={apiRef}
             disableVirtualization={E2E_DISABLE_VIRTUALIZATION}
             rows={displayedRows}
-            columns={columns}
+            columns={sizedColumns}
+            onColumnWidthChange={handleColumnWidthChange}
             loading={isInfiniteOn ? infinite.isLoading : rowsResult.status === 'loading'}
             rowCount={isInfiniteOn ? infinite.rows.length : rowsResult.totalRows}
             paginationMode="server"
