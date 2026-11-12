@@ -76,6 +76,7 @@ POST_STORED_PROCEDURE_MIGRATIONS=(
     "57_backfill_measurementssummary_stemguid.sql"
     "58_refresh_rawcodes_empty_token_handling.sql"
     "60_add_published_stemid.sql"
+    "62_trim_coremeasurements_redundant_indexes.sql"
 )
 
 REQUIRED_BASE_TABLES=(

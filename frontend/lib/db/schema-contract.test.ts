@@ -25,6 +25,7 @@ import {
   type SchemaContract,
   type CompareOptions
 } from './schema-contract';
+import { CENSUS_REPLACEMENT_SCAN_INDEX } from '@/lib/ingestion/temporary-measurements';
 
 const TARGET_COLLATION = 'utf8mb4_0900_ai_ci';
 
@@ -397,6 +398,64 @@ describe('collision-check index contract', () => {
     const { failures } = compareAgainstCanonical(live);
 
     expect(failures).toContainEqual(expect.objectContaining({ table, object: index, category: 'index', kind: 'uniqueness' }));
+  });
+});
+
+/**
+ * U1 (#560). The census-replacement window SELECT ... FOR UPDATE hints
+ * CENSUS_REPLACEMENT_SCAN_INDEX by name. On a schema without it the hint is ignored
+ * and the keyset cursor walks PRIMARY across every other census under FOR UPDATE
+ * (#555 spec F-4). #560 drops idx_cm_census_active, the (CensusID, IsActive) sibling
+ * that used to cover CensusID lookups when idx_censusid was absent, so the index's
+ * presence and shape are contract-required.
+ */
+describe('census-replacement cursor index contract (#560)', () => {
+  const canonical = loadCanonicalSchemaContract();
+  const COREMEASUREMENTS_TABLE = 'coremeasurements';
+  const CURSOR_INDEX_COLUMNS = ['CensusID'];
+  const DROPPED_SIBLING_EXTRA_COLUMN = 'IsActive';
+  const cursorIndexKey = CENSUS_REPLACEMENT_SCAN_INDEX.toLowerCase();
+
+  function compareAgainstCanonical(live: SchemaContract) {
+    return compareSchemaContracts(canonical, live, { tables: CRITICAL_TABLES, requiredIndexesByTable: REQUIRED_INDEXES_BY_TABLE });
+  }
+
+  it('requires the index the census-replacement cursor hints, under the same name', () => {
+    const required = REQUIRED_INDEXES_BY_TABLE[COREMEASUREMENTS_TABLE];
+    console.log(`[U1] CENSUS_REPLACEMENT_SCAN_INDEX=${CENSUS_REPLACEMENT_SCAN_INDEX}; required coremeasurements indexes=${JSON.stringify(required)}`);
+    expect(required, 'the cursor hint names an index the deploy gate does not protect').toContain(CENSUS_REPLACEMENT_SCAN_INDEX);
+  });
+
+  it('defines the cursor index in tablestructures.sql as a non-unique (CensusID) index', () => {
+    const definition = canonical.tables[COREMEASUREMENTS_TABLE].indexes[cursorIndexKey];
+    console.log(`[U1] canonical ${CENSUS_REPLACEMENT_SCAN_INDEX}: ${JSON.stringify(definition)}`);
+    expect(definition, `${CENSUS_REPLACEMENT_SCAN_INDEX} missing from tablestructures.sql`).toBeDefined();
+    expect(definition.columns).toEqual(CURSOR_INDEX_COLUMNS);
+    expect(definition.unique).toBe(false);
+  });
+
+  it('fails a live schema that lacks the cursor index', () => {
+    const live = clone(canonical);
+    delete live.tables[COREMEASUREMENTS_TABLE].indexes[cursorIndexKey];
+
+    const { failures } = compareAgainstCanonical(live);
+    console.log(`[U1] failures without the cursor index:\n${formatContractFailures(failures)}`);
+
+    expect(failures).toContainEqual(
+      expect.objectContaining({ table: COREMEASUREMENTS_TABLE, object: CENSUS_REPLACEMENT_SCAN_INDEX, category: 'index', kind: 'missing' })
+    );
+  });
+
+  it('fails a live schema whose cursor index gained a key column (the dropped idx_cm_census_active shape)', () => {
+    const live = clone(canonical);
+    live.tables[COREMEASUREMENTS_TABLE].indexes[cursorIndexKey].columns = [...CURSOR_INDEX_COLUMNS, DROPPED_SIBLING_EXTRA_COLUMN];
+
+    const { failures } = compareAgainstCanonical(live);
+    console.log(`[U1] failures with (CensusID, IsActive):\n${formatContractFailures(failures)}`);
+
+    expect(failures).toContainEqual(
+      expect.objectContaining({ table: COREMEASUREMENTS_TABLE, object: CENSUS_REPLACEMENT_SCAN_INDEX, category: 'index', kind: 'columns' })
+    );
   });
 });
 
