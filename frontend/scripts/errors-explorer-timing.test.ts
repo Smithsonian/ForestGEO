@@ -3,10 +3,12 @@ import { AZURE_HOST } from './lib/schema-cli';
 import { cleanupTimingConnections } from '@/tests/setup/stricttestdatabasecleanup';
 import { everyErrorSetStatement } from '@/tests/setup/errorsetstatements';
 import * as oracle from '@/tests/oracles/errors-explorer-legacy';
-import { buildF1MembershipProbe, buildF2MembershipProbe, MEMBERSHIP_PROBE_LABELS } from '@/tests/benchmarks/lib/membershipprobe';
+import { buildF1MembershipProbe, buildF2MembershipProbe, MEMBERSHIP_PROBE_LABELS, runMembershipProbeRepetition } from '@/tests/benchmarks/lib/membershipprobe';
 import { CENSUS_LIST_SIZE, chunkCensusIDs, ERROR_EXPLORER_STATEMENT_LABELS, readStatementLabel } from '@/app/api/errors/explorer/errorsetsql';
 import {
   classifyStatement,
+  countDistinctSignatures,
+  createTimedProbeExecutor,
   describeCensusScope,
   lastPageNumber,
   m1Summary,
@@ -572,6 +574,80 @@ describe('page scenarios on a multi-chunk scope', () => {
   });
 });
 
+describe('membership probe timing', () => {
+  const SHOW_MS = 40;
+  const STRINGIFY_MS = 25;
+  const SQL_MS_PER_CALL = [1, 2, 3, 4];
+  const EXPECTED_SQL_MS = 10;
+  const SHOW_CALLS_PER_STATEMENT = 2;
+
+  it.each([
+    ['F2', buildF2MembershipProbe],
+    ['F1', buildF1MembershipProbe]
+  ])('%s: times the SQL alone, not the SHOW SESSION STATUS reads or the row serialisation around it', async (_name, build) => {
+    let clockMs = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clockMs);
+    let sqlCalls = 0;
+    const connection = {
+      query: vi.fn(async () => {
+        clockMs += SHOW_MS;
+        return [[{ Value: '100' }], []];
+      }),
+      execute: vi.fn(async () => {
+        clockMs += SQL_MS_PER_CALL[sqlCalls++ % SQL_MS_PER_CALL.length];
+        const row = {
+          CoreMeasurementID: sqlCalls,
+          ErrorID: 1,
+          PriorCensusID: null,
+          PriorDBH: null,
+          PriorHOM: null,
+          toJSON() {
+            clockMs += STRINGIFY_MS;
+            return { CoreMeasurementID: sqlCalls };
+          }
+        };
+        return [[row], []];
+      })
+    };
+    const executor = createSerializedExecutor(connection as never);
+    await executor.calibrateBytes();
+    const showCallsBeforeProbe = connection.query.mock.calls.length;
+    const scope = { schema: BUILDER_SCHEMA, plotID: 1, censusIDs: range(MULTI_CHUNK_CENSUS_COUNT) };
+    const sample = await runMembershipProbeRepetition(scope, build, createTimedProbeExecutor(executor));
+    const showCallsDuringProbe = connection.query.mock.calls.length - showCallsBeforeProbe;
+    console.log(`SHOW calls during probe=${showCallsDuringProbe}; wall clock advanced to ${clockMs} ms; reported durationMs=${sample.durationMs}`);
+    expect(showCallsDuringProbe, 'the telemetry must really run inside each call for this test to mean anything').toBe(
+      chunkCensusIDs(scope.censusIDs).length * SHOW_CALLS_PER_STATEMENT
+    );
+    expect(clockMs).toBeGreaterThan(EXPECTED_SQL_MS + showCallsDuringProbe * SHOW_MS);
+    expect(sample.durationMs).toBe(EXPECTED_SQL_MS);
+  });
+});
+
+describe('distinct signature counting', () => {
+  const REPEATED_SIGNATURE = { ErrorTypeKeys: '3,7', SignatureComplete: 1, HasDuplicate: 0, HasSameBatch: 1 };
+  const SECOND_SIGNATURE = { ErrorTypeKeys: '3', SignatureComplete: 1, HasDuplicate: 0, HasSameBatch: 0, MeasurementCount: 5 };
+  const CHUNK_WITH_SECOND_SIGNATURE = 2;
+  const EXPECTED_CHUNKS = 4;
+
+  it('merges the histogram rows of 26 censuses: one signature in four chunks counts once, a second signature counts once', async () => {
+    const callsByLabel = new Map<string | null, number>();
+    const executor = {
+      executeQuery: async (sql: string) => {
+        const label = readStatementLabel(sql);
+        const chunkIndex = callsByLabel.get(label) ?? 0;
+        callsByLabel.set(label, chunkIndex + 1);
+        return [{ ...REPEATED_SIGNATURE, MeasurementCount: chunkIndex + 1 }, ...(chunkIndex === CHUNK_WITH_SECOND_SIGNATURE ? [SECOND_SIGNATURE] : [])];
+      }
+    };
+    const counts = await countDistinctSignatures(executor, BUILDER_SCHEMA, 1, range(MULTI_CHUNK_CENSUS_COUNT));
+    console.log(`distinct signatures ${JSON.stringify(counts)}; calls per label ${JSON.stringify([...callsByLabel])}`);
+    expect(counts).toEqual({ withFlags: 2, withoutFlags: 2 });
+    expect(callsByLabel.get(ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags)).toBe(EXPECTED_CHUNKS);
+    expect(callsByLabel.get(ERROR_EXPLORER_STATEMENT_LABELS.histogramWithoutFlags)).toBe(EXPECTED_CHUNKS);
+  });
+});
+
 describe('a full measurement run over a 26-census scope (fake database)', () => {
   const PLOT_ID = 1;
   const RUNS = 1;
@@ -697,6 +773,52 @@ describe('a full measurement run over a 26-census scope (fake database)', () => 
     expect(result.exitCode).toBe(0);
     expect(explained.some(({ sql }) => sql.includes(ERROR_EXPLORER_STATEMENT_LABELS.page))).toBe(true);
     expect(explainedViaText).toHaveLength(0);
+  });
+
+  it('reports a timed-out signature histogram, carries null, and still runs the scenarios', async () => {
+    const f = databaseFake();
+    const answer = f.connection.execute.getMockImplementation()!;
+    let histogramCalls = 0;
+    f.connection.execute.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (readStatementLabel(sql) === ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags && histogramCalls++ === 0) {
+        throw { errno: 3024, code: 'ER_QUERY_TIMEOUT' };
+      }
+      return answer(sql, params);
+    });
+    const args = ['--schema', BUILDER_SCHEMA, '--plot', String(PLOT_ID), '--census', range(MULTI_CHUNK_CENSUS_COUNT).join(','), '--runs', String(RUNS)];
+    const result = await runTimingCli(args, f.deps);
+    const output = f.stdout.join('\n');
+    const summary = JSON.parse(
+      output
+        .split('\n')
+        .find(line => line.startsWith('ERRORS_EXPLORER_TIMING_SUMMARY '))!
+        .slice('ERRORS_EXPLORER_TIMING_SUMMARY '.length)
+    );
+    console.log(
+      `exit=${result.exitCode}; line: ${output.split('\n').find(line => line.startsWith('distinct signatures'))}; summary: ${JSON.stringify(summary.distinctSignatures)}`
+    );
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain('distinct signatures: timed out after');
+    expect(summary.distinctSignatures).toEqual({ withFlags: null, withoutFlags: null });
+    expect(output).toContain('queryPage0 run 1: identical');
+  });
+
+  it('propagates a probe error that is not a timeout, naming only the probe label', async () => {
+    const f = databaseFake();
+    const answer = f.connection.execute.getMockImplementation()!;
+    const LEAKING_MESSAGE = "SELECT command denied to user 'u'@'h'";
+    f.connection.execute.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (isProbe(sql)) throw { errno: 1142, code: 'ER_TABLEACCESS_DENIED_ERROR', message: LEAKING_MESSAGE };
+      return answer(sql, params);
+    });
+    const args = ['--schema', BUILDER_SCHEMA, '--plot', String(PLOT_ID), '--census', range(MULTI_CHUNK_CENSUS_COUNT).join(','), '--runs', String(RUNS)];
+    const result = await runTimingCli(args, f.deps);
+    const stderr = f.stderr.join('\n');
+    console.log(`exit=${result.exitCode}; stderr=${stderr}`);
+    expect(result.exitCode).toBe(1);
+    expect(stderr).toContain(`m1Probe/${MEMBERSHIP_PROBE_LABELS.f2}`);
+    expect(stderr).not.toContain("'u'@'h'");
+    expect(f.stdout.join('\n')).not.toContain("'u'@'h'");
   });
 
   it('merges the histogram chunks into the distinct signature count', async () => {

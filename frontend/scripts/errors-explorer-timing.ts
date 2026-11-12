@@ -24,7 +24,8 @@ import {
   m1Summary,
   runMembershipProbe,
   type M1Result,
-  type MembershipProbeRow
+  type MembershipProbeRow,
+  type ProbeExecutor
 } from '../tests/benchmarks/lib/membershipprobe';
 
 export { classifyStatement, describeCensusScope, lastPageNumber, m1Summary, pastTheEndPageNumber };
@@ -32,6 +33,7 @@ export { classifyStatement, describeCensusScope, lastPageNumber, m1Summary, past
 const DEFAULT_MAX_STATEMENT_MS = 60_000;
 const INTERRUPT_EXIT_CODE = 130;
 const TIMEOUT_ERRNO = 3024;
+const M1_PROBE_SCENARIO = 'm1Probe';
 const SHOW_BYTES = "SHOW SESSION STATUS LIKE 'Bytes_sent'";
 const LEADING_COMMENTS = /^(?:\s*(?:\/\*[\s\S]*?\*\/|--[^\n]*\n))*\s*/;
 const READ_STATEMENT_START = /^(?:SELECT|WITH)\b/i;
@@ -84,7 +86,7 @@ const SAFE_CONTEXT = new Set([
   'detailsFirstContradictionRow',
   'messageCounts',
   'exportDefault',
-  'm1Probe',
+  M1_PROBE_SCENARIO,
   ...Object.values(ERROR_EXPLORER_STATEMENT_LABELS),
   ...Object.values(MEMBERSHIP_PROBE_LABELS)
 ]);
@@ -214,13 +216,13 @@ export function createSerializedExecutor(connection: Pick<Connection, 'query' | 
     const before = await readBytes();
     bytesOverhead = (await readBytes()) - before;
   }
-  function executeQuery(sql: string, params?: readonly unknown[], label = 'unlabelled'): Promise<unknown> {
+  function executeQuery(sql: string, params?: readonly unknown[], label = UNLABELLED_STATEMENT): Promise<unknown> {
     const issuedAt = performance.now();
     const issuedOperation = operation;
     const run = async () => {
       if (aborted) throw new TimingRunAbortedError();
       assertReadOnlyStatement(sql);
-      const trustedLabel = label === 'unlabelled' ? classifyStatement(sql) : label;
+      const trustedLabel = label === UNLABELLED_STATEMENT ? classifyStatement(sql) : label;
       onStatement?.(trustedLabel);
       const instrumentationStart = performance.now();
       const beforeBytes = bytesOverhead === null ? null : await readBytes();
@@ -274,6 +276,7 @@ export function createSerializedExecutor(connection: Pick<Connection, 'query' | 
   };
 }
 type Executor = ReturnType<typeof createSerializedExecutor>;
+type DistinctSignatures = { withFlags: number | null; withoutFlags: number | null };
 type Scenario = { name: string; run: (executor: Executor) => Promise<unknown> };
 export interface TimingDeps {
   env?: Environment;
@@ -474,7 +477,12 @@ export function summarizePageLoad(query: readonly { run: number; criticalMs: num
     ...counts
   };
 }
-async function countDistinctSignatures(executor: Executor, schema: string, plotID: number, censusIDs: number[]) {
+export async function countDistinctSignatures(
+  executor: Pick<Executor, 'executeQuery'>,
+  schema: string,
+  plotID: number,
+  censusIDs: number[]
+): Promise<{ withFlags: number; withoutFlags: number }> {
   const countFor = async (buildHistogram: typeof buildHistogramWithFlagsStatement): Promise<number> => {
     const chunks: ErrorSignatureRow[][] = [];
     for (const chunk of chunkCensusIDs(censusIDs)) {
@@ -484,6 +492,14 @@ async function countDistinctSignatures(executor: Executor, schema: string, plotI
     return mergeSignatureRows(chunks).length;
   };
   return { withFlags: await countFor(buildHistogramWithFlagsStatement), withoutFlags: await countFor(buildHistogramWithoutFlagsStatement) };
+}
+export function createTimedProbeExecutor(executor: Pick<Executor, 'executeQuery' | 'statements'>): ProbeExecutor {
+  return async statement => {
+    const recordsBefore = executor.statements.length;
+    const rows = (await executor.executeQuery(statement.sql, statement.params, membershipProbeLabelOf(statement.sql))) as MembershipProbeRow[];
+    const record = executor.statements[recordsBefore];
+    return { rows, sqlMs: record.endedAt - record.startedAt };
+  };
 }
 function membershipProbeLabelOf(sql: string): string {
   return sql.startsWith(MEMBERSHIP_PROBE_LABELS.f2) ? MEMBERSHIP_PROBE_LABELS.f2 : MEMBERSHIP_PROBE_LABELS.f1;
@@ -508,14 +524,34 @@ async function readStatus(connection: QueryConnection, sql: string): Promise<num
   if (!Number.isFinite(value)) throw new Error('Invalid session status');
   return value;
 }
+async function reportDistinctSignatures(
+  executor: Executor,
+  schema: string,
+  plotID: number,
+  censusIDs: number[],
+  maxMs: number,
+  out: (line: string) => void
+): Promise<DistinctSignatures> {
+  try {
+    const counts = await countDistinctSignatures(executor, schema, plotID, censusIDs);
+    out(`distinct signatures: with flags ${counts.withFlags}, without flags ${counts.withoutFlags}`);
+    return counts;
+  } catch (error) {
+    if (errnoOf(error) !== TIMEOUT_ERRNO) throw error;
+    await executor.drain();
+    out(`distinct signatures: timed out after ${maxMs} ms`);
+    return { withFlags: null, withoutFlags: null };
+  }
+}
 async function reportShape(
   executor: Executor,
   connection: QueryConnection,
   schema: string,
   plotID: number,
   censusIDs: number[],
+  maxMs: number,
   out: (line: string) => void
-): Promise<{ withFlags: number; withoutFlags: number }> {
+): Promise<DistinctSignatures> {
   const placeholders = censusIDs.map(() => '?').join(',');
   const scope = `PlotID = ? AND CensusID IN (${placeholders})`;
   const params = [plotID, ...censusIDs];
@@ -555,8 +591,7 @@ async function reportShape(
     'shape'
   );
   out(`indexes: ${JSON.stringify(indexes)}`);
-  const distinctSignatures = await countDistinctSignatures(executor, schema, plotID, censusIDs);
-  out(`distinct signatures: with flags ${distinctSignatures.withFlags}, without flags ${distinctSignatures.withoutFlags}`);
+  const distinctSignatures = await reportDistinctSignatures(executor, schema, plotID, censusIDs, maxMs, out);
   await listGroupSizes(
     executor,
     schema,
@@ -574,11 +609,7 @@ async function runM1Probe(
   out: (line: string) => void
 ): Promise<M1Result | { m1Status: typeof M1_STATUS.inconclusive; diagnostic: string }> {
   try {
-    const m1 = await runMembershipProbe(
-      scope,
-      async statement => (await executor.executeQuery(statement.sql, statement.params, membershipProbeLabelOf(statement.sql))) as MembershipProbeRow[],
-      { measuredRuns }
-    );
+    const m1 = await runMembershipProbe(scope, createTimedProbeExecutor(executor), { measuredRuns });
     out(describeM1(m1));
     return m1;
   } catch (error) {
@@ -606,7 +637,7 @@ async function runMeasurements(
   const censusIDs = [...new Set(censusArg.split(',').map(parsePositive))];
   const runs = argument(argv, '--runs') === undefined ? DEFAULT_RUNS : parsePositive(argument(argv, '--runs'));
   const request = { schema, plotID, censusID: censusIDs[0], censusIDs, page: 0, pageSize: PAGE_SIZE, filters: DEFAULT_ERROR_EXPLORER_FILTERS };
-  const distinctSignatures = await reportShape(executor, connection, schema, plotID, censusIDs, out);
+  const distinctSignatures = await reportShape(executor, connection, schema, plotID, censusIDs, maxMs, out);
   const censusScope = describeCensusScope(censusIDs);
   const page = await oracle.queryErrorExplorer(executor, request);
   const facets = await oracle.buildErrorExplorerFacets(executor, request);
@@ -724,8 +755,8 @@ async function runMeasurements(
       }
     }
   }
-  setScenario('m1Probe');
-  executor.setOperation('m1Probe');
+  setScenario(M1_PROBE_SCENARIO);
+  executor.setOperation(M1_PROBE_SCENARIO);
   const m1 = await runM1Probe(executor, { schema, plotID, censusIDs }, runs, maxMs, out);
   out(table.join('\n'));
   const pageLoad: Partial<Record<ArmName, unknown>> = {};
@@ -777,7 +808,7 @@ export async function runTimingCli(argv: readonly string[], deps: TimingDeps = {
   let destroyed = false;
   let phase: 'connection' | 'statement' = 'connection';
   let scenario = 'setup';
-  let label = 'unlabelled';
+  let label = UNLABELLED_STATEMENT;
   const cleanupSignal: Array<() => void> = [];
   const destroy = () => {
     if (!connection || destroyed) return;
@@ -846,7 +877,7 @@ export async function runTimingCli(argv: readonly string[], deps: TimingDeps = {
       try {
         await item.run({
           ...executor,
-          executeQuery: (sql, params, statementLabel = 'unlabelled') => {
+          executeQuery: (sql, params, statementLabel = UNLABELLED_STATEMENT) => {
             label = statementLabel;
             return executor!.executeQuery(sql, params, statementLabel);
           }
