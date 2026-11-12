@@ -644,6 +644,7 @@ export const VIEW_ERRORS_TEXT = {
   footnote: 'A measurement with several errors appears under each of them.',
   filteredToPrefix: 'Filtered to:',
   removeFilter: 'Remove filter',
+  selectCensus: 'Select a census to see its errors.',
   emptyCensus: 'No unresolved errors in this census.',
   emptyFiltered: 'No unresolved errors match these filters.',
   clearFilters: 'Clear filters',

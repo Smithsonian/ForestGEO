@@ -467,6 +467,17 @@ export default function ErrorsExplorer() {
 
   const factsLine = totals ? formatViewErrorsFactsLine(totals.affectedMeasurements, totals.activeMeasurements, totals.errorTypeCount) : null;
 
+  if (!readScope) {
+    return (
+      <Stack spacing={2} sx={{ width: '100%' }}>
+        <Typography level="h1" data-testid="errors-explorer-title">
+          {VIEW_ERRORS_TEXT.pageTitle}
+        </Typography>
+        <Typography level="body-md">{VIEW_ERRORS_TEXT.selectCensus}</Typography>
+      </Stack>
+    );
+  }
+
   return (
     <Stack spacing={2} sx={{ width: '100%' }}>
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'flex-start' }}>

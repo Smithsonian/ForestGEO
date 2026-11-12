@@ -1237,6 +1237,34 @@ describe('Export one error type', () => {
   });
 });
 
+describe('With no census selected', () => {
+  it('asks for a census and sends no read', async () => {
+    page.censusIDs = [];
+    const { network } = await mountPage(defaultRoutes(), { awaitGroupGrid: false });
+    expect(await screen.findByText(VIEW_ERRORS_TEXT.selectCensus)).toBeInTheDocument();
+    expect(screen.getByTestId('errors-explorer-title')).toHaveTextContent(VIEW_ERRORS_TEXT.pageTitle);
+    expect(screen.queryByRole('progressbar'), 'nothing is loading, so nothing spins').not.toBeInTheDocument();
+    expect(screen.queryByTestId('errorsexplorer-export-csv'), 'no export without a census to export').toBeNull();
+    console.log(`[view errors] requests with no census: ${JSON.stringify(network.requests.map(request => request.url))}`);
+    expect(network.bodiesFor(ROUTES.facets)).toHaveLength(0);
+    expect(network.bodiesFor(ROUTES.query)).toHaveLength(0);
+  });
+
+  it('loads the page once a census is selected', async () => {
+    page.censusIDs = [];
+    const { network, rerender } = await mountPage(defaultRoutes(), { awaitGroupGrid: false });
+    expect(await screen.findByText(VIEW_ERRORS_TEXT.selectCensus)).toBeInTheDocument();
+
+    page.censusIDs = [FIRST_CENSUS_ID];
+    const { default: ErrorsExplorer } = await import('./errorsexplorer');
+    rerender(<ErrorsExplorer />);
+    await waitFor(() => expect(capturedGrids.get(GROUP_LABEL)?.rows.length, 'the first group loads its rows').toBeGreaterThan(0));
+    console.log(`[view errors] requests after selecting a census: ${JSON.stringify(network.requests.map(request => request.url))}`);
+    expect(screen.queryByText(VIEW_ERRORS_TEXT.selectCensus)).toBeNull();
+    expect(network.bodiesFor(ROUTES.facets).at(-1)).toMatchObject({ censusID: FIRST_CENSUS_ID, censusIDs: [FIRST_CENSUS_ID] });
+  });
+});
+
 describe('Obsolete responses', () => {
   it('keeps the newer search facets when the older response arrives last', async () => {
     const olderFacets = deferred<Response>();
