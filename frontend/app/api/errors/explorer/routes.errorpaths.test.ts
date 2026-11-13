@@ -21,6 +21,7 @@ const FIRST_PAGE = 0;
 const PAGE_SIZE = 25;
 
 const SECOND_CENSUS_ID = 8;
+const THIRD_CENSUS_ID = 9;
 const OVERSIZED_MESSAGE_LIST_LENGTH = 101;
 const OVERSIZED_MESSAGE_LENGTH = 1001;
 const OVERSIZED_COLUMN_FILTER_VALUE_LENGTH = 201;
@@ -34,8 +35,8 @@ const SECRET_DATABASE_MESSAGE = 'ER_PARSE_ERROR near SELECT secret_table';
 const FORWARDED_ERROR_TYPE = { source: 'validation', code: '5', message: 'Duplicate tree/stem tag' };
 const FORWARDED_SORT_MODEL = [{ field: 'treeTag', sort: 'desc' }];
 const FORWARDED_COLUMN_FILTERS = [{ field: 'stemTag', operator: 'contains', value: 'A' }];
-const REQUESTED_CENSUS_IDS_WITH_REPEAT = [CENSUS_ID, SECOND_CENSUS_ID, CENSUS_ID];
-const FORWARDED_CENSUS_IDS = [CENSUS_ID, SECOND_CENSUS_ID];
+const REQUESTED_CENSUS_IDS_WITH_REPEAT = [THIRD_CENSUS_ID, SECOND_CENSUS_ID, THIRD_CENSUS_ID];
+const FORWARDED_CENSUS_IDS = [THIRD_CENSUS_ID, SECOND_CENSUS_ID];
 const FORWARDED_QUERY_FIELDS = ['errorType', 'sortModel', 'columnFilters', 'censusIDs'] as const;
 const EXPECTED_FORWARDED_VALUES = {
   errorType: FORWARDED_ERROR_TYPE,

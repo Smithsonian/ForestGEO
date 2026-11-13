@@ -15,7 +15,6 @@ export const FALLBACK_ERROR_MESSAGE = 'Measurement is marked invalid but has no 
 export const DBH_CHANGE_VALIDATION_CODES: ReadonlySet<string> = new Set(['1', '2']);
 export const DBH_CHANGE_PERCENT_FRACTION_DIGITS = 1;
 const PERCENT_SCALE = 100;
-const DBH_DISPLAY_FRACTION_DIGITS = 2;
 
 export function toFiniteNumberOrNull(value: unknown): number | null {
   if (value === null || value === undefined) return null;

@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/db/connectionmanager', () => {
@@ -10,14 +11,21 @@ const PRODUCTION_DIRECTORIES = ['app', 'components', 'config', 'lib'];
 const TEST_DIRECTORY_NAME = '__tests__';
 const SOURCE_FILE = /\.(ts|tsx)$/;
 const TEST_FILE = /\.(test|spec)\.(ts|tsx)$/;
-const ORACLE_DIRECTORY = 'tests/oracles';
-const ORACLE_FILE = /^errors-explorer-legacy.*\.ts$/;
-const LIVE_EXPLORER_MODULE_PREFIXES = ['@/config/', '@/lib/errorsexplorer/', '@/lib/activemeasurementcount'];
-const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
-const LINE_COMMENT = /^\s*\/\/.*$/gm;
-const STATIC_MODULE_REFERENCE = /\b(import|export)\s+(type\s+)?(?:[^;'"]*?\bfrom\s+)?['"]([^'"]+)['"]/g;
-const DYNAMIC_MODULE_REFERENCE = /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+const ORACLE_ENTRY_FILE = 'tests/oracles/errors-explorer-legacy.ts';
+const ORACLE_DIRECTORY = path.posix.dirname(ORACLE_ENTRY_FILE);
 const ORACLE_IMPORT_SPECIFIER = /(?:\bfrom\s+|\bimport\s*\(\s*|\brequire\s*\(\s*)['"][^'"]*tests\/oracles\/[^'"]*['"]/;
+const REPO_ALIAS_PREFIX = '@/';
+const SAME_DIRECTORY_PREFIX = './';
+const RELATIVE_SPECIFIER_PREFIXES = [SAME_DIRECTORY_PREFIX, '../'];
+const RESOLVABLE_EXTENSIONS = ['', '.ts', '.tsx', '/index.ts', '/index.tsx'];
+const LIVE_EXPLORER_PATH = /^(config|lib\/errorsexplorer|lib\/activemeasurementcount|app\/api\/errors)(\/|\.|$)/;
+const NON_LITERAL_SPECIFIER_LABEL = 'non-literal module specifier';
+
+interface ModuleReference {
+  specifier: string | null;
+  sourceText: string;
+  isTypeOnly: boolean;
+}
 
 function productionSourceFiles(directory: string): string[] {
   return readdirSync(directory).flatMap(entry => {
@@ -27,15 +35,119 @@ function productionSourceFiles(directory: string): string[] {
   });
 }
 
-function isLiveExplorerModule(specifier: string): boolean {
-  return LIVE_EXPLORER_MODULE_PREFIXES.some(prefix => specifier.startsWith(prefix));
+function literalSpecifier(node: ts.Expression | undefined): string | null {
+  return node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : null;
 }
 
-function valueImportsOfLiveExplorerModules(source: string): string[] {
-  const code = source.replace(BLOCK_COMMENT, '').replace(LINE_COMMENT, '');
-  const staticValueSpecifiers = [...code.matchAll(STATIC_MODULE_REFERENCE)].filter(match => !match[2]).map(match => match[3]);
-  const dynamicSpecifiers = [...code.matchAll(DYNAMIC_MODULE_REFERENCE)].map(match => match[1]);
-  return [...staticValueSpecifiers, ...dynamicSpecifiers].filter(isLiveExplorerModule);
+function importDeclarationIsTypeOnly(declaration: ts.ImportDeclaration): boolean {
+  const clause = declaration.importClause;
+  if (!clause) return false;
+  if (clause.isTypeOnly) return true;
+  const namedBindings = clause.namedBindings;
+  const onlyInlineTypeNames =
+    !clause.name &&
+    namedBindings !== undefined &&
+    ts.isNamedImports(namedBindings) &&
+    namedBindings.elements.length > 0 &&
+    namedBindings.elements.every(element => element.isTypeOnly);
+  return onlyInlineTypeNames;
+}
+
+function exportDeclarationIsTypeOnly(declaration: ts.ExportDeclaration): boolean {
+  if (declaration.isTypeOnly) return true;
+  const exportClause = declaration.exportClause;
+  return (
+    exportClause !== undefined &&
+    ts.isNamedExports(exportClause) &&
+    exportClause.elements.length > 0 &&
+    exportClause.elements.every(element => element.isTypeOnly)
+  );
+}
+
+function moduleReferencesOf(source: string, fileName: string): ModuleReference[] {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const references: ModuleReference[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) {
+      references.push({
+        specifier: literalSpecifier(node.moduleSpecifier),
+        sourceText: node.moduleSpecifier.getText(sourceFile),
+        isTypeOnly: importDeclarationIsTypeOnly(node)
+      });
+    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
+      references.push({
+        specifier: literalSpecifier(node.moduleSpecifier),
+        sourceText: node.moduleSpecifier.getText(sourceFile),
+        isTypeOnly: exportDeclarationIsTypeOnly(node)
+      });
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      const expression = node.moduleReference.expression;
+      references.push({ specifier: literalSpecifier(expression), sourceText: expression.getText(sourceFile), isTypeOnly: node.isTypeOnly });
+    } else if (ts.isCallExpression(node)) {
+      const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require';
+      if ((isDynamicImport || isRequire) && node.arguments.length > 0) {
+        references.push({ specifier: literalSpecifier(node.arguments[0]), sourceText: node.arguments[0].getText(sourceFile), isTypeOnly: false });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return references;
+}
+
+function resolveToRepoPath(specifier: string, containingRepoPath: string): string | null {
+  if (specifier.startsWith(REPO_ALIAS_PREFIX)) return path.posix.normalize(specifier.slice(REPO_ALIAS_PREFIX.length));
+  if (RELATIVE_SPECIFIER_PREFIXES.some(prefix => specifier.startsWith(prefix))) {
+    return path.posix.normalize(path.posix.join(path.posix.dirname(containingRepoPath), specifier));
+  }
+  return null;
+}
+
+function liveExplorerValueImports(source: string, containingRepoPath: string): string[] {
+  return moduleReferencesOf(source, containingRepoPath)
+    .filter(reference => !reference.isTypeOnly)
+    .filter(reference => {
+      if (reference.specifier === null) return true;
+      const repoPath = resolveToRepoPath(reference.specifier, containingRepoPath);
+      return repoPath !== null && LIVE_EXPLORER_PATH.test(repoPath);
+    })
+    .map(reference => (reference.specifier === null ? `${NON_LITERAL_SPECIFIER_LABEL} ${reference.sourceText}` : reference.specifier));
+}
+
+function resolveSourceFileOnDisk(frontendRoot: string, repoPathWithoutExtension: string): string | null {
+  const resolved = RESOLVABLE_EXTENSIONS.map(extension => `${repoPathWithoutExtension}${extension}`).find(candidate => {
+    const fullPath = path.join(frontendRoot, candidate);
+    return existsSync(fullPath) && statSync(fullPath).isFile();
+  });
+  return resolved ?? null;
+}
+
+function sameDirectoryImportsOf(frontendRoot: string, repoPath: string): string[] {
+  const source = readFileSync(path.join(frontendRoot, repoPath), 'utf8');
+  return moduleReferencesOf(source, repoPath)
+    .filter(reference => reference.specifier?.startsWith(SAME_DIRECTORY_PREFIX))
+    .map(reference => {
+      const target = resolveToRepoPath(reference.specifier as string, repoPath) as string;
+      const resolved = resolveSourceFileOnDisk(frontendRoot, target);
+      if (resolved === null) throw new Error(`${repoPath} imports ${reference.specifier}, which resolves to no file under ${target}`);
+      return resolved;
+    });
+}
+
+function oracleFilesReachableFromEntry(frontendRoot: string): string[] {
+  const reached = new Set<string>([ORACLE_ENTRY_FILE]);
+  const pending = [ORACLE_ENTRY_FILE];
+  while (pending.length > 0) {
+    const current = pending.pop() as string;
+    sameDirectoryImportsOf(frontendRoot, current)
+      .filter(imported => !reached.has(imported))
+      .forEach(imported => {
+        reached.add(imported);
+        pending.push(imported);
+      });
+  }
+  return [...reached].sort();
 }
 
 describe('errors explorer module boundaries (#544)', () => {
@@ -54,39 +166,57 @@ describe('errors explorer module boundaries (#544)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('freezes the oracle: it takes only types from the live explorer modules', () => {
+  it('freezes the oracle: every file it loads takes only types from the live explorer modules', () => {
     const frontendRoot = path.resolve(__dirname, '../../../..');
-    const oracleDirectory = path.join(frontendRoot, ORACLE_DIRECTORY);
-    const oracleFiles = readdirSync(oracleDirectory).filter(entry => ORACLE_FILE.test(entry));
-    const valueImportsByFile = Object.fromEntries(
-      oracleFiles.map(file => [file, valueImportsOfLiveExplorerModules(readFileSync(path.join(oracleDirectory, file), 'utf8'))])
+    const oracleFiles = oracleFilesReachableFromEntry(frontendRoot);
+    const entryImports = sameDirectoryImportsOf(frontendRoot, ORACLE_ENTRY_FILE);
+    const liveValueImportsByFile = Object.fromEntries(
+      oracleFiles.map(file => [file, liveExplorerValueImports(readFileSync(path.join(frontendRoot, file), 'utf8'), file)])
     );
-    const offenders = Object.fromEntries(Object.entries(valueImportsByFile).filter(([, specifiers]) => specifiers.length > 0));
-    console.log(`[#544 imports] scanned oracle files ${JSON.stringify(oracleFiles)}; live value imports: ${JSON.stringify(offenders)}`);
-    expect(oracleFiles.length, 'the scan must read oracle files').toBeGreaterThan(0);
+    const offenders = Object.fromEntries(Object.entries(liveValueImportsByFile).filter(([, specifiers]) => specifiers.length > 0));
+    console.log(
+      `[#544 imports] oracle files reached from ${ORACLE_ENTRY_FILE}: ${JSON.stringify(oracleFiles)}; live value imports: ${JSON.stringify(offenders)}`
+    );
+    expect(oracleFiles, 'the walk must include the entry file').toContain(ORACLE_ENTRY_FILE);
+    expect(entryImports.length, 'the entry file must import its frozen helpers').toBeGreaterThan(0);
+    entryImports.forEach(imported => expect(oracleFiles, `the walk must include ${imported}`).toContain(imported));
+    oracleFiles.forEach(file => expect(path.posix.dirname(file), `${file} is outside the oracle directory`).toBe(ORACLE_DIRECTORY));
     expect(offenders).toEqual({});
   });
 
-  it('detects a value import from a live explorer module but allows type-only imports (mutant)', () => {
+  it('detects a value import of live explorer code, by any specifier spelling, but allows type-only imports (mutant)', () => {
+    const containingFile = `${ORACLE_DIRECTORY}/errors-explorer-legacy-mutant.ts`;
     const typeOnlySource = [
       "import type { ErrorExplorerRow } from '@/config/errorsexplorer';",
       "import type { ColumnValueRow } from '@/lib/errorsexplorer/columnquery';",
-      "import { safeFormatQuery } from '@/lib/db/sqlsecurity';"
+      "import type { groupErrorRowsForTest } from '@/app/api/errors/explorer/_shared';",
+      "import { type ErrorExplorerSortItem } from '../../config/errorsexplorer';",
+      "export type { ErrorExplorerColumnFilter } from '@/config/errorsexplorer';",
+      "import { safeFormatQuery } from '@/lib/db/sqlsecurity';",
+      "import { toTextCellValue } from './errors-explorer-legacy-columnquery';"
     ].join('\n');
-    const mutantSources = [
-      `${typeOnlySource}\nimport { dedupeStrings } from '@/config/errorsexplorer';`,
-      `${typeOnlySource}\nimport {\n  type ErrorExplorerRow,\n  dedupeNumbers\n} from '@/config/errorsexplorer';`,
-      `${typeOnlySource}\nimport { readActiveMeasurementCount } from '@/lib/activemeasurementcount';`,
-      `${typeOnlySource}\nexport { compareRowsBySortItem } from '@/lib/errorsexplorer/columnquery';`,
-      `${typeOnlySource}\nconst live = await import('@/config/errorsexplorer');`,
-      `${typeOnlySource}\nimport '@/lib/errorsexplorer/columnquery';`
+    const mutantLinesAndFlaggedSpecifiers: Array<[string, string]> = [
+      ["import { dedupeStrings } from '@/config/errorsexplorer';", '@/config/errorsexplorer'],
+      ["import {\n  type ErrorExplorerRow,\n  dedupeNumbers\n} from '@/config/errorsexplorer';", '@/config/errorsexplorer'],
+      ["import { readActiveMeasurementCount } from '@/lib/activemeasurementcount';", '@/lib/activemeasurementcount'],
+      ["export { compareRowsBySortItem } from '@/lib/errorsexplorer/columnquery';", '@/lib/errorsexplorer/columnquery'],
+      ["const live = await import('@/config/errorsexplorer');", '@/config/errorsexplorer'],
+      ["import '@/lib/errorsexplorer/columnquery';", '@/lib/errorsexplorer/columnquery'],
+      ["import { groupErrorRowsForTest } from '@/app/api/errors/explorer/_shared';", '@/app/api/errors/explorer/_shared'],
+      ["import { dedupeStrings } from '../../config/errorsexplorer';", '../../config/errorsexplorer'],
+      ["import { buildErrorTypeKey } from '@/lib/errorsexplorer';", '@/lib/errorsexplorer'],
+      ["import {\n  dedupeNumbers, // don't drift from the frozen copy\n  dedupeStrings\n} from '@/config/errorsexplorer';", '@/config/errorsexplorer'],
+      ['const live = await import(`@/config/errorsexplorer`);', '@/config/errorsexplorer'],
+      ["const live = require('@/config/errorsexplorer');", '@/config/errorsexplorer'],
+      ['const live = await import(`@/config/${moduleName}`);', `${NON_LITERAL_SPECIFIER_LABEL} \`@/config/\${moduleName}\``]
     ];
-    console.log(`[#544 imports] type-only source reports ${JSON.stringify(valueImportsOfLiveExplorerModules(typeOnlySource))}`);
-    expect(valueImportsOfLiveExplorerModules(typeOnlySource)).toEqual([]);
-    mutantSources.forEach(mutant => {
-      const found = valueImportsOfLiveExplorerModules(mutant);
-      console.log(`[#544 imports] mutant reports ${JSON.stringify(found)} for:\n${mutant}`);
-      expect(found.length, `a value import must be detected in:\n${mutant}`).toBeGreaterThan(0);
+    console.log(`[#544 imports] type-only source reports ${JSON.stringify(liveExplorerValueImports(typeOnlySource, containingFile))}`);
+    expect(liveExplorerValueImports(typeOnlySource, containingFile)).toEqual([]);
+    mutantLinesAndFlaggedSpecifiers.forEach(([mutantLine, flaggedSpecifier]) => {
+      const mutant = `${typeOnlySource}\n${mutantLine}`;
+      const found = liveExplorerValueImports(mutant, containingFile);
+      console.log(`[#544 imports] mutant reports ${JSON.stringify(found)} for:\n${mutantLine}`);
+      expect(found, `exactly the added line must be flagged:\n${mutantLine}`).toEqual([flaggedSpecifier]);
     });
   });
 });
