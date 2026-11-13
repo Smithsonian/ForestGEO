@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import ailogger from '@/ailogger';
 import {
+  type ContradictionType,
   DEFAULT_ERROR_EXPLORER_FILTERS,
   type ErrorExplorerDetailsResponse,
   type ErrorExplorerFacetsResponse,
@@ -44,6 +45,7 @@ const PAGE_SIZE = 25;
 const FIRST_PAGE = 0;
 const WHOLE_MEMBER_LIST = TRUNCATION_DUPLICATE_MEMBER_IDS.join(',');
 const CONTRADICTIONS_SHOW_LABEL = 'contradictions';
+const DUPLICATE_CONTRADICTION: ContradictionType = 'duplicate_tag_stem';
 const DETAILS_FIXED_STATEMENT_COUNT = 3;
 const NON_POSITIVE_OR_FRACTIONAL_IDS = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 2];
 
@@ -203,6 +205,12 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
     it('default query returns the three group members, then the unrelated row, with only the members flagged', () => {
       expect(run.defaultQuery.rows.map(row => row.coreMeasurementID)).toEqual(QUERY_ORDER_ALL_ERRORS);
       expect(run.defaultQuery.rows.map(row => row.hasContradiction)).toEqual([true, true, true, false]);
+      expect(run.defaultQuery.rows.map(row => row.contradictionTypes)).toEqual([
+        [DUPLICATE_CONTRADICTION],
+        [DUPLICATE_CONTRADICTION],
+        [DUPLICATE_CONTRADICTION],
+        []
+      ]);
       expect(run.defaultQuery.totalRows).toBe(QUERY_ORDER_ALL_ERRORS.length);
       expect(rowById(run.defaultQuery, TRUNCATION_UNRELATED_ERROR_ROW_ID)?.contradictionTypes).toEqual([]);
     });

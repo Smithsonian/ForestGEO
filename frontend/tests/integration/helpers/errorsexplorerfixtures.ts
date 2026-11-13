@@ -89,10 +89,10 @@ export const PRIOR_DBH_NULL = null;
 export const PRIOR_DBH_ROUNDED_VALUE = 9;
 export const PRIOR_DBH_ROUNDED_PERCENT = 38.9;
 export const INACTIVE_CLEAN_TREE_TAG = 'IN1';
-export const PHANTOM_PARTNER_ID = 70;
-export const PHANTOM_ERROR_MEMBER_ID = 701;
-export const PHANTOM_TREE_TAG = 'PH1';
-export const PHANTOM_STEM_TAG = '1';
+export const OUTSIDE_PARTNER_ID = 70;
+export const OUTSIDE_PARTNER_ERROR_MEMBER_ID = 701;
+export const OUTSIDE_PARTNER_TREE_TAG = 'PH1';
+export const OUTSIDE_PARTNER_STEM_TAG = '1';
 
 const DEFAULT_SEEDS: readonly number[] = [544, 20261104, 4242];
 export const EQUIVALENCE_SEEDS_ENV = 'ERRORS_EXPLORER_EQUIVALENCE_SEEDS';
@@ -183,15 +183,15 @@ export interface SharedIdentityRowIDs {
   /** Linked to the first catalog entry only. */
   linkedToFirstOnly: number;
 }
-export interface PhantomPartnerRowIDs {
-  /** A longer ID whose duplicate group also holds a non-error partner; the partner's ID is a prefix of this ID. */
+export interface OutsidePartnerRowIDs {
+  /** A longer ID whose duplicate group also holds a partner outside the error set; the partner's ID is a prefix of this ID. */
   errorMember: number;
-  nonErrorPartner: number;
+  outsidePartner: number;
 }
 export interface PlantedCaseRowIDs {
   dbhChange: DbhChangeRowIDs;
   sharedIdentity: SharedIdentityRowIDs;
-  phantomPartner: PhantomPartnerRowIDs;
+  outsidePartner: OutsidePartnerRowIDs;
   inactiveClean: number;
 }
 export interface GeneratedFixture extends ExplorerFixture {
@@ -968,9 +968,11 @@ function plantedRows(): PlantedRows {
     linkedToBoth: plant({ treeTag: 'SI1', stemTag: '1' }, [SHARED_IDENTITY_ERROR_IDS.first, SHARED_IDENTITY_ERROR_IDS.second]),
     linkedToFirstOnly: plant({ treeTag: 'SI2', stemTag: '1' }, [SHARED_IDENTITY_ERROR_IDS.first])
   };
-  const phantomPartner: PhantomPartnerRowIDs = {
-    nonErrorPartner: plant({ coreMeasurementID: PHANTOM_PARTNER_ID, treeTag: PHANTOM_TREE_TAG, stemTag: PHANTOM_STEM_TAG }),
-    errorMember: plant({ coreMeasurementID: PHANTOM_ERROR_MEMBER_ID, treeTag: PHANTOM_TREE_TAG, stemTag: PHANTOM_STEM_TAG }, [ET.tagMismatch])
+  const outsidePartner: OutsidePartnerRowIDs = {
+    outsidePartner: plant({ coreMeasurementID: OUTSIDE_PARTNER_ID, treeTag: OUTSIDE_PARTNER_TREE_TAG, stemTag: OUTSIDE_PARTNER_STEM_TAG }),
+    errorMember: plant({ coreMeasurementID: OUTSIDE_PARTNER_ERROR_MEMBER_ID, treeTag: OUTSIDE_PARTNER_TREE_TAG, stemTag: OUTSIDE_PARTNER_STEM_TAG }, [
+      ET.tagMismatch
+    ])
   };
 
   const witnessGroups: WitnessGroups = {
@@ -996,7 +998,7 @@ function plantedRows(): PlantedRows {
     ],
     witnessGroups,
     mismatchedPlotRowIDs,
-    plantedCases: { dbhChange, sharedIdentity, phantomPartner, inactiveClean }
+    plantedCases: { dbhChange, sharedIdentity, outsidePartner, inactiveClean }
   };
 }
 
@@ -1046,8 +1048,6 @@ export const FIXTURE_GENERATED_ROW_CODE = 'SIGNATURE_TYPE';
 
 export const LOCALE_TIE_NFC_TEXT = 'é tie';
 export const LOCALE_TIE_NFD_TEXT = 'é tie';
-export const LOCALE_TIE_NFC_FIELD = 'éField';
-export const LOCALE_TIE_NFD_FIELD = 'éField';
 export const LOCALE_TIE_MEASUREMENT_IDS = { carriesSecondType: 101, carriesFirstType: 102 } as const;
 
 const SIGNATURE_FIXTURE_CENSUS: FixtureCensus = { censusID: FIRST_CENSUS_ID, plotID: MAIN_PLOT_ID, plotCensusNumber: 1 };

@@ -457,6 +457,7 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
           const actual = await production.buildErrorExplorerFacets(plainExecutor() as unknown as ProductionExecutor, facetRequest);
           await compare({ scenario: 'chunked facets', filters: name }, actual, expected);
           expect(actual.censusTotals.affectedMeasurements, `${name}: facets must cover the chunks`).toBeGreaterThan(0);
+          expect(actual.errorTypes.length, `${name}: the filter must leave error types to compare`).toBeGreaterThan(0);
         }
 
         const countsRequest = { schema: database(), plotID: MAIN_PLOT_ID, censusIDs: [...MANY_CENSUS_IDS] };

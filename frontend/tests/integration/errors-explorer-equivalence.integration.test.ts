@@ -51,8 +51,8 @@ import {
   SINGLE_ERROR_STEM_TAG_PAIR,
   SINGLE_ERROR_TREE_TAG_PAIR,
   ACCENT_ONLY_TREE_TAG_PAIR,
-  PHANTOM_ERROR_MEMBER_ID,
-  PHANTOM_PARTNER_ID,
+  OUTSIDE_PARTNER_ERROR_MEMBER_ID,
+  OUTSIDE_PARTNER_ID,
   PRIOR_DBH_ROUNDED_PERCENT,
   SHARED_IDENTITY_ERROR_IDS,
   SHOW_FILTER_SETS,
@@ -524,16 +524,16 @@ const COVERAGE_CASES: readonly CoverageCase[] = [
       rowIDs.size > 0 && measurementByID.get(fixture.plantedCases.inactiveClean)?.isActive === false && !rowIDs.has(fixture.plantedCases.inactiveClean)
   },
   {
-    name: 'a non-error duplicate partner whose ID is a prefix of a longer error member ID',
+    name: 'an outside-the-error-set duplicate partner whose ID is a prefix of a longer error member ID',
     isCovered: ({ rowIDs, rowByID, fixture }) => {
-      const { errorMember, nonErrorPartner } = fixture.plantedCases.phantomPartner;
+      const { errorMember, outsidePartner } = fixture.plantedCases.outsidePartner;
       return (
-        errorMember === PHANTOM_ERROR_MEMBER_ID &&
-        nonErrorPartner === PHANTOM_PARTNER_ID &&
-        String(errorMember).startsWith(String(nonErrorPartner)) &&
-        !rowIDs.has(nonErrorPartner) &&
+        errorMember === OUTSIDE_PARTNER_ERROR_MEMBER_ID &&
+        outsidePartner === OUTSIDE_PARTNER_ID &&
+        String(errorMember).startsWith(String(outsidePartner)) &&
+        !rowIDs.has(outsidePartner) &&
         rowByID.get(errorMember)?.contradictionTypes.includes(DUPLICATE) === true &&
-        rowByID.get(errorMember)?.relatedMeasurementIDs.includes(nonErrorPartner) === true
+        rowByID.get(errorMember)?.relatedMeasurementIDs.includes(outsidePartner) === true
       );
     }
   },
@@ -550,8 +550,10 @@ const COVERAGE_CASES: readonly CoverageCase[] = [
         catalogEntries.length === sharedIdentityErrorIDs.length &&
         catalogEntries.every(entry => entry.source === 'ingestion' && entry.code === null && entry.message === sharedMessage) &&
         bothRow?.errorCount === 2 &&
+        bothRow.errorCodes.every(code => code === FAILED_NO_LOG_CODE) &&
         bothRow.errorMessages.every(message => message === sharedMessage) &&
         firstOnlyRow?.errorCount === 1 &&
+        firstOnlyRow.errorCodes.every(code => code === FAILED_NO_LOG_CODE) &&
         firstOnlyRow.errorMessages.every(message => message === sharedMessage)
       );
     }

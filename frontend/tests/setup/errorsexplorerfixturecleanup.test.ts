@@ -22,6 +22,7 @@ import {
   SINGLE_ERROR_STEM_TAG_PAIR,
   SINGLE_ERROR_TREE_TAG_PAIR,
   ACCENT_ONLY_TREE_TAG_PAIR,
+  SHARED_IDENTITY_ERROR_IDS,
   SINGLE_ERROR_SAME_BATCH_PAIR,
   SAME_BATCH_PLOT_MISMATCH_TREE_TAG,
   DECOY_PLOT_ID,
@@ -494,13 +495,15 @@ describe('generateEquivalenceFixture', () => {
     const errorIDs = new Set(fixture.errorTypes.map(type => type.errorID));
     const censusByID = new Map(fixture.censuses.map(census => [census.censusID, census]));
     const logKeys = fixture.logs.map(log => `${log.measurementID}:${log.errorID}`);
-    const typeKeys = fixture.errorTypes.map(type => `${type.source}:${type.code}`);
+    const codedTypeKeys = fixture.errorTypes.filter(type => type.code !== null).map(type => `${type.source}:${type.code}`);
     const validationCodes = new Set(fixture.errorTypes.filter(type => type.source === 'validation').map(type => type.code));
     console.log(`[fixture ${FIRST_SEED}] measurements=${fixture.measurements.length} logs=${fixture.logs.length}`);
 
     expect(measurementIDs.size).toBe(fixture.measurements.length);
     expect(new Set(logKeys).size).toBe(logKeys.length);
-    expect(new Set(typeKeys).size).toBe(typeKeys.length);
+    expect(new Set(codedTypeKeys).size, 'uq_measurement_error_source_code is unique over (source, code) and admits any number of NULL codes').toBe(
+      codedTypeKeys.length
+    );
     expect(fixture.logs.every(log => measurementIDs.has(log.measurementID) && errorIDs.has(log.errorID))).toBe(true);
     expect(fixture.measurements.filter(row => censusByID.get(row.censusID)?.plotID !== row.plotID).map(row => row.coreMeasurementID)).toEqual(
       fixture.mismatchedPlotRowIDs
@@ -514,6 +517,15 @@ describe('generateEquivalenceFixture', () => {
     expect(fixture.measurements.every(row => (row.rawCodes ?? '').length <= RAW_CODES_COLUMN_LENGTH)).toBe(true);
     expect(fixture.measurements.every(row => (row.attributes ?? '').length <= ATTRIBUTES_COLUMN_LENGTH)).toBe(true);
     expect(fixture.measurements.every(row => (row.speciesName ?? '').length <= SPECIES_NAME_COLUMN_LENGTH)).toBe(true);
+  });
+
+  it('keeps the shared-identity pair as two NULL-code ingestion entries that carry one message', () => {
+    const sharedIdentityErrorIDs: readonly number[] = Object.values(SHARED_IDENTITY_ERROR_IDS);
+    const pair = fixture.errorTypes.filter(type => sharedIdentityErrorIDs.includes(type.errorID));
+
+    expect(pair.map(type => type.errorID)).toEqual(sharedIdentityErrorIDs);
+    expect(pair.map(type => `${type.source}:${type.code}`)).toEqual(['ingestion:null', 'ingestion:null']);
+    expect(new Set(pair.map(type => type.message)).size).toBe(1);
   });
 
   it('fills the nine display columns with values that differ by row and by column', () => {
