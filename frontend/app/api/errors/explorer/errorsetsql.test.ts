@@ -47,6 +47,8 @@ const TOTAL_ROWS_COLUMN = 'TotalRows';
 const WINDOWED_COUNT = /COUNT\(\*\) OVER \(\)/g;
 const ANY_WINDOW = /\bOVER\s*\(/g;
 const EXPECTED_NO_LOG_DISPLAY_PARAMS = [ERROR_SOURCE.ingestion, FALLBACK_ERROR_CODE, FALLBACK_ERROR_MESSAGE];
+const IS_FAILED_ROW_COLUMN = 'IsFailedRow';
+const FAILED_ROW_EXPRESSION = '(cm.StemGUID IS NULL)';
 const FIRST_TABLE_REFERENCE = /\b(?:FROM|JOIN)\s+(\S+)/i;
 const SQL_PREVIEW_LENGTH = 120;
 const QUALIFIED_SCHEMA_PREFIX = `\`${SCHEMA}\`.`;
@@ -373,5 +375,51 @@ describe('errorsetsql statement builders', () => {
         EXPECTED_NO_LOG_DISPLAY_PARAMS
       );
     }
+  });
+
+  describe('histogram failed-row flag', () => {
+    const WITH_FLAGS_FINAL_SELECT = /\nSELECT f\.ErrorTypeKeys/;
+    const WITHOUT_FLAGS_FINAL_SELECT = /\nSELECT em\.ErrorTypeKeys/;
+    const GROUP_BY_CLAUSE = /\bGROUP BY ([^\n]+)\n/;
+    const ORDER_BY_CLAUSE = /\bORDER BY ([^\n]+)$/;
+
+    function finalSelectOf(sql: string, finalSelectStart: RegExp): string {
+      const start = finalSelectStart.exec(sql);
+      if (!start) throw new Error(`no final histogram SELECT in: ${preview(sql)}`);
+      return sql.slice(start.index);
+    }
+
+    it('derives the flag from the core measurement stem inside error_key', () => {
+      const { sql } = buildHistogramWithFlagsStatement(scopeFor([2]));
+      const errorKeyStart = sql.indexOf('error_key AS (');
+      const errorKeyEnd = sql.indexOf(',\nduplicate_group AS', errorKeyStart);
+      const errorKeyCte = sql.slice(errorKeyStart, errorKeyEnd);
+
+      console.log(`error_key CTE: ${errorKeyCte}`);
+      expect(errorKeyStart, 'error_key CTE present').toBeGreaterThanOrEqual(0);
+      expect(errorKeyCte).toContain(`${FAILED_ROW_EXPRESSION} AS ${IS_FAILED_ROW_COLUMN}`);
+    });
+
+    it('selects, groups and orders the with-flags histogram by the flag', () => {
+      const finalSelect = finalSelectOf(buildHistogramWithFlagsStatement(scopeFor([2])).sql, WITH_FLAGS_FINAL_SELECT);
+      const selectList = finalSelect.slice(0, finalSelect.indexOf('FROM flagged'));
+      const groupBy = GROUP_BY_CLAUSE.exec(finalSelect)?.[1] ?? '';
+      const orderBy = ORDER_BY_CLAUSE.exec(finalSelect)?.[1] ?? '';
+
+      console.log(`select: ${selectList.trim()}\ngroup by: ${groupBy}\norder by: ${orderBy}`);
+      expect(selectList, 'selected').toContain(`f.${IS_FAILED_ROW_COLUMN}`);
+      expect(groupBy, 'grouped by, so failed and live rows with one signature never merge').toContain(`f.${IS_FAILED_ROW_COLUMN}`);
+      expect(orderBy, 'ordered by, so the result is deterministic').toContain(`f.${IS_FAILED_ROW_COLUMN}`);
+    });
+
+    it('returns a constant false flag from the without-flags histogram so both shapes have the same columns', () => {
+      const finalSelect = finalSelectOf(buildHistogramWithoutFlagsStatement(scopeFor([2])).sql, WITHOUT_FLAGS_FINAL_SELECT);
+
+      console.log(`without-flags select: ${finalSelect.slice(0, finalSelect.indexOf('FROM'))}`);
+      expect(finalSelect).toContain(`0 AS ${IS_FAILED_ROW_COLUMN}`);
+      expect(finalSelect, 'the cheap shape cannot see coremeasurements, so it must not group by the flag').not.toMatch(
+        new RegExp(`GROUP BY[^\\n]*${IS_FAILED_ROW_COLUMN}`)
+      );
+    });
   });
 });

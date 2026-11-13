@@ -93,6 +93,7 @@ export interface ErrorSignatureRow {
   SignatureComplete: SqlFlag;
   HasDuplicate: SqlFlag;
   HasSameBatch: SqlFlag;
+  IsFailedRow: SqlFlag;
   MeasurementCount: SqlCount;
 }
 
@@ -288,7 +289,7 @@ const SIGNATURE_MEASUREMENT_CTE = `error_measurement AS (
            GROUP BY eo.CoreMeasurementID) signature)`;
 
 const ERROR_KEY_CTE = `error_key AS (
-  SELECT em.*, ms.CensusID, ms.TreeTag, ms.StemTag, ms.MeasurementDate, cm.UploadFileID, cm.UploadBatchID
+  SELECT em.*, ms.CensusID, ms.TreeTag, ms.StemTag, ms.MeasurementDate, cm.UploadFileID, cm.UploadBatchID, (cm.StemGUID IS NULL) AS IsFailedRow
     FROM error_measurement em
     JOIN ??.measurementssummary ms ON ms.CoreMeasurementID = em.CoreMeasurementID
     JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = em.CoreMeasurementID)`;
@@ -467,10 +468,10 @@ export function buildHistogramWithFlagsStatement(scope: ErrorSetScope): BuiltSta
     joinFragments([
       errorSetCtes(scope, SIGNATURE_MEASUREMENT_CTE, true),
       `
-SELECT f.ErrorTypeKeys, f.SignatureComplete, f.HasDuplicate, f.HasSameBatch, COUNT(*) AS MeasurementCount
+SELECT f.ErrorTypeKeys, f.SignatureComplete, f.HasDuplicate, f.HasSameBatch, f.IsFailedRow, COUNT(*) AS MeasurementCount
   FROM flagged f
- GROUP BY f.ErrorTypeKeys, f.SignatureComplete, f.HasDuplicate, f.HasSameBatch
- ORDER BY f.ErrorTypeKeys, f.SignatureComplete, f.HasDuplicate, f.HasSameBatch`
+ GROUP BY f.ErrorTypeKeys, f.SignatureComplete, f.HasDuplicate, f.HasSameBatch, f.IsFailedRow
+ ORDER BY f.ErrorTypeKeys, f.SignatureComplete, f.HasDuplicate, f.HasSameBatch, f.IsFailedRow`
     ])
   );
 }
@@ -482,7 +483,7 @@ export function buildHistogramWithoutFlagsStatement(scope: ErrorSetScope): Built
     joinFragments([
       errorSetCtes(scope, SIGNATURE_MEASUREMENT_CTE, false),
       `
-SELECT em.ErrorTypeKeys, em.SignatureComplete, ${SQL_FALSE} AS HasDuplicate, ${SQL_FALSE} AS HasSameBatch, COUNT(*) AS MeasurementCount
+SELECT em.ErrorTypeKeys, em.SignatureComplete, ${SQL_FALSE} AS HasDuplicate, ${SQL_FALSE} AS HasSameBatch, ${SQL_FALSE} AS IsFailedRow, COUNT(*) AS MeasurementCount
   FROM error_measurement em
  GROUP BY em.ErrorTypeKeys, em.SignatureComplete
  ORDER BY em.ErrorTypeKeys, em.SignatureComplete`
