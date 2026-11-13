@@ -429,6 +429,11 @@ export function buildErrorExportRows(groupedRows: Map<number, GroupedErrorRow>, 
     );
 }
 
+/** push(...rows) throws RangeError once rows outgrow the engine's argument limit; a statement can answer with hundreds of thousands. */
+function appendRows<Row>(target: Row[], rows: readonly Row[]): void {
+  for (const row of rows) target.push(row);
+}
+
 async function runStatement<Row>(connectionManager: ExplorerConnection, statement: BuiltStatement): Promise<Row[]> {
   return (await connectionManager.executeQuery(statement.sql, statement.params)) as Row[];
 }
@@ -527,7 +532,7 @@ async function hydrateRequestedRows(
           : runStatement<RawErrorOccurrenceRow>(connectionManager, buildIDRawRowsStatement(scope, idChunk)),
         fetchMemberGroupContradictions(connectionManager, scope, idChunk)
       ]);
-      rawRows.push(...chunkRawRows);
+      appendRows(rawRows, chunkRawRows);
       chunkContradictions.forEach((contradictions, measurementID) => contradictionMap.set(measurementID, contradictions));
     }
   }
@@ -551,7 +556,7 @@ async function fetchFlaggedScopeRawRows(
 ): Promise<FlaggedRawErrorOccurrenceRow[]> {
   const rawRows: FlaggedRawErrorOccurrenceRow[] = [];
   for (const scope of censusChunkScopes(schema, plotID, censusIDs)) {
-    rawRows.push(...(await runStatement<FlaggedRawErrorOccurrenceRow>(connectionManager, buildScopeRawRowsStatement(scope))));
+    appendRows(rawRows, await runStatement<FlaggedRawErrorOccurrenceRow>(connectionManager, buildScopeRawRowsStatement(scope)));
   }
   return rawRows;
 }
@@ -679,7 +684,7 @@ async function selectMultiChunkPage(
     }
     const rows = await runStatement<SelectedPageRow>(connectionManager, buildPageStatement(scope, keyFilter, flags, prefixWindow));
     if (rows.length > 0) {
-      candidates.push(...rows);
+      appendRows(candidates, rows);
       summary = addSummaries(summary, summaryFromTotals(rows[0]));
     }
   }
@@ -862,7 +867,7 @@ export async function buildErrorExplorerDetails(
 
   const relatedRawRows: RawErrorOccurrenceRow[] = [];
   for (const idChunk of chunkMeasurementIDs(relatedMeasurementIDs)) {
-    relatedRawRows.push(...(await runStatement<RawErrorOccurrenceRow>(connectionManager, buildIDRawRowsStatement(scope, idChunk))));
+    appendRows(relatedRawRows, await runStatement<RawErrorOccurrenceRow>(connectionManager, buildIDRawRowsStatement(scope, idChunk)));
   }
   const relatedGrouped = groupErrorRows(relatedRawRows, new Map());
   const relatedRows = relatedMeasurementIDs
