@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, waitFor, within as _within, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DashboardPage from './page';
 import { useSession } from 'next-auth/react';
@@ -18,7 +18,12 @@ import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useAppStore } from '@/config/store/appstore';
 import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE } from '@/config/censusdeletion';
 import { HTTPResponses } from '@/config/macros';
-import { CENSUS_DATES_REFRESH_FAILURE_MESSAGE, CENSUS_DATES_SAVE_FAILURE_MESSAGE } from '@/config/censuswindow';
+import {
+  CENSUS_CREATED_REFRESH_FAILURE_MESSAGE,
+  CENSUS_DATES_REFRESH_FAILURE_MESSAGE,
+  CENSUS_DATES_SAVE_FAILURE_MESSAGE,
+  CENSUS_DATES_VIEW_REBUILD_FAILURE_MESSAGE
+} from '@/config/censuswindow';
 import { buildCensusDatesPatchBody } from '@/lib/db/definitions/timekeeping';
 
 // Mock dependencies
@@ -986,6 +991,50 @@ describe('Enhanced Dashboard Page', () => {
       expect(callsAfterThePatch().censusListFetches).toHaveLength(0);
     });
 
+    const VIEW_REBUILD_URLS = ['/api/refreshviews/measurementssummary/testsite', '/api/refreshviews/viewfulltable/testsite'];
+
+    function viewRebuildCalls() {
+      return vi.mocked(global.fetch).mock.calls.filter(([url]) => VIEW_REBUILD_URLS.includes(String(url)));
+    }
+
+    it('rebuilds both measurement views for the edited census after the save commits', async () => {
+      routeCensusPatchTo(() => Promise.resolve(new Response(JSON.stringify({ message: 'Update successful', changed: true }), { status: HTTPResponses.OK })));
+      const { user } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+
+      await waitFor(() => expect(viewRebuildCalls()).toHaveLength(VIEW_REBUILD_URLS.length));
+      const calls = viewRebuildCalls();
+      console.log(`[edit census dates page] rebuild calls: ${JSON.stringify(calls.map(([url, init]) => [url, (init as RequestInit).body]))}`);
+      expect(calls.map(([url]) => String(url)).sort()).toEqual([...VIEW_REBUILD_URLS].sort());
+      for (const [, init] of calls) {
+        expect((init as RequestInit).method).toBe('POST');
+        expect(JSON.parse(String((init as RequestInit).body))).toEqual({ plotID: EDITABLE_CENSUS.plotID, censusID: EDITABLE_CENSUS_ID });
+      }
+    });
+
+    it('sends no view rebuild when the PATCH fails', async () => {
+      routeCensusPatchTo(() => Promise.resolve(new Response(JSON.stringify({ error: 'boom' }), { status: HTTPResponses.INTERNAL_SERVER_ERROR })));
+      const { user } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+      expect(await screen.findByText(CENSUS_DATES_SAVE_FAILURE_MESSAGE)).toBeInTheDocument();
+      expect(viewRebuildCalls()).toHaveLength(0);
+    });
+
+    it('reports a failed view rebuild without reopening the modal, and still refreshes the list', async () => {
+      vi.mocked(global.fetch).mockImplementation((url: any) => {
+        if (String(url) === CENSUS_PATCH_URL)
+          return Promise.resolve(new Response(JSON.stringify({ message: 'Update successful', changed: true }), { status: HTTPResponses.OK }));
+        if (VIEW_REBUILD_URLS.includes(String(url))) return Promise.resolve(new Response('{}', { status: HTTPResponses.INTERNAL_SERVER_ERROR }));
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response);
+      });
+      const { user } = await openEditDatesModal();
+      await user.click(screen.getByRole('button', { name: 'Save Dates' }));
+
+      expect(await screen.findByText(CENSUS_DATES_VIEW_REBUILD_FAILURE_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText('Edit Census 1 Dates')).not.toBeInTheDocument();
+      expect(callsAfterThePatch().censusListFetches).toHaveLength(1);
+    });
+
     it('closes the modal and reports a refresh failure separately when the save committed', async () => {
       routeCensusPatchTo(
         () => Promise.resolve(new Response(JSON.stringify({ message: 'Update successful', changed: true }), { status: HTTPResponses.OK })),
@@ -1124,6 +1173,80 @@ describe('Enhanced Dashboard Page', () => {
       await act(async () => failRefresh(new TypeError('late network failure')));
       expect(screen.queryByText(CENSUS_DATES_REFRESH_FAILURE_MESSAGE)).not.toBeInTheDocument();
       expect(useAppStore.getState().censusList).toEqual([EDITABLE_CENSUS]);
+    });
+  });
+
+  describe('Create census', () => {
+    const CENSUS_POST_URL = '/api/fixeddata/census/testsite/censusID';
+    const CENSUS_LIST_URL_FRAGMENT = '/api/fetchall/census/';
+    const NEW_CENSUS_ID = 42;
+    const NEW_CENSUS_START_DAY = '2026-01-01';
+    const START_DATE_INPUT_ID = 'census-start-date-input';
+    const CREATE_FAILURE_TEXT = 'Failed to create census. Please try again.';
+
+    function routeCreateTo(postResponse: () => Promise<Response>, censusListResponse: () => Promise<Response>) {
+      vi.mocked(global.fetch).mockImplementation((url: any, init?: any) => {
+        if (String(url) === CENSUS_POST_URL && init?.method === 'POST') return postResponse();
+        if (String(url).includes(CENSUS_LIST_URL_FRAGMENT)) return censusListResponse();
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response);
+      });
+    }
+
+    async function submitCreateCensus() {
+      const user = userEvent.setup();
+      render(<DashboardPage />);
+      await user.click(await screen.findByRole('button', { name: 'Start a new census' }));
+      const dialog = await screen.findByRole('dialog');
+      fireEvent.change(document.getElementById(START_DATE_INPUT_ID) as HTMLInputElement, { target: { value: NEW_CENSUS_START_DAY } });
+      await user.click(within(dialog).getByRole('button', { name: /^Create Census/ }));
+      return { user };
+    }
+
+    beforeEach(() => {
+      vi.mocked(useSession).mockReturnValue({
+        data: { ...mockSession, user: { ...mockSession.user, userStatus: 'global' } },
+        status: 'authenticated',
+        update: vi.fn()
+      } as any);
+      vi.mocked(useOrgCensusContext).mockReturnValue(undefined as any);
+      vi.mocked(useOrgCensusListDispatch).mockReturnValue(async ({ censusList }) => {
+        useAppStore.getState().setCensusList(censusList ?? []);
+      });
+      useAppStore.getState().setCensusList([]);
+    });
+
+    afterEach(() => {
+      vi.mocked(useOrgCensusListDispatch).mockReset();
+    });
+
+    it('closes the modal and reports the refresh failure separately when the census was created', async () => {
+      routeCreateTo(
+        () => Promise.resolve(new Response(JSON.stringify({ createdIDs: { census: NEW_CENSUS_ID } }), { status: HTTPResponses.OK })),
+        () => Promise.reject(new TypeError('network down'))
+      );
+      await submitCreateCensus();
+
+      expect(await screen.findByText(CENSUS_CREATED_REFRESH_FAILURE_MESSAGE)).toBeInTheDocument();
+      console.log(
+        `[create census] alerts: ${screen
+          .queryAllByRole('alert')
+          .map(alert => alert.textContent)
+          .join(' | ')}`
+      );
+      expect(screen.queryByText(CREATE_FAILURE_TEXT)).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    });
+
+    it('keeps the modal open with the create failure when the POST itself fails', async () => {
+      routeCreateTo(
+        () => Promise.resolve(new Response('boom', { status: HTTPResponses.INTERNAL_SERVER_ERROR })),
+        () => Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response)
+      );
+      await submitCreateCensus();
+
+      expect(await screen.findByText(CREATE_FAILURE_TEXT)).toBeInTheDocument();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.queryByText(CENSUS_CREATED_REFRESH_FAILURE_MESSAGE)).not.toBeInTheDocument();
     });
   });
 

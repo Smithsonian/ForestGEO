@@ -16,13 +16,14 @@ import {
   Typography
 } from '@mui/joy';
 import { useEffect, useMemo, useState } from 'react';
-import { type CensusDates, getCensusDatesError } from '@/config/censuswindow';
+import { type CensusDates, type NeighbourCensusWindow, getCensusDatesError, getCensusOverlapError } from '@/config/censuswindow';
 
 interface CensusDatesModalProps {
   open: boolean;
   censusNumber: number;
   initialStartDate: string | null;
   initialEndDate: string | null;
+  neighbourWindows: readonly NeighbourCensusWindow[];
   isSaving: boolean;
   errorMessage: string | null;
   onClose: () => void;
@@ -34,6 +35,7 @@ export default function CensusDatesModal({
   censusNumber,
   initialStartDate,
   initialEndDate,
+  neighbourWindows,
   isSaving,
   errorMessage,
   onClose,
@@ -48,7 +50,10 @@ export default function CensusDatesModal({
     setEndDate(initialEndDate ?? '');
   }, [open, initialStartDate, initialEndDate]);
 
-  const dateError = useMemo(() => getCensusDatesError(startDate, endDate || null), [startDate, endDate]);
+  const dateError = useMemo(
+    () => getCensusDatesError(startDate, endDate || null) ?? getCensusOverlapError({ startDate, endDate: endDate || null }, neighbourWindows),
+    [startDate, endDate, neighbourWindows]
+  );
 
   const handleSave = () => {
     if (dateError) return;

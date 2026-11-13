@@ -126,6 +126,9 @@ export const CENSUS_END_BEFORE_START_MESSAGE = 'End date cannot be before the st
 export const CENSUS_INVALID_DATE_MESSAGE = 'Census dates must be valid YYYY-MM-DD dates between years 1000 and 9999.';
 export const CENSUS_DATES_SAVE_FAILURE_MESSAGE = 'Failed to save the census dates. Please try again.';
 export const CENSUS_DATES_REFRESH_FAILURE_MESSAGE = 'Census dates saved, but refreshing the census list failed. Reload the page to see the new dates.';
+export const CENSUS_DATES_VIEW_REBUILD_FAILURE_MESSAGE =
+  'Census dates saved, but the measurement views could not be rebuilt. Refresh the view from View Data to update them.';
+export const CENSUS_CREATED_REFRESH_FAILURE_MESSAGE = 'Census created, but refreshing the census list failed. Reload the page to see it.';
 
 /** True when both days are set and the end day falls before the start day. */
 export function isCensusEndBeforeStart(start: CalendarDayInput, end: CalendarDayInput): boolean {
@@ -145,5 +148,31 @@ export function getCensusDatesError(start: unknown, end: unknown): string | null
   if (start === null || start === undefined || start === '') return CENSUS_START_DATE_REQUIRED_MESSAGE;
   if (!isValidCensusDate(start) || (end !== null && end !== undefined && !isValidCensusDate(end))) return CENSUS_INVALID_DATE_MESSAGE;
   if (isCensusEndBeforeStart(start, end as CalendarDayInput)) return CENSUS_END_BEFORE_START_MESSAGE;
+  return null;
+}
+
+export interface NeighbourCensusWindow {
+  plotCensusNumber: number;
+  start: CalendarDayInput;
+  end: CalendarDayInput;
+}
+
+export function formatCensusOverlapMessage(plotCensusNumber: number): string {
+  return `These dates overlap Census ${plotCensusNumber}. Census date ranges in a plot cannot overlap.`;
+}
+
+/** Closed intervals on calendar days; a missing end is an open window. Neighbours without a start are not comparable. */
+export function getCensusOverlapError(dates: CensusDates, neighbours: readonly NeighbourCensusWindow[]): string | null {
+  const start = parseCalendarDay(dates.startDate);
+  if (start === undefined) return null;
+  const end = parseCalendarDay(dates.endDate);
+  for (const neighbour of neighbours) {
+    const neighbourStart = parseCalendarDay(neighbour.start);
+    if (neighbourStart === undefined) continue;
+    const neighbourEnd = parseCalendarDay(neighbour.end);
+    const startsBeforeNeighbourEnds = neighbourEnd === undefined || compareCalendarDays(start, neighbourEnd) <= 0;
+    const endsAfterNeighbourStarts = end === undefined || compareCalendarDays(end, neighbourStart) >= 0;
+    if (startsBeforeNeighbourEnds && endsAfterNeighbourStarts) return formatCensusOverlapMessage(neighbour.plotCensusNumber);
+  }
   return null;
 }

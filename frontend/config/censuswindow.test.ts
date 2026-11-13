@@ -8,6 +8,9 @@ import {
   getMeasurementSpan,
   isCensusEndBeforeStart,
   getCensusDatesError,
+  getCensusOverlapError,
+  formatCensusOverlapMessage,
+  type NeighbourCensusWindow,
   CENSUS_INVALID_DATE_MESSAGE
 } from './censuswindow';
 import type { CalendarDay } from './dateformats';
@@ -212,5 +215,23 @@ describe('getCensusDatesError', () => {
   it('rejects invalid calendar days and Date objects instead of treating them as absent', () => {
     expect(getCensusDatesError('2023-02-29', null)).toBe(CENSUS_INVALID_DATE_MESSAGE);
     expect(getCensusDatesError('2024-02-29', new Date(Number.NaN))).toBe(CENSUS_INVALID_DATE_MESSAGE);
+  });
+});
+
+const CENSUS_1: NeighbourCensusWindow = { plotCensusNumber: 1, start: '2020-01-01', end: '2020-12-31' };
+const CENSUS_3_OPEN: NeighbourCensusWindow = { plotCensusNumber: 3, start: '2024-01-01', end: null };
+const CENSUS_WITHOUT_START: NeighbourCensusWindow = { plotCensusNumber: 4, start: null, end: null };
+
+describe('getCensusOverlapError', () => {
+  it.each([
+    ['ends the day before a neighbour starts', { startDate: '2022-01-01', endDate: '2023-12-31' }, null],
+    ['starts the day after a neighbour ends', { startDate: '2021-01-01', endDate: '2021-06-30' }, null],
+    ['shares its first day with a neighbour last day', { startDate: '2020-12-31', endDate: '2021-06-30' }, formatCensusOverlapMessage(1)],
+    ['is open-ended and starts before an open neighbour', { startDate: '2022-01-01', endDate: null }, formatCensusOverlapMessage(3)],
+    ['starts inside an open-ended neighbour', { startDate: '2025-01-01', endDate: '2025-02-01' }, formatCensusOverlapMessage(3)]
+  ])('a window that %s', (_name, dates, expected) => {
+    const result = getCensusOverlapError(dates, [CENSUS_1, CENSUS_3_OPEN, CENSUS_WITHOUT_START]);
+    console.log(`[census overlap] ${JSON.stringify(dates)} -> ${result}`);
+    expect(result).toBe(expected);
   });
 });

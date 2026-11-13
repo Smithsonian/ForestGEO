@@ -36,7 +36,7 @@ import {
 } from '@/app/contexts/compat-hooks';
 import { createAndUpdateCensusList, reconcileCurrentCensusSelection, updateCensusDates } from '@/lib/db/definitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/lib/db/definitions/core';
 import { SitesRDS as _SitesRDS, PlotRDS as _PlotRDS } from '@/lib/db/definitions/zones';
 import { OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/lib/db/definitions/timekeeping';
@@ -63,7 +63,16 @@ import PlotCardModal from '@/components/client/modals/plotcardmodal';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import CensusCreationModal, { CensusCreationDetails } from '@/components/client/modals/censuscreationmodal';
 import CensusDatesModal from '@/components/client/modals/censusdatesmodal';
-import { CENSUS_DATES_REFRESH_FAILURE_MESSAGE, CENSUS_DATES_SAVE_FAILURE_MESSAGE, type CensusDates, getCensusWindow } from '@/config/censuswindow';
+import { requestScopeViewRebuilds } from '@/lib/errorsexplorer/viewrebuilds';
+import {
+  CENSUS_CREATED_REFRESH_FAILURE_MESSAGE,
+  CENSUS_DATES_REFRESH_FAILURE_MESSAGE,
+  CENSUS_DATES_SAVE_FAILURE_MESSAGE,
+  CENSUS_DATES_VIEW_REBUILD_FAILURE_MESSAGE,
+  type CensusDates,
+  type NeighbourCensusWindow,
+  getCensusWindow
+} from '@/config/censuswindow';
 import { toCalendarDayString } from '@/config/dateformats';
 import { Plot } from '@/lib/db/definitions/zones';
 import { PlotWithCensusCount } from '@/components/dashboard/plotsoverview';
@@ -464,6 +473,7 @@ export default function DashboardPage() {
     async (dates: CensusDates) => {
       const censusID = censusToEditDates?.dateRanges?.[0]?.censusID;
       if (!censusID || !currentSite?.schemaName) return;
+      const editedPlotID = censusToEditDates?.plotID ?? currentPlot?.plotID;
 
       setIsSavingCensusDates(true);
       setCensusDatesError(null);
@@ -476,20 +486,38 @@ export default function DashboardPage() {
         return;
       }
 
-      // The update has committed; a refresh failure must not read as a failed save.
+      // The update has committed; a refresh or rebuild failure must not read as a failed save.
       setCensusToEditDates(null);
       try {
         await refreshCensusList();
       } catch (refreshError) {
         ailogger.error('Census dates saved but census list refresh failed', refreshError instanceof Error ? refreshError : undefined);
         setError(CENSUS_DATES_REFRESH_FAILURE_MESSAGE);
+      }
+      try {
+        if (editedPlotID) await requestScopeViewRebuilds({ schema: currentSite.schemaName, plotID: editedPlotID, censusID });
+      } catch (rebuildError) {
+        ailogger.error('Census dates saved but measurement view rebuild failed', rebuildError instanceof Error ? rebuildError : undefined);
+        setError(CENSUS_DATES_VIEW_REBUILD_FAILURE_MESSAGE);
       } finally {
         setIsSavingCensusDates(false);
       }
     },
-    [censusToEditDates, currentSite?.schemaName, refreshCensusList]
+    [censusToEditDates, currentPlot?.plotID, currentSite?.schemaName, refreshCensusList]
   );
 
+  const censusNumberBeingEdited = censusToEditDates?.plotCensusNumber;
+  const censusToEditNeighbours = useMemo<NeighbourCensusWindow[]>(
+    () =>
+      (censusListContext ?? []).flatMap(census => {
+        if (!census || census.plotCensusNumber === censusNumberBeingEdited) return [];
+        return (census.dateRanges ?? []).map(range => {
+          const window = getCensusWindow(range);
+          return { plotCensusNumber: census.plotCensusNumber, start: window.start, end: window.end };
+        });
+      }),
+    [censusListContext, censusNumberBeingEdited]
+  );
   const censusToEditWindow = censusToEditDates?.dateRanges?.[0] ? getCensusWindow(censusToEditDates.dateRanges[0]) : undefined;
 
   const handleAddCensus = useCallback(() => {
@@ -557,9 +585,14 @@ export default function DashboardPage() {
           ailogger.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
         }
 
-        // Refresh the census list to show the new census
-        await refreshCensusList();
+        // The census and its rollover have committed; a refresh failure must not read as a failed create.
         setOpenCreateCensusModal(false);
+        try {
+          await refreshCensusList();
+        } catch (refreshError) {
+          ailogger.error('Census created but census list refresh failed', refreshError instanceof Error ? refreshError : undefined);
+          setError(CENSUS_CREATED_REFRESH_FAILURE_MESSAGE);
+        }
 
         // Ensure loading shows for at least 750ms for visual feedback
         const elapsed = Date.now() - startTime;
@@ -1093,6 +1126,7 @@ export default function DashboardPage() {
         censusNumber={censusToEditDates?.plotCensusNumber ?? 0}
         initialStartDate={toCalendarDayString(censusToEditWindow?.start)}
         initialEndDate={toCalendarDayString(censusToEditWindow?.end)}
+        neighbourWindows={censusToEditNeighbours}
         isSaving={isSavingCensusDates}
         errorMessage={censusDatesError}
         onClose={() => setCensusToEditDates(null)}
