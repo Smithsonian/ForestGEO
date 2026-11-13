@@ -155,6 +155,7 @@ describe('buildErrorMessageCounts', () => {
     expect(facets.censusTotals.duplicateTagStem, 'the fixture must actually contain a duplicate-tag contradiction').toBeGreaterThan(0);
     expect(facets.censusTotals.sameBatchConflict, 'the fixture must actually contain a same-batch contradiction').toBeGreaterThan(0);
     expect(facets.censusTotals.failedMeasurements, 'the fixture must actually contain a failed row').toBeGreaterThan(0);
+    expect(counts.totalMeasurements, 'every fake measurement is in the error set').toBe(MEASUREMENTS.length);
     expect(counts.totalMeasurements).toBe(facets.censusTotals.affectedMeasurements);
   });
 

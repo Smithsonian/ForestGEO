@@ -12,6 +12,7 @@ import {
   type ErrorTypeIdentity
 } from '@/config/errorsexplorer';
 import * as production from '@/app/api/errors/explorer/_shared';
+import * as oracle from '../oracles/errors-explorer-legacy';
 import {
   buildRelatedRowsOutsideErrorSetStatement,
   CENSUS_LIST_SIZE,
@@ -30,6 +31,8 @@ import {
   DECOY_PLOT_ID,
   FIRST_CENSUS_ID,
   FIXTURE_HOOK_TIMEOUT_MS,
+  LOCALE_TIE_NFC_TEXT,
+  LOCALE_TIE_NFD_TEXT,
   MAIN_PLOT_ID,
   replaceFixture,
   SECOND_CENSUS_ID,
@@ -64,6 +67,8 @@ const CODE_B: ErrorTypeIdentity = { source: 'ingestion', code: 'CODE_B', message
 const VALIDATION_14: ErrorTypeIdentity = { source: 'validation', code: String(VALIDATION_14_ID), message: VALIDATION_14_MESSAGE };
 const DUPLICATE: ErrorTypeIdentity = { source: 'ingestion', code: 'DUPLICATE_TAG_STEMTAG', message: DUPLICATE_MESSAGE };
 const FALLBACK: ErrorTypeIdentity = { source: 'ingestion', code: FALLBACK_ERROR_CODE, message: FALLBACK_ERROR_MESSAGE };
+
+const DUPLICATE_FIELDS = ['treeTag', 'stemTag'];
 
 const CODE_A_ERROR_ID = 1;
 const CODE_B_ERROR_ID = 2;
@@ -293,6 +298,34 @@ function growthFixture(): ExplorerFixture {
   );
 }
 
+const CENSUS_TIE_ROWS = { firstCensus: 811, secondCensus: 812 } as const;
+const CENSUS_TIE_NFC_ERROR_ID = 1;
+const CENSUS_TIE_NFD_ERROR_ID = 2;
+const DESCENDING_CENSUS_IDS = [SECOND_CENSUS_ID, FIRST_CENSUS_ID];
+const NORMALIZATION_FORM_BY_TIE_TEXT = new Map([
+  [LOCALE_TIE_NFC_TEXT, 'NFC'],
+  [LOCALE_TIE_NFD_TEXT, 'NFD']
+]);
+const normalizationFormOf = (text: string): string => NORMALIZATION_FORM_BY_TIE_TEXT.get(text) ?? text;
+
+/**
+ * Two ingestion types with no code whose messages are the NFC and NFD forms of one text: they tie on count, message, source and code, so the
+ * Node path orders them by encounter order. The lower measurement ID (811) sits in the first census, the higher (812) in the second.
+ */
+function censusTieFixture(): ExplorerFixture {
+  return {
+    ...explorerFixture(
+      [measurement(CENSUS_TIE_ROWS.firstCensus), measurement(CENSUS_TIE_ROWS.secondCensus, { censusID: SECOND_CENSUS_ID })],
+      [unresolvedLog(CENSUS_TIE_ROWS.firstCensus, CENSUS_TIE_NFC_ERROR_ID), unresolvedLog(CENSUS_TIE_ROWS.secondCensus, CENSUS_TIE_NFD_ERROR_ID)]
+    ),
+    errorTypes: [
+      { errorID: CENSUS_TIE_NFC_ERROR_ID, source: 'ingestion', code: null, message: LOCALE_TIE_NFC_TEXT },
+      { errorID: CENSUS_TIE_NFD_ERROR_ID, source: 'ingestion', code: null, message: LOCALE_TIE_NFD_TEXT }
+    ],
+    validations: []
+  };
+}
+
 const DUPLICATE_FIELDS_ROW_ID = 801;
 const EXPORT_ROWS = { codeA: 101, codeB: 102, both: 103 } as const;
 
@@ -361,7 +394,10 @@ type ProductionExecutor = Parameters<typeof production.queryErrorExplorer>[0];
 const kindOf = (statement: RecordedStatement): string =>
   statement.label ?? (statement.sql.includes(ACTIVE_COUNT_SQL_MARKER) ? ACTIVE_COUNT_KIND : UNLABELLED_KIND);
 const sortedKindsOf = (statements: readonly RecordedStatement[]): string[] => statements.map(kindOf).sort();
+const SQL_MESSAGE_COUNT_KINDS = [ERROR_EXPLORER_STATEMENT_LABELS.catalog, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithoutFlags].sort();
 const SQL_FACET_KINDS = [ERROR_EXPLORER_STATEMENT_LABELS.catalog, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags, ACTIVE_COUNT_KIND].sort();
+const TIE_FALLBACK_FACET_KINDS = [...SQL_FACET_KINDS, ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows].sort();
+const TIE_FALLBACK_MESSAGE_COUNT_KINDS = [...SQL_MESSAGE_COUNT_KINDS, ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows].sort();
 const NODE_FACET_KINDS = [ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows, ACTIVE_COUNT_KIND].sort();
 
 const identityOf = ({ source, code, message }: ErrorTypeIdentity): ErrorTypeIdentity => ({ source, code, message });
@@ -480,6 +516,15 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
       expect(facets.errorTypes[0].count, 'rows 103 and 201 carry validation 14').toBe(2);
     });
 
+    it("gives DUPLICATE_TAG_STEMTAG's entry the tree and stem tag fields (P2-6)", async () => {
+      const { facets } = await facetsFor();
+
+      const duplicateEntries = facets.errorTypes.filter(type => type.code === DUPLICATE.code);
+      console.log('[view-errors duplicate fields]', JSON.stringify(duplicateEntries));
+      expect(duplicateEntries, 'the failed row 104 carries the one DUPLICATE_TAG_STEMTAG identity').toHaveLength(1);
+      expect(duplicateEntries[0].fields).toEqual(DUPLICATE_FIELDS);
+    });
+
     it('marks the identity whose rows carry a contradiction', async () => {
       const { facets } = await facetsFor();
 
@@ -575,13 +620,21 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
     useFixture();
 
     it("matches the View Errors query: each message's count is that message's totalRows, and the total is censusTotals.affectedMeasurements", async () => {
-      const counts = await production.buildErrorMessageCounts(
-        createRecordingExecutor(explorerConnection(), { measureJsonBytes: false }) as unknown as ProductionExecutor,
-        { schema: database(), plotID: MAIN_PLOT_ID, censusIDs: CENSUS_IDS }
-      );
+      const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });
+      const counts = await production.buildErrorMessageCounts(recorder as unknown as ProductionExecutor, {
+        schema: database(),
+        plotID: MAIN_PLOT_ID,
+        censusIDs: CENSUS_IDS
+      });
       const { facets } = await facetsFor();
 
-      console.log('[view-errors message counts]', JSON.stringify({ counts, affectedMeasurements: facets.censusTotals.affectedMeasurements }));
+      console.log(
+        '[view-errors message counts]',
+        JSON.stringify({ counts, affectedMeasurements: facets.censusTotals.affectedMeasurements, kinds: sortedKindsOf(recorder.statements) })
+      );
+      expect(sortedKindsOf(recorder.statements), 'the counts are read from the catalog and the histogram without flags, not the Node path').toEqual(
+        SQL_MESSAGE_COUNT_KINDS
+      );
       expect(counts.messages.length, 'the fixture must carry several messages').toBeGreaterThan(1);
       expect(counts.totalMeasurements).toBe(facets.censusTotals.affectedMeasurements);
       for (const { value, count } of counts.messages) {
@@ -589,6 +642,56 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
       }
     });
   });
+
+  describe('ties across censuses requested in descending order', () => {
+    useFixture(censusTieFixture());
+
+    const countsByForm = (messages: ReadonlyArray<{ value: string; count: number }>) =>
+      messages.map(({ value, count }) => ({ value: normalizationFormOf(value), count }));
+    const tieRequest = () => ({ ...scope(), censusIDs: DESCENDING_CENSUS_IDS });
+
+    it('orders tied error types by the census order of the request, not by measurement ID', async () => {
+      const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });
+      const facets = await production.buildErrorExplorerFacets(recorder as unknown as ProductionExecutor, {
+        ...tieRequest(),
+        filters: DEFAULT_ERROR_EXPLORER_FILTERS
+      });
+      const expected = await oracle.buildErrorExplorerFacets(createRecordingExecutor(explorerConnection(), { measureJsonBytes: false }) as never, {
+        ...tieRequest(),
+        filters: DEFAULT_ERROR_EXPLORER_FILTERS
+      });
+
+      console.log(
+        '[view-errors census tie facets]',
+        JSON.stringify({
+          production: facets.errorTypes.map(type => normalizationFormOf(type.message)),
+          oracle: expected.errorTypes.map(type => normalizationFormOf(type.message))
+        })
+      );
+      expect(sortedKindsOf(recorder.statements), 'the tie sends the facets to the Node path').toEqual(TIE_FALLBACK_FACET_KINDS);
+      expect(
+        facets.errorTypes.map(type => normalizationFormOf(type.message)),
+        'row 812 is in the census listed first in the request, so its NFD identity is met first although row 811 has the lower ID'
+      ).toEqual(['NFD', 'NFC']);
+      expect(facets.errorTypes.map(type => normalizationFormOf(type.message))).toEqual(expected.errorTypes.map(type => normalizationFormOf(type.message)));
+    });
+
+    it('orders tied messages by the census order of the request, not by measurement ID', async () => {
+      const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });
+      const request = { schema: database(), plotID: MAIN_PLOT_ID, censusIDs: DESCENDING_CENSUS_IDS };
+      const counts = await production.buildErrorMessageCounts(recorder as unknown as ProductionExecutor, request);
+      const expected = await oracle.buildErrorMessageCounts(createRecordingExecutor(explorerConnection(), { measureJsonBytes: false }) as never, request);
+
+      console.log('[view-errors census tie counts]', JSON.stringify({ production: countsByForm(counts.messages), oracle: countsByForm(expected.messages) }));
+      expect(sortedKindsOf(recorder.statements), 'the tie sends the counts to the Node path').toEqual(TIE_FALLBACK_MESSAGE_COUNT_KINDS);
+      expect(countsByForm(counts.messages), 'row 812 is in the census listed first in the request, so its NFD message is met first').toEqual([
+        { value: 'NFD', count: 1 },
+        { value: 'NFC', count: 1 }
+      ]);
+      expect(countsByForm(counts.messages)).toEqual(countsByForm(expected.messages));
+    });
+  });
+
   describe('queries on the Node path: sort, column filter and display values', () => {
     describe('sort across the whole error-type group', () => {
       useFixture(sortFixture());
