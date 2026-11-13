@@ -34,7 +34,7 @@ import {
   useSiteDispatch,
   useSiteListContext
 } from '@/app/contexts/compat-hooks';
-import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/lib/db/definitions/timekeeping';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection, updateCensusDates } from '@/lib/db/definitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/lib/db/definitions/core';
@@ -62,6 +62,9 @@ import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE, CENSUS_DELETE_STALE_LIST_STATUSE
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import CensusCreationModal, { CensusCreationDetails } from '@/components/client/modals/censuscreationmodal';
+import CensusDatesModal from '@/components/client/modals/censusdatesmodal';
+import { CENSUS_DATES_REFRESH_FAILURE_MESSAGE, CENSUS_DATES_SAVE_FAILURE_MESSAGE, type CensusDates, getCensusWindow } from '@/config/censuswindow';
+import { toCalendarDayString } from '@/config/dateformats';
 import { Plot } from '@/lib/db/definitions/zones';
 import { PlotWithCensusCount } from '@/components/dashboard/plotsoverview';
 import { CensusWithStats } from '@/components/dashboard/censusesoverview';
@@ -151,6 +154,15 @@ export default function DashboardPage() {
   const plotID = currentPlot?.plotID;
   const censusID = currentCensus?.dateRanges?.[0]?.censusID;
   const plotCensusNumber = currentCensus?.plotCensusNumber;
+  const censusRefreshScopeRef = useRef<{ schemaName: typeof schemaName; plotID: typeof plotID; controller: AbortController } | null>(null);
+  const censusRefreshSequenceRef = useRef(0);
+
+  useEffect(() => {
+    const scope = { schemaName, plotID, controller: new AbortController() };
+    censusRefreshScopeRef.current = scope;
+    return () => scope.controller.abort();
+  }, [schemaName, plotID]);
+
   const scopeKey = schemaName && plotID && censusID ? `${schemaName}|${plotID}|${censusID}|${plotCensusNumber ?? ''}` : '';
   // Data is only current when it answers the LATEST request started for the current scope.
   // Keying by request id (not just scope) means returning to scope A (A -> B -> A, or a retry)
@@ -173,6 +185,10 @@ export default function DashboardPage() {
   const [censusToDelete, setCensusToDelete] = useState<CensusWithStats | OrgCensusRDS | null>(null);
   const [openDeleteCensusModal, setOpenDeleteCensusModal] = useState(false);
   const [isDeletingCensus, setIsDeletingCensus] = useState(false);
+
+  const [censusToEditDates, setCensusToEditDates] = useState<CensusWithStats | OrgCensusRDS | null>(null);
+  const [isSavingCensusDates, setIsSavingCensusDates] = useState(false);
+  const [censusDatesError, setCensusDatesError] = useState<string | null>(null);
 
   // Census creation state
   const isCreatingCensusRef = useRef(false);
@@ -314,17 +330,27 @@ export default function DashboardPage() {
       return;
     }
 
+    // The save may finish after its site/plot was left. An in-flight refresh must
+    // also stay invalid after A -> B -> A, even if fetch ignores cancellation.
+    const scope = censusRefreshScopeRef.current;
+    if (!scope || scope.schemaName !== currentSite.schemaName || scope.plotID !== currentPlot.plotID || scope.controller.signal.aborted) return;
+    const requestID = ++censusRefreshSequenceRef.current;
+    const isCurrent = () => !scope.controller.signal.aborted && requestID === censusRefreshSequenceRef.current;
+
     try {
       console.log('Refreshing census list...');
       const response = await fetch(
-        `/api/fetchall/census/${currentPlot.plotID}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`
+        `/api/fetchall/census/${currentPlot.plotID}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`,
+        { signal: scope.controller.signal }
       );
+      if (!response.ok) throw new Error(`Failed to load census data (HTTP ${response.status})`);
       const censusRDSLoad = await response.json();
-      if (!censusRDSLoad) throw new Error('Failed to load census data');
-      const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
-      const updatedCensusList = await createAndUpdateCensusList(censusArray);
+      if (!Array.isArray(censusRDSLoad)) throw new Error('Invalid census list response');
+      const updatedCensusList = await createAndUpdateCensusList(censusRDSLoad);
+      if (!isCurrent()) return;
       if (censusListDispatch) await censusListDispatch({ censusList: updatedCensusList });
 
+      if (!isCurrent()) return;
       if (censusDispatch && currentCensus) {
         const reconciledCensus = reconcileCurrentCensusSelection(currentCensus, updatedCensusList);
         await censusDispatch({ census: reconciledCensus });
@@ -332,6 +358,7 @@ export default function DashboardPage() {
 
       console.log('Census list refreshed successfully');
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('Failed to refresh census list:', error);
       ailogger.error('Failed to refresh census list', error instanceof Error ? error : undefined);
       throw error;
@@ -427,6 +454,43 @@ export default function DashboardPage() {
     },
     [censusToDelete, currentSite?.schemaName, refreshCensusList, setLoading]
   );
+
+  const handleCensusEditDates = useCallback((census: CensusWithStats | OrgCensusRDS) => {
+    setCensusDatesError(null);
+    setCensusToEditDates(census);
+  }, []);
+
+  const handleSaveCensusDates = useCallback(
+    async (dates: CensusDates) => {
+      const censusID = censusToEditDates?.dateRanges?.[0]?.censusID;
+      if (!censusID || !currentSite?.schemaName) return;
+
+      setIsSavingCensusDates(true);
+      setCensusDatesError(null);
+      try {
+        await updateCensusDates(currentSite.schemaName, censusID, dates);
+      } catch (saveError) {
+        ailogger.error('Failed to update census dates', saveError instanceof Error ? saveError : undefined);
+        setCensusDatesError(CENSUS_DATES_SAVE_FAILURE_MESSAGE);
+        setIsSavingCensusDates(false);
+        return;
+      }
+
+      // The update has committed; a refresh failure must not read as a failed save.
+      setCensusToEditDates(null);
+      try {
+        await refreshCensusList();
+      } catch (refreshError) {
+        ailogger.error('Census dates saved but census list refresh failed', refreshError instanceof Error ? refreshError : undefined);
+        setError(CENSUS_DATES_REFRESH_FAILURE_MESSAGE);
+      } finally {
+        setIsSavingCensusDates(false);
+      }
+    },
+    [censusToEditDates, currentSite?.schemaName, refreshCensusList]
+  );
+
+  const censusToEditWindow = censusToEditDates?.dateRanges?.[0] ? getCensusWindow(censusToEditDates.dateRanges[0]) : undefined;
 
   const handleAddCensus = useCallback(() => {
     if (isCreatingCensusRef.current) {
@@ -674,6 +738,7 @@ export default function DashboardPage() {
             isLoading={false}
             userRole={userRole}
             onCensusDelete={handleCensusDelete}
+            onCensusEditDates={handleCensusEditDates}
             onAddCensus={handleAddCensus}
             onSelectCensus={census => {
               if (censusDispatch) {
@@ -1021,6 +1086,17 @@ export default function DashboardPage() {
         isCreating={isCreatingCensus}
         onClose={() => setOpenCreateCensusModal(false)}
         onCreate={handleConfirmCreateCensus}
+      />
+
+      <CensusDatesModal
+        open={censusToEditDates !== null}
+        censusNumber={censusToEditDates?.plotCensusNumber ?? 0}
+        initialStartDate={toCalendarDayString(censusToEditWindow?.start)}
+        initialEndDate={toCalendarDayString(censusToEditWindow?.end)}
+        isSaving={isSavingCensusDates}
+        errorMessage={censusDatesError}
+        onClose={() => setCensusToEditDates(null)}
+        onSave={handleSaveCensusDates}
       />
 
       {/* Census Delete Confirmation Modal */}

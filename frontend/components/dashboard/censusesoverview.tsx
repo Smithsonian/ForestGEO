@@ -2,8 +2,8 @@
  * Censuses Overview Component
  *
  * Shows the plot's censuses as cards. Clicking a card selects that census.
- * Each card's More actions menu offers Delete census, enabled only where
- * the server's admin, active and latest-only rule would allow it.
+ * Each card's More actions menu offers Edit census dates and Delete census;
+ * delete is enabled only where the server's admin, active and latest-only rule would allow it.
  */
 
 'use client';
@@ -36,6 +36,7 @@ import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import DescriptionIcon from '@mui/icons-material/Description';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import DeleteIcon from '@mui/icons-material/Delete';
+import EditCalendarIcon from '@mui/icons-material/EditCalendar';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import AddIcon from '@mui/icons-material/Add';
 import { getCensusDeleteBlockReason } from '@/config/censusdeletion';
@@ -75,6 +76,7 @@ export interface CensusesOverviewProps {
   isLoading?: boolean;
   userRole?: UserAuthRoles;
   onCensusDelete?: (census: OrgCensusRDS | CensusWithStats) => void;
+  onCensusEditDates?: (census: OrgCensusRDS | CensusWithStats) => void;
   onAddCensus?: () => void;
   onSelectCensus?: (census: OrgCensusRDS | CensusWithStats) => void;
 }
@@ -128,10 +130,11 @@ function stopCardInteraction(event: React.SyntheticEvent) {
 interface CensusActionsMenuProps {
   census: OrgCensusRDS | CensusWithStats;
   deleteBlockReason: string | null;
-  onDelete: (census: OrgCensusRDS | CensusWithStats) => void;
+  onEditDates?: (census: OrgCensusRDS | CensusWithStats) => void;
+  onDelete?: (census: OrgCensusRDS | CensusWithStats) => void;
 }
 
-function CensusActionsMenu({ census, deleteBlockReason, onDelete }: CensusActionsMenuProps) {
+function CensusActionsMenu({ census, deleteBlockReason, onEditDates, onDelete }: CensusActionsMenuProps) {
   return (
     <Dropdown>
       <MenuButton
@@ -156,21 +159,31 @@ function CensusActionsMenu({ census, deleteBlockReason, onDelete }: CensusAction
       </MenuButton>
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the handlers only stop events bubbling to the card; they add no behaviour */}
       <Menu placement="bottom-end" onClick={stopCardInteraction} onKeyDown={stopCardInteraction} sx={{ minWidth: 240, zIndex: 9999 }}>
-        <MenuItem color="danger" disabled={deleteBlockReason !== null} onClick={() => onDelete(census)}>
-          <ListItemDecorator>
-            <DeleteIcon />
-          </ListItemDecorator>
-          <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-            <Typography level="body-sm" color="danger">
-              Delete census
-            </Typography>
-            {deleteBlockReason ? (
-              <Typography level="body-xs" color="neutral" sx={{ whiteSpace: 'normal' }}>
-                {deleteBlockReason}
+        {onEditDates && (
+          <MenuItem onClick={() => onEditDates(census)}>
+            <ListItemDecorator>
+              <EditCalendarIcon />
+            </ListItemDecorator>
+            <Typography level="body-sm">Edit census dates</Typography>
+          </MenuItem>
+        )}
+        {onDelete && (
+          <MenuItem color="danger" disabled={deleteBlockReason !== null} onClick={() => onDelete(census)}>
+            <ListItemDecorator>
+              <DeleteIcon />
+            </ListItemDecorator>
+            <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+              <Typography level="body-sm" color="danger">
+                Delete census
               </Typography>
-            ) : null}
-          </Box>
-        </MenuItem>
+              {deleteBlockReason ? (
+                <Typography level="body-xs" color="neutral" sx={{ whiteSpace: 'normal' }}>
+                  {deleteBlockReason}
+                </Typography>
+              ) : null}
+            </Box>
+          </MenuItem>
+        )}
       </Menu>
     </Dropdown>
   );
@@ -181,11 +194,12 @@ interface CensusCardProps {
   index: number;
   censusList: readonly (OrgCensusRDS | CensusWithStats)[];
   userRole?: UserAuthRoles;
+  onEditDates?: (census: OrgCensusRDS | CensusWithStats) => void;
   onDelete?: (census: OrgCensusRDS | CensusWithStats) => void;
   onSelect?: (census: OrgCensusRDS | CensusWithStats) => void;
 }
 
-function CensusCard({ census, index, censusList, userRole, onDelete, onSelect }: CensusCardProps) {
+function CensusCard({ census, index, censusList, userRole, onEditDates, onDelete, onSelect }: CensusCardProps) {
   const gradient = CENSUS_GRADIENTS[index % CENSUS_GRADIENTS.length];
   const status = getCensusStatus(census.dateRanges);
   const duration = calculateDuration(census.dateRanges);
@@ -275,7 +289,14 @@ function CensusCard({ census, index, censusList, userRole, onDelete, onSelect }:
             >
               {statusConfig[status].label}
             </Chip>
-            {onDelete && <CensusActionsMenu census={census} deleteBlockReason={getCensusDeleteBlockReason(census, censusList, userRole)} onDelete={onDelete} />}
+            {(onEditDates || onDelete) && (
+              <CensusActionsMenu
+                census={census}
+                deleteBlockReason={getCensusDeleteBlockReason(census, censusList, userRole)}
+                onEditDates={onEditDates}
+                onDelete={onDelete}
+              />
+            )}
           </Stack>
         </Box>
 
@@ -510,6 +531,7 @@ export default function CensusesOverview({
   isLoading = false,
   userRole,
   onCensusDelete,
+  onCensusEditDates,
   onAddCensus,
   onSelectCensus
 }: CensusesOverviewProps) {
@@ -599,7 +621,15 @@ export default function CensusesOverview({
       <Box component="ul" sx={gridStyles}>
         {sortedCensuses.map((census, index) => (
           <Box component="li" key={census.plotCensusNumber ?? index}>
-            <CensusCard census={census} index={index} censusList={censuses} userRole={userRole} onDelete={onCensusDelete} onSelect={onSelectCensus} />
+            <CensusCard
+              census={census}
+              index={index}
+              censusList={censuses}
+              userRole={userRole}
+              onEditDates={onCensusEditDates}
+              onDelete={onCensusDelete}
+              onSelect={onSelectCensus}
+            />
           </Box>
         ))}
       </Box>

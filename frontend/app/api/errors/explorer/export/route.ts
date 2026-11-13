@@ -3,44 +3,24 @@ import Papa from 'papaparse';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { DEFAULT_ERROR_EXPLORER_FILTERS, ErrorExplorerQueryRequest } from '@/config/errorsexplorer';
-import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { buildErrorExportRows, fetchGroupedErrorRows } from '../_shared';
 import { fromBody, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
-import { z } from 'zod';
+import {
+  errorExplorerExportRequestSchema,
+  parseExplorerRequest,
+  readExplorerRequestJson,
+  type ParsedErrorExplorerExportRequest
+} from '@/lib/errorsexplorer/explorerrequest';
 
 export const runtime = 'nodejs';
 
-type ErrorExplorerExportRequest = Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters'>;
+type ErrorExplorerExportRequest = Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters' | 'errorType'>;
 
-const MAX_EXPORT_CENSUS_IDS = 25;
-const boundedStrings = z.array(z.string().max(1_000)).max(100);
-const exportRequestSchema = z
-  .object({
-    schema: z.string().refine(isValidSchema, 'Invalid schema'),
-    plotID: z.coerce.number().int().positive(),
-    censusID: z.coerce.number().int().positive(),
-    censusIDs: z.array(z.coerce.number().int().positive()).max(MAX_EXPORT_CENSUS_IDS).optional().default([]),
-    filters: z
-      .object({
-        source: z.enum(['all', 'validation', 'ingestion']).optional().default(DEFAULT_ERROR_EXPLORER_FILTERS.source),
-        exactMessages: boundedStrings.optional().default([]),
-        affectedFields: boundedStrings.optional().default([]),
-        contradictionOnly: z.boolean().optional().default(false),
-        contradictionTypes: z
-          .array(z.enum(['duplicate_tag_stem', 'same_batch_conflict']))
-          .max(2)
-          .optional()
-          .default([]),
-        quickSearch: z.string().max(500).optional().default(''),
-        presetId: z.string().max(100).optional()
-      })
-      .optional()
-      .default(DEFAULT_ERROR_EXPLORER_FILTERS)
-  })
-  .strict();
+const FILENAME_UNSAFE_CHARACTERS = /[^A-Za-z0-9_-]/g;
+const FILENAME_REPLACEMENT = '_';
 
-function parseRequest(body: z.infer<typeof exportRequestSchema>): ErrorExplorerExportRequest {
+function parseRequest(body: ParsedErrorExplorerExportRequest): ErrorExplorerExportRequest {
   return {
     schema: body.schema ?? '',
     plotID: Number(body.plotID ?? 0),
@@ -52,7 +32,8 @@ function parseRequest(body: z.infer<typeof exportRequestSchema>): ErrorExplorerE
       exactMessages: body.filters?.exactMessages ?? [],
       affectedFields: body.filters?.affectedFields ?? [],
       contradictionTypes: body.filters?.contradictionTypes ?? []
-    }
+    },
+    errorType: body.errorType
   };
 }
 
@@ -61,29 +42,27 @@ async function handler(request: NextRequest, _context: RouteContext) {
   const startedAt = Date.now();
 
   try {
-    let rawBody: unknown;
-    try {
-      rawBody = await request.json();
-    } catch {
+    const json = await readExplorerRequestJson(request);
+    if (!json.ok) {
       return NextResponse.json({ error: 'Invalid export request', code: 'INVALID_EXPORT_REQUEST' }, { status: HTTPResponses.INVALID_REQUEST });
     }
-    const parsed = exportRequestSchema.safeParse(rawBody);
-    if (!parsed.success) {
-      ailogger.warn('Rejected invalid errors explorer export request', {
-        issues: parsed.error.issues.map(issue => ({ path: issue.path.join('.'), code: issue.code }))
-      });
+    const parsed = parseExplorerRequest(errorExplorerExportRequestSchema, json.body);
+    if (!parsed.ok) {
+      ailogger.warn('Rejected invalid errors explorer export request', { issues: parsed.issues });
       return NextResponse.json({ error: 'Invalid export request', code: 'INVALID_EXPORT_REQUEST' }, { status: HTTPResponses.INVALID_REQUEST });
     }
     const body = parseRequest(parsed.data);
 
     const groupedRows = await fetchGroupedErrorRows(connectionManager, body.schema, body.plotID, body.censusIDs?.length ? body.censusIDs : body.censusID);
-    const exportRows = buildErrorExportRows(groupedRows, body.filters);
+    const exportRows = buildErrorExportRows(groupedRows, body.filters, body.errorType);
     // Excel and other spreadsheet applications execute cells beginning with
     // formula sigils. Every exported text field can ultimately be upload/user
     // controlled, so force Papa Parse's formula escaping for all rows.
     const csv = Papa.unparse(exportRows, { escapeFormulae: true });
     const date = new Date().toISOString().slice(0, 10);
-    const filename = `errors-${body.schema}-plot${body.plotID}-census${body.censusID}-${date}.csv`;
+    // The code is request text going into a response header, so only filename-safe characters are kept.
+    const typeSuffix = body.errorType ? `-${body.errorType.source}-${body.errorType.code.replace(FILENAME_UNSAFE_CHARACTERS, FILENAME_REPLACEMENT)}` : '';
+    const filename = `errors-${body.schema}-plot${body.plotID}-census${body.censusID}${typeSuffix}-${date}.csv`;
     const censusCount = body.censusIDs?.length || 1;
     ailogger.event('ErrorExplorerCsvExported', {
       schema: body.schema,

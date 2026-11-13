@@ -267,3 +267,60 @@ describe('CensusesOverview census card menu (#525 items 2+3)', () => {
     expect(onSelectCensus).toHaveBeenCalledWith(LATEST_ACTIVE);
   });
 });
+
+const EDIT_DATES_ITEM_NAME = /Edit census dates/;
+
+function renderOverviewWithEditDates(censuses: OrgCensusRDS[], userRole: UserAuthRoles = 'global') {
+  const onCensusDelete = vi.fn();
+  const onCensusEditDates = vi.fn();
+  const onSelectCensus = vi.fn();
+  render(
+    <CensusesOverview
+      censuses={censuses}
+      plotName="Test Plot"
+      userRole={userRole}
+      onCensusDelete={onCensusDelete}
+      onCensusEditDates={onCensusEditDates}
+      onSelectCensus={onSelectCensus}
+    />
+  );
+  return { onCensusDelete, onCensusEditDates, onSelectCensus };
+}
+
+describe('CensusesOverview census card menu: Edit census dates', () => {
+  it('lists Edit census dates above Delete census', async () => {
+    const user = userEvent.setup();
+    renderOverviewWithEditDates([EARLIER_ACTIVE, LATEST_ACTIVE]);
+    await user.click(menuTrigger(LATEST_ACTIVE.plotCensusNumber));
+    const items = await screen.findAllByRole('menuitem');
+    console.log(`[edit census dates] menu items: ${items.map(item => `"${item.textContent}"`).join(', ')}`);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent(EDIT_DATES_ITEM_NAME);
+    expect(items[1]).toHaveTextContent(DELETE_ITEM_NAME);
+  });
+
+  it('calls onCensusEditDates with that census and never selects the card', async () => {
+    const user = userEvent.setup();
+    const { onCensusEditDates, onCensusDelete, onSelectCensus } = renderOverviewWithEditDates([EARLIER_ACTIVE, LATEST_ACTIVE]);
+    await user.click(menuTrigger(EARLIER_ACTIVE.plotCensusNumber));
+    await user.click(await screen.findByRole('menuitem', { name: EDIT_DATES_ITEM_NAME }));
+
+    console.log(`[edit census dates] onCensusEditDates=${onCensusEditDates.mock.calls.length} onSelectCensus=${onSelectCensus.mock.calls.length}`);
+    expect(onCensusEditDates).toHaveBeenCalledTimes(1);
+    expect(onCensusEditDates).toHaveBeenCalledWith(EARLIER_ACTIVE);
+    expect(onCensusDelete).not.toHaveBeenCalled();
+    expect(onSelectCensus).not.toHaveBeenCalled();
+  });
+
+  it('leaves Edit census dates enabled for a non-admin while Delete stays admin-only', async () => {
+    const user = userEvent.setup();
+    renderOverviewWithEditDates([EARLIER_ACTIVE, LATEST_ACTIVE], 'field crew');
+    await user.click(menuTrigger(LATEST_ACTIVE.plotCensusNumber));
+    const editItem = await screen.findByRole('menuitem', { name: EDIT_DATES_ITEM_NAME });
+    const deleteItem = screen.getByRole('menuitem', { name: DELETE_ITEM_NAME });
+    console.log(`[edit census dates] field crew edit: ${describeItem(editItem)} delete: ${describeItem(deleteItem)}`);
+    expect(editItem).not.toHaveAttribute('aria-disabled', 'true');
+    expect(deleteItem).toHaveAttribute('aria-disabled', 'true');
+    expect(deleteItem).toHaveTextContent(CENSUS_DELETE_ADMIN_ONLY_REASON);
+  });
+});

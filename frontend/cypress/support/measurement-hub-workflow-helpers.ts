@@ -1,6 +1,13 @@
 import type { ErrorExplorerQueryRequest, ErrorExplorerRow } from '../../config/errorsexplorer';
-import { buildErrorsExplorerDetails, buildErrorsExplorerQueryResponse } from './errors-explorer-helpers';
-import type { MeasurementValidationFailure } from './grid-api-helpers';
+import { DEFAULT_ERROR_EXPLORER_FILTERS } from '../../config/errorsexplorer';
+import {
+  buildErrorsExplorerDetails,
+  buildErrorsExplorerQueryResponse,
+  deriveCensusTotals,
+  deriveErrorTypes,
+  MOCK_ACTIVE_MEASUREMENTS
+} from './errors-explorer-helpers';
+import { withViewDataStatus, type MeasurementValidationFailure } from './grid-api-helpers';
 import { canonicalDiffToRowPatch, mockEditPlanFlow } from './edit-plan-helpers';
 
 type GenericRow = Record<string, any>;
@@ -142,16 +149,8 @@ function buildFacetEntries(values: string[]) {
 
 function buildErrorFacets(rows: ErrorExplorerRow[]) {
   return {
-    messages: buildFacetEntries(rows.flatMap(row => row.errorMessages)),
-    fields: buildFacetEntries(rows.flatMap(row => row.errorFields)),
-    sourceCounts: {
-      validation: rows.filter(row => row.errorSources.includes('validation')).length,
-      ingestion: rows.filter(row => row.errorSources.includes('ingestion')).length
-    },
-    contradictionCounts: {
-      duplicateTagStem: rows.filter(row => row.contradictionTypes.includes('duplicate_tag_stem')).length,
-      sameBatchConflict: rows.filter(row => row.contradictionTypes.includes('same_batch_conflict')).length
-    }
+    errorTypes: deriveErrorTypes(rows, DEFAULT_ERROR_EXPLORER_FILTERS),
+    censusTotals: deriveCensusTotals(rows, MOCK_ACTIVE_MEASUREMENTS)
   };
 }
 
@@ -173,7 +172,8 @@ export function mockMeasurementHubWorkflowApi({
 
   cy.intercept('POST', `**/api/fixeddatafilter/measurementssummary/${schema}/**`, req => {
     const quickFilterValues = req.body?.filterModel?.quickFilterValues ?? [];
-    const filteredRows = state.summaryRows.filter(row => matchesQuickFilter(row, quickFilterValues));
+    const failedMeasurementIDs = new Set(state.validationFailures.map(failure => Number(failure.coreMeasurementID)));
+    const filteredRows = state.summaryRows.filter(row => matchesQuickFilter(row, quickFilterValues)).map(row => withViewDataStatus(row, failedMeasurementIDs));
 
     req.reply({
       statusCode: 200,
@@ -305,6 +305,18 @@ export function mockMeasurementHubWorkflowApi({
       body: []
     });
   }).as('runMeasurementHubQuery');
+
+  cy.intercept('POST', '**/api/validations/clearmeasurementerrors', req => {
+    const measurementID = Number(req.body?.measurementID);
+    const clearedErrorCount = state.validationFailures.filter(failure => Number(failure.coreMeasurementID) === measurementID).length;
+    state.validationFailures = state.validationFailures.filter(failure => Number(failure.coreMeasurementID) !== measurementID);
+    state.errorRows = state.errorRows.filter(row => Number(row.coreMeasurementID) !== measurementID);
+    state.summaryRows = state.summaryRows.map(row =>
+      Number(row.coreMeasurementID) === measurementID ? { ...row, isValidated: null, measurementStatus: 'pending' } : row
+    );
+
+    req.reply({ statusCode: 200, body: { clearedErrorCount } });
+  }).as('clearMeasurementErrors');
 
   cy.intercept('POST', `**/api/refreshviews/measurementssummary/${schema}**`, {
     statusCode: refreshSummaryResponse.statusCode,

@@ -540,7 +540,9 @@ export function InputChip({
           reload(true);
         }}
         onKeyDown={event => {
-          if (event.key === 'Enter' || event.key === 'Tab') {
+          // Enter picks the highlighted option only while the list is open; otherwise it belongs to the grid's Enter navigation.
+          const isOptionListOpen = (event.target as HTMLElement).getAttribute('aria-expanded') === 'true';
+          if (event.key === 'Tab' || (event.key === 'Enter' && isOptionListOpen)) {
             event.stopPropagation();
           }
         }}

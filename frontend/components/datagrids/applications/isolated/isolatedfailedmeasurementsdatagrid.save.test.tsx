@@ -729,69 +729,77 @@ describe('failed measurement correction with the real MUI grid', () => {
     await waitFor(() => expect(screen.getByText(/Row successfully updated!.*DBH rounded to the existing value/s)).toBeInTheDocument());
   });
 
-  it('rejects a clear-indicator clear of spCode as an invalid clear and allows a corrected retry (Opus A3)', async () => {
-    renderGrid({ preview: [response({ error: 'invalid clear', field: 'SpCode' }, false, 422), response(makePreview())] });
-    await waitFor(() => expect(getDataRow()).toBeInTheDocument());
-    const user = userEvent.setup();
-    const row = getDataRow();
-    await user.click(within(row).getByRole('menuitem', { name: /Edit this row/i }));
+  it(
+    'rejects a clear-indicator clear of spCode as an invalid clear and allows a corrected retry (Opus A3)',
+    async () => {
+      renderGrid({ preview: [response({ error: 'invalid clear', field: 'SpCode' }, false, 422), response(makePreview())] });
+      await waitFor(() => expect(getDataRow()).toBeInTheDocument());
+      const user = userEvent.setup();
+      const row = getDataRow();
+      await user.click(within(row).getByRole('menuitem', { name: /Edit this row/i }));
 
-    const cell = row.querySelector('[data-field="spCode"]') as HTMLElement;
-    const speciesInput = within(cell).getByRole('combobox');
-    // Joy's Autocomplete clear indicator is styled `visibility: hidden` until the field
-    // is focused - focus it first, as a real user would before clicking Clear, then
-    // query the button by its accessible role/name.
-    await user.click(speciesInput);
-    await user.click(within(cell).getByRole('button', { name: 'Clear' }));
+      const cell = row.querySelector('[data-field="spCode"]') as HTMLElement;
+      const speciesInput = within(cell).getByRole('combobox');
+      // Joy's Autocomplete clear indicator is styled `visibility: hidden` until the field
+      // is focused - focus it first, as a real user would before clicking Clear, then
+      // query the button by its accessible role/name.
+      await user.click(speciesInput);
+      await user.click(within(cell).getByRole('button', { name: 'Clear' }));
 
-    await user.click(within(row).getByRole('menuitem', { name: /Save your changes/i }));
-    await user.click(await screen.findByRole('button', { name: 'Save Changes' }));
+      await user.click(within(row).getByRole('menuitem', { name: /Save your changes/i }));
+      await user.click(await screen.findByRole('button', { name: 'Save Changes' }));
 
-    const previews = fetchCalls().filter(([url, init]) => String(url).includes('/api/edits/preview') && init?.method === 'POST');
-    expect(previews).toHaveLength(1);
-    expect(JSON.parse(String(previews[0][1]?.body)).newRow).toEqual({ SpCode: '' });
+      const previews = fetchCalls().filter(([url, init]) => String(url).includes('/api/edits/preview') && init?.method === 'POST');
+      expect(previews).toHaveLength(1);
+      expect(JSON.parse(String(previews[0][1]?.body)).newRow).toEqual({ SpCode: '' });
 
-    await waitFor(() => expect(screen.getByText(/Error:.*invalid clear/i)).toBeInTheDocument());
-    expect(fetchCalls().some(([url]) => String(url).includes('/api/edits/apply'))).toBe(false);
-    expect(screen.queryByText('Row successfully updated!')).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/Error:.*invalid clear/i)).toBeInTheDocument());
+      expect(fetchCalls().some(([url]) => String(url).includes('/api/edits/apply'))).toBe(false);
+      expect(screen.queryByText('Row successfully updated!')).not.toBeInTheDocument();
 
-    // Retryable: cancel the rejected clear, then successfully correct the species code.
-    await user.click(within(getDataRow()).getByRole('menuitem', { name: /Cancel your changes/i }));
-    await waitFor(() => expect(within(getDataRow()).getByRole('menuitem', { name: /Edit this row/i })).toBeInTheDocument());
-    const retryUser = await enterSpeciesAndOpenSave();
-    await retryUser.click(await screen.findByTestId('edit-preview-apply'));
-    await waitFor(() => expect(screen.getByText('Row successfully updated!')).toBeInTheDocument());
-  });
+      // Retryable: cancel the rejected clear, then successfully correct the species code.
+      await user.click(within(getDataRow()).getByRole('menuitem', { name: /Cancel your changes/i }));
+      await waitFor(() => expect(within(getDataRow()).getByRole('menuitem', { name: /Edit this row/i })).toBeInTheDocument());
+      const retryUser = await enterSpeciesAndOpenSave();
+      await retryUser.click(await screen.findByTestId('edit-preview-apply'));
+      await waitFor(() => expect(screen.getByText('Row successfully updated!')).toBeInTheDocument());
+    },
+    TWO_SAVE_CYCLE_TEST_TIMEOUT_MS
+  );
 
-  it('rejects a keyboard-cleared spCode (select-all + delete, then blur) as an invalid clear and allows a corrected retry (Opus A3)', async () => {
-    renderGrid({ preview: [response({ error: 'invalid clear', field: 'SpCode' }, false, 422), response(makePreview())] });
-    await waitFor(() => expect(getDataRow()).toBeInTheDocument());
-    const user = userEvent.setup();
-    const row = getDataRow();
-    await user.click(within(row).getByRole('menuitem', { name: /Edit this row/i }));
+  it(
+    'rejects a keyboard-cleared spCode (select-all + delete, then blur) as an invalid clear and allows a corrected retry (Opus A3)',
+    async () => {
+      renderGrid({ preview: [response({ error: 'invalid clear', field: 'SpCode' }, false, 422), response(makePreview())] });
+      await waitFor(() => expect(getDataRow()).toBeInTheDocument());
+      const user = userEvent.setup();
+      const row = getDataRow();
+      await user.click(within(row).getByRole('menuitem', { name: /Edit this row/i }));
 
-    const cell = row.querySelector('[data-field="spCode"]') as HTMLElement;
-    const speciesInput = within(cell).getByRole('combobox') as HTMLInputElement;
-    await user.click(speciesInput);
-    await user.clear(speciesInput);
+      const cell = row.querySelector('[data-field="spCode"]') as HTMLElement;
+      const speciesInput = within(cell).getByRole('combobox') as HTMLInputElement;
+      await user.click(speciesInput);
+      await user.clear(speciesInput);
 
-    await user.click(within(row).getByRole('menuitem', { name: /Save your changes/i }));
-    await user.click(await screen.findByRole('button', { name: 'Save Changes' }));
+      await user.click(within(row).getByRole('menuitem', { name: /Save your changes/i }));
+      await user.click(await screen.findByRole('button', { name: 'Save Changes' }));
 
-    const previews = fetchCalls().filter(([url, init]) => String(url).includes('/api/edits/preview') && init?.method === 'POST');
-    expect(previews).toHaveLength(1);
-    expect(JSON.parse(String(previews[0][1]?.body)).newRow).toEqual({ SpCode: '' });
+      const previews = fetchCalls().filter(([url, init]) => String(url).includes('/api/edits/preview') && init?.method === 'POST');
+      expect(previews).toHaveLength(1);
+      expect(JSON.parse(String(previews[0][1]?.body)).newRow).toEqual({ SpCode: '' });
 
-    await waitFor(() => expect(screen.getByText(/Error:.*invalid clear/i)).toBeInTheDocument());
-    expect(fetchCalls().some(([url]) => String(url).includes('/api/edits/apply'))).toBe(false);
-    expect(screen.queryByText('Row successfully updated!')).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/Error:.*invalid clear/i)).toBeInTheDocument());
+      expect(fetchCalls().some(([url]) => String(url).includes('/api/edits/apply'))).toBe(false);
+      expect(screen.queryByText('Row successfully updated!')).not.toBeInTheDocument();
 
-    await user.click(within(getDataRow()).getByRole('menuitem', { name: /Cancel your changes/i }));
-    await waitFor(() => expect(within(getDataRow()).getByRole('menuitem', { name: /Edit this row/i })).toBeInTheDocument());
-    const retryUser = await enterSpeciesAndOpenSave();
-    await retryUser.click(await screen.findByTestId('edit-preview-apply'));
-    await waitFor(() => expect(screen.getByText('Row successfully updated!')).toBeInTheDocument());
-  });
+      await user.click(within(getDataRow()).getByRole('menuitem', { name: /Cancel your changes/i }));
+      await waitFor(() => expect(within(getDataRow()).getByRole('menuitem', { name: /Edit this row/i })).toBeInTheDocument());
+      const retryUser = await enterSpeciesAndOpenSave();
+      await retryUser.click(await screen.findByTestId('edit-preview-apply'));
+      await waitFor(() => expect(screen.getByText('Row successfully updated!')).toBeInTheDocument());
+    },
+    TWO_SAVE_CYCLE_TEST_TIMEOUT_MS
+  );
 
   it('saves the latest typed dbh value when a real pointer click on Save immediately follows typing (no explicit blur)', async () => {
     const persistedRow: FailedRow = { ...originalRow, dbh: 15.5 };

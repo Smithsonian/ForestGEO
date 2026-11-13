@@ -134,6 +134,7 @@ export const ROUTE_POLICIES = {
   'validations/procedures/[validationType]': 'site-scoped',
   'validations/procedures/shared-cross-census-location': 'site-scoped',
   'validations/procedures/shared-dbh': 'site-scoped',
+  'validations/clearmeasurementerrors': 'site-scoped',
   'validations/run': 'site-scoped',
   'validations/updatepassedvalidations': 'site-scoped',
   'validations/validate-query': 'site-scoped',

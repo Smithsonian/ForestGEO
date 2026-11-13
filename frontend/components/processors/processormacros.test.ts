@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { escape } from 'mysql2';
 import type { GridFilterModel } from '@mui/x-data-grid';
-import { buildFilterModelStub } from './processormacros';
+import { buildFilterModelStub, resolveFilterLogicOperatorSql, SUPPORTED_FILTER_OPERATORS, UnsupportedFilterLogicOperatorError } from './processormacros';
 
 const { getPoolMonitorInstanceMock, poolMonitorMock, loggerMock } = vi.hoisted(() => ({
   getPoolMonitorInstanceMock: vi.fn(),
@@ -131,5 +131,66 @@ describe('buildFilterModelStub SQL escaping', () => {
     expect(sql).toBe(`${SPECIES_COLUMN} IN (${expectedList})`);
     // The quote inside the first element must be escaped, not doubled.
     expect(sql).toContain("'a\\'b'");
+  });
+});
+
+describe('buildFilterModelStub logic operator (SQL injection guard)', () => {
+  const SPECIES_ITEM = { field: 'speciesName', operator: 'equals', value: 'Quercus' };
+  const TAG_ITEM = { field: 'treeTag', operator: 'equals', value: '010203' };
+  const HOSTILE_SEPARATORS = [') OR (1=1) OR (', 'AND 1=1; DROP TABLE trees; --', 'xor', 'AND NOT', ' and', 'and '];
+  const SUPPORTED_OPERATOR_COUNT = 21;
+
+  it.each([
+    [undefined, 'AND'],
+    [null, 'AND'],
+    ['', 'AND'],
+    ['and', 'AND'],
+    ['AND', 'AND'],
+    ['And', 'AND'],
+    ['or', 'OR'],
+    ['OR', 'OR']
+  ])('maps %j to %s', (logicOperator, expected) => {
+    expect(resolveFilterLogicOperatorSql(logicOperator)).toBe(expected);
+  });
+
+  it.each([...HOSTILE_SEPARATORS, 1, { toUpperCase: (): string => 'OR 1=1' }, ['or']])('rejects %j with UnsupportedFilterLogicOperatorError', logicOperator => {
+    expect(() => resolveFilterLogicOperatorSql(logicOperator)).toThrow(UnsupportedFilterLogicOperatorError);
+  });
+
+  it.each(HOSTILE_SEPARATORS)('never emits a hostile separator into the SQL text: %j', logicOperator => {
+    let emitted: string | null = null;
+    let thrown: unknown = null;
+    try {
+      emitted = buildFilterModelStub({ items: [SPECIES_ITEM, TAG_ITEM], logicOperator } as unknown as GridFilterModel);
+    } catch (error) {
+      thrown = error;
+    }
+    console.log('[logic operator guard]', JSON.stringify({ logicOperator, emitted, thrown: thrown instanceof Error ? thrown.name : thrown }));
+    expect(emitted).toBeNull();
+    expect(thrown).toBeInstanceOf(UnsupportedFilterLogicOperatorError);
+  });
+
+  it('still joins two valid conditions with OR', () => {
+    const sql = buildFilterModelStub({ items: [SPECIES_ITEM, TAG_ITEM], logicOperator: 'or' } as GridFilterModel);
+    expect(sql).toBe("`SpeciesName` = 'Quercus' OR `TreeTag` = '010203'");
+  });
+
+  it('a one-item model still rejects a hostile separator (it is validated before the join)', () => {
+    expect(() => buildFilterModelStub({ items: [SPECIES_ITEM], logicOperator: ') OR (1=1' } as unknown as GridFilterModel)).toThrow(
+      UnsupportedFilterLogicOperatorError
+    );
+  });
+
+  it('exports exactly the operators buildCondition implements', () => {
+    const SAMPLE_VALUES: Record<string, unknown> = { isAnyOf: ['a', 'b'], isEmpty: undefined, isNotEmpty: undefined };
+    const observed = [...SUPPORTED_FILTER_OPERATORS].map(operator => ({
+      operator,
+      sql: buildFilterModelStub({
+        items: [{ field: 'speciesName', operator, value: operator in SAMPLE_VALUES ? SAMPLE_VALUES[operator] : 'x' }]
+      } as GridFilterModel)
+    }));
+    console.log('[supported operators]', JSON.stringify(observed));
+    expect(observed.filter(entry => entry.sql === '')).toEqual([]);
+    expect(SUPPORTED_FILTER_OPERATORS.size).toBe(SUPPORTED_OPERATOR_COUNT);
   });
 });

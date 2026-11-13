@@ -47,6 +47,7 @@ export interface InfiniteScrollPaginationProps {
 
 export interface CustomGridPaginationProps extends NonNullable<GridSlotProps['pagination']> {
   disabled?: boolean;
+  disabledReason?: string;
   infiniteScroll?: InfiniteScrollPaginationProps;
   /** Stable grid identity used to remember a rows-per-page preference. */
   gridType?: string;
@@ -141,7 +142,11 @@ export default function CustomGridPagination(props: CustomGridPaginationProps) {
   const navDisabled = disabled || isInfinite;
 
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1, py: 0.5, width: '100%', flexWrap: 'wrap', gap: 1 }}>
+    <Box
+      data-testid="custom-grid-pagination"
+      title={props.disabled && props.disabledReason ? props.disabledReason : undefined}
+      sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1, py: 0.5, width: '100%', flexWrap: 'wrap', gap: 1 }}
+    >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
         {isInfinite && infiniteScroll ? (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>

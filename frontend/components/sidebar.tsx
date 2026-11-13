@@ -1,6 +1,6 @@
 'use client';
 import * as React from 'react';
-import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useState } from 'react';
 import { preloadKey } from '@/lib/query/preload';
 import { queryKey } from '@/lib/query';
 import { createFetchQuery } from '@/config/servergridhelpers';
@@ -132,6 +132,8 @@ interface SidebarProps {
  * /dashboard (bug F7). Real user interactions (click/keyboard) always carry an event, so
  * only they may clear a selection.
  */
+export const SIDEBAR_WIDTH = 'clamp(240px, 24vw, 340px)';
+
 export const isProgrammaticSelectClear = (event: React.SyntheticEvent | null, newValue: number | string | null): boolean => event === null && newValue === null;
 
 const ADMIN_NAV = [
@@ -174,48 +176,12 @@ export default function Sidebar(props: SidebarProps) {
 
   const { setCensusListLoaded: _setCensusListLoaded } = props;
 
-  const sidebarRef = useRef<HTMLDivElement>(null);
-  const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
   const [isSiteDropdownOpen, setSiteDropdownOpen] = useState(false);
   const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
   // Admin pages used to forcibly clear the user's site/plot/census selections on mount.
   // That side-effect was hostile UX (sub-paths like /admin/provision/runs would wipe state),
   // and admin pages are overlays — they don't need a clean context. Removed in 2026-05 task 13.
-
-  useEffect(() => {
-    let debounceTimer: NodeJS.Timeout | null = null;
-
-    const updateSidebarWidth = () => {
-      if (sidebarRef.current) {
-        const scrollWidth = sidebarRef.current.scrollWidth;
-        const calculatedWidth = Math.max(scrollWidth, 340); // Minimum width
-
-        setSidebarWidth(Math.min(calculatedWidth + 10, 380)); // Reduced max width from 500 to 380
-      }
-    };
-
-    // Debounce resize updates to prevent excessive recalculations
-    const debouncedUpdate = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(updateSidebarWidth, 300);
-    };
-
-    const resizeObserver = new ResizeObserver(debouncedUpdate);
-
-    // Only observe the container, not all children
-    if (sidebarRef.current) {
-      resizeObserver.observe(sidebarRef.current);
-    }
-
-    // Initial calculation
-    updateSidebarWidth();
-
-    return () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      resizeObserver.disconnect();
-    };
-  }, []); // Remove context dependencies - observer doesn't need to recreate
 
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
     if (selectedSite === undefined) {
@@ -355,8 +321,14 @@ export default function Sidebar(props: SidebarProps) {
         <Typography level="body-md" className="sidebar-item" data-testid={'selected-census-plotcensusnumber'}>
           {`Census: ${selectedCensus?.plotCensusNumber}`}
         </Typography>
-        <Stack direction={'column'} alignItems={'start'}>
-          <Typography color={!currentCensus ? 'danger' : 'primary'} level="body-sm" className="sidebar-item" data-testid={'selected-census-dates'}>
+        <Stack direction={'column'} alignItems={'start'} sx={{ maxWidth: '100%', minWidth: 0 }}>
+          <Typography
+            color={!currentCensus ? 'danger' : 'primary'}
+            level="body-sm"
+            className="sidebar-item"
+            data-testid={'selected-census-dates'}
+            sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}
+          >
             {currentCensus !== undefined && dateMessage}
           </Typography>
         </Stack>
@@ -749,7 +721,6 @@ export default function Sidebar(props: SidebarProps) {
       <Stack direction={'row'} sx={{ display: 'flex', width: '100%', maxWidth: '100vw', minWidth: 0 }}>
         <Box
           component="nav"
-          ref={sidebarRef}
           id="side-navigation"
           className="Sidebar"
           aria-label="Site navigation sidebar"
@@ -758,7 +729,7 @@ export default function Sidebar(props: SidebarProps) {
             top: 0,
             left: 0,
             height: '100vh',
-            width: { xs: '100%', md: `${sidebarWidth}px` },
+            width: { xs: '100%', md: 'var(--Sidebar-width)' },
             maxWidth: '100vw',
             boxSizing: 'border-box',
             p: 2,
@@ -776,16 +747,7 @@ export default function Sidebar(props: SidebarProps) {
             }
           }}
         >
-          <GlobalStyles
-            styles={theme => ({
-              ':root': {
-                '--Sidebar-width': `${sidebarWidth}px`,
-                [theme.breakpoints.up('lg')]: {
-                  '--Sidebar-width': `${sidebarWidth}px`
-                }
-              }
-            })}
-          />
+          <GlobalStyles styles={{ ':root': { '--Sidebar-width': SIDEBAR_WIDTH } }} />
           <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Stack direction={'column'} sx={{ marginRight: '1em' }}>
@@ -872,7 +834,7 @@ export default function Sidebar(props: SidebarProps) {
                 <Avatar sx={{ marginRight: 1 }} alt={'site options icon'}>
                   <TravelExploreIcon />
                 </Avatar>
-                <Box sx={{ flexGrow: 1 }}>{renderSiteOptions()}</Box>
+                <Box sx={{ flexGrow: 1, minWidth: 0 }}>{renderSiteOptions()}</Box>
               </Box>
               {currentSite !== undefined && !isAdminPage && (
                 <>
@@ -880,7 +842,9 @@ export default function Sidebar(props: SidebarProps) {
                     <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'plot options icon'}>
                       <PlotLogo />
                     </Avatar>
-                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: currentPlot ? '0.5em' : '1em' }}>{renderPlotOptions()}</Box>
+                    <Box sx={{ flexGrow: 1, minWidth: 0, marginLeft: '0.5em', alignItems: 'center', marginRight: currentPlot ? '0.5em' : '1em' }}>
+                      {renderPlotOptions()}
+                    </Box>
                     {currentPlot && (
                       <Tooltip title="Clear plot selection" arrow>
                         <IconButton
@@ -908,7 +872,7 @@ export default function Sidebar(props: SidebarProps) {
                         <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'census options icon'}>
                           <CensusLogo />
                         </Avatar>
-                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: currentCensus ? '0.5em' : '1em' }}>
+                        <Box sx={{ flexGrow: 1, minWidth: 0, marginLeft: '0.5em', alignItems: 'center', marginRight: currentCensus ? '0.5em' : '1em' }}>
                           {renderCensusOptions()}
                         </Box>
                         {currentCensus && (

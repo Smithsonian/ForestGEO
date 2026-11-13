@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { formatCensusWindowDuration, getCensusStatus, getCensusWindow, getCensusWindowBounds, getMeasurementBounds, getMeasurementSpan } from './censuswindow';
+import {
+  formatCensusWindowDuration,
+  getCensusStatus,
+  getCensusWindow,
+  getCensusWindowBounds,
+  getMeasurementBounds,
+  getMeasurementSpan,
+  isCensusEndBeforeStart,
+  getCensusDatesError,
+  CENSUS_INVALID_DATE_MESSAGE
+} from './censuswindow';
 import type { CalendarDay } from './dateformats';
 
 const TODAY: CalendarDay = { year: 2026, month: 10, day: 20 };
@@ -168,5 +178,39 @@ describe('open ranges (R5)', () => {
     const empty = [{ censusStartDate: null, censusEndDate: null, firstMeasurementDate: null, lastMeasurementDate: null }];
     expect(getCensusWindowBounds(empty)).toEqual({ start: undefined, end: undefined, endIsOpen: false });
     expect(getMeasurementBounds(empty)).toEqual({ first: undefined, last: undefined });
+  });
+});
+
+describe('isCensusEndBeforeStart', () => {
+  it('is true only when the end day precedes the start day', () => {
+    expect(isCensusEndBeforeStart('2026-03-10', '2026-03-09')).toBe(true);
+    expect(isCensusEndBeforeStart('2026-03-10', '2026-03-10')).toBe(false);
+    expect(isCensusEndBeforeStart('2026-03-10', '2026-03-11')).toBe(false);
+  });
+
+  it('is false when either day is missing, so an open-ended census is allowed', () => {
+    expect(isCensusEndBeforeStart('2026-03-10', null)).toBe(false);
+    expect(isCensusEndBeforeStart('2026-03-10', '')).toBe(false);
+    expect(isCensusEndBeforeStart(null, '2026-03-10')).toBe(false);
+  });
+
+  it('reads database DATE values (UTC-midnight Dates) by calendar day in every zone', () => {
+    // A persisted StartDate arrives from mysql2 as a UTC-midnight Date; the request's EndDate is a string.
+    const persistedStart = new Date('2026-01-01T00:00:00.000Z');
+    expect(isCensusEndBeforeStart(persistedStart, '2025-12-31')).toBe(true);
+    expect(isCensusEndBeforeStart(persistedStart, '2026-01-01')).toBe(false);
+  });
+});
+
+describe('getCensusDatesError', () => {
+  it('accepts leap days, MySQL DATE year bounds, and an open end', () => {
+    expect(getCensusDatesError('2024-02-29', null)).toBeNull();
+    expect(getCensusDatesError('1000-01-01', '9999-12-31')).toBeNull();
+    expect(getCensusDatesError(new Date('2024-02-29T00:00:00.000Z'), '2024-03-01')).toBeNull();
+  });
+
+  it('rejects invalid calendar days and Date objects instead of treating them as absent', () => {
+    expect(getCensusDatesError('2023-02-29', null)).toBe(CENSUS_INVALID_DATE_MESSAGE);
+    expect(getCensusDatesError('2024-02-29', new Date(Number.NaN))).toBe(CENSUS_INVALID_DATE_MESSAGE);
   });
 });

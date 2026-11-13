@@ -2,31 +2,7 @@
 'use client';
 
 import { DynamicButton, ExtendedGridFilterModel, RowControl, VisibleFilter } from '@/config/datagridhelpers';
-import {
-  Badge,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  Dropdown,
-  FormLabel,
-  IconButton,
-  ListItemDecorator,
-  Menu,
-  MenuButton,
-  MenuItem,
-  Modal,
-  ModalDialog,
-  Skeleton,
-  Stack,
-  Switch,
-  Tooltip,
-  Typography
-} from '@mui/joy';
+import { Badge, Box, Button, Chip, Divider, Dropdown, IconButton, ListItemDecorator, Menu, MenuButton, MenuItem, Stack, Tooltip, Typography } from '@mui/joy';
 import {
   ColumnsPanelTrigger,
   FilterPanelTrigger,
@@ -44,19 +20,17 @@ import { ClearIcon } from '@mui/x-date-pickers/icons';
 import React, { Dispatch, RefObject, SetStateAction, useEffect, useState } from 'react';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
-import GridOnIcon from '@mui/icons-material/GridOn';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import CheckIcon from '@mui/icons-material/Check';
 import CancelPresentationIcon from '@mui/icons-material/CancelPresentation';
 import VerifiedIcon from '@mui/icons-material/Verified';
 import ScheduleIcon from '@mui/icons-material/Schedule';
-import { DatagridType, FormType, getTableHeaders } from '@/config/macros/formdetails';
+import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { Plot, Site } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { Add, CallSplit, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import RenderGridFormExplanations from '@/components/client/rendergridformexplanations';
+import HeaderReferenceDialog, { headerReferenceGridType } from '@/components/client/modals/headerreferencedialog';
+import MeasurementsExportModal from '@/components/client/modals/measurementsexportmodal';
 
 // The errors toggle filters (IsValidated = FALSE OR unresolved log entry); its tooltip breaks that
 // down into rows with unresolved logged errors vs FALSE rows with no log entry (not yet validated).
@@ -108,13 +82,6 @@ const defaultControl: RowControl = {
   toggle: () => {},
   count: 0
 };
-
-function headerReferenceGridType(gridType?: string): DatagridType | null {
-  if (!gridType) return null;
-  if (gridType === 'measurements' || gridType === 'measurementssummary') return DatagridType.measurementssummaryview;
-  if (gridType === 'species') return DatagridType.alltaxonomiesview;
-  return Object.values(DatagridType).includes(gridType as DatagridType) ? (gridType as DatagridType) : null;
-}
 
 interface MeasurementFilterChipProps {
   control: RowControl;
@@ -190,9 +157,6 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
   const [isTyping, setIsTyping] = useState(false);
   const [openExportModal, setOpenExportModal] = useState(false);
   const [openHeaderReference, setOpenHeaderReference] = useState(false);
-  const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
-  const [exportVisibility, setExportVisibility] = useState<VisibleFilter[]>(filterModel?.visible || []);
-  const [isExporting, setIsExporting] = useState(false);
   const apiRef = useGridApiContext();
   const referenceGridType = headerReferenceGridType(gridType);
 
@@ -259,46 +223,6 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
 
     URL.revokeObjectURL(url);
   }
-
-  const downloadExportedData = async () => {
-    setIsExporting(true);
-    try {
-      // 2a) generic two-arg export
-      if (handleExport) {
-        const data = await handleExport(exportVisibility, exportType);
-        const blob = new Blob([data], {
-          type: 'text/csv;charset=utf-8;'
-        });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `measurements_${exportType}_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      }
-      // 2b) single-purpose CSV
-      else if (handleExportCSV) {
-        await handleExportCSV();
-      }
-      // 2c) "export all" fallback
-      else {
-        await handleExportAll!();
-      }
-    } catch (error: any) {
-      console.error('Export failed:', error);
-      // Could add a snackbar notification here if available in props
-      alert(`Export failed: ${error.message || 'Unknown error'}`);
-    } finally {
-      setIsExporting(false);
-      setOpenExportModal(false);
-    }
-  };
-
-  const handleChipToggle = (type: string) => {
-    setExportVisibility(prev => (prev.includes(type as VisibleFilter) ? prev.filter(t => t !== (type as VisibleFilter)) : [...prev, type as VisibleFilter]));
-  };
 
   const csvHeaders = gridColumns
     .filter(column => !Object.keys(apiRef.current.state.columns.columnVisibilityModel).includes(column.field))
@@ -600,230 +524,18 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
           )}
         </Box>
         {referenceGridType && (
-          <Modal open={openHeaderReference} onClose={() => setOpenHeaderReference(false)}>
-            <ModalDialog aria-labelledby="header-reference-dialog-title" sx={{ width: 'min(1100px, calc(100vw - 32px))', maxHeight: '90vh', overflow: 'auto' }}>
-              <DialogTitle id="header-reference-dialog-title">Header reference</DialogTitle>
-              <RenderGridFormExplanations datagridType={referenceGridType} />
-              <DialogActions>
-                <Button onClick={() => setOpenHeaderReference(false)}>Close</Button>
-              </DialogActions>
-            </ModalDialog>
-          </Modal>
+          <HeaderReferenceDialog open={openHeaderReference} onClose={() => setOpenHeaderReference(false)} datagridType={referenceGridType} />
         )}
         {handleExport && (
-          <Modal
+          <MeasurementsExportModal
             open={openExportModal}
             onClose={() => setOpenExportModal(false)}
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            <ModalDialog
-              role={'dialog'}
-              aria-labelledby={'exporting-data'}
-              aria-describedby={'export-description'}
-              sx={{
-                width: '90%',
-                maxWidth: '60vh',
-                maxHeight: '90vh',
-                overflowY: 'auto',
-                p: 3
-              }}
-            >
-              <DialogTitle id={'exporting-data'}>Exporting Data</DialogTitle>
-              <DialogContent
-                id={'export-description'}
-                sx={{
-                  mt: 1,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  flexGrow: 1,
-                  overflowY: 'auto'
-                }}
-              >
-                <Stack direction={'row'} sx={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Stack direction={'column'}>
-                    <Typography level={'body-md'}>Desired Format Type:</Typography>
-                    <Typography level={'body-sm'}>You can export data in either of these formats:</Typography>
-                    <Stack direction={'row'}>
-                      <Chip>
-                        <strong>Table CSV</strong>
-                      </Chip>
-                      <Chip>
-                        <strong>Form CSV</strong>
-                      </Chip>
-                    </Stack>
-                  </Stack>
-                  <Switch
-                    aria-label={'toggle whether to export as a CSV or a form'}
-                    size={'lg'}
-                    checked={exportType === 'csv'}
-                    onChange={(event: React.ChangeEvent<HTMLInputElement>) => (event.target.checked ? setExportType('csv') : setExportType('form'))}
-                    endDecorator={
-                      <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-                        <Skeleton loading={exportType !== 'csv'} variant={'circular'} width={'1.5em'} height={'1.5em'}>
-                          <GridOnIcon />
-                        </Skeleton>
-                        <Typography level={'body-sm'}>
-                          <Skeleton loading={exportType !== 'csv'}>CSV</Skeleton>
-                        </Typography>
-                      </Stack>
-                    }
-                    startDecorator={
-                      <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-                        <Skeleton loading={exportType !== 'form'} variant={'circular'} width={'1.5em'} height={'1.5em'}>
-                          <PictureAsPdfIcon />
-                        </Skeleton>
-                        <Typography level={'body-sm'}>
-                          <Skeleton loading={exportType !== 'form'}>Form</Skeleton>
-                        </Typography>
-                      </Stack>
-                    }
-                    sx={{
-                      marginRight: '1.5em',
-                      transform: 'scale(1.25)',
-                      transformOrigin: 'center'
-                    }}
-                  />
-                </Stack>
-                <Divider sx={{ my: 1 }} />
-                <FormLabel id={'export-headers'} htmlFor={'display-export-headers'}>
-                  Export Headers:
-                </FormLabel>
-                <Box
-                  id={'display-export-headers'}
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(125px, 0.5fr))',
-                    gap: '0.5rem',
-                    mb: 1,
-                    width: '100%',
-                    boxSizing: 'border-box'
-                  }}
-                >
-                  {exportType === 'csv'
-                    ? csvHeaders.map((header, index) => (
-                        <Chip key={index} variant={'soft'} color={'primary'}>
-                          {header}
-                        </Chip>
-                      ))
-                    : formHeaders.map((label, index) => (
-                        <Chip key={index} variant={'soft'} color={'primary'}>
-                          {label}
-                        </Chip>
-                      ))}
-                </Box>
-                <Divider sx={{ my: 1 }} />
-                <Typography level={'title-md'}>Please choose your desired visibility settings using the provided legend:</Typography>
-                <Stack
-                  direction={'row'}
-                  sx={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    justifyContent: 'space-between',
-                    gap: 1
-                  }}
-                >
-                  <Chip
-                    component={'button'}
-                    type={'button'}
-                    role={'checkbox'}
-                    aria-checked={exportVisibility.includes('valid')}
-                    tabIndex={0}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleChipToggle('valid');
-                      }
-                    }}
-                    color={'success'}
-                    size={'lg'}
-                    aria-label={exportVisibility.includes('valid') ? 'Rows passing validation will be exported' : "Rows passing validation won't be exported"}
-                    variant={exportVisibility.includes('valid') ? 'soft' : 'outlined'}
-                    startDecorator={exportVisibility.includes('valid') ? <CheckIcon /> : undefined}
-                    sx={{
-                      flex: 1,
-                      textAlign: 'center',
-                      whiteSpace: 'normal',
-                      wordBreak: 'break-word'
-                    }}
-                    onClick={() => handleChipToggle('valid')}
-                  >
-                    Rows passing validation
-                  </Chip>
-                  <Chip
-                    component={'button'}
-                    type={'button'}
-                    role={'checkbox'}
-                    aria-checked={exportVisibility.includes('errors')}
-                    tabIndex={0}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleChipToggle('errors');
-                      }
-                    }}
-                    color={'danger'}
-                    size={'lg'}
-                    variant={exportVisibility.includes('errors') ? 'soft' : 'outlined'}
-                    aria-label={exportVisibility.includes('errors') ? 'Rows failing validation will be exported' : "Rows failing validation won't be exported"}
-                    startDecorator={exportVisibility.includes('errors') ? <CheckIcon /> : undefined}
-                    sx={{
-                      flex: 1,
-                      textAlign: 'center',
-                      whiteSpace: 'normal',
-                      wordBreak: 'break-word'
-                    }}
-                    onClick={() => handleChipToggle('errors')}
-                  >
-                    Rows failing validation
-                  </Chip>
-                  <Chip
-                    component={'button'}
-                    type={'button'}
-                    role={'checkbox'}
-                    aria-checked={exportVisibility.includes('pending')}
-                    tabIndex={0}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleChipToggle('pending');
-                      }
-                    }}
-                    color={'primary'}
-                    size={'lg'}
-                    variant={exportVisibility.includes('pending') ? 'soft' : 'outlined'}
-                    aria-label={exportVisibility.includes('pending') ? 'Rows pending validation will be exported' : "Rows pending validation won't be exported"}
-                    startDecorator={exportVisibility.includes('pending') ? <CheckIcon /> : undefined}
-                    sx={{
-                      flex: 1,
-                      textAlign: 'center',
-                      whiteSpace: 'normal',
-                      wordBreak: 'break-word'
-                    }}
-                    onClick={() => handleChipToggle('pending')}
-                  >
-                    Rows pending validation
-                  </Chip>
-                </Stack>
-              </DialogContent>
-              <DialogActions>
-                <Button
-                  onClick={downloadExportedData}
-                  disabled={isExporting}
-                  startDecorator={isExporting ? <CircularProgress size="sm" /> : undefined}
-                  aria-label={'Export selected data/visibility and close the modal'}
-                >
-                  {isExporting ? 'Exporting...' : 'Export'}
-                </Button>
-                <Button aria-label={'Cancel the operation and close the modal'} onClick={() => setOpenExportModal(false)} disabled={isExporting}>
-                  Cancel
-                </Button>
-              </DialogActions>
-            </ModalDialog>
-          </Modal>
+            handleExport={handleExport}
+            initialVisibility={filterModel?.visible || []}
+            csvHeaders={csvHeaders}
+            formHeaders={formHeaders}
+            fileNameParts={{ schemaName: currentSite?.schemaName, plotName: currentPlot?.plotName, plotCensusNumber: currentCensus?.plotCensusNumber }}
+          />
         )}
       </Toolbar>
     </>

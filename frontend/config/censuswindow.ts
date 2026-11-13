@@ -1,4 +1,12 @@
-import { CalendarDay, calendarDayNumber, calendarMonthsBetween, compareCalendarDays, parseCalendarDay, todayCalendarDay } from '@/config/dateformats';
+import {
+  CalendarDay,
+  type CalendarDayInput,
+  calendarDayNumber,
+  calendarMonthsBetween,
+  compareCalendarDays,
+  parseCalendarDay,
+  todayCalendarDay
+} from '@/config/dateformats';
 
 type DateInput = string | Date | null | undefined;
 
@@ -105,4 +113,37 @@ export function formatCensusWindowDuration(ranges: CensusDateFields[] | undefine
   const years = Math.floor(months / 12);
   const remainingMonths = months % 12;
   return remainingMonths === 0 ? `${years} year${years !== 1 ? 's' : ''}` : `${years}y ${remainingMonths}m`;
+}
+
+/** A census window as the edit form and the PATCH payload carry it: calendar days, end optional. */
+export interface CensusDates {
+  startDate: string;
+  endDate: string | null;
+}
+
+export const CENSUS_START_DATE_REQUIRED_MESSAGE = 'Start date is required.';
+export const CENSUS_END_BEFORE_START_MESSAGE = 'End date cannot be before the start date.';
+export const CENSUS_INVALID_DATE_MESSAGE = 'Census dates must be valid YYYY-MM-DD dates between years 1000 and 9999.';
+export const CENSUS_DATES_SAVE_FAILURE_MESSAGE = 'Failed to save the census dates. Please try again.';
+export const CENSUS_DATES_REFRESH_FAILURE_MESSAGE = 'Census dates saved, but refreshing the census list failed. Reload the page to see the new dates.';
+
+/** True when both days are set and the end day falls before the start day. */
+export function isCensusEndBeforeStart(start: CalendarDayInput, end: CalendarDayInput): boolean {
+  const startDay = parseCalendarDay(start);
+  const endDay = parseCalendarDay(end);
+  return startDay !== undefined && endDay !== undefined && compareCalendarDays(endDay, startDay) < 0;
+}
+
+/** Accept canonical request strings or database DATE objects, never MySQL's permissive date coercions. */
+function isValidCensusDate(value: unknown): value is string | Date {
+  if (!(value instanceof Date) && (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))) return false;
+  const day = parseCalendarDay(value);
+  return day !== undefined && day.year >= 1000 && day.year <= 9999;
+}
+
+export function getCensusDatesError(start: unknown, end: unknown): string | null {
+  if (start === null || start === undefined || start === '') return CENSUS_START_DATE_REQUIRED_MESSAGE;
+  if (!isValidCensusDate(start) || (end !== null && end !== undefined && !isValidCensusDate(end))) return CENSUS_INVALID_DATE_MESSAGE;
+  if (isCensusEndBeforeStart(start, end as CalendarDayInput)) return CENSUS_END_BEFORE_START_MESSAGE;
+  return null;
 }

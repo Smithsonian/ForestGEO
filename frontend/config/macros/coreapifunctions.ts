@@ -11,10 +11,14 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { auth } from '@/auth';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
+import type { Session } from 'next-auth';
 import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutation';
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { trimReferenceTextFields } from '@/lib/reference-text';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
+import { getCensusDatesError } from '@/config/censuswindow';
+import { toCalendarDayString, type CalendarDayInput } from '@/config/dateformats';
 
 // Mapping from dataType to primary key column name
 const PRIMARY_KEY_MAP: Record<string, string> = {
@@ -391,6 +395,14 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         else if (typeof requestedChanges.Code === 'string' && requestedChanges.Code === '') throw new MutationRequestError('Attribute code cannot be blank');
       }
       const newRowData = { ...persistedBefore, ...requestedChanges };
+      if (dataType === 'census' && ('StartDate' in requestedChanges || 'EndDate' in requestedChanges)) {
+        const dateError = getCensusDatesError(newRowData.StartDate, newRowData.EndDate);
+        if (dateError) throw new MutationRequestError(dateError);
+        // A partial PATCH may leave one date as a mysql2 UTC-midnight Date. Serialize
+        // both as calendar days so SQL formatting cannot shift the untouched date.
+        newRowData.StartDate = toCalendarDayString(newRowData.StartDate as CalendarDayInput);
+        newRowData.EndDate = toCalendarDayString(newRowData.EndDate as CalendarDayInput);
+      }
       const { [demappedGridID]: updatedGridIDKey, ...remainingProperties } = newRowData;
 
       let dataToUpdate;
@@ -744,12 +756,21 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
   const connectionManager = ConnectionManager.getInstance();
+  const session = await auth();
+  try {
+    assertSessionMayEdit(session as Session);
+  } catch (error) {
+    if (error instanceof PendingUserEditForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: HTTPResponses.FORBIDDEN });
+    }
+    throw error;
+  }
+  const changedBy = authenticatedSessionIdentity(session?.user);
   try {
     assertMutableDataType('DELETE', params.dataType);
     const { newRow } = await readMutationBody(request, 'DELETE');
     const primaryKeyColumn = PRIMARY_KEY_MAP[params.dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
     const demappedGridID = primaryKeyColumn;
-    const changedBy = await changelogChangedBy();
 
     await connectionManager.withTransaction(async tx => {
       const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
