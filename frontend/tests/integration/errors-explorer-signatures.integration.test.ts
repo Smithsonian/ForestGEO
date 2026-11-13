@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import ailogger from '@/ailogger';
 import { DEFAULT_ERROR_EXPLORER_FILTERS, type ErrorExplorerFacetsResponse } from '@/config/errorsexplorer';
 import * as production from '@/app/api/errors/explorer/_shared';
+import { LOCALE_TIE_FALLBACK_WARNING, SIGNATURE_FALLBACK_WARNING, SIGNATURE_THRESHOLD_WARNING } from '@/app/api/errors/explorer/_shared';
 import {
   buildHistogramWithFlagsStatement,
   ERROR_EXPLORER_STATEMENT_LABELS,
@@ -20,8 +21,11 @@ import {
   distinctSignatureTypesFixture,
   EQUIVALENCE_GROUP_CONCAT_MAX_LEN,
   expectExplorerEqual,
+  failedRowSignatureFixture,
+  FAILED_SIGNATURE_MEASUREMENT_IDS,
   FIRST_CENSUS_ID,
   FIXTURE_HOOK_TIMEOUT_MS,
+  localeTieErrorTypeFixture,
   localeTieMessageFixture,
   LOCALE_TIE_NFC_TEXT,
   LOCALE_TIE_NFD_TEXT,
@@ -31,6 +35,10 @@ import {
   replaceFixture,
   seedDistinctSignatureMeasurements,
   setGroupConcatMaxLen,
+  SHARED_IDENTITY_CATALOG_ENTRY_LINK_COUNT,
+  SHARED_IDENTITY_ERROR_TYPES,
+  SHARED_IDENTITY_MEASUREMENT_COUNT,
+  sharedIdentityFixture,
   SIGNATURE_WITNESS_COMPLETE_LIMIT,
   SIGNATURE_WITNESS_CUT_INSIDE_KEY_LIMIT,
   SIGNATURE_WITNESS_CUT_TO_OTHER_KEY_LIMIT,
@@ -45,9 +53,9 @@ vi.mock('@/ailogger', () => ({ default: { warn: vi.fn(), error: vi.fn(), info: v
 
 const SIGNATURES_DATABASE = `${DEFAULT_TEST_CONFIG.database}_errsig`;
 const LARGE_FIXTURE_TEST_TIMEOUT_MS = 5 * 60 * 1000;
-const SIGNATURE_FALLBACK_WARNING = 'Errors explorer: a cut error-type signature sent this request to the Node path';
-const SIGNATURE_THRESHOLD_WARNING = 'Errors explorer: the signature histogram returned more rows than the warning threshold';
-const LOCALE_TIE_FALLBACK_WARNING = 'Errors explorer: facet values that localeCompare ties sent this request to the Node path';
+const ACTIVE_COUNT_SQL_MARKER = 'SELECT COUNT(*) AS n';
+const ACTIVE_COUNT_KIND = 'active-count';
+const UNLABELLED_KIND = 'unlabelled';
 const FACETS_REQUEST_KIND = 'facets';
 const MESSAGE_COUNTS_REQUEST_KIND = 'message-counts';
 
@@ -137,14 +145,14 @@ describe('errors explorer: signature histogram against the frozen oracle (#544)'
 
   const warningMessages = () => warn().mock.calls.map(call => call[0]);
   const warningsOf = (message: string) => warn().mock.calls.filter(call => call[0] === message);
+  const kindOf = (statement: RecordedStatement) => statement.label ?? (statement.sql.includes(ACTIVE_COUNT_SQL_MARKER) ? ACTIVE_COUNT_KIND : UNLABELLED_KIND);
+  /** Facets run the catalog, the histogram and the active count at once, so their completion order is not fixed. */
+  const sortedKindsOf = (statements: RecordedStatement[]) => statements.map(kindOf).sort();
   const usedOnlyCatalogAndHistogram = (statements: RecordedStatement[], histogramLabel: string) =>
     statements.every(statement => statement.label === ERROR_EXPLORER_STATEMENT_LABELS.catalog || statement.label === histogramLabel);
   const labelsOf = (statements: RecordedStatement[]) => statements.map(statement => statement.label);
-  const FALLBACK_FACET_LABELS = [
-    ERROR_EXPLORER_STATEMENT_LABELS.catalog,
-    ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags,
-    ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows
-  ];
+  const SQL_FACET_KINDS = [ERROR_EXPLORER_STATEMENT_LABELS.catalog, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags, ACTIVE_COUNT_KIND].sort();
+  const FALLBACK_FACET_KINDS = [...SQL_FACET_KINDS, ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows].sort();
   const FALLBACK_COUNT_LABELS = [
     ERROR_EXPLORER_STATEMENT_LABELS.catalog,
     ERROR_EXPLORER_STATEMENT_LABELS.histogramWithoutFlags,
@@ -175,10 +183,7 @@ describe('errors explorer: signature histogram against the frozen oracle (#544)'
       const actual = await expectProductionEqualsOracle('limit 6', SIGNATURE_WITNESS_COMPLETE_LIMIT);
 
       expect(warningMessages(), 'no warning when every signature is whole').toEqual([]);
-      expect(
-        usedOnlyCatalogAndHistogram(actual.facetStatements, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags),
-        'facets read only the catalog and the histogram'
-      ).toBe(true);
+      expect(sortedKindsOf(actual.facetStatements), 'facets read only the catalog, the histogram and the active count').toEqual(SQL_FACET_KINDS);
       expect(
         usedOnlyCatalogAndHistogram(actual.countStatements, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithoutFlags),
         'message counts read only the catalog and the histogram'
@@ -211,9 +216,14 @@ describe('errors explorer: signature histogram against the frozen oracle (#544)'
         warningsOf(SIGNATURE_FALLBACK_WARNING).map(call => call[1]),
         'one fallback warning per request'
       ).toEqual([expect.objectContaining({ requestKind: FACETS_REQUEST_KIND }), expect.objectContaining({ requestKind: MESSAGE_COUNTS_REQUEST_KIND })]);
-      expect(labelsOf(actual.facetStatements), 'facets: catalog, histogram, then one scope raw-rows statement and no member-group statement').toEqual(
-        FALLBACK_FACET_LABELS
-      );
+      expect(
+        sortedKindsOf(actual.facetStatements),
+        'facets: catalog, histogram and active count, then one scope raw-rows statement and no member-group statement'
+      ).toEqual(FALLBACK_FACET_KINDS);
+      expect(
+        actual.facetStatements.filter(statement => kindOf(statement) === ACTIVE_COUNT_KIND),
+        'the fallback reuses the active count it already ran'
+      ).toHaveLength(1);
       expect(labelsOf(actual.countStatements), 'message counts: catalog, histogram, then one scope raw-rows statement and no member-group statement').toEqual(
         FALLBACK_COUNT_LABELS
       );
@@ -231,7 +241,7 @@ describe('errors explorer: signature histogram against the frozen oracle (#544)'
       const actual = await expectProductionEqualsOracle('limit 4', SIGNATURE_WITNESS_CUT_INSIDE_KEY_LIMIT);
 
       expect(warningsOf(SIGNATURE_FALLBACK_WARNING)).toHaveLength(2);
-      expect(labelsOf(actual.facetStatements)).toEqual(FALLBACK_FACET_LABELS);
+      expect(sortedKindsOf(actual.facetStatements)).toEqual(FALLBACK_FACET_KINDS);
       expect(labelsOf(actual.countStatements)).toEqual(FALLBACK_COUNT_LABELS);
       expect(actual.counts.totalMeasurements).toBe(2);
     });
@@ -244,7 +254,7 @@ describe('errors explorer: signature histogram against the frozen oracle (#544)'
       const actual = await expectProductionEqualsOracle('40 types', MANY_TYPES_CUTTING_LIMIT);
 
       expect(warningsOf(SIGNATURE_FALLBACK_WARNING)).toHaveLength(2);
-      expect(labelsOf(actual.facetStatements)).toEqual(FALLBACK_FACET_LABELS);
+      expect(sortedKindsOf(actual.facetStatements)).toEqual(FALLBACK_FACET_KINDS);
       expect(labelsOf(actual.countStatements)).toEqual(FALLBACK_COUNT_LABELS);
       expect(actual.counts.totalMeasurements).toBe(1);
       expect(actual.counts.messages, 'every one of the 40 messages counts the one measurement').toHaveLength(40);
@@ -252,7 +262,7 @@ describe('errors explorer: signature histogram against the frozen oracle (#544)'
   });
 
   describe('locale ties', () => {
-    it('two messages that localeCompare calls equal keep the oracle order through the Node path', async () => {
+    it('two messages that localeCompare calls equal keep the oracle order for message counts through the Node path, while the error types order by code on the SQL path', async () => {
       await loadFixture(localeTieMessageFixture());
 
       const actual = await expectProductionEqualsOracle('message tie', EQUIVALENCE_GROUP_CONCAT_MAX_LEN);
@@ -261,14 +271,83 @@ describe('errors explorer: signature histogram against the frozen oracle (#544)'
         { value: LOCALE_TIE_NFD_TEXT, count: 1 },
         { value: LOCALE_TIE_NFC_TEXT, count: 1 }
       ]);
-      // P6 owns the facets half of this case: errorTypes tie on message and code together, which changes the fallback warning and labels below.
+      expect(
+        actual.facets.errorTypes.map(errorType => errorType.message),
+        'the two codes differ, so the comparator separates the identities and the histogram order is already the oracle order'
+      ).toEqual([LOCALE_TIE_NFC_TEXT, LOCALE_TIE_NFD_TEXT]);
+      expect(
+        warningsOf(LOCALE_TIE_FALLBACK_WARNING).map(call => call[1]),
+        'only the message counts fall back'
+      ).toEqual([expect.objectContaining({ requestKind: MESSAGE_COUNTS_REQUEST_KIND })]);
+      expect(warningsOf(SIGNATURE_FALLBACK_WARNING), 'the signatures were whole: only the tie caused the fallback').toEqual([]);
+      expect(sortedKindsOf(actual.facetStatements), 'facets stay on the SQL path').toEqual(SQL_FACET_KINDS);
+      expect(labelsOf(actual.countStatements)).toEqual(FALLBACK_COUNT_LABELS);
+    });
+
+    it('two identities that tie on count, message, source and code keep the oracle order for error types and message counts through the Node path', async () => {
+      await loadFixture(localeTieErrorTypeFixture());
+
+      const actual = await expectProductionEqualsOracle('error type tie', EQUIVALENCE_GROUP_CONCAT_MAX_LEN);
+
+      expect(
+        actual.facets.errorTypes.map(errorType => errorType.message),
+        'the oracle meets the NFD identity first because its measurement has the lower ID, the opposite of the histogram order'
+      ).toEqual([LOCALE_TIE_NFD_TEXT, LOCALE_TIE_NFC_TEXT]);
       expect(warningsOf(LOCALE_TIE_FALLBACK_WARNING).map(call => call[1])).toEqual([
         expect.objectContaining({ requestKind: FACETS_REQUEST_KIND }),
         expect.objectContaining({ requestKind: MESSAGE_COUNTS_REQUEST_KIND })
       ]);
       expect(warningsOf(SIGNATURE_FALLBACK_WARNING), 'the signatures were whole: only the tie caused the fallback').toEqual([]);
-      expect(labelsOf(actual.facetStatements)).toEqual(FALLBACK_FACET_LABELS);
+      expect(sortedKindsOf(actual.facetStatements), 'catalog, histogram and active count, then the scope raw rows').toEqual(FALLBACK_FACET_KINDS);
+      expect(
+        actual.facetStatements.filter(statement => kindOf(statement) === ACTIVE_COUNT_KIND),
+        'the fallback reuses the active count it already ran'
+      ).toHaveLength(1);
       expect(labelsOf(actual.countStatements)).toEqual(FALLBACK_COUNT_LABELS);
+    });
+  });
+
+  describe('failed rows in the histogram key', () => {
+    beforeAll(() => loadFixture(failedRowSignatureFixture()), FIXTURE_HOOK_TIMEOUT_MS);
+
+    it('keeps a failed row and an intact row with the same error types in two histogram rows and counts one failed measurement', async () => {
+      const histogram = await readHistogramRows(EQUIVALENCE_GROUP_CONCAT_MAX_LEN);
+      console.log(`[signatures] failed-row histogram rows: ${JSON.stringify(histogram)}`);
+      expect(
+        histogram.map(row => [row.ErrorTypeKeys, Number(row.IsFailedRow), Number(row.MeasurementCount)]).sort(),
+        `measurements ${FAILED_SIGNATURE_MEASUREMENT_IDS.failed} (failed) and ${FAILED_SIGNATURE_MEASUREMENT_IDS.intact} share one signature`
+      ).toEqual([
+        ['1', SQL_FALSE, 1],
+        ['1', SQL_TRUE, 1]
+      ]);
+
+      const actual = await expectProductionEqualsOracle('failed row signature', EQUIVALENCE_GROUP_CONCAT_MAX_LEN);
+
+      expect(actual.facets.censusTotals.failedMeasurements).toBe(1);
+      expect(actual.facets.censusTotals.affectedMeasurements).toBe(2);
+      expect(sortedKindsOf(actual.facetStatements)).toEqual(SQL_FACET_KINDS);
+    });
+  });
+
+  describe('one identity under two catalog entries', () => {
+    beforeAll(() => loadFixture(sharedIdentityFixture()), FIXTURE_HOOK_TIMEOUT_MS);
+
+    it('counts a measurement once for an identity it carries through two NULL-code catalog rows', async () => {
+      expect(
+        SHARED_IDENTITY_ERROR_TYPES.map(type => type.code),
+        'the fixture must have two catalog entries with a NULL code'
+      ).toEqual([null, null]);
+
+      const actual = await expectProductionEqualsOracle('shared identity', EQUIVALENCE_GROUP_CONCAT_MAX_LEN);
+
+      console.log(
+        `[signatures] shared identity: measurements=${SHARED_IDENTITY_MEASUREMENT_COUNT} catalogEntryLinks=${SHARED_IDENTITY_CATALOG_ENTRY_LINK_COUNT} errorTypes=${JSON.stringify(actual.facets.errorTypes)}`
+      );
+      expect(actual.facets.errorTypes).toHaveLength(1);
+      expect(actual.facets.errorTypes[0].count, 'two measurements, not the three links').toBe(SHARED_IDENTITY_MEASUREMENT_COUNT);
+      expect(actual.facets.censusTotals.errorTypeCount, 'one identity').toBe(1);
+      expect(actual.facets.censusTotals.affectedMeasurements).toBe(SHARED_IDENTITY_MEASUREMENT_COUNT);
+      expect(sortedKindsOf(actual.facetStatements)).toEqual(SQL_FACET_KINDS);
     });
   });
 
@@ -290,7 +369,8 @@ describe('errors explorer: signature histogram against the frozen oracle (#544)'
           expect.objectContaining({ requestKind: MESSAGE_COUNTS_REQUEST_KIND, signatureRows: DISTINCT_SIGNATURE_MEASUREMENT_COUNT })
         ]);
         expect(warningsOf(SIGNATURE_FALLBACK_WARNING), 'every signature was whole').toEqual([]);
-        expect(usedOnlyCatalogAndHistogram(actual.facetStatements, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags)).toBe(true);
+        expect(sortedKindsOf(actual.facetStatements)).toEqual(SQL_FACET_KINDS);
+        expect(usedOnlyCatalogAndHistogram(actual.countStatements, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithoutFlags)).toBe(true);
       },
       LARGE_FIXTURE_TEST_TIMEOUT_MS
     );

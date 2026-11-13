@@ -735,7 +735,7 @@ const FIXTURE_ERROR_TYPES: FixtureErrorType[] = [
 ];
 
 /** Two catalog rows with a NULL code and one message are one identity under two ErrorIDs. They are kept out of FIXTURE_ERROR_TYPES so the seeded random draw is unchanged. */
-const SHARED_IDENTITY_ERROR_TYPES: FixtureErrorType[] = [
+export const SHARED_IDENTITY_ERROR_TYPES: FixtureErrorType[] = [
   { errorID: SHARED_IDENTITY_ERROR_IDS.first, source: 'ingestion', code: null, message: FIXTURE_MESSAGES.sharedIdentity },
   { errorID: SHARED_IDENTITY_ERROR_IDS.second, source: 'ingestion', code: null, message: FIXTURE_MESSAGES.sharedIdentity }
 ];
@@ -1110,6 +1110,69 @@ export function signatureWitnessFixture(): ExplorerFixture {
     [
       { measurementID: SIGNATURE_WITNESS_MEASUREMENT_IDS.quadrupleCarrier, errorIDs: [ids.single, ids.quadruple] },
       { measurementID: SIGNATURE_WITNESS_MEASUREMENT_IDS.tripleCarrier, errorIDs: [ids.single, ids.triple] }
+    ]
+  );
+}
+
+export const SHARED_IDENTITY_MEASUREMENT_IDS = { linkedToBoth: 101, linkedToFirstOnly: 102 } as const;
+export const SHARED_IDENTITY_MEASUREMENT_COUNT = 2;
+export const SHARED_IDENTITY_CATALOG_ENTRY_LINK_COUNT = 3;
+
+/** Two NULL-code catalog entries with one message are one identity. Measurement 101 is linked to both, 102 to the first only: two measurements, three links. */
+export function sharedIdentityFixture(): ExplorerFixture {
+  const ids = SHARED_IDENTITY_ERROR_IDS;
+  return signatureFixture(
+    SHARED_IDENTITY_ERROR_TYPES.map(type => ({ ...type })),
+    [],
+    [
+      { measurementID: SHARED_IDENTITY_MEASUREMENT_IDS.linkedToBoth, errorIDs: [ids.first, ids.second] },
+      { measurementID: SHARED_IDENTITY_MEASUREMENT_IDS.linkedToFirstOnly, errorIDs: [ids.first] }
+    ]
+  );
+}
+
+export const FAILED_SIGNATURE_MEASUREMENT_IDS = { failed: 101, intact: 102 } as const;
+export const FAILED_SIGNATURE_ERROR_ID = 1;
+const FAILED_SIGNATURE_STALE_SUMMARY_STEM_GUID = 9999;
+
+/** Two measurements with the same one-type signature; 101 failed ingestion (its core stem is NULL while its summary stem is stale), 102 did not. */
+export function failedRowSignatureFixture(): ExplorerFixture {
+  const fixture = signatureFixture(
+    [generatedErrorType(FAILED_SIGNATURE_ERROR_ID)],
+    [],
+    [FAILED_SIGNATURE_MEASUREMENT_IDS.failed, FAILED_SIGNATURE_MEASUREMENT_IDS.intact].map(measurementID => ({
+      measurementID,
+      errorIDs: [FAILED_SIGNATURE_ERROR_ID]
+    }))
+  );
+  return {
+    ...fixture,
+    measurements: fixture.measurements.map(measurement =>
+      measurement.coreMeasurementID === FAILED_SIGNATURE_MEASUREMENT_IDS.failed
+        ? { ...measurement, coreStemGUID: null, summaryStemGUID: FAILED_SIGNATURE_STALE_SUMMARY_STEM_GUID }
+        : measurement
+    )
+  };
+}
+
+export const LOCALE_TIE_ERROR_TYPE_IDS = { nfc: 1, nfd: 2 } as const;
+
+/**
+ * Two ingestion catalog entries with NULL codes (so one normalised code) whose messages are the NFC and NFD forms of one text: identities that tie on count,
+ * message, source and code. The code column cannot carry the NFC/NFD pair itself, because its unique key compares under utf8mb4_0900_ai_ci. The measurement IDs
+ * run against the type IDs so the histogram and the oracle meet the two identities in opposite orders.
+ */
+export function localeTieErrorTypeFixture(): ExplorerFixture {
+  const ids = LOCALE_TIE_ERROR_TYPE_IDS;
+  return signatureFixture(
+    [
+      { errorID: ids.nfc, source: 'ingestion', code: null, message: LOCALE_TIE_NFC_TEXT },
+      { errorID: ids.nfd, source: 'ingestion', code: null, message: LOCALE_TIE_NFD_TEXT }
+    ],
+    [],
+    [
+      { measurementID: LOCALE_TIE_MEASUREMENT_IDS.carriesSecondType, errorIDs: [ids.nfd] },
+      { measurementID: LOCALE_TIE_MEASUREMENT_IDS.carriesFirstType, errorIDs: [ids.nfc] }
     ]
   );
 }

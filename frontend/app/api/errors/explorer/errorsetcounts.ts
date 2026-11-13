@@ -272,7 +272,7 @@ function newErrorTypeAccumulator({ source, code, message }: ErrorDetailRecord): 
 }
 
 /**
- * Dev's buildErrorTypeFacets with a weight per row: an identity gains a row's weight once, however many of the row's
+ * The error-type facets with a weight per row (dev's per-measurement counting): an identity gains a row's weight once, however many of the row's
  * catalog entries carry it. The caller applies the quick search.
  */
 export function computeErrorTypeFacets(rows: readonly WeightedErrorRow[], filters: ErrorExplorerFilters): ErrorTypeFacet[] {
@@ -298,7 +298,7 @@ export function computeErrorTypeFacets(rows: readonly WeightedErrorRow[], filter
     .sort(compareErrorTypeFacets);
 }
 
-/** Dev's buildCensusTotals with a weight per row. It takes no filters: the totals describe every row it is given. */
+/** The census totals with a weight per row (dev's per-measurement counting). It takes no filters: the totals describe every row it is given. */
 export function computeCensusTotals(rows: readonly WeightedErrorRow[], activeMeasurements: number): ErrorCensusTotals {
   const hasSource = (row: WeightedErrorRow, source: ErrorTypeIdentity['source']) => row.errors.some(error => error.source === source);
   return {

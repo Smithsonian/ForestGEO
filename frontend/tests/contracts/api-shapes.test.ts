@@ -1,6 +1,41 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_ERROR_EXPLORER_FILTERS, type ErrorExplorerQueryRequest } from '@/config/errorsexplorer';
 import { buildErrorExplorerFacets, queryErrorExplorer } from '@/app/api/errors/explorer/_shared';
+import { ERROR_EXPLORER_STATEMENT_LABELS, readStatementLabel, SQL_FALSE, SQL_TRUE } from '@/app/api/errors/explorer/errorsetsql';
+
+const SPECIES_MISMATCH_ERROR_ID = 1;
+const INVALID_SPECIES_ERROR_ID = 2;
+const ACTIVE_COUNT_SQL_MARKER = 'SELECT COUNT(*) AS n';
+const catalogRows = [
+  {
+    ErrorID: SPECIES_MISMATCH_ERROR_ID,
+    ErrorSource: 'validation' as const,
+    ErrorCode: '21',
+    DisplayMessage: 'Species mismatch',
+    ValidationCriteria: 'speciesCode',
+    ProcedureName: 'ValidateSpecies'
+  },
+  {
+    ErrorID: INVALID_SPECIES_ERROR_ID,
+    ErrorSource: 'ingestion' as const,
+    ErrorCode: 'INVALID_SPECIES',
+    DisplayMessage: 'Invalid species reference',
+    ValidationCriteria: '',
+    ProcedureName: ''
+  }
+];
+// Measurements 101 and 102 share a tree tag and stem tag, so each signature row carries the duplicate flag; 102 failed ingestion (its core stem is NULL).
+const histogramWithFlagsRows = [
+  { errorTypeID: SPECIES_MISMATCH_ERROR_ID, isFailedRow: false },
+  { errorTypeID: INVALID_SPECIES_ERROR_ID, isFailedRow: true }
+].map(({ errorTypeID, isFailedRow }) => ({
+  ErrorTypeKeys: String(errorTypeID),
+  SignatureComplete: SQL_TRUE,
+  HasDuplicate: SQL_TRUE,
+  HasSameBatch: SQL_FALSE,
+  IsFailedRow: isFailedRow ? SQL_TRUE : SQL_FALSE,
+  MeasurementCount: 1
+}));
 
 const rawErrorRows = [
   {
@@ -91,6 +126,18 @@ function makeConnection() {
   } as any;
 }
 
+function makeFacetsConnection() {
+  return {
+    executeQuery: vi.fn(async (query: string) => {
+      const label = readStatementLabel(query);
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.catalog) return catalogRows;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags) return histogramWithFlagsRows;
+      if (label === null && query.includes(ACTIVE_COUNT_SQL_MARKER)) return [{ n: 0 }];
+      throw new Error(`Unexpected facets statement in contract test (label ${label}): ${query}`);
+    })
+  } as any;
+}
+
 function makeRequest(overrides: Partial<ErrorExplorerQueryRequest> = {}): ErrorExplorerQueryRequest {
   return {
     schema: 'forestgeo_testing',
@@ -150,7 +197,7 @@ describe('API response shape contracts', () => {
   });
 
   it('keeps Errors Explorer facets stable for filters and chips', async () => {
-    const facets = await buildErrorExplorerFacets(makeConnection(), makeRequest());
+    const facets = await buildErrorExplorerFacets(makeFacetsConnection(), makeRequest());
 
     console.log('[view-errors contract facets]', JSON.stringify(facets));
     expect(facets).toEqual({

@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import type { Connection } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import type { ContradictionType, ErrorExplorerFilters, ErrorExplorerRow } from '@/config/errorsexplorer';
+import { ERROR_EXPLORER_STATEMENT_LABELS, readStatementLabel } from '@/app/api/errors/explorer/errorsetsql';
 import { DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import {
   assertLocalOrRefuse,
@@ -71,7 +72,8 @@ const DETAIL_STEM_LOCAL_X = 12;
 const DETAIL_STEM_LOCAL_Y = 22;
 
 const sharedState = vi.hoisted(() => ({
-  connection: null as Connection | null
+  connection: null as Connection | null,
+  executedSql: [] as string[]
 }));
 
 vi.mock('@/auth', () => ({
@@ -87,12 +89,23 @@ vi.mock('@/lib/db/connectionmanager', async () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[]) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      sharedState.executedSql.push(query);
       return runQueryDispatch(sharedState.connection, query, params);
     },
     closeConnection: async () => undefined
   };
   return { default: { getInstance: () => manager } };
 });
+
+const ACTIVE_COUNT_SQL_MARKER = 'SELECT COUNT(*) AS n';
+const ACTIVE_COUNT_KIND = 'active-count';
+const UNLABELLED_KIND = 'unlabelled';
+
+function executedKinds(): string[] {
+  return sharedState.executedSql.map(sql => readStatementLabel(sql) ?? (sql.includes(ACTIVE_COUNT_SQL_MARKER) ? ACTIVE_COUNT_KIND : UNLABELLED_KIND)).sort();
+}
+
+const UNSEARCHED_FACET_KINDS = [ERROR_EXPLORER_STATEMENT_LABELS.catalog, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags, ACTIVE_COUNT_KIND].sort();
 
 const NO_FILTERS: ErrorExplorerFilters = {
   source: 'all',
@@ -411,7 +424,7 @@ describe('errors explorer route behaviour on real MySQL', () => {
   });
 
   describe('POST /api/errors/explorer/facets', () => {
-    it('returns message and field facets scoped to the current census', async () => {
+    it('returns error-type identities and census totals scoped to the current census', async () => {
       await replaceFixture(
         connection(),
         fixtureOf({
@@ -431,20 +444,26 @@ describe('errors explorer route behaviour on real MySQL', () => {
         })
       );
       const { POST } = await import('@/app/api/errors/explorer/facets/route');
+      sharedState.executedSql = [];
 
       const response = await POST(facetsRequest(schema(), NO_FILTERS), ROUTE_CONTEXT);
 
       const body = await readSuccessfulBody(response);
-      console.log('[facets messages and fields]', JSON.stringify({ messages: body.messages, fields: body.fields }));
+      console.log('[facets error types and census totals]', JSON.stringify({ errorTypes: body.errorTypes, censusTotals: body.censusTotals }));
 
-      expect(body.messages).toEqual(
+      expect(Object.keys(body).sort(), 'the facets response is exactly errorTypes and censusTotals').toEqual(['censusTotals', 'errorTypes']);
+      expect(executedKinds(), 'the unsearched facets read the catalog, the histogram and the active count').toEqual(UNSEARCHED_FACET_KINDS);
+      expect(body.errorTypes).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ value: DUPLICATE_TAG_MESSAGE, count: 1 }),
-          expect.objectContaining({ value: DUPLICATE_TAG_INGESTION_MESSAGE, count: 1 })
+          expect.objectContaining({ source: 'validation', code: String(VALIDATION_DUPLICATE_TAG_ID), message: DUPLICATE_TAG_MESSAGE, count: 1 }),
+          expect.objectContaining({ source: 'ingestion', code: DUPLICATE_TAG_INGESTION_ERROR.code, message: DUPLICATE_TAG_INGESTION_MESSAGE, count: 1 })
         ])
       );
-      expect(body.fields).toEqual(expect.arrayContaining([expect.objectContaining({ value: 'treeTag', count: 2 })]));
-      expect(body.totalMeasurements, `the decoy row ${DECOY_MEASUREMENT_ID} in census ${DECOY_CENSUS_ID} must not be counted`).toBe(2);
+      expect(body.errorTypes, 'the decoy row in census 8 must not add an identity or a count').toHaveLength(2);
+      expect(body.errorTypes.flatMap((identity: { fields: string[] }) => identity.fields)).toEqual(expect.arrayContaining(['treeTag', 'stemTag']));
+      expect(body.censusTotals, `the decoy row ${DECOY_MEASUREMENT_ID} in census ${DECOY_CENSUS_ID} must not be counted`).toEqual(
+        expect.objectContaining({ affectedMeasurements: 2, validation: 1, ingestion: 1, errorTypeCount: 2 })
+      );
     });
 
     it('reports one distinct measurement when a row carries two error messages (#547)', async () => {
@@ -463,13 +482,22 @@ describe('errors explorer route behaviour on real MySQL', () => {
         })
       );
       const { POST } = await import('@/app/api/errors/explorer/facets/route');
+      sharedState.executedSql = [];
 
       const response = await POST(facetsRequest(schema(), NO_FILTERS), ROUTE_CONTEXT);
 
       const body = await readSuccessfulBody(response);
-      console.log('[#547 facets total]', JSON.stringify({ totalMeasurements: body.totalMeasurements, messages: body.messages }));
-      expect(body.messages.map((option: { value: string }) => option.value).sort()).toEqual([SECOND_TWO_ERRORS_MESSAGE, FIRST_TWO_ERRORS_MESSAGE].sort());
-      expect(body.totalMeasurements, 'two messages on one measurement are one affected measurement').toBe(1);
+      console.log('[#547 facets total]', JSON.stringify({ censusTotals: body.censusTotals, errorTypes: body.errorTypes }));
+      expect(body.errorTypes.map((identity: { message: string }) => identity.message).sort()).toEqual(
+        [SECOND_TWO_ERRORS_MESSAGE, FIRST_TWO_ERRORS_MESSAGE].sort()
+      );
+      expect(
+        body.errorTypes.map((identity: { count: number }) => identity.count),
+        'each of the two identities counts the one measurement'
+      ).toEqual([1, 1]);
+      expect(body.censusTotals.affectedMeasurements, 'two messages on one measurement are one affected measurement').toBe(1);
+      expect(body.censusTotals.errorTypeCount).toBe(2);
+      expect(executedKinds()).toEqual(UNSEARCHED_FACET_KINDS);
     });
   });
 
