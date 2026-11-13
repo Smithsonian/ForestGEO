@@ -8,6 +8,7 @@ import {
   buildHistogramWithoutFlagsStatement,
   buildIDRawRowsStatement,
   buildPageStatement,
+  buildRelatedRowsOutsideErrorSetStatement,
   buildSameBatchMemberGroupsStatement,
   buildScopeRawRowsStatement,
   buildTotalsStatement,
@@ -40,7 +41,7 @@ const DEEP_OFFSET = 1000;
 const MAX_CENSUS_LIST_LENGTH = 40;
 const ID_LIST_LENGTHS = [1, 2, 127, 128, 129, 200, 256, 257, 300];
 const MAX_ID_LIST_LENGTH = Math.max(...ID_LIST_LENGTHS);
-const EXPECTED_STATEMENT_SHAPES = 9;
+const EXPECTED_STATEMENT_SHAPES = 10;
 const UNLABELLED = 'unlabelled';
 const SUMMARY_COLUMN_NAMES = ['ValidationRows', 'IngestionRows', 'ContradictionRows', 'DuplicateTagStemRows', 'SameBatchConflictRows'];
 const TOTAL_ROWS_COLUMN = 'TotalRows';
@@ -151,6 +152,7 @@ function everyBuilderWithSchema(schema: string): Array<[string, () => BuiltState
     ['histogramWithoutFlags', () => buildHistogramWithoutFlagsStatement(scope)],
     ['scopeRawRows', () => buildScopeRawRowsStatement(scope)],
     ['idRawRows', () => buildIDRawRowsStatement(scope, [10])],
+    ['relatedRowsOutsideErrorSet', () => buildRelatedRowsOutsideErrorSetStatement(scope, [10])],
     ['duplicateMemberGroups', () => buildDuplicateMemberGroupsStatement(scope, [10])],
     ['sameBatchMemberGroups', () => buildSameBatchMemberGroupsStatement(scope, [10])]
   ];
@@ -186,6 +188,9 @@ describe('errorsetsql statement builders', () => {
       ['empty census list', () => buildScopeRawRowsStatement(scopeFor([]))],
       ['9-census scope', () => buildScopeRawRowsStatement(scopeFor(range(OVERSIZED_CENSUS_LIST_LENGTH)))],
       ['129-id list', () => buildIDRawRowsStatement(scopeFor([2]), range(OVERSIZED_ID_LIST_LENGTH))],
+      ['empty outside-id list', () => buildRelatedRowsOutsideErrorSetStatement(scopeFor([2]), [])],
+      ['129-id outside list', () => buildRelatedRowsOutsideErrorSetStatement(scopeFor([2]), range(OVERSIZED_ID_LIST_LENGTH))],
+      ['9-census outside scope', () => buildRelatedRowsOutsideErrorSetStatement(scopeFor(range(OVERSIZED_CENSUS_LIST_LENGTH)), [10])],
       ['129-id duplicate list', () => buildDuplicateMemberGroupsStatement(scopeFor([2]), range(OVERSIZED_ID_LIST_LENGTH))]
     ];
     for (const [name, attempt] of attempts) {
@@ -200,7 +205,7 @@ describe('errorsetsql statement builders', () => {
     }
   });
 
-  it('produces exactly nine distinct statement texts across list lengths, key filters, flags, windows and plots', () => {
+  it('produces exactly ten distinct statement texts across list lengths, key filters, flags, windows and plots', () => {
     const textsByLabel = new Map<string, Set<string>>();
     const firstVariantByText = new Map<string, string>();
     const allTexts = new Set<string>();
@@ -420,6 +425,55 @@ describe('errorsetsql statement builders', () => {
       expect(finalSelect, 'the cheap shape cannot see coremeasurements, so it must not group by the flag').not.toMatch(
         new RegExp(`GROUP BY[^\\n]*${IS_FAILED_ROW_COLUMN}`)
       );
+    });
+  });
+
+  describe('related rows outside the error set', () => {
+    const OUTSIDE_LABEL = '/* errors-explorer:related-rows-outside */';
+    const RELATED_ROW_COLUMNS = [
+      'RelatedCoreMeasurementID',
+      'TreeTag',
+      'StemTag',
+      'SpeciesCode',
+      'QuadratName',
+      'MeasurementDate',
+      'MeasuredDBH',
+      'MeasuredHOM',
+      'StemLocalX',
+      'StemLocalY',
+      'MeasurementDescription',
+      'UploadFileID',
+      'UploadBatchID'
+    ];
+    const OUTSIDE_IDS = [501, 502, 503];
+
+    it('carries the tenth label and starts from the schema-qualified coremeasurements table', () => {
+      const { sql } = buildRelatedRowsOutsideErrorSetStatement(scopeFor([2]), OUTSIDE_IDS);
+
+      console.log(preview(sql));
+      expect(ERROR_EXPLORER_STATEMENT_LABELS.relatedRowsOutsideErrorSet).toBe(OUTSIDE_LABEL);
+      expect(readStatementLabel(sql)).toBe(OUTSIDE_LABEL);
+      expect(FIRST_TABLE_REFERENCE.exec(sql)?.[1]).toBe(`${QUALIFIED_SCHEMA_PREFIX}coremeasurements`);
+    });
+
+    it('selects the columns the details panel reads for a partner outside the error set', () => {
+      const { sql } = buildRelatedRowsOutsideErrorSetStatement(scopeFor([2]), OUTSIDE_IDS);
+      const selectList = sql.slice(sql.indexOf('SELECT'), sql.indexOf('FROM'));
+
+      console.log(`select list: ${selectList}`);
+      for (const column of RELATED_ROW_COLUMNS) expect(selectList, `missing ${column}`).toMatch(new RegExp(`\\b${column}\\b`));
+    });
+
+    it('binds the plot, then the padded census slot, then the padded id slot, and keeps only active rows', () => {
+      const { sql, params } = buildRelatedRowsOutsideErrorSetStatement(scopeFor(THREE_CENSUS_IDS), OUTSIDE_IDS);
+      const paddedCensusSlot = [...THREE_CENSUS_IDS, ...Array<null>(CENSUS_LIST_SIZE - THREE_CENSUS_IDS.length).fill(null)];
+      const paddedIDSlot = [...OUTSIDE_IDS, ...Array<null>(ID_LIST_SIZE - OUTSIDE_IDS.length).fill(null)];
+
+      console.log(`params: ${JSON.stringify(params)}`);
+      expect(sql).toMatch(/ms\.PlotID = \?/);
+      expect(sql).toContain('COALESCE(cm.IsActive, TRUE) = TRUE');
+      expect(params).toEqual([PLOT_ID, ...paddedCensusSlot, ...paddedIDSlot]);
+      expect(placeholderCount(sql)).toBe(params.length);
     });
   });
 });

@@ -5,6 +5,7 @@ import {
   buildHistogramWithoutFlagsStatement,
   buildIDRawRowsStatement,
   buildPageStatement,
+  buildRelatedRowsOutsideErrorSetStatement,
   buildSameBatchMemberGroupsStatement,
   buildScopeRawRowsStatement,
   buildTotalsStatement,
@@ -64,7 +65,7 @@ export function describeCensusScope(censusIDs: readonly number[]): { censuses: n
   return { censuses: censusIDs.length, censusChunks: chunkCensusIDs(censusIDs).length };
 }
 
-/** Every builder's output for every census chunk and every measurement-ID chunk (the nine statement shapes per chunk). */
+/** Every builder's output for every census chunk and every measurement-ID chunk (the ten statement shapes per chunk). */
 export function everyErrorSetStatement(
   schema: string,
   censusIDs: number[],
@@ -82,6 +83,7 @@ export function everyErrorSetStatement(
       buildScopeRawRowsStatement(scope),
       ...chunkMeasurementIDs(measurementIDs).flatMap(idChunk => [
         buildIDRawRowsStatement(scope, idChunk),
+        buildRelatedRowsOutsideErrorSetStatement(scope, idChunk),
         buildDuplicateMemberGroupsStatement(scope, idChunk),
         buildSameBatchMemberGroupsStatement(scope, idChunk)
       ])

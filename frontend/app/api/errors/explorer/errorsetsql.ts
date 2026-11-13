@@ -20,6 +20,7 @@ export const ERROR_EXPLORER_STATEMENT_LABELS = {
   histogramWithoutFlags: '/* errors-explorer:histogram-without-flags */',
   scopeRawRows: '/* errors-explorer:scope-raw-rows */',
   idRawRows: '/* errors-explorer:id-raw-rows */',
+  relatedRowsOutsideErrorSet: '/* errors-explorer:related-rows-outside */',
   duplicateMemberGroups: '/* errors-explorer:duplicate-member-groups */',
   sameBatchMemberGroups: '/* errors-explorer:same-batch-member-groups */'
 } as const;
@@ -111,6 +112,22 @@ export interface DuplicateMemberGroupRow extends MemberListColumns {
 }
 
 export interface SameBatchMemberGroupRow extends MemberListColumns {
+  UploadFileID: string | null;
+  UploadBatchID: string | null;
+}
+
+export interface RelatedRowOutsideErrorSetRow {
+  RelatedCoreMeasurementID: number;
+  TreeTag: string | null;
+  StemTag: string | null;
+  SpeciesCode: string | null;
+  QuadratName: string | null;
+  MeasurementDate: Date | string | null;
+  MeasuredDBH: SqlCount | null;
+  MeasuredHOM: SqlCount | null;
+  StemLocalX: SqlCount | null;
+  StemLocalY: SqlCount | null;
+  MeasurementDescription: string | null;
   UploadFileID: string | null;
   UploadBatchID: string | null;
 }
@@ -418,7 +435,7 @@ function assertPageWindow(window: PageWindow): void {
   }
 }
 
-// ---- the nine statements ----
+// ---- the ten statements ----
 
 export function buildCatalogStatement(schema: string): BuiltStatement {
   return finalize(schema, ERROR_EXPLORER_STATEMENT_LABELS.catalog, {
@@ -514,6 +531,27 @@ export function buildIDRawRowsStatement(scope: ErrorSetScope, measurementIDs: re
       errorOccurrenceSource(scope, measurementIDs),
       ')',
       { sql: `\nSELECT ${RAW_ROW_COLUMNS}\n  FROM error_occurrence eo\n  ${RAW_ROW_JOINS}\n ${RAW_ROW_ORDER}`, params: [...ERROR_DISPLAY_PARAMS] }
+    ])
+  );
+}
+
+export function buildRelatedRowsOutsideErrorSetStatement(scope: ErrorSetScope, measurementIDs: readonly number[]): BuiltStatement {
+  return finalize(
+    scope.schema,
+    ERROR_EXPLORER_STATEMENT_LABELS.relatedRowsOutsideErrorSet,
+    joinFragments([
+      `SELECT ms.CoreMeasurementID AS RelatedCoreMeasurementID, ms.TreeTag, ms.StemTag, ms.SpeciesCode, ms.QuadratName, ms.MeasurementDate,
+       ms.MeasuredDBH, ms.MeasuredHOM, ms.StemLocalX, ms.StemLocalY, ms.Description AS MeasurementDescription,
+       cm.UploadFileID, cm.UploadBatchID
+  FROM ??.coremeasurements cm
+  JOIN ??.measurementssummary ms ON ms.CoreMeasurementID = cm.CoreMeasurementID
+ WHERE ms.PlotID = `,
+      bound(scope.plotID),
+      ' AND ms.CensusID IN (',
+      censusList(scope),
+      ') AND COALESCE(cm.IsActive, TRUE) = TRUE AND cm.CoreMeasurementID IN (',
+      measurementIDList(measurementIDs),
+      ')'
     ])
   );
 }
