@@ -1,20 +1,34 @@
 import { isDeepStrictEqual } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import * as oracle from '../../../../tests/oracles/errors-explorer-legacy';
-import { DEFAULT_ERROR_EXPLORER_FILTERS, ERROR_EXPLORER_PRESETS, INGESTION_ERROR_FIELD_MAP, type ErrorExplorerFilters } from '@/config/errorsexplorer';
+import {
+  applyShowValue,
+  buildErrorTypeKey,
+  DEFAULT_ERROR_EXPLORER_FILTERS,
+  ERRORS_EXPLORER_SHOW_OPTIONS,
+  FALLBACK_ERROR_CODE,
+  FALLBACK_ERROR_MESSAGE,
+  INGESTION_ERROR_FIELD_MAP,
+  type ErrorCensusTotals,
+  type ErrorDetailRecord,
+  type ErrorExplorerFilters,
+  type ErrorTypeIdentity
+} from '@/config/errorsexplorer';
 import { seededRandom } from '../../../../tests/setup/local-db-setup';
 import {
   allowedFlagCombinations,
   anyFlagCombinationAllowed,
   buildErrorTypeCatalog,
   buildRelatedMeasurementIDs,
-  computeErrorFacets,
+  computeCensusTotals,
   computeErrorKeySets,
   computeErrorMessageCounts,
+  computeErrorTypeFacets,
   ErrorTypeCatalogMismatchError,
   findMissingErrorTypeKeys,
   getOccurrenceFields,
   hasIncompleteSignature,
+  hasErrorTypeOrderTie,
   hasLocaleCompareTie,
   isImpossibleKeyFilter,
   mergeSignatureRows,
@@ -37,6 +51,8 @@ const MAX_EXTRA_GROUP_MEMBERS = 2;
 const MEMBER_ID_OVERSHOOT = 20;
 const SIGNATURE_CHUNK_COUNT = 2;
 const SINGLE_MEASUREMENT_WEIGHT = 1;
+const FAILED_ROW_MODULUS = 7;
+const ACTIVE_MEASUREMENTS = 4321;
 
 const SCHEMA = 'forestgeo_testsite';
 const PLOT_ID = 1;
@@ -45,6 +61,7 @@ const SECOND_PARAM_INDEX = 1;
 const RAW_ERRORS_QUERY_MARKER = 'SELECT ms.CoreMeasurementID';
 const DUPLICATE_GROUPS_QUERY_MARKER = 'GROUP_CONCAT(DISTINCT ms.CoreMeasurementID';
 const SAME_BATCH_QUERY_MARKER = 'GROUP_CONCAT(DISTINCT cm.CoreMeasurementID';
+const ACTIVE_COUNT_QUERY_MARKER = 'COUNT(*) AS n';
 
 const SEMICOLON_MESSAGE = 'First condition; second condition';
 const SHARED_MESSAGE = 'Species mismatch';
@@ -91,12 +108,16 @@ function toCatalogRows(types: readonly ErrorTypeDefinition[]): ErrorTypeCatalogR
   }));
 }
 
+function isFailedMeasurement(measurementID: number): boolean {
+  return measurementID % FAILED_ROW_MODULUS === 0;
+}
+
 function toRawOccurrence(measurementID: number, type: ErrorTypeDefinition): oracle.RawErrorOccurrenceRow {
   return {
     CoreMeasurementID: measurementID,
     PlotID: PLOT_ID,
     CensusID: CENSUS_ID,
-    CoreStemGUID: measurementID,
+    CoreStemGUID: isFailedMeasurement(measurementID) ? null : measurementID,
     TreeTag: `T${measurementID}`,
     StemTag: '1',
     ErrorSource: type.source,
@@ -159,6 +180,7 @@ function fakeExecutor(generated: GeneratedErrorSet) {
   return {
     executeQuery: async (sql: string, params: number[]) => {
       expect(params[SECOND_PARAM_INDEX], 'the oracle must query the generated census').toBe(CENSUS_ID);
+      if (sql.includes(ACTIVE_COUNT_QUERY_MARKER)) return [{ n: ACTIVE_MEASUREMENTS }];
       if (sql.includes(DUPLICATE_GROUPS_QUERY_MARKER)) return generated.duplicateGroups;
       if (sql.includes(SAME_BATCH_QUERY_MARKER)) return generated.sameBatchGroups;
       if (sql.includes(RAW_ERRORS_QUERY_MARKER)) return generated.rawRows;
@@ -173,6 +195,7 @@ function collapseBySignature(grouped: Map<number, oracle.GroupedErrorRow>, gener
     SignatureComplete: SQL_TRUE,
     HasDuplicate: row.baseRow.contradictionTypes.includes('duplicate_tag_stem') ? SQL_TRUE : SQL_FALSE,
     HasSameBatch: row.baseRow.contradictionTypes.includes('same_batch_conflict') ? SQL_TRUE : SQL_FALSE,
+    IsFailedRow: row.baseRow.isFailedRow ? SQL_TRUE : SQL_FALSE,
     MeasurementCount: SINGLE_MEASUREMENT_WEIGHT
   }));
   const chunkSize = Math.ceil(signatureRows.length / SIGNATURE_CHUNK_COUNT);
@@ -181,11 +204,12 @@ function collapseBySignature(grouped: Map<number, oracle.GroupedErrorRow>, gener
 }
 
 const FACET_FILTER_CASES: Array<{ name: string; filters: ErrorExplorerFilters }> = [
-  ...ERROR_EXPLORER_PRESETS.map(preset => ({ name: `preset ${preset.id}`, filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, ...preset.filters } })),
-  { name: 'source ingestion', filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, source: 'ingestion' } },
+  ...ERRORS_EXPLORER_SHOW_OPTIONS.map(option => ({ name: `Show ${option.value}`, filters: applyShowValue(DEFAULT_ERROR_EXPLORER_FILTERS, option.value) })),
   { name: 'unknown source', filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, source: 'unknown' as never } },
   { name: 'non-array contradictionTypes', filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, contradictionTypes: 'duplicate_tag_stem' as never } },
-  { name: 'exactMessages does not scope facets', filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages: [SEMICOLON_MESSAGE] } }
+  { name: 'contradictionTypes same_batch_conflict', filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, contradictionTypes: ['same_batch_conflict'] } },
+  { name: 'affectedFields treeTag', filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, affectedFields: ['treeTag'] } },
+  { name: 'exactMessages scopes errorTypes and leaves censusTotals alone', filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages: [SEMICOLON_MESSAGE] } }
 ];
 
 function firstDifferingFacet(expected: Record<string, unknown>, actual: Record<string, unknown>): string | null {
@@ -203,6 +227,7 @@ describe.each(RANDOM_SEEDS)('weighted facet and message math against the frozen 
       errors: row.allErrors,
       contradictionTypes: row.baseRow.contradictionTypes,
       hasContradiction: row.baseRow.hasContradiction,
+      isFailedRow: row.baseRow.isFailedRow,
       measurementCount: SINGLE_MEASUREMENT_WEIGHT
     }));
     const collapsed = collapseBySignature(grouped, generated, catalog);
@@ -214,19 +239,22 @@ describe.each(RANDOM_SEEDS)('weighted facet and message math against the frozen 
     const contradictionTotals = {
       duplicate: Array.from(grouped.values()).filter(row => row.baseRow.contradictionTypes.includes('duplicate_tag_stem')).length,
       sameBatch: Array.from(grouped.values()).filter(row => row.baseRow.contradictionTypes.includes('same_batch_conflict')).length,
-      noLog: Array.from(grouped.values()).filter(row => row.allErrors.some(error => error.code === NO_LOG_TYPE.code)).length
+      noLog: Array.from(grouped.values()).filter(row => row.allErrors.some(error => error.code === NO_LOG_TYPE.code)).length,
+      failed: Array.from(grouped.values()).filter(row => row.baseRow.isFailedRow).length
     };
     console.log(`[seed ${seed}] measurements ${grouped.size}, weighted signature rows ${collapsed.length}, totals`, contradictionTotals);
     expect(grouped.size).toBe(MEASUREMENTS_PER_SEED);
     expect(contradictionTotals.duplicate).toBeGreaterThan(0);
     expect(contradictionTotals.sameBatch).toBeGreaterThan(0);
     expect(contradictionTotals.noLog).toBeGreaterThan(0);
+    expect(contradictionTotals.failed, 'some measurements must be failed rows').toBeGreaterThan(0);
+    expect(contradictionTotals.failed, 'and some must not be').toBeLessThan(grouped.size);
     expect(collapsed.length, 'collapsing must actually merge measurements').toBeLessThan(grouped.size);
     expect(collapsed.reduce((total, row) => total + row.measurementCount, 0)).toBe(grouped.size);
   });
 
   it.each(FACET_FILTER_CASES)(
-    'computeErrorFacets equals buildErrorExplorerFacets for $name, per grouped row and collapsed by signature',
+    'computeErrorTypeFacets and computeCensusTotals equal buildErrorExplorerFacets for $name, per grouped row and collapsed by signature',
     async ({ filters }) => {
       const expected = await oracle.buildErrorExplorerFacets(executor, {
         schema: SCHEMA,
@@ -241,7 +269,7 @@ describe.each(RANDOM_SEEDS)('weighted facet and message math against the frozen 
         ['weight 1 per grouped row', perGroupedRow],
         ['collapsed by signature', collapsed]
       ] as const) {
-        const actual = computeErrorFacets(rows, filters);
+        const actual = { errorTypes: computeErrorTypeFacets(rows, filters), censusTotals: computeCensusTotals(rows, ACTIVE_MEASUREMENTS) };
         const differing = firstDifferingFacet(expected as never, actual as never);
         if (differing) {
           console.log(`[seed ${seed}] ${label}: first differing facet "${differing}"`, {
@@ -254,13 +282,13 @@ describe.each(RANDOM_SEEDS)('weighted facet and message math against the frozen 
     }
   );
 
-  it('keeps a message containing a semicolon as one whole facet value', async () => {
+  it('keeps a message containing a semicolon as one whole error type message', async () => {
     const { collapsed } = await weightedRowSets();
 
-    const facets = computeErrorFacets(collapsed, DEFAULT_ERROR_EXPLORER_FILTERS);
+    const errorTypes = computeErrorTypeFacets(collapsed, DEFAULT_ERROR_EXPLORER_FILTERS);
 
-    const messageValues = facets.messages.map(option => option.value);
-    console.log(`[seed ${seed}] message facet values`, messageValues);
+    const messageValues = errorTypes.map(errorType => errorType.message);
+    console.log(`[seed ${seed}] error type messages`, messageValues);
     expect(messageValues).toContain(SEMICOLON_MESSAGE);
     expect(messageValues).not.toContain('First condition');
     expect(messageValues).not.toContain('second condition');
@@ -460,6 +488,78 @@ describe('error type key sets', () => {
   });
 });
 
+describe('error type key sets for one error type identity', () => {
+  const identityOf = (type: ErrorTypeDefinition): ErrorTypeIdentity => ({ source: type.source, code: type.code, message: type.message });
+  const SHARED_IDENTITY_CODE = 'SHARED_IDENTITY_CODE';
+  const SHARED_IDENTITY_MESSAGE = 'Two catalog rows say this';
+  const sharedIdentityTypes: ErrorTypeDefinition[] = [
+    { key: 8, source: 'ingestion', code: SHARED_IDENTITY_CODE, message: SHARED_IDENTITY_MESSAGE, criteria: '', procedureName: '' },
+    { key: 9, source: 'ingestion', code: SHARED_IDENTITY_CODE, message: SHARED_IDENTITY_MESSAGE, criteria: '', procedureName: '' }
+  ];
+
+  it('keeps only the keys whose source, code and message equal the identity, and never matches all keys', () => {
+    const catalog = buildErrorTypeCatalog(toCatalogRows(CATALOG_TYPES));
+    const sharedMessageTypeA = CATALOG_TYPES[1];
+
+    const keySets = computeErrorKeySets(catalog, DEFAULT_ERROR_EXPLORER_FILTERS, identityOf(sharedMessageTypeA));
+
+    console.log('[key sets] one identity', keySets);
+    expect(sharedMessageTypeA.message, 'precondition: another code shares this message').toBe(CATALOG_TYPES[2].message);
+    expect(keySets.allKeysMatch, 'an identity restricts the keys even under default filters').toBe(false);
+    expect(keySets.matchingKeys).toEqual([sharedMessageTypeA.key]);
+    expect(keySets.matchingValidationKeys).toEqual([sharedMessageTypeA.key]);
+    expect(keySets.matchingIngestionKeys).toEqual([]);
+  });
+
+  it('finds the no-log type by its identity', () => {
+    const catalog = buildErrorTypeCatalog(toCatalogRows(CATALOG_TYPES));
+
+    const keySets = computeErrorKeySets(catalog, DEFAULT_ERROR_EXPLORER_FILTERS, {
+      source: 'ingestion',
+      code: FALLBACK_ERROR_CODE,
+      message: FALLBACK_ERROR_MESSAGE
+    });
+
+    expect(keySets.matchingKeys).toEqual([NO_LOG_ERROR_TYPE_KEY]);
+    expect(keySets.matchingIngestionKeys).toEqual([NO_LOG_ERROR_TYPE_KEY]);
+  });
+
+  it('keeps every catalog key that carries the identity when two ErrorIDs normalise to one', () => {
+    const catalog = buildErrorTypeCatalog(toCatalogRows([...CATALOG_TYPES, ...sharedIdentityTypes]));
+
+    const keySets = computeErrorKeySets(catalog, DEFAULT_ERROR_EXPLORER_FILTERS, identityOf(sharedIdentityTypes[0]));
+
+    expect(keySets.matchingKeys).toEqual([8, 9]);
+    expect(keySets.matchingIngestionKeys).toEqual([8, 9]);
+  });
+
+  it('leaves no key when the page filters exclude the identity, so the response is empty', () => {
+    const catalog = buildErrorTypeCatalog(toCatalogRows(CATALOG_TYPES));
+    const validationIdentity = identityOf(CATALOG_TYPES[0]);
+
+    const keySets = computeErrorKeySets(catalog, { ...DEFAULT_ERROR_EXPLORER_FILTERS, source: 'ingestion' }, validationIdentity);
+
+    console.log('[key sets] identity outside the filtered source', keySets);
+    expect(keySets.matchingKeys).toEqual([]);
+    expect(isImpossibleKeyFilter(keySets)).toBe(true);
+  });
+
+  it('compares the message exactly, not by locale or case', () => {
+    const catalog = buildErrorTypeCatalog(toCatalogRows(CATALOG_TYPES));
+    const identity = identityOf(CATALOG_TYPES[0]);
+
+    expect(computeErrorKeySets(catalog, DEFAULT_ERROR_EXPLORER_FILTERS, { ...identity, message: identity.message.toUpperCase() }).matchingKeys).toEqual([]);
+    expect(computeErrorKeySets(catalog, DEFAULT_ERROR_EXPLORER_FILTERS, { ...identity, code: `${identity.code} ` }).matchingKeys).toEqual([]);
+  });
+
+  it('returns the same sets as before when no identity is given', () => {
+    const catalog = buildErrorTypeCatalog(toCatalogRows(CATALOG_TYPES));
+
+    expect(computeErrorKeySets(catalog, DEFAULT_ERROR_EXPLORER_FILTERS, undefined)).toEqual(computeErrorKeySets(catalog, DEFAULT_ERROR_EXPLORER_FILTERS));
+    expect(computeErrorKeySets(catalog, DEFAULT_ERROR_EXPLORER_FILTERS).allKeysMatch).toBe(true);
+  });
+});
+
 describe('signature rows', () => {
   interface SignatureOptions {
     keys: string;
@@ -467,12 +567,14 @@ describe('signature rows', () => {
     complete?: boolean;
     duplicate?: boolean;
     sameBatch?: boolean;
+    failed?: boolean;
   }
-  const signature = ({ keys, count, complete = true, duplicate = false, sameBatch = false }: SignatureOptions): ErrorSignatureRow => ({
+  const signature = ({ keys, count, complete = true, duplicate = false, sameBatch = false, failed = false }: SignatureOptions): ErrorSignatureRow => ({
     ErrorTypeKeys: keys,
     SignatureComplete: complete ? SQL_TRUE : SQL_FALSE,
     HasDuplicate: duplicate ? SQL_TRUE : SQL_FALSE,
     HasSameBatch: sameBatch ? SQL_TRUE : SQL_FALSE,
+    IsFailedRow: failed ? SQL_TRUE : SQL_FALSE,
     MeasurementCount: count
   });
 
@@ -490,6 +592,19 @@ describe('signature rows', () => {
     expect(mergedRow?.HasDuplicate, 'a merged row keeps its duplicate flag').toBe(SQL_FALSE);
     expect(mergedRow?.SignatureComplete, 'a merged row keeps its completeness').toBe(SQL_TRUE);
     expect(merged.find(row => row.ErrorTypeKeys === '3')?.MeasurementCount, 'a row that merges with nothing still gets a numeric count').toBe(7);
+  });
+
+  it('keeps a failed row and a live row with the same signature apart, and sums failed rows across chunks', () => {
+    const merged = mergeSignatureRows([
+      [signature({ keys: '4', count: 2 }), signature({ keys: '4', failed: true, count: 3 })],
+      [signature({ keys: '4', failed: true, count: '5' }), signature({ keys: '4', count: '11' })]
+    ]);
+
+    console.log('[signatures] failed vs live', merged);
+    expect(merged.map(row => [Number(row.IsFailedRow), Number(row.MeasurementCount)])).toEqual([
+      [SQL_FALSE, 13],
+      [SQL_TRUE, 8]
+    ]);
   });
 
   it('keeps a complete and an incomplete signature with the same text apart, and different flags apart', () => {
@@ -528,7 +643,19 @@ describe('signature rows', () => {
     expect(weighted[0].measurementCount).toBe(9);
     expect(weighted[0].contradictionTypes).toEqual(['duplicate_tag_stem', 'same_batch_conflict']);
     expect(weighted[0].hasContradiction).toBe(true);
+    expect(weighted[0].isFailedRow).toBe(false);
     expect(weighted[0].errors.map(error => error.code)).toEqual(['failed_no_log', '3']);
+  });
+
+  it('decodes the failed-row flag onto the weighted row', () => {
+    const catalog = buildErrorTypeCatalog(toCatalogRows(CATALOG_TYPES));
+
+    const weighted = toWeightedErrorRows([signature({ keys: '1', failed: true, count: 4 }), signature({ keys: '1', count: 6 })], catalog);
+
+    expect(weighted.map(row => [row.isFailedRow, row.measurementCount])).toEqual([
+      [true, 4],
+      [false, 6]
+    ]);
   });
 
   it('throws ErrorTypeCatalogMismatchError naming the keys the catalog does not list', () => {
@@ -588,6 +715,275 @@ describe('hasLocaleCompareTie', () => {
         { value: 'm', count: 5 },
         { value: NFC_E_ACUTE, count: 2 },
         { value: NFD_E_ACUTE, count: 2 }
+      ])
+    ).toBe(true);
+  });
+});
+
+describe('error type facets and census totals from weighted rows', () => {
+  const SHARED_FACET_MESSAGE = 'Shared message';
+  const CODE_A: ErrorTypeIdentity = { source: 'ingestion', code: 'CODE_A', message: SHARED_FACET_MESSAGE };
+  const CODE_B: ErrorTypeIdentity = { source: 'ingestion', code: 'CODE_B', message: SHARED_FACET_MESSAGE };
+  const VALIDATION_14: ErrorTypeIdentity = { source: 'validation', code: '14', message: 'Attribute code does not exist in attributes table' };
+  const DUPLICATE: ErrorTypeIdentity = { source: 'ingestion', code: 'DUPLICATE_TAG_STEMTAG', message: 'Duplicate TreeTag/StemTag within upload batch' };
+  const FALLBACK: ErrorTypeIdentity = { source: 'ingestion', code: FALLBACK_ERROR_CODE, message: FALLBACK_ERROR_MESSAGE };
+  const ACTIVE_COUNT = 88;
+  const KEY_VALIDATION_14 = 1;
+  const KEY_CODE_A = 2;
+  const KEY_CODE_B = 3;
+  const KEY_DUPLICATE = 4;
+  const CATALOG_ROWS: ErrorTypeCatalogRow[] = [
+    {
+      ErrorID: KEY_VALIDATION_14,
+      ErrorSource: 'validation',
+      ErrorCode: '14',
+      DisplayMessage: VALIDATION_14.message,
+      ValidationCriteria: 'attributes',
+      ProcedureName: 'ValidateAttributes'
+    },
+    { ErrorID: KEY_CODE_A, ErrorSource: 'ingestion', ErrorCode: 'CODE_A', DisplayMessage: SHARED_FACET_MESSAGE, ValidationCriteria: '', ProcedureName: '' },
+    { ErrorID: KEY_CODE_B, ErrorSource: 'ingestion', ErrorCode: 'CODE_B', DisplayMessage: SHARED_FACET_MESSAGE, ValidationCriteria: '', ProcedureName: '' },
+    {
+      ErrorID: KEY_DUPLICATE,
+      ErrorSource: 'ingestion',
+      ErrorCode: 'DUPLICATE_TAG_STEMTAG',
+      DisplayMessage: DUPLICATE.message,
+      ValidationCriteria: '',
+      ProcedureName: ''
+    }
+  ];
+  const catalog = buildErrorTypeCatalog(CATALOG_ROWS);
+
+  function weightedFromSignatures(
+    signatureRows: ReadonlyArray<{ keys: number[]; duplicate?: boolean; failed?: boolean; sameBatch?: boolean; count?: number }>
+  ): WeightedErrorRow[] {
+    return toWeightedErrorRows(
+      signatureRows.map(
+        ({ keys, duplicate = false, failed = false, sameBatch = false, count = SINGLE_MEASUREMENT_WEIGHT }): ErrorSignatureRow => ({
+          ErrorTypeKeys: keys.join(','),
+          SignatureComplete: SQL_TRUE,
+          HasDuplicate: duplicate ? SQL_TRUE : SQL_FALSE,
+          HasSameBatch: sameBatch ? SQL_TRUE : SQL_FALSE,
+          IsFailedRow: failed ? SQL_TRUE : SQL_FALSE,
+          MeasurementCount: count
+        })
+      ),
+      catalog
+    );
+  }
+
+  // Six measurements across two censuses: 101 CODE_A, 102 CODE_B, 103 validation 14 + CODE_A in a duplicate group, 104 failed DUPLICATE_TAG_STEMTAG,
+  // 105 the linked no-log type (not failed), 201 validation 14.
+  const SIX_MEASUREMENTS = weightedFromSignatures([
+    { keys: [KEY_CODE_A] },
+    { keys: [KEY_CODE_B] },
+    { keys: [KEY_VALIDATION_14, KEY_CODE_A], duplicate: true },
+    { keys: [KEY_DUPLICATE], failed: true },
+    { keys: [NO_LOG_ERROR_TYPE_KEY] },
+    { keys: [KEY_VALIDATION_14] }
+  ]);
+
+  const countsByCode = (errorTypes: ReturnType<typeof computeErrorTypeFacets>) => errorTypes.map(errorType => [errorType.code, errorType.count]);
+
+  it('lists two identities for one message shared by two codes, ordered by count then message, source, code', () => {
+    const errorTypes = computeErrorTypeFacets(SIX_MEASUREMENTS, DEFAULT_ERROR_EXPLORER_FILTERS);
+
+    console.log('[error types] default', errorTypes);
+    expect(countsByCode(errorTypes)).toEqual([
+      ['14', 2],
+      ['CODE_A', 2],
+      ['DUPLICATE_TAG_STEMTAG', 1],
+      [FALLBACK_ERROR_CODE, 1],
+      ['CODE_B', 1]
+    ]);
+  });
+
+  it('marks the identity whose rows carry a contradiction', () => {
+    const errorTypes = computeErrorTypeFacets(SIX_MEASUREMENTS, DEFAULT_ERROR_EXPLORER_FILTERS);
+
+    expect(errorTypes.find(errorType => errorType.code === '14')?.hasContradiction, 'measurement 103 carries 14 and a duplicate group').toBe(true);
+    expect(errorTypes.find(errorType => errorType.code === 'CODE_B')?.hasContradiction).toBe(false);
+  });
+
+  it("gives DUPLICATE_TAG_STEMTAG's entry the tree and stem tag fields (P2-6)", () => {
+    const errorTypes = computeErrorTypeFacets(SIX_MEASUREMENTS, DEFAULT_ERROR_EXPLORER_FILTERS);
+
+    expect(errorTypes.find(errorType => errorType.code === 'DUPLICATE_TAG_STEMTAG')?.fields).toEqual(['treeTag', 'stemTag']);
+  });
+
+  it("lists only a mixed-source row's validation identity under Show → Validation", () => {
+    const errorTypes = computeErrorTypeFacets(SIX_MEASUREMENTS, applyShowValue(DEFAULT_ERROR_EXPLORER_FILTERS, 'validation'));
+
+    console.log('[error types] Show validation', errorTypes);
+    expect(errorTypes.map(({ source, code, message }) => ({ source, code, message }))).toEqual([VALIDATION_14]);
+    expect(errorTypes[0].count, 'rows 103 and 201; row 101 carries only an ingestion identity').toBe(2);
+  });
+
+  it('lists both identities sharing an exact message, and nothing else', () => {
+    const errorTypes = computeErrorTypeFacets(SIX_MEASUREMENTS, { ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages: [SHARED_FACET_MESSAGE] });
+
+    expect(errorTypes.map(errorType => errorType.code)).toEqual(['CODE_A', 'CODE_B']);
+  });
+
+  it('skips a row that the contradiction filter refuses', () => {
+    const errorTypes = computeErrorTypeFacets(SIX_MEASUREMENTS, applyShowValue(DEFAULT_ERROR_EXPLORER_FILTERS, 'contradictions'));
+
+    expect(countsByCode(errorTypes), 'only measurement 103 is contradicted').toEqual([
+      ['14', 1],
+      ['CODE_A', 1]
+    ]);
+  });
+
+  it('adds a measurement weight to an identity once per row and sums the weights of rows', () => {
+    const rows = weightedFromSignatures([{ keys: [KEY_CODE_A], count: 40 }, { keys: [KEY_CODE_A, KEY_CODE_B], count: 2 }, { keys: [KEY_CODE_B] }]);
+
+    const errorTypes = computeErrorTypeFacets(rows, DEFAULT_ERROR_EXPLORER_FILTERS);
+
+    expect(countsByCode(errorTypes)).toEqual([
+      ['CODE_A', 42],
+      ['CODE_B', 3]
+    ]);
+  });
+
+  it("adds a row's weight once to an identity it carries through two catalog entries", () => {
+    const IDENTITY_WEIGHT = 9;
+    const record: ErrorDetailRecord = { ...CODE_A, fields: ['treeTag'], procedureName: null, comparison: null };
+    const sameIdentityOtherEntry: ErrorDetailRecord = { ...record, fields: ['treeTag', 'stemTag'] };
+    const rows: WeightedErrorRow[] = [
+      { errors: [record, sameIdentityOtherEntry], contradictionTypes: [], hasContradiction: false, isFailedRow: false, measurementCount: IDENTITY_WEIGHT },
+      { errors: [record], contradictionTypes: [], hasContradiction: false, isFailedRow: false, measurementCount: SINGLE_MEASUREMENT_WEIGHT }
+    ];
+
+    const errorTypes = computeErrorTypeFacets(rows, DEFAULT_ERROR_EXPLORER_FILTERS);
+    const totals = computeCensusTotals(rows, ACTIVE_COUNT);
+
+    console.log('[error types] shared identity', errorTypes, totals);
+    expect(errorTypes).toHaveLength(1);
+    expect(errorTypes[0].count, 'weight 9 once, plus the weight-one row; twice the weight would be 19').toBe(IDENTITY_WEIGHT + SINGLE_MEASUREMENT_WEIGHT);
+    expect(errorTypes[0].fields, 'fields are the union in first-seen order').toEqual(['treeTag', 'stemTag']);
+    expect(totals.errorTypeCount, 'one identity however many catalog entries carry it').toBe(1);
+  });
+
+  it('counts the whole error set and ignores every filter', () => {
+    const narrowedErrorTypes = computeErrorTypeFacets(SIX_MEASUREMENTS, {
+      ...DEFAULT_ERROR_EXPLORER_FILTERS,
+      source: 'validation',
+      exactMessages: [VALIDATION_14.message]
+    });
+
+    const totals = computeCensusTotals(SIX_MEASUREMENTS, ACTIVE_COUNT);
+
+    const expectedTotals: ErrorCensusTotals = {
+      affectedMeasurements: 6,
+      activeMeasurements: ACTIVE_COUNT,
+      errorTypeCount: 5,
+      validation: 2,
+      ingestion: 5,
+      failedMeasurements: 1,
+      contradictions: 1,
+      duplicateTagStem: 1,
+      sameBatchConflict: 0
+    };
+    console.log('[census totals]', totals);
+    expect(narrowedErrorTypes[0].count, 'the narrowed list sees only the two measurements carrying validation 14').toBe(2);
+    expect(totals).toEqual(expectedTotals);
+  });
+
+  it('counts a linked failed_no_log row under ingestion but not as failed (D-d)', () => {
+    const noLogOnly = weightedFromSignatures([{ keys: [NO_LOG_ERROR_TYPE_KEY] }]);
+
+    const totals = computeCensusTotals(noLogOnly, ACTIVE_COUNT);
+
+    expect(totals.ingestion).toBe(1);
+    expect(totals.failedMeasurements, 'only a row with no stem is failed').toBe(0);
+    expect(computeCensusTotals(weightedFromSignatures([{ keys: [NO_LOG_ERROR_TYPE_KEY], failed: true }]), ACTIVE_COUNT).failedMeasurements).toBe(1);
+  });
+
+  it('sums every weight into the totals', () => {
+    const rows = weightedFromSignatures([
+      { keys: [KEY_CODE_A], count: 30 },
+      { keys: [KEY_VALIDATION_14, KEY_CODE_A], sameBatch: true, count: 5 },
+      { keys: [KEY_DUPLICATE], duplicate: true, sameBatch: true, failed: true, count: 2 }
+    ]);
+
+    const totals = computeCensusTotals(rows, ACTIVE_COUNT);
+
+    expect(totals).toEqual({
+      affectedMeasurements: 37,
+      activeMeasurements: ACTIVE_COUNT,
+      errorTypeCount: 3,
+      validation: 5,
+      ingestion: 37,
+      failedMeasurements: 2,
+      contradictions: 7,
+      duplicateTagStem: 2,
+      sameBatchConflict: 7
+    });
+  });
+
+  it('returns an empty list and all-zero totals for no rows', () => {
+    expect(computeErrorTypeFacets([], DEFAULT_ERROR_EXPLORER_FILTERS)).toEqual([]);
+    expect(computeCensusTotals([], ACTIVE_COUNT)).toEqual({
+      affectedMeasurements: 0,
+      activeMeasurements: ACTIVE_COUNT,
+      errorTypeCount: 0,
+      validation: 0,
+      ingestion: 0,
+      failedMeasurements: 0,
+      contradictions: 0,
+      duplicateTagStem: 0,
+      sameBatchConflict: 0
+    });
+  });
+
+  it('keeps error type identities distinct by their serialised source, code and message', () => {
+    expect(buildErrorTypeKey(CODE_A)).not.toBe(buildErrorTypeKey(CODE_B));
+  });
+});
+
+describe('hasErrorTypeOrderTie', () => {
+  const NFC_E_ACUTE = '\u00e9';
+  const NFD_E_ACUTE = 'e\u0301';
+  const facet = (overrides: Partial<ErrorTypeIdentity> & { count?: number }) => ({
+    source: 'ingestion' as const,
+    code: 'CODE',
+    message: 'Message',
+    fields: [],
+    count: 3,
+    hasContradiction: false,
+    ...overrides
+  });
+
+  it('is true when two distinct identities tie on count, message, source and code under localeCompare', () => {
+    expect(NFC_E_ACUTE.localeCompare(NFD_E_ACUTE), 'precondition: this runtime treats the two forms as equal').toBe(0);
+
+    expect(hasErrorTypeOrderTie([facet({ message: NFC_E_ACUTE }), facet({ message: NFD_E_ACUTE })])).toBe(true);
+  });
+
+  it('is true for a tie in the code or the source alone, when the other fields and the count tie', () => {
+    expect(hasErrorTypeOrderTie([facet({ code: NFC_E_ACUTE }), facet({ code: NFD_E_ACUTE })])).toBe(true);
+  });
+
+  it('is false when the tied messages differ by count, by code, or by source', () => {
+    expect(hasErrorTypeOrderTie([facet({ message: NFC_E_ACUTE, count: 4 }), facet({ message: NFD_E_ACUTE, count: 3 })])).toBe(false);
+    expect(hasErrorTypeOrderTie([facet({ message: NFC_E_ACUTE, code: 'A' }), facet({ message: NFD_E_ACUTE, code: 'B' })])).toBe(false);
+    expect(hasErrorTypeOrderTie([facet({ message: NFC_E_ACUTE, source: 'ingestion' }), facet({ message: NFD_E_ACUTE, source: 'validation' })])).toBe(false);
+  });
+
+  it('is false for distinct messages with equal counts, identical identities, and short lists', () => {
+    expect(hasErrorTypeOrderTie([facet({ message: 'a' }), facet({ message: 'b' })])).toBe(false);
+    expect(hasErrorTypeOrderTie([facet({}), facet({})])).toBe(false);
+    expect(hasErrorTypeOrderTie([facet({})])).toBe(false);
+    expect(hasErrorTypeOrderTie([])).toBe(false);
+  });
+
+  it('finds a tie that is not at the start of the list', () => {
+    expect(
+      hasErrorTypeOrderTie([
+        facet({ count: 9 }),
+        facet({ count: 5, message: 'm' }),
+        facet({ message: NFC_E_ACUTE, count: 2 }),
+        facet({ message: NFD_E_ACUTE, count: 2 })
       ])
     ).toBe(true);
   });

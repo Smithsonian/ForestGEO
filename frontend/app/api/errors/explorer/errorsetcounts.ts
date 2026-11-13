@@ -1,11 +1,15 @@
 import {
+  buildErrorTypeKey,
   dedupeStrings,
+  ERROR_SOURCE,
   INGESTION_ERROR_FIELD_MAP,
   type ContradictionType,
+  type ErrorCensusTotals,
   type ErrorDetailRecord,
-  type ErrorExplorerFacetsResponse,
   type ErrorExplorerFilters,
-  type ErrorFacetOption
+  type ErrorFacetOption,
+  type ErrorTypeFacet,
+  type ErrorTypeIdentity
 } from '@/config/errorsexplorer';
 import {
   LIST_SEPARATOR,
@@ -94,10 +98,16 @@ function filtersRestrictErrorTypes(filters: ErrorExplorerFilters): boolean {
   return filters.source !== 'all' || filters.exactMessages.length > 0 || filters.affectedFields.length > 0;
 }
 
-export function computeErrorKeySets(catalog: ErrorTypeCatalog, filters: ErrorExplorerFilters): ErrorTypeKeyFilter {
-  const matching = Array.from(catalog.recordsByKey).filter(([, record]) => errorMatchesFilters(record, filters));
+function carriesIdentity(record: ErrorDetailRecord, identity: ErrorTypeIdentity): boolean {
+  return record.source === identity.source && record.code === identity.code && record.message === identity.message;
+}
+
+export function computeErrorKeySets(catalog: ErrorTypeCatalog, filters: ErrorExplorerFilters, errorType?: ErrorTypeIdentity): ErrorTypeKeyFilter {
+  const matching = Array.from(catalog.recordsByKey).filter(
+    ([, record]) => errorMatchesFilters(record, filters) && (errorType === undefined || carriesIdentity(record, errorType))
+  );
   return {
-    allKeysMatch: !filtersRestrictErrorTypes(filters),
+    allKeysMatch: errorType === undefined && !filtersRestrictErrorTypes(filters),
     matchingKeys: matching.map(([key]) => key),
     matchingValidationKeys: matching.filter(([, record]) => record.source === 'validation').map(([key]) => key),
     matchingIngestionKeys: matching.filter(([, record]) => record.source === 'ingestion').map(([key]) => key)
@@ -171,6 +181,7 @@ export interface WeightedErrorRow {
   readonly errors: readonly ErrorDetailRecord[];
   readonly contradictionTypes: readonly ContradictionType[];
   readonly hasContradiction: boolean;
+  readonly isFailedRow: boolean;
   readonly measurementCount: number;
 }
 
@@ -179,7 +190,7 @@ export function parseErrorTypeKeys(errorTypeKeys: string): number[] {
 }
 
 function signatureMergeKey(row: ErrorSignatureRow): string {
-  return [String(row.ErrorTypeKeys), Number(row.SignatureComplete), Number(row.HasDuplicate), Number(row.HasSameBatch)].join('|');
+  return [String(row.ErrorTypeKeys), Number(row.SignatureComplete), Number(row.HasDuplicate), Number(row.HasSameBatch), Number(row.IsFailedRow)].join('|');
 }
 
 export function mergeSignatureRows(chunks: readonly ErrorSignatureRow[][]): ErrorSignatureRow[] {
@@ -215,6 +226,7 @@ export function toWeightedErrorRows(rows: readonly ErrorSignatureRow[], catalog:
       errors: parseErrorTypeKeys(row.ErrorTypeKeys).map(key => catalog.recordsByKey.get(key) as ErrorDetailRecord),
       contradictionTypes,
       hasContradiction: contradictionTypes.length > 0,
+      isFailedRow: Number(row.IsFailedRow) === SQL_TRUE,
       measurementCount: Number(row.MeasurementCount)
     };
   });
@@ -246,27 +258,59 @@ export interface ErrorMessageCounts {
   messages: ErrorFacetOption[];
 }
 
-/** Today's facet math (buildErrorExplorerFacets at 8b60006b, lines 647-680) with a weight per row; search is applied by the caller. */
-export function computeErrorFacets(rows: readonly WeightedErrorRow[], filters: ErrorExplorerFilters): ErrorExplorerFacetsResponse {
-  const scopedRows = rows.filter(
-    row =>
-      (filters.source === 'all' || row.errors.some(error => error.source === filters.source)) &&
-      contradictionFiltersAllow(filters, row.hasContradiction, row.contradictionTypes)
-  );
-  const fieldCounts = new Map<string, number>();
-  scopedRows.forEach(row => new Set(row.errors.flatMap(error => error.fields)).forEach(field => addWeight(fieldCounts, field, row.measurementCount)));
+interface ErrorTypeAccumulator {
+  facet: ErrorTypeFacet;
+  fields: Set<string>;
+}
+
+function compareErrorTypeFacets(a: ErrorTypeFacet, b: ErrorTypeFacet): number {
+  return b.count - a.count || a.message.localeCompare(b.message) || a.source.localeCompare(b.source) || a.code.localeCompare(b.code);
+}
+
+function newErrorTypeAccumulator({ source, code, message }: ErrorDetailRecord): ErrorTypeAccumulator {
+  return { facet: { source, code, message, fields: [], count: 0, hasContradiction: false }, fields: new Set() };
+}
+
+/**
+ * Dev's buildErrorTypeFacets with a weight per row: an identity gains a row's weight once, however many of the row's
+ * catalog entries carry it. The caller applies the quick search.
+ */
+export function computeErrorTypeFacets(rows: readonly WeightedErrorRow[], filters: ErrorExplorerFilters): ErrorTypeFacet[] {
+  const byIdentity = new Map<string, ErrorTypeAccumulator>();
+  for (const row of rows) {
+    const matchingErrors = row.errors.filter(error => errorMatchesFilters(error, filters));
+    if (matchingErrors.length === 0 || !contradictionFiltersAllow(filters, row.hasContradiction, row.contradictionTypes)) continue;
+    const identitiesCountedForRow = new Set<string>();
+    for (const error of matchingErrors) {
+      const identityKey = buildErrorTypeKey(error);
+      const entry = byIdentity.get(identityKey) ?? newErrorTypeAccumulator(error);
+      error.fields.forEach(field => entry.fields.add(field));
+      if (row.hasContradiction) entry.facet.hasContradiction = true;
+      if (!identitiesCountedForRow.has(identityKey)) {
+        entry.facet.count += row.measurementCount;
+        identitiesCountedForRow.add(identityKey);
+      }
+      byIdentity.set(identityKey, entry);
+    }
+  }
+  return Array.from(byIdentity.values())
+    .map(entry => ({ ...entry.facet, fields: Array.from(entry.fields) }))
+    .sort(compareErrorTypeFacets);
+}
+
+/** Dev's buildCensusTotals with a weight per row. It takes no filters: the totals describe every row it is given. */
+export function computeCensusTotals(rows: readonly WeightedErrorRow[], activeMeasurements: number): ErrorCensusTotals {
+  const hasSource = (row: WeightedErrorRow, source: ErrorTypeIdentity['source']) => row.errors.some(error => error.source === source);
   return {
-    messages: sortFacetOptions(weightedMessageCounts(scopedRows).entries()),
-    fields: sortFacetOptions(fieldCounts.entries()),
-    sourceCounts: {
-      validation: totalWeight(scopedRows, row => row.errors.some(error => error.source === 'validation')),
-      ingestion: totalWeight(scopedRows, row => row.errors.some(error => error.source === 'ingestion'))
-    },
-    contradictionCounts: {
-      duplicateTagStem: totalWeight(scopedRows, row => row.contradictionTypes.includes(DUPLICATE_TAG_STEM)),
-      sameBatchConflict: totalWeight(scopedRows, row => row.contradictionTypes.includes(SAME_BATCH_CONFLICT))
-    },
-    totalMeasurements: totalWeight(scopedRows)
+    affectedMeasurements: totalWeight(rows),
+    activeMeasurements,
+    errorTypeCount: new Set(rows.flatMap(row => row.errors.map(buildErrorTypeKey))).size,
+    validation: totalWeight(rows, row => hasSource(row, ERROR_SOURCE.validation)),
+    ingestion: totalWeight(rows, row => hasSource(row, ERROR_SOURCE.ingestion)),
+    failedMeasurements: totalWeight(rows, row => row.isFailedRow),
+    contradictions: totalWeight(rows, row => row.hasContradiction),
+    duplicateTagStem: totalWeight(rows, row => row.contradictionTypes.includes(DUPLICATE_TAG_STEM)),
+    sameBatchConflict: totalWeight(rows, row => row.contradictionTypes.includes(SAME_BATCH_CONFLICT))
   };
 }
 
@@ -284,5 +328,17 @@ export function hasLocaleCompareTie(options: readonly ErrorFacetOption[]): boole
   return options.some((option, index) => {
     const next = options[index + 1];
     return next !== undefined && next.count === option.count && next.value !== option.value && option.value.localeCompare(next.value) === 0;
+  });
+}
+
+/**
+ * True when two different identities with the same count compare equal on message, source and code under localeCompare
+ * (for example NFC and NFD forms of one letter). The stable sort then keeps encounter order, which differs between
+ * histogram rows and measurement rows, so such a response must be rebuilt on the Node path to keep dev's order.
+ */
+export function hasErrorTypeOrderTie(errorTypes: readonly ErrorTypeFacet[]): boolean {
+  return errorTypes.some((errorType, index) => {
+    const next = errorTypes[index + 1];
+    return next !== undefined && buildErrorTypeKey(errorType) !== buildErrorTypeKey(next) && compareErrorTypeFacets(errorType, next) === 0;
   });
 }
