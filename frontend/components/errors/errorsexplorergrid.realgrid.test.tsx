@@ -157,7 +157,7 @@ function Harness({
 }
 
 /** One flat grid; `gated` stands in for the row-edit hook's pending-rebuild gate so the grid's own gating is what runs. */
-function FlatHarness({ gated }: { gated: boolean }) {
+function FlatHarness({ gated, hiddenFields = [] }: { gated: boolean; hiddenFields?: readonly string[] }) {
   const readScopeKey = buildReadScopeKey(READ_SCOPE);
   const realRowEdit = useErrorsExplorerRowEdit({
     readScope: READ_SCOPE,
@@ -167,7 +167,11 @@ function FlatHarness({ gated }: { gated: boolean }) {
     showPageAlert: () => undefined
   });
   const rowEdit = { ...realRowEdit, isReadScopeGated: gated };
-  const [models, setModels] = useState<ErrorsExplorerGridModels>({ sortModel: [], filterModel: { items: [] }, columnVisibilityModel: {} });
+  const [models, setModels] = useState<ErrorsExplorerGridModels>({
+    sortModel: [],
+    filterModel: { items: [] },
+    columnVisibilityModel: Object.fromEntries(hiddenFields.map(field => [field, false]))
+  });
   return (
     <ErrorsExplorerGrid
       gridKey={FLAT_GRID}
@@ -205,6 +209,16 @@ async function switchFlatGridToInfinite() {
 
 function grid(label: string) {
   return within(screen.getByRole('grid', { name: label }));
+}
+
+interface VisibleColumnsApi {
+  getVisibleColumns: () => Array<{ field: string }>;
+}
+
+function visibleFields(gridKey: string): string[] {
+  const api = (window as unknown as { __errorsGridApi?: Record<string, VisibleColumnsApi | undefined> }).__errorsGridApi?.[gridKey];
+  if (!api) throw new Error(`No test-only grid API handle for ${gridKey}`);
+  return api.getVisibleColumns().map(column => column.field);
 }
 
 function cell(label: string, rowID: number, field: string): HTMLElement {
@@ -367,6 +381,81 @@ describe('ErrorsExplorerGrid with the real DataGrid', () => {
     expect(queryBodies(fetchMock), 'no query while the owning grid is locked').toHaveLength(0);
     expect(modelsChanged, 'the locked grid reports no model change').not.toHaveBeenCalled();
     expect((cell('1 rows', 101, 'treeTag').querySelector('input') as HTMLInputElement).value, 'the typed values are still in the row').toBe('T101');
+  });
+
+  it.each([
+    ['a fixed-width column', 'measuredDBH'],
+    ['a flex column', 'treeTag']
+  ])('keeps the resized width of %s when the page re-renders with a new columns array', async (_columnKind, resizedField) => {
+    const RESIZED_WIDTH = 333;
+    const SEARCH_THAT_RERENDERS = 'T';
+    const { rerender } = render(<Harness />);
+    await waitFor(() => expect(cell('1 rows', 101, resizedField)).toBeInTheDocument());
+    const api = (
+      window as unknown as {
+        __errorsGridApi: Record<
+          string,
+          { setColumnWidth: (field: string, width: number) => void; getColumn: (field: string) => { width?: number; flex?: number; computedWidth: number } }
+        >;
+      }
+    ).__errorsGridApi[GRID_A];
+    const columnBefore = api.getColumn(resizedField);
+    const widthBefore = columnBefore.computedWidth;
+    const flexBefore = columnBefore.flex;
+
+    act(() => api.setColumnWidth(resizedField, RESIZED_WIDTH));
+    await waitFor(() => expect(api.getColumn(resizedField).width).toBe(RESIZED_WIDTH));
+
+    rerender(<Harness filters={{ ...DEFAULT_ERROR_EXPLORER_FILTERS, quickSearch: SEARCH_THAT_RERENDERS }} />);
+    await waitFor(() => expect(queryBodies(fetchMock).at(-1)?.filters.quickSearch).toBe(SEARCH_THAT_RERENDERS));
+    await waitFor(() => expect(cell('1 rows', 101, resizedField)).toBeInTheDocument());
+
+    const columnAfter = api.getColumn(resizedField);
+    console.log(
+      `[errors grid] ${resizedField} before resize: computedWidth ${widthBefore}, flex ${flexBefore}; after re-render: ` +
+        `computedWidth ${columnAfter.computedWidth}, width ${columnAfter.width}, flex ${columnAfter.flex} (resized to ${RESIZED_WIDTH})`
+    );
+    expect(widthBefore, 'the default width differs from the resized one, so the assertion below can fail').not.toBe(RESIZED_WIDTH);
+    expect(columnAfter.computedWidth).toBe(RESIZED_WIDTH);
+  });
+
+  it('reveals the hidden editable columns while a group row is open, without saving that as the column choice', async () => {
+    const HIDDEN_EDITABLE_FIELD = 'description';
+    const HIDDEN_READ_ONLY_FIELD = 'priorHOM';
+    const onModelsChangeSpy = vi.fn();
+    render(<Harness onModelsChangeSpy={onModelsChangeSpy} />);
+    await waitFor(() => expect(cell('1 rows', 101, 'treeTag')).toBeInTheDocument());
+    const hiddenCell = () => screen.getByRole('grid', { name: '1 rows' }).querySelector(`[data-id="101"] [data-field="${HIDDEN_EDITABLE_FIELD}"]`);
+    const fieldsAtRest = visibleFields(GRID_A);
+    expect(fieldsAtRest, 'hidden at rest').not.toContain(HIDDEN_EDITABLE_FIELD);
+    expect(hiddenCell(), 'no cell at rest').toBeNull();
+
+    fireEvent.doubleClick(cell('1 rows', 101, 'treeTag'));
+    await waitFor(() => expect(hiddenCell()?.querySelector('input, textarea') ?? null, 'the revealed cell holds an editor').not.toBeNull());
+    const fieldsWhileEditing = visibleFields(GRID_A);
+    console.log('[errors grid] visible fields', JSON.stringify({ atRest: fieldsAtRest, whileEditing: fieldsWhileEditing, otherGrid: visibleFields(GRID_B) }));
+    expect(fieldsWhileEditing).toEqual(expect.arrayContaining(['attributes', 'stemLocalX', 'stemLocalY', 'measuredDBH', 'measuredHOM', 'description']));
+    expect(fieldsWhileEditing, 'a hidden read-only column stays hidden').not.toContain(HIDDEN_READ_ONLY_FIELD);
+    expect(visibleFields(GRID_B), 'the group that is not being edited keeps its own columns').not.toContain(HIDDEN_EDITABLE_FIELD);
+
+    fireEvent.keyDown(cell('1 rows', 101, 'treeTag'), { key: 'Escape' });
+    await waitFor(() => expect(hiddenCell()).toBeNull());
+    expect(visibleFields(GRID_A), 'back to the columns shown before the edit').toEqual(fieldsAtRest);
+    const visibilityWrites = onModelsChangeSpy.mock.calls.filter(([, models]) => models.columnVisibilityModel[HIDDEN_EDITABLE_FIELD] === true);
+    console.log(
+      `[errors grid] onModelsChange calls: ${onModelsChangeSpy.mock.calls.length}, with ${HIDDEN_EDITABLE_FIELD} visible: ${visibilityWrites.length}`
+    );
+    expect(visibilityWrites).toHaveLength(0);
+  });
+
+  it("reveals nothing in the flat grid, where a hidden column is the user's own choice", async () => {
+    const USER_HIDDEN_FIELD = 'description';
+    render(<FlatHarness gated={false} hiddenFields={[USER_HIDDEN_FIELD]} />);
+    await waitFor(() => expect(cell(FLAT_LABEL, 101, 'treeTag')).toBeInTheDocument());
+    fireEvent.doubleClick(cell(FLAT_LABEL, 101, 'treeTag'));
+    await waitFor(() => expect(cell(FLAT_LABEL, 101, 'treeTag').querySelector('input')).not.toBeNull());
+    console.log('[errors grid] flat visible fields while editing', JSON.stringify(visibleFields(FLAT_GRID)));
+    expect(visibleFields(FLAT_GRID)).not.toContain(USER_HIDDEN_FIELD);
   });
 
   it('gates the flat infinite reads: drops an in-flight response, sends nothing while gated, reads once when the gate lifts (P2-2, A3)', async () => {

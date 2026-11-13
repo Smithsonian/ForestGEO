@@ -292,6 +292,7 @@ export const DETAILS_SHEET_TEXT = {
   compareTitle: 'Compare with the other row',
   inspectRow: 'Inspect this row',
   codesHeading: 'Codes',
+  descriptionHeading: 'Description',
   uploadedCodes: 'Uploaded',
   materializedCodes: 'Materialized',
   retry: 'Retry',
@@ -300,6 +301,18 @@ export const DETAILS_SHEET_TEXT = {
   ingestionChip: 'Ingestion',
   unavailable: '—'
 } as const;
+
+const FACT_SEPARATOR = ' · ';
+const HOM_CHANGED_SUFFIX = ' (HOM changed)';
+
+export function formatErrorCodeLine(code: string, procedureName: string | null | undefined): string {
+  return procedureName ? `Code ${code}${FACT_SEPARATOR}${procedureName}` : `Code ${code}`;
+}
+
+export function formatPriorHomFact(priorHOM: number | null, homChanged: boolean): string | null {
+  if (priorHOM === null) return null;
+  return `Prior HOM ${priorHOM}${homChanged ? HOM_CHANGED_SUFFIX : ''}`;
+}
 
 export function formatMeasurementHeading(measurementID: number): string {
   return `Measurement ${measurementID}`;
@@ -446,6 +459,10 @@ export const EMPTY_ERROR_CENSUS_TOTALS: ErrorCensusTotals = {
 
 export function buildErrorTypeKey({ source, code, message }: ErrorTypeIdentity): string {
   return JSON.stringify([source, code, message]);
+}
+
+export function formatExportErrorType(label: string): string {
+  return `${VIEW_ERRORS_TEXT.exportCsv}: ${label}`;
 }
 
 export function toErrorTypeIdentity({ source, code, message }: ErrorTypeIdentity): ErrorTypeIdentity {
@@ -627,11 +644,13 @@ export const VIEW_ERRORS_TEXT = {
   footnote: 'A measurement with several errors appears under each of them.',
   filteredToPrefix: 'Filtered to:',
   removeFilter: 'Remove filter',
+  selectCensus: 'Select a census to see its errors.',
   emptyCensus: 'No unresolved errors in this census.',
   emptyFiltered: 'No unresolved errors match these filters.',
   clearFilters: 'Clear filters',
   totalsLoadFailed: "Couldn't load the census totals.",
   totalsStale: 'These totals may be out of date.',
+  groupsUnavailable: 'The error totals could not be loaded, so the rows are shown without grouping.',
   rowsLoadFailed: "Couldn't load these rows.",
   rowsStale: DETAILS_SHEET_TEXT.rowsStale,
   retry: DETAILS_SHEET_TEXT.retry,

@@ -14,6 +14,8 @@ import {
   EDIT_THIS_ROW_UNAVAILABLE_TOOLTIP,
   FALLBACK_ERROR_CODE,
   FALLBACK_ERROR_MESSAGE,
+  formatErrorTypeLabel,
+  formatExportErrorType,
   formatShowMoreErrorTypes,
   MARKED_INVALID_NO_ERROR_LOGGED_LABEL,
   VIEW_ERRORS_ALERTS,
@@ -1158,6 +1160,108 @@ describe('Per-unit load state', () => {
     expect(screen.getByTestId('errors-explorer-facts').textContent).not.toMatch(/\d/);
     await act(async () => firstFacets.resolve(jsonResponse(facetsResponse([VALIDATION_FACET]))));
     expect(await within(screen.getByTestId('errors-tile-affected')).findByText('1')).toBeInTheDocument();
+  });
+});
+
+describe('When the totals call fails', () => {
+  it('shows the rows ungrouped with a notice, then restores the groups once the totals load', async () => {
+    let facetsShouldFail = true;
+    const { network } = await mountPage(
+      defaultRoutes({
+        facets: () =>
+          facetsShouldFail
+            ? jsonResponse({ error: 'Unable to load the error totals' }, 500)
+            : jsonResponse(facetsResponse([VALIDATION_FACET], { affectedMeasurements: 1 }))
+      }),
+      { awaitGroupGrid: false }
+    );
+
+    expect(await screen.findByText(VIEW_ERRORS_TEXT.groupsUnavailable)).toBeInTheDocument();
+    await waitFor(() => expect(requireGrid(FLAT_LABEL).rows.map(row => Number(row.id))).toEqual([101, 102]));
+    const flatQuery = network.bodiesFor(ROUTES.query).at(-1);
+    console.log(`[view errors] fallback query body: ${JSON.stringify(flatQuery)}`);
+    expect(flatQuery).not.toHaveProperty('errorType');
+    expect(capturedGrids.has(GROUP_LABEL), 'no group grid without the totals').toBe(false);
+    expect(screen.getByRole('combobox', { name: VIEW_ERRORS_TEXT.groupRowsLabel }), "the user's grouping choice is kept").not.toHaveTextContent(
+      VIEW_ERRORS_TEXT.noGrouping
+    );
+
+    const totalsAlert = screen.getByText(VIEW_ERRORS_TEXT.totalsLoadFailed).closest<HTMLElement>('[role="alert"]');
+    if (!totalsAlert) throw new Error('The totals tiles show no load-failed alert to retry from');
+    facetsShouldFail = false;
+    await userEvent.click(within(totalsAlert).getByRole('button', { name: VIEW_ERRORS_TEXT.retry }));
+    await waitFor(() => expect(capturedGrids.get(GROUP_LABEL)?.rows.length, 'the group grid is back with its rows').toBeGreaterThan(0));
+    console.log(`[view errors] queries after the totals recovered: ${JSON.stringify(network.bodiesFor(ROUTES.query).map(body => body?.errorType ?? null))}`);
+    expect(screen.queryByText(VIEW_ERRORS_TEXT.groupsUnavailable)).not.toBeInTheDocument();
+    expect(network.bodiesFor(ROUTES.query).at(-1)?.errorType).toMatchObject({ code: VALIDATION_FACET.code });
+  });
+});
+
+describe('Export one error type', () => {
+  const OBJECT_URL = 'blob:view-errors-test';
+
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+
+  // jsdom's URL has neither method, so they are assigned for the test and put back after it.
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => OBJECT_URL);
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+    vi.restoreAllMocks();
+  });
+
+  it('sends the group identity with the page filters, and the page export sends none', async () => {
+    const SEARCH = 'T-1';
+    const { network } = await mountPage();
+    await userEvent.type(screen.getByRole('textbox', { name: VIEW_ERRORS_TEXT.searchLabel }), SEARCH);
+    await userEvent.click(await screen.findByRole('button', { name: formatExportErrorType(formatErrorTypeLabel(VALIDATION_FACET.message)) }));
+    await waitFor(() => expect(network.bodiesFor(ROUTES.export)).toHaveLength(1));
+    await waitFor(() => expect(screen.getByTestId('errorsexplorer-export-csv')).toBeEnabled());
+    await userEvent.click(screen.getByTestId('errorsexplorer-export-csv'));
+    await waitFor(() => expect(network.bodiesFor(ROUTES.export)).toHaveLength(2));
+
+    const [groupExport, pageExport] = network.bodiesFor(ROUTES.export);
+    console.log(`[view errors] export bodies: ${JSON.stringify([groupExport, pageExport])}`);
+    expect(groupExport?.errorType).toEqual({ source: VALIDATION_FACET.source, code: VALIDATION_FACET.code, message: VALIDATION_FACET.message });
+    expect(groupExport?.filters).toMatchObject({ quickSearch: SEARCH });
+    expect(pageExport).not.toHaveProperty('errorType');
+    expect(pageExport?.filters).toMatchObject({ quickSearch: SEARCH });
+    expect(screen.queryByTestId('errors-explorer-page-alert'), 'neither export failed').toBeNull();
+    expect(HTMLAnchorElement.prototype.click, 'each export hands the browser a download').toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('With no census selected', () => {
+  it('asks for a census and sends no read', async () => {
+    page.censusIDs = [];
+    const { network } = await mountPage(defaultRoutes(), { awaitGroupGrid: false });
+    expect(await screen.findByText(VIEW_ERRORS_TEXT.selectCensus)).toBeInTheDocument();
+    expect(screen.getByTestId('errors-explorer-title')).toHaveTextContent(VIEW_ERRORS_TEXT.pageTitle);
+    expect(screen.queryByRole('progressbar'), 'nothing is loading, so nothing spins').not.toBeInTheDocument();
+    expect(screen.queryByTestId('errorsexplorer-export-csv'), 'no export without a census to export').toBeNull();
+    console.log(`[view errors] requests with no census: ${JSON.stringify(network.requests.map(request => request.url))}`);
+    expect(network.bodiesFor(ROUTES.facets)).toHaveLength(0);
+    expect(network.bodiesFor(ROUTES.query)).toHaveLength(0);
+  });
+
+  it('loads the page once a census is selected', async () => {
+    page.censusIDs = [];
+    const { network, rerender } = await mountPage(defaultRoutes(), { awaitGroupGrid: false });
+    expect(await screen.findByText(VIEW_ERRORS_TEXT.selectCensus)).toBeInTheDocument();
+
+    page.censusIDs = [FIRST_CENSUS_ID];
+    const { default: ErrorsExplorer } = await import('./errorsexplorer');
+    rerender(<ErrorsExplorer />);
+    await waitFor(() => expect(capturedGrids.get(GROUP_LABEL)?.rows.length, 'the first group loads its rows').toBeGreaterThan(0));
+    console.log(`[view errors] requests after selecting a census: ${JSON.stringify(network.requests.map(request => request.url))}`);
+    expect(screen.queryByText(VIEW_ERRORS_TEXT.selectCensus)).toBeNull();
+    expect(network.bodiesFor(ROUTES.facets).at(-1)).toMatchObject({ censusID: FIRST_CENSUS_ID, censusIDs: [FIRST_CENSUS_ID] });
   });
 });
 

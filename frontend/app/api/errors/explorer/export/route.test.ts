@@ -249,6 +249,41 @@ describe('POST /api/errors/explorer/export', () => {
     expect(disposition).toContain('.csv"');
   });
 
+  it('exports one error type and names the file after its source and code, reduced to filename-safe characters', async () => {
+    const REQUESTED_CODE = 'BAD"CODE/1';
+    const FILENAME_SAFE_CODE = 'BAD_CODE_1';
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'executeQuery')
+      .mockResolvedValueOnce([
+        baseRawRow({ ErrorSource: 'ingestion', ErrorCode: REQUESTED_CODE, DisplayMessage: 'Requested type' }),
+        baseRawRow({ ErrorSource: 'validation', ErrorCode: '2', DisplayMessage: 'Another type on the same measurement' }),
+        baseRawRow({ CoreMeasurementID: 102, ErrorSource: 'validation', ErrorCode: '2', DisplayMessage: 'Another type on the same measurement' })
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const response = await POST(
+      buildRequest({
+        schema: 'forestgeo_testing',
+        plotID: 5,
+        censusID: 7,
+        filters: baseFilters(),
+        errorType: { source: 'ingestion', code: REQUESTED_CODE, message: 'Requested type' }
+      }),
+      ROUTE_CONTEXT
+    );
+
+    expect(response.status).toBe(HTTPResponses.OK);
+    const disposition = response.headers.get('Content-Disposition') ?? '';
+    const lines = await readCsvLines(response);
+    console.log('[view-errors export one type]', JSON.stringify({ disposition, lines }));
+    expect(disposition).toContain(`attachment; filename="errors-forestgeo_testing-plot5-census7-ingestion-${FILENAME_SAFE_CODE}-`);
+    expect(disposition).toMatch(/\.csv"$/);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('Requested type');
+    expect(lines[1]).not.toContain('Another type');
+  });
+
   it('rejects an invalid schema before ever querying the database', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const querySpy = vi.spyOn(cm, 'executeQuery');

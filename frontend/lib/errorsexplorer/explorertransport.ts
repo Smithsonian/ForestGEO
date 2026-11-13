@@ -3,6 +3,7 @@ import type {
   ErrorExplorerFacetsResponse,
   ErrorExplorerFilters,
   ErrorsExplorerReadScope,
+  ErrorTypeIdentity,
   RowMutationScope
 } from '@/config/errorsexplorer';
 
@@ -56,11 +57,15 @@ export function extractFilenameFromContentDisposition(headerValue: string | null
   return headerValue?.match(CONTENT_DISPOSITION_FILENAME)?.[1] ?? EXPORT_CSV_FALLBACK_FILENAME;
 }
 
-export async function postErrorsExplorerExport(scope: ErrorsExplorerReadScope, filters: ErrorExplorerFilters): Promise<{ blob: Blob; filename: string }> {
+export async function postErrorsExplorerExport(
+  scope: ErrorsExplorerReadScope,
+  filters: ErrorExplorerFilters,
+  errorType?: ErrorTypeIdentity
+): Promise<{ blob: Blob; filename: string }> {
   const response = await fetch(EXPORT_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(scopeBody(scope, filters))
+    body: JSON.stringify({ ...scopeBody(scope, filters), ...(errorType ? { errorType } : {}) })
   });
   if (!response.ok) {
     const data: unknown = await response.json().catch(() => null);

@@ -13,9 +13,11 @@ import {
   ERROR_DETAILS_SHEET_WIDTH,
   ERROR_SOURCE,
   formatDbhChangeFact,
+  formatErrorCodeLine,
   formatErrorTypeLabel,
   formatMeasurementHeading,
   formatOpenRow,
+  formatPriorHomFact,
   formatQuadratLine,
   formatTreeStemLine,
   formatUnresolvedErrorsHeading,
@@ -29,7 +31,7 @@ import {
   type RelatedContradictionRow
 } from '@/config/errorsexplorer';
 import { designTokens } from '@/config/design-tokens';
-import { getMaterializedCodesValue, getUploadedCodesValue, hasCodesMismatch, renderCodesChips } from './errorcodes';
+import { getCodesMismatchMessage, getMaterializedCodesValue, getUploadedCodesValue, hasCodesMismatch, renderCodesChips } from './errorcodes';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { ErrorSourceChip } from './errorsourcechip';
 import LockedControl from './lockedcontrol';
@@ -75,6 +77,7 @@ function ErrorCard({
   priorCensusNumberFor: ErrorRowDetailsPanelProps['priorCensusNumberFor'];
 }) {
   const fact = factLineFor(error, currentDBH, priorCensusNumberFor);
+  const priorHomFact = error.comparison ? formatPriorHomFact(error.comparison.priorHOM, error.comparison.homChanged) : null;
   return (
     <Card size="sm" variant="outlined" data-testid="error-row-details-error-card">
       <Stack spacing={0.5}>
@@ -84,6 +87,9 @@ function ErrorCard({
           </Typography>
           <ErrorSourceChip source={error.source} />
         </Stack>
+        <Typography level="body-xs" sx={{ color: 'text.tertiary' }}>
+          {formatErrorCodeLine(error.code, error.procedureName)}
+        </Typography>
         {error.fields.length > 0 && (
           <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
             {error.fields.map(field => (
@@ -94,6 +100,7 @@ function ErrorCard({
           </Stack>
         )}
         {fact && <Typography level="body-xs">{fact}</Typography>}
+        {priorHomFact && <Typography level="body-xs">{priorHomFact}</Typography>}
         {isAttributeCodeErrorType(error) && (
           <JoyLink component={Link} href={ATTRIBUTES_PAGE_PATH} level="body-xs">
             {DETAILS_SHEET_TEXT.openAttributes}
@@ -221,6 +228,13 @@ export default function ErrorRowDetailsPanel(props: ErrorRowDetailsPanelProps) {
               {renderCodesChips(getMaterializedCodesValue(detailRow), 'None')}
             </>
           )}
+          {hasCodesMismatch(detailRow) && <Typography level="body-xs">{getCodesMismatchMessage(detailRow)}</Typography>}
+        </Stack>
+      )}
+      {detailRow?.description && (
+        <Stack spacing={0.5}>
+          <Typography level="title-sm">{DETAILS_SHEET_TEXT.descriptionHeading}</Typography>
+          <Typography level="body-sm">{detailRow.description}</Typography>
         </Stack>
       )}
       {detailRow?.hasContradiction && relatedRows.length > 0 && (

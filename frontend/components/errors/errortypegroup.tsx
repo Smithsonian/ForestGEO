@@ -1,14 +1,16 @@
 'use client';
 
 import React, { useCallback, useId, useState } from 'react';
-import { Button, Chip, Sheet, Stack, Typography } from '@mui/joy';
+import { Button, Chip, IconButton, Sheet, Stack, Typography } from '@mui/joy';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import {
   CONTRADICTION_REASONS,
   ERROR_SOURCE,
   errorTypeHintFor,
   formatErrorTypeLabel,
+  formatExportErrorType,
   formatGroupRowCount,
   isFallbackErrorType,
   toErrorTypeIdentity,
@@ -29,10 +31,13 @@ export interface ErrorTypeGroupProps {
   onToggle: () => void;
   collapseDisabledReason: string | null;
   activeMeasurements: number | null;
+  onExport: () => void;
+  exporting: boolean;
   gridProps: GroupGridProps;
 }
 
-export default function ErrorTypeGroup({ facet, gridKey, expanded, onToggle, collapseDisabledReason, activeMeasurements, gridProps }: ErrorTypeGroupProps) {
+export default function ErrorTypeGroup(props: ErrorTypeGroupProps) {
+  const { facet, gridKey, expanded, onToggle, collapseDisabledReason, activeMeasurements, onExport, exporting, gridProps } = props;
   const label = formatErrorTypeLabel(facet.message);
   const [loadedContradictionTypes, setLoadedContradictionTypes] = useState<ContradictionType[]>([]);
   const faultedFields = React.useMemo(() => new Set(facet.fields), [facet.fields]);
@@ -50,38 +55,53 @@ export default function ErrorTypeGroup({ facet, gridKey, expanded, onToggle, col
   const hint = errorTypeHintFor(facet);
   const collapseLocked = expanded && collapseDisabledReason !== null;
   const panelID = useId();
+  const exportLabel = formatExportErrorType(label);
 
   return (
     <Sheet variant="outlined" sx={{ borderRadius: 'md', p: 1 }}>
-      <Typography component="h2" level="title-md" sx={{ '& > span': { width: '100%' } }}>
-        <LockedControl reason={collapseLocked ? collapseDisabledReason : null}>
-          <Button
-            variant="plain"
-            color="neutral"
-            aria-expanded={expanded}
-            aria-controls={panelID}
-            disabled={collapseLocked}
-            onClick={onToggle}
-            startDecorator={expanded ? <ExpandMoreIcon /> : <ChevronRightIcon />}
-            sx={{ width: '100%', justifyContent: 'flex-start', gap: 1, flexWrap: 'wrap' }}
-          >
-            <span>{label}</span>
-            {!isFallbackErrorType(facet) && (
-              <Chip size="sm" variant="soft" color={facet.source === ERROR_SOURCE.validation ? 'primary' : 'warning'}>
-                {facet.source === ERROR_SOURCE.validation ? VIEW_ERRORS_TEXT.validationChip : VIEW_ERRORS_TEXT.ingestionChip}
-              </Chip>
-            )}
-            {facet.hasContradiction && (
-              <Chip size="sm" variant="soft" color="warning">
-                {VIEW_ERRORS_TEXT.contradictionChip}
-              </Chip>
-            )}
-            <Typography level="body-sm" sx={{ ml: 'auto' }}>
-              {formatGroupRowCount(facet.count, activeMeasurements ?? 0)}
-            </Typography>
-          </Button>
-        </LockedControl>
-      </Typography>
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Typography component="h2" level="title-md" sx={{ flex: 1, minWidth: 0, '& > span': { width: '100%' } }}>
+          <LockedControl reason={collapseLocked ? collapseDisabledReason : null}>
+            <Button
+              variant="plain"
+              color="neutral"
+              aria-expanded={expanded}
+              aria-controls={panelID}
+              disabled={collapseLocked}
+              onClick={onToggle}
+              startDecorator={expanded ? <ExpandMoreIcon /> : <ChevronRightIcon />}
+              sx={{ width: '100%', justifyContent: 'flex-start', gap: 1, flexWrap: 'wrap' }}
+            >
+              <span>{label}</span>
+              {!isFallbackErrorType(facet) && (
+                <Chip size="sm" variant="soft" color={facet.source === ERROR_SOURCE.validation ? 'primary' : 'warning'}>
+                  {facet.source === ERROR_SOURCE.validation ? VIEW_ERRORS_TEXT.validationChip : VIEW_ERRORS_TEXT.ingestionChip}
+                </Chip>
+              )}
+              {facet.hasContradiction && (
+                <Chip size="sm" variant="soft" color="warning">
+                  {VIEW_ERRORS_TEXT.contradictionChip}
+                </Chip>
+              )}
+              <Typography level="body-sm" sx={{ ml: 'auto' }}>
+                {formatGroupRowCount(facet.count, activeMeasurements ?? 0)}
+              </Typography>
+            </Button>
+          </LockedControl>
+        </Typography>
+        <IconButton
+          size="sm"
+          variant="plain"
+          color="neutral"
+          aria-label={exportLabel}
+          title={exportLabel}
+          loading={exporting}
+          disabled={exporting}
+          onClick={onExport}
+        >
+          <FileDownloadOutlinedIcon />
+        </IconButton>
+      </Stack>
       {!expanded && hint && (
         <Typography level="body-xs" sx={{ px: 1, color: 'text.tertiary' }}>
           {hint}

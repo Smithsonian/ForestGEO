@@ -7,6 +7,8 @@ import {
   ERROR_TYPE_GROUP_INITIAL_LIMIT,
   FALLBACK_ERROR_CODE,
   FALLBACK_ERROR_MESSAGE,
+  formatErrorTypeLabel,
+  formatExportErrorType,
   VIEW_ERRORS_TEXT,
   type ErrorTypeFacet
 } from '@/config/errorsexplorer';
@@ -55,6 +57,8 @@ function renderGroup(overrides: Partial<ErrorTypeGroupProps> = {}) {
     onToggle: vi.fn(),
     collapseDisabledReason: null,
     activeMeasurements: ACTIVE,
+    onExport: vi.fn(),
+    exporting: false,
     gridProps: {} as ErrorTypeGroupProps['gridProps'],
     ...overrides
   } satisfies ErrorTypeGroupProps;
@@ -115,6 +119,21 @@ describe('ErrorTypeGroup', () => {
     expect(controlsIdref).not.toMatch(/\s/);
     const panel = screen.getByTestId('grid-14').parentElement as HTMLElement;
     expect(panel.id).toBe(controlsIdref);
+  });
+
+  it('offers Export CSV for the group and reports the click without toggling the group', async () => {
+    const props = renderGroup();
+    const exportButton = screen.getByRole('button', { name: formatExportErrorType(formatErrorTypeLabel(ATTRIBUTE.message)) });
+    console.log('[view-errors group export]', exportButton.getAttribute('aria-label'));
+    expect(within(screen.getByRole('heading', { level: 2 })).queryAllByRole('button'), 'the export button is not nested in the toggle heading').toHaveLength(1);
+    await userEvent.click(exportButton);
+    expect(props.onExport).toHaveBeenCalledTimes(1);
+    expect(props.onToggle).not.toHaveBeenCalled();
+  });
+
+  it('disables its Export CSV while that export is running', () => {
+    renderGroup({ exporting: true });
+    expect(screen.getByRole('button', { name: formatExportErrorType(formatErrorTypeLabel(ATTRIBUTE.message)) })).toBeDisabled();
   });
 
   it('calls onToggle from the header button', async () => {

@@ -8,6 +8,7 @@ import {
   MAX_ERROR_TYPE_MESSAGE_LENGTH
 } from '@/config/errorsexplorer';
 import {
+  errorExplorerExportRequestSchema,
   errorExplorerFacetsRequestSchema,
   errorExplorerQueryRequestSchema,
   parseErrorExplorerDetailsParams,
@@ -123,6 +124,33 @@ describe('errors explorer facets request', () => {
   it('takes the shared part only', () => {
     expect(parseExplorerRequest(errorExplorerFacetsRequestSchema, { schema: VALID_SCHEMA, plotID: 1, censusID: 5 }).ok).toBe(true);
     expect(parseExplorerRequest(errorExplorerFacetsRequestSchema, { schema: VALID_SCHEMA, plotID: 1, censusID: 5, page: 0 }).ok).toBe(false);
+  });
+});
+
+describe('errors explorer export request errorType', () => {
+  const EXPORT_SCOPE = { schema: VALID_SCHEMA, plotID: 1, censusID: 5 };
+  const IDENTITY = { source: 'validation', code: '14', message: 'Attribute code does not exist in attributes table' };
+
+  it('accepts an error type identity and still accepts a request without one', () => {
+    const withIdentity = parseExplorerRequest(errorExplorerExportRequestSchema, { ...EXPORT_SCOPE, errorType: IDENTITY });
+    const withoutIdentity = parseExplorerRequest(errorExplorerExportRequestSchema, EXPORT_SCOPE);
+    console.log('[view-errors export schema]', JSON.stringify({ withIdentity, withoutIdentity }));
+    expect(withIdentity.ok && withIdentity.data.errorType).toEqual(IDENTITY);
+    expect(withoutIdentity.ok && withoutIdentity.data.errorType).toBeUndefined();
+  });
+
+  it('rejects an identity with an extra key and reports only the path', () => {
+    const SECRET_VALUE = 'do-not-echo';
+    const parsed = parseExplorerRequest(errorExplorerExportRequestSchema, { ...EXPORT_SCOPE, errorType: { ...IDENTITY, extra: SECRET_VALUE } });
+    console.log('[view-errors export schema] issues:', JSON.stringify(parsed.ok ? [] : parsed.issues));
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.issues.map(issue => issue.path)).toEqual(['errorType']);
+    expect(JSON.stringify(parsed.issues)).not.toContain(SECRET_VALUE);
+  });
+
+  it('still rejects an unknown top-level key', () => {
+    expect(parseExplorerRequest(errorExplorerExportRequestSchema, { ...EXPORT_SCOPE, page: 0 }).ok).toBe(false);
   });
 });
 

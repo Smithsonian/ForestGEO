@@ -6,6 +6,8 @@ import {
   GridRowEditStopReasons,
   GridRowModes,
   useGridApiRef,
+  type GridColDef,
+  type GridColumnResizeParams,
   type GridColumnVisibilityModel,
   type GridEventListener,
   type GridFilterModel,
@@ -38,13 +40,15 @@ import {
   type ErrorTypeIdentity
 } from '@/config/errorsexplorer';
 import type { OrgCensus } from '@/lib/db/definitions/timekeeping';
-import { buildErrorsExplorerColumns, FAULTED_CELL_CLASS, resolvePriorDbhHeader } from './errorsexplorercolumns';
+import { buildErrorsExplorerColumns, FAULTED_CELL_CLASS, GROUP_EDIT_REVEAL_FIELDS, resolvePriorDbhHeader } from './errorsexplorercolumns';
 
 // Wide grids column-virtualize off-screen cells out of the DOM, hiding them from Cypress; e2e-only escape hatch.
 const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
 const EXPOSE_GRID_API_FOR_TESTS = process.env.NODE_ENV === 'test';
 const INFINITE_MODE = 'infinite';
 const PAGINATED_MODE = 'paginated';
+const RESIZED_COLUMN_FLEX = 0;
+const EDIT_REVEAL_VISIBILITY: GridColumnVisibilityModel = Object.fromEntries(GROUP_EDIT_REVEAL_FIELDS.map(field => [field, true]));
 
 interface GridPaginationExtras {
   disabled: boolean;
@@ -170,6 +174,12 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
     rowModesModelRef.current = model;
     setRowModesModelState(model);
   }, []);
+  const hasRowInEditMode = Object.values(rowModesModel).some(entry => entry.mode === GridRowModes.Edit);
+  const revealsEditableColumns = isGroup && hasRowInEditMode;
+  const columnVisibilityModel = useMemo(
+    () => (revealsEditableColumns ? { ...models.columnVisibilityModel, ...EDIT_REVEAL_VISIBILITY } : models.columnVisibilityModel),
+    [models.columnVisibilityModel, revealsEditableColumns]
+  );
   const displayedRowsRef = useRef(displayedRows);
   displayedRowsRef.current = displayedRows;
   const findRow = useCallback((rowID: number) => displayedRowsRef.current.find(row => Number(row.id) === rowID), []);
@@ -285,6 +295,19 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
     ]
   );
 
+  // A new columns prop makes MUI reapply each definition's width and flex, so a user's resize is written back into the definitions.
+  const [resizedWidths, setResizedWidths] = useState<Record<string, number>>({});
+  const handleColumnWidthChange = useCallback((params: GridColumnResizeParams) => {
+    setResizedWidths(previous => ({ ...previous, [params.colDef.field]: params.width }));
+  }, []);
+  const sizedColumns = useMemo<GridColDef[]>(
+    () =>
+      columns.map(column =>
+        resizedWidths[column.field] === undefined ? column : { ...column, width: resizedWidths[column.field], flex: RESIZED_COLUMN_FLEX }
+      ),
+    [columns, resizedWidths]
+  );
+
   const processRowUpdate = useMemo(() => rowEdit.processRowUpdate(gridKey), [rowEdit, gridKey]);
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) event.defaultMuiPrevented = true;
@@ -387,7 +410,8 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
             apiRef={apiRef}
             disableVirtualization={E2E_DISABLE_VIRTUALIZATION}
             rows={displayedRows}
-            columns={columns}
+            columns={sizedColumns}
+            onColumnWidthChange={handleColumnWidthChange}
             loading={isInfiniteOn ? infinite.isLoading : rowsResult.status === 'loading'}
             rowCount={isInfiniteOn ? infinite.rows.length : rowsResult.totalRows}
             paginationMode="server"
@@ -404,8 +428,11 @@ export default function ErrorsExplorerGrid(props: ErrorsExplorerGridProps) {
             onFilterModelChange={handleFilterModelChange}
             disableColumnSorting={locked}
             disableColumnFilter={locked}
-            columnVisibilityModel={models.columnVisibilityModel}
-            onColumnVisibilityModelChange={model => onModelsChange({ ...models, columnVisibilityModel: model })}
+            columnVisibilityModel={columnVisibilityModel}
+            onColumnVisibilityModelChange={model => {
+              // While the reveal is on, MUI reports the merged model; saving it would make the reveal permanent.
+              if (!revealsEditableColumns) onModelsChange({ ...models, columnVisibilityModel: model });
+            }}
             editMode="row"
             rowModesModel={rowModesModel}
             onRowModesModelChange={applyRowModes}
