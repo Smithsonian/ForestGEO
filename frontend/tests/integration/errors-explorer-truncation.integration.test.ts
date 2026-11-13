@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import ailogger from '@/ailogger';
 import {
   DEFAULT_ERROR_EXPLORER_FILTERS,
-  ERROR_EXPLORER_PRESETS,
   type ErrorExplorerDetailsResponse,
   type ErrorExplorerFacetsResponse,
   type ErrorExplorerFilters,
@@ -30,6 +29,7 @@ import {
   MAIN_PLOT_ID,
   replaceFixture,
   setGroupConcatMaxLen,
+  SHOW_FILTER_SETS,
   TRUNCATION_DUPLICATE_MEMBER_IDS,
   TRUNCATION_LIMITS,
   TRUNCATION_UNRELATED_ERROR_ROW_ID,
@@ -43,7 +43,7 @@ const TRUNCATION_DATABASE = `${DEFAULT_TEST_CONFIG.database}_errtrunc`;
 const PAGE_SIZE = 25;
 const FIRST_PAGE = 0;
 const WHOLE_MEMBER_LIST = TRUNCATION_DUPLICATE_MEMBER_IDS.join(',');
-const CONTRADICTIONS_PRESET_ID = 'contradictions';
+const CONTRADICTIONS_SHOW_LABEL = 'contradictions';
 const DETAILS_FIXED_STATEMENT_COUNT = 3;
 const NON_POSITIVE_OR_FRACTIONAL_IDS = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 2];
 
@@ -64,10 +64,10 @@ const RELATED_SUPERSET_BY_LIMIT: Record<number, number[]> = {
 };
 const LIMITS = Object.values(TRUNCATION_LIMITS);
 
-const CONTRADICTIONS_PRESET_FILTERS: ErrorExplorerFilters = (() => {
-  const preset = ERROR_EXPLORER_PRESETS.find(candidate => candidate.id === CONTRADICTIONS_PRESET_ID);
-  if (!preset) throw new Error(`The preset ${CONTRADICTIONS_PRESET_ID} no longer exists`);
-  return { ...preset.filters, presetId: preset.id };
+const CONTRADICTIONS_SHOW_FILTERS: ErrorExplorerFilters = (() => {
+  const showSet = SHOW_FILTER_SETS.find(candidate => candidate.label === CONTRADICTIONS_SHOW_LABEL);
+  if (!showSet) throw new Error(`The Show set ${CONTRADICTIONS_SHOW_LABEL} no longer exists`);
+  return showSet.filters;
 })();
 
 type ProductionExecutor = Parameters<typeof production.queryErrorExplorer>[0];
@@ -75,7 +75,7 @@ type ProductionExecutor = Parameters<typeof production.queryErrorExplorer>[0];
 interface LimitRun {
   defaultQuery: ErrorExplorerQueryResponse;
   defaultQueryLabels: Array<string | null>;
-  presetQuery: ErrorExplorerQueryResponse;
+  showQuery: ErrorExplorerQueryResponse;
   facets: ErrorExplorerFacetsResponse;
   facetsLabels: Array<string | null>;
   facetsWarnedMessages: unknown[];
@@ -133,7 +133,7 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       response: await production.queryErrorExplorer(executor, queryRequest(DEFAULT_ERROR_EXPLORER_FILTERS)),
       labels: recorded.map(statement => statement.label)
     }));
-    const presetQuery = await runWithLimit(limit, executor => production.queryErrorExplorer(executor, queryRequest(CONTRADICTIONS_PRESET_FILTERS)));
+    const showQuery = await runWithLimit(limit, executor => production.queryErrorExplorer(executor, queryRequest(CONTRADICTIONS_SHOW_FILTERS)));
     const warningsBeforeFacets = vi.mocked(ailogger.warn).mock.calls.length;
     const facetsRun = await runWithLimit(limit, async (executor, recorded) => ({
       response: await production.buildErrorExplorerFacets(executor, { ...requestScope(), filters: DEFAULT_ERROR_EXPLORER_FILTERS }),
@@ -155,13 +155,13 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
     console.log(
       `[truncation] limit=${limit} memberGroup=${JSON.stringify({ list: memberGroupRow.MeasurementIDs, complete: memberGroupRow.MemberListComplete })} ` +
         `defaultQuery=${JSON.stringify(defaultQueryRun.response.rows.map(row => ({ id: row.coreMeasurementID, flagged: row.hasContradiction, related: row.relatedMeasurementIDs })))} ` +
-        `presetIDs=${JSON.stringify(presetQuery.rows.map(row => row.coreMeasurementID))} facets=${JSON.stringify(facets.contradictionCounts)} facetsLabels=${JSON.stringify(facetsRun.labels)} facetsWarnings=${JSON.stringify(facetsWarnedMessages)} ` +
+        `showIDs=${JSON.stringify(showQuery.rows.map(row => row.coreMeasurementID))} censusTotals=${JSON.stringify(facets.censusTotals)} facetsLabels=${JSON.stringify(facetsRun.labels)} facetsWarnings=${JSON.stringify(facetsWarnedMessages)} ` +
         `detailsRelated=${JSON.stringify([...detailsByMeasurementID].map(([id, details]) => [id, details.row?.relatedMeasurementIDs, details.relatedRows.map(row => row.coreMeasurementID)]))}`
     );
     return {
       defaultQuery: defaultQueryRun.response,
       defaultQueryLabels: defaultQueryRun.labels,
-      presetQuery,
+      showQuery,
       facets,
       facetsLabels: facetsRun.labels,
       facetsWarnedMessages,
@@ -204,8 +204,6 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       expect(run.defaultQuery.rows.map(row => row.coreMeasurementID)).toEqual(QUERY_ORDER_ALL_ERRORS);
       expect(run.defaultQuery.rows.map(row => row.hasContradiction)).toEqual([true, true, true, false]);
       expect(run.defaultQuery.totalRows).toBe(QUERY_ORDER_ALL_ERRORS.length);
-      expect(run.defaultQuery.summary.duplicateTagStem).toBe(TRUNCATION_DUPLICATE_MEMBER_IDS.length);
-      expect(run.defaultQuery.summary.contradictions).toBe(TRUNCATION_DUPLICATE_MEMBER_IDS.length);
       expect(rowById(run.defaultQuery, TRUNCATION_UNRELATED_ERROR_ROW_ID)?.contradictionTypes).toEqual([]);
     });
 
@@ -221,10 +219,10 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       );
     });
 
-    it('the Contradictions preset returns exactly the three members', () => {
-      expect(run.presetQuery.rows.map(row => row.coreMeasurementID)).toEqual([...TRUNCATION_DUPLICATE_MEMBER_IDS]);
-      expect(run.presetQuery.totalRows).toBe(TRUNCATION_DUPLICATE_MEMBER_IDS.length);
-      expect(run.presetQuery.rows.every(row => row.hasContradiction)).toBe(true);
+    it('Show contradictions returns exactly the three members', () => {
+      expect(run.showQuery.rows.map(row => row.coreMeasurementID)).toEqual([...TRUNCATION_DUPLICATE_MEMBER_IDS]);
+      expect(run.showQuery.totalRows).toBe(TRUNCATION_DUPLICATE_MEMBER_IDS.length);
+      expect(run.showQuery.rows.every(row => row.hasContradiction)).toBe(true);
     });
 
     it('facets are answered by the catalog and the flagged histogram alone: no fallback to the scope raw rows, no warning', () => {
@@ -233,9 +231,9 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
     });
 
     it('facets count all three members as duplicates', () => {
-      expect(run.facets.contradictionCounts.duplicateTagStem).toBe(TRUNCATION_DUPLICATE_MEMBER_IDS.length);
-      expect(run.facets.contradictionCounts.sameBatchConflict).toBe(0);
-      expect(run.facets.totalMeasurements).toBe(QUERY_ORDER_ALL_ERRORS.length);
+      expect(run.facets.censusTotals.duplicateTagStem).toBe(TRUNCATION_DUPLICATE_MEMBER_IDS.length);
+      expect(run.facets.censusTotals.sameBatchConflict).toBe(0);
+      expect(run.facets.censusTotals.affectedMeasurements).toBe(QUERY_ORDER_ALL_ERRORS.length);
     });
 
     it.each(TRUNCATION_DUPLICATE_MEMBER_IDS.map(id => [id]))('member %i is flagged and its related IDs are whole tokens of the cut list', measurementID => {
@@ -264,11 +262,11 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       });
     });
 
-    it('the unrelated error row has no contradiction in the query, in details and in the preset', async () => {
+    it('the unrelated error row has no contradiction in the query, in details and under Show contradictions', async () => {
       const unrelatedRow = rowById(run.defaultQuery, TRUNCATION_UNRELATED_ERROR_ROW_ID);
       expect(unrelatedRow?.hasContradiction).toBe(false);
       expect(unrelatedRow?.relatedMeasurementIDs).toEqual([]);
-      expect(run.presetQuery.rows.map(row => row.coreMeasurementID)).not.toContain(TRUNCATION_UNRELATED_ERROR_ROW_ID);
+      expect(run.showQuery.rows.map(row => row.coreMeasurementID)).not.toContain(TRUNCATION_UNRELATED_ERROR_ROW_ID);
       const unrelatedDetails = await runWithLimit(limit, executor =>
         production.buildErrorExplorerDetails(executor, requestScope(), TRUNCATION_UNRELATED_ERROR_ROW_ID)
       );

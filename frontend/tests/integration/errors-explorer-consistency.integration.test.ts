@@ -2,7 +2,6 @@ import type { ResultSetHeader } from 'mysql2/promise';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_ERROR_EXPLORER_FILTERS,
-  ERROR_EXPLORER_PRESETS,
   type ContradictionType,
   type ErrorExplorerFilters,
   type ErrorExplorerQueryRequest,
@@ -53,6 +52,7 @@ import {
   MANY_CENSUS_TREE_TAG_SEARCH,
   replaceFixture,
   setGroupConcatMaxLen,
+  SHOW_FILTER_SETS,
   type ExplorerFixture,
   type FixtureDatabase,
   type RecordedStatement
@@ -74,7 +74,7 @@ const CHUNK_PAGE_SIZES: readonly number[] = [SMALL_PAGE_SIZE, LARGE_PAGE_SIZE];
 const SLOW_CASE_TIMEOUT_MS = 10 * 60 * 1000;
 const DUPLICATE: ContradictionType = 'duplicate_tag_stem';
 const SAME_BATCH: ContradictionType = 'same_batch_conflict';
-const CONTRADICTIONS_PRESET_ID = 'contradictions';
+const CONTRADICTIONS_SHOW_LABEL = 'contradictions';
 const MEMBER_GROUP_KINDS_PER_ROW = 2;
 const DETAILS_FIXED_STATEMENT_COUNT = 3;
 const SHORT_MEMBER_LIST_LIMIT_BYTES = 4096;
@@ -92,21 +92,20 @@ type MemberGroupRow = { RequestedMeasurementID: number; MeasurementIDs: string |
 
 const filtersWith = (overrides: Partial<ErrorExplorerFilters>): ErrorExplorerFilters => ({ ...DEFAULT_ERROR_EXPLORER_FILTERS, ...overrides });
 
-const CONTRADICTIONS_PRESET_FILTERS: ErrorExplorerFilters = (() => {
-  const preset = ERROR_EXPLORER_PRESETS.find(candidate => candidate.id === CONTRADICTIONS_PRESET_ID);
-  if (!preset) throw new Error(`The preset ${CONTRADICTIONS_PRESET_ID} no longer exists`);
+const CONTRADICTIONS_SHOW_FILTERS: ErrorExplorerFilters = (() => {
+  const showSet = SHOW_FILTER_SETS.find(candidate => candidate.label === CONTRADICTIONS_SHOW_LABEL);
+  if (!showSet) throw new Error(`The Show set ${CONTRADICTIONS_SHOW_LABEL} no longer exists`);
   return {
-    ...preset.filters,
-    exactMessages: [...preset.filters.exactMessages],
-    affectedFields: [...preset.filters.affectedFields],
-    contradictionTypes: [...preset.filters.contradictionTypes],
-    presetId: preset.id
+    ...showSet.filters,
+    exactMessages: [...showSet.filters.exactMessages],
+    affectedFields: [...showSet.filters.affectedFields],
+    contradictionTypes: [...showSet.filters.contradictionTypes]
   };
 })();
 
 function sliceWholeList(whole: ErrorExplorerQueryResponse, page: number, pageSize: number): ErrorExplorerQueryResponse {
   const start = page * pageSize;
-  return { rows: whole.rows.slice(start, start + pageSize), totalRows: whole.totalRows, summary: whole.summary };
+  return { rows: whole.rows.slice(start, start + pageSize), totalRows: whole.totalRows };
 }
 
 /** Every page of the list, plus one past the end. */
@@ -242,7 +241,7 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
         console.log(`[interleaving a] exact message ids=${JSON.stringify(idsOf(changedA.response.rows))} totalRows=${changedA.response.totalRows}`);
         expect(idsOf(changedA.response.rows), 'row 101 no longer shows message A').toEqual(MESSAGE_A_ORDER.filter(id => id !== ROW.carriesAAndB));
         expect(changedA.response.totalRows, 'totalRows is the page statement count from before the change').toBe(MESSAGE_A_ORDER.length);
-        expect(changedA.response.summary).toEqual(controlA.response.summary);
+        expect(changedA.response.totalRows).toEqual(controlA.response.totalRows);
         expectOnePageStatementAndOneCatalog(changedA.recorder.statements);
 
         const controlDefault = await queryOnFreshFixture(DEFAULT_ERROR_EXPLORER_FILTERS);
@@ -294,13 +293,13 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
     it(
       '(c) the duplicate mate disappears after the page statement: the row leaves the Contradictions result and shows no contradiction under default filters',
       async () => {
-        const control = await queryOnFreshFixture(CONTRADICTIONS_PRESET_FILTERS);
+        const control = await queryOnFreshFixture(CONTRADICTIONS_SHOW_FILTERS);
         expect(idsOf(control.response.rows), 'control: the duplicate error member alone').toEqual([ROW.duplicateErrorMember]);
         expect(control.response.totalRows).toBe(1);
 
-        const changed = await queryWithChangeAfter(CONTRADICTIONS_PRESET_FILTERS, LABELS.page, deleteSummaryRow(ROW.duplicateMate));
+        const changed = await queryWithChangeAfter(CONTRADICTIONS_SHOW_FILTERS, LABELS.page, deleteSummaryRow(ROW.duplicateMate));
         changed.recorder.assertAllHooksFired();
-        console.log(`[interleaving c] preset ids=${JSON.stringify(idsOf(changed.response.rows))} totalRows=${changed.response.totalRows}`);
+        console.log(`[interleaving c] Show contradictions ids=${JSON.stringify(idsOf(changed.response.rows))} totalRows=${changed.response.totalRows}`);
         expect(changed.response.rows, 'the row no longer has a contradiction').toEqual([]);
         expect(changed.response.totalRows).toBe(1);
         expectOnePageStatementAndOneCatalog(changed.recorder.statements);
@@ -318,7 +317,7 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
         expect(reread?.contradictionTypes).toEqual([]);
         expect(reread?.relatedMeasurementIDs).toEqual([]);
         expect(changedDefault.response.totalRows).toBe(DEFAULT_ORDER.length);
-        expect(changedDefault.response.summary, 'summary is the page statement summary from before the change').toEqual(controlDefault.response.summary);
+        expect(changedDefault.response.totalRows, 'totalRows is the page statement count from before the change').toEqual(controlDefault.response.totalRows);
       },
       FIXTURE_HOOK_TIMEOUT_MS
     );
@@ -341,7 +340,6 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
         expect(reread?.errorMessages).toEqual([MESSAGE.messageA, MESSAGE.messageC]);
         expect(reread?.errorCount).toBe(2);
         expect(changed.response.totalRows).toBe(control.response.totalRows);
-        expect(changed.response.summary).toEqual(control.response.summary);
         expectOnePageStatementAndOneCatalog(changed.recorder.statements);
 
         const afterwards = await production.queryErrorExplorer(
@@ -362,7 +360,7 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
     const MESSAGE_FILTERS = filtersWith({ exactMessages: [FIXTURE_MESSAGES.shared] });
     const SQL_PATH_FILTERS: ReadonlyArray<{ name: string; filters: ErrorExplorerFilters }> = [
       { name: 'default filters', filters: DEFAULT_ERROR_EXPLORER_FILTERS },
-      { name: 'Contradictions preset', filters: CONTRADICTIONS_PRESET_FILTERS },
+      { name: 'Show contradictions', filters: CONTRADICTIONS_SHOW_FILTERS },
       { name: 'message filter', filters: MESSAGE_FILTERS }
     ];
     const SEARCHES = [MANY_CENSUS_TREE_TAG_SEARCH, FIXTURE_MESSAGES.tagMismatchLowerCase];
@@ -378,7 +376,9 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
     async function expectChunkedQueryPages(censusIDs: readonly number[], chunkCount: number, minimumTotalRows: number): Promise<void> {
       for (const { name, filters } of SQL_PATH_FILTERS) {
         const whole = await oracle.queryErrorExplorer(oracleExecutor(), queryRequest(censusIDs, filters, FIRST_PAGE, WHOLE_LIST_PAGE_SIZE));
-        console.log(`[chunks] ${name} over ${censusIDs.length} censuses: oracle totalRows=${whole.totalRows} flagged=${whole.summary.contradictions}`);
+        console.log(
+          `[chunks] ${name} over ${censusIDs.length} censuses: oracle totalRows=${whole.totalRows} flagged=${whole.rows.filter(row => row.hasContradiction).length}`
+        );
         expect(whole.totalRows, `${name} must select rows, or the case proves nothing`).toBeGreaterThan(minimumTotalRows);
         for (const pageSize of CHUNK_PAGE_SIZES) {
           for (const page of [...pagesIncludingOnePastTheEnd(whole.totalRows, pageSize), ...IRREGULAR_PAGES]) {
@@ -456,7 +456,7 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
           const expected = await oracle.buildErrorExplorerFacets(oracleExecutor(), facetRequest);
           const actual = await production.buildErrorExplorerFacets(plainExecutor() as unknown as ProductionExecutor, facetRequest);
           await compare({ scenario: 'chunked facets', filters: name }, actual, expected);
-          expect(actual.totalMeasurements, `${name}: facets must cover the chunks`).toBeGreaterThan(0);
+          expect(actual.censusTotals.affectedMeasurements, `${name}: facets must cover the chunks`).toBeGreaterThan(0);
         }
 
         const countsRequest = { schema: database(), plotID: MAIN_PLOT_ID, censusIDs: [...MANY_CENSUS_IDS] };

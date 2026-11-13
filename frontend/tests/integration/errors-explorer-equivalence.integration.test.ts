@@ -2,7 +2,6 @@ import { isDeepStrictEqual } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
-  ERROR_EXPLORER_PRESETS,
   type ContradictionType,
   type ErrorExplorerFacetsResponse,
   type ErrorExplorerFilters,
@@ -52,6 +51,11 @@ import {
   SINGLE_ERROR_STEM_TAG_PAIR,
   SINGLE_ERROR_TREE_TAG_PAIR,
   ACCENT_ONLY_TREE_TAG_PAIR,
+  PHANTOM_ERROR_MEMBER_ID,
+  PHANTOM_PARTNER_ID,
+  PRIOR_DBH_ROUNDED_PERCENT,
+  SHARED_IDENTITY_ERROR_IDS,
+  SHOW_FILTER_SETS,
   type FixtureDatabase,
   type FixtureMeasurement,
   type GeneratedFixture,
@@ -155,16 +159,16 @@ function buildFilterGrid(): NamedFilters[] {
     { label: 'same-batch only', contradictionOnly: true, contradictionTypes: [SAME_BATCH] },
     { label: 'both types', contradictionOnly: true, contradictionTypes: [DUPLICATE, SAME_BATCH] }
   ];
-  const presets = ERROR_EXPLORER_PRESETS.map(preset => ({
-    label: `preset ${preset.id}`,
+  const showSets = SHOW_FILTER_SETS.map(showSet => ({
+    label: `show ${showSet.label}`,
     filters: oracleFilters({
-      ...preset.filters,
-      exactMessages: [...preset.filters.exactMessages],
-      affectedFields: [...preset.filters.affectedFields],
-      contradictionTypes: [...preset.filters.contradictionTypes]
+      ...showSet.filters,
+      exactMessages: [...showSet.filters.exactMessages],
+      affectedFields: [...showSet.filters.affectedFields],
+      contradictionTypes: [...showSet.filters.contradictionTypes]
     }),
     sweepWithSearch: true,
-    axes: [`preset:${preset.id}`]
+    axes: [`show:${showSet.label}`]
   }));
   const grid: NamedFilters[] = [];
   for (const source of sources)
@@ -222,11 +226,11 @@ function buildFilterGrid(): NamedFilters[] {
     },
     { label: 'unknown source', filters: oracleFilters({ source: 'bogus' as ErrorExplorerSource }), sweepWithSearch: false, axes: [] }
   ];
-  return [...presets, ...grid, ...noLogMessage, ...supplementary, ...irregular];
+  return [...showSets, ...grid, ...noLogMessage, ...supplementary, ...irregular];
 }
 
 const FILTER_GRID = buildFilterGrid();
-const PRESET_FILTERS = FILTER_GRID.slice(0, ERROR_EXPLORER_PRESETS.length);
+const SHOW_SET_FILTERS = FILTER_GRID.slice(0, SHOW_FILTER_SETS.length);
 const NO_LOG_FILTER_LABEL_PART = 'no-log fallback message';
 interface ScopedFilters {
   scope: Scope;
@@ -234,9 +238,9 @@ interface ScopedFilters {
 }
 const GRID_COMBINATIONS: ScopedFilters[] = [
   ...SCOPES.flatMap(scope => FILTER_GRID.map(named => ({ scope, named }))),
-  ...PLOT_SCOPES.flatMap(scope => PRESET_FILTERS.map(named => ({ scope, named })))
+  ...PLOT_SCOPES.flatMap(scope => SHOW_SET_FILTERS.map(named => ({ scope, named })))
 ];
-const PRESET_COMBINATIONS: ScopedFilters[] = [...SCOPES, ...PLOT_SCOPES].flatMap(scope => PRESET_FILTERS.map(named => ({ scope, named })));
+const SHOW_SET_COMBINATIONS: ScopedFilters[] = [...SCOPES, ...PLOT_SCOPES].flatMap(scope => SHOW_SET_FILTERS.map(named => ({ scope, named })));
 
 /** A statement that only reads: optional leading comments, then WITH or SELECT. Anything else may change data and so empties the oracle's read cache. */
 const READ_STATEMENT_PATTERN = /^\s*(?:\/\*[\s\S]*?\*\/\s*)*(?:WITH|SELECT)\b/i;
@@ -313,7 +317,7 @@ function pagesFor(totalRows: number, pageSize: number): number[] {
 
 function sliceOracleWholeList(whole: ErrorExplorerQueryResponse, page: number, pageSize: number): ErrorExplorerQueryResponse {
   const start = page * pageSize;
-  return { rows: whole.rows.slice(start, start + pageSize), totalRows: whole.totalRows, summary: whole.summary };
+  return { rows: whole.rows.slice(start, start + pageSize), totalRows: whole.totalRows };
 }
 
 interface CoverageContext {
@@ -500,7 +504,58 @@ const COVERAGE_CASES: readonly CoverageCase[] = [
       context.fixture.mismatchedPlotRowIDs.length > 0 &&
       context.fixture.mismatchedPlotRowIDs.every(mismatchedID => isLeftOutOfPlotOneGroups(context, mismatchedID))
   },
-  { name: 'an error row whose Attributes alone carry the search token', isCovered: ({ rows }) => rows.some(row => row.attributes === ATTRIBUTES_ONLY_TOKEN) }
+  { name: 'an error row whose Attributes alone carry the search token', isCovered: ({ rows }) => rows.some(row => row.attributes === ATTRIBUTES_ONLY_TOKEN) },
+  {
+    name: 'DBH-change rows whose prior DBH is zero, null and a value, giving a blank, a blank and a rounded percent',
+    isCovered: ({ fixture, rowByID }) => {
+      const { priorZero, priorNull, priorRounded } = fixture.plantedCases.dbhChange;
+      return (
+        rowByID.get(priorZero)?.priorDBH === 0 &&
+        rowByID.get(priorZero)?.dbhChangePercent === null &&
+        rowByID.get(priorNull)?.priorDBH === null &&
+        rowByID.get(priorNull)?.dbhChangePercent === null &&
+        rowByID.get(priorRounded)?.dbhChangePercent === PRIOR_DBH_ROUNDED_PERCENT
+      );
+    }
+  },
+  {
+    name: 'an inactive measurement outside the error set, so active measurements differ from error rows',
+    isCovered: ({ rowIDs, fixture, measurementByID }) =>
+      rowIDs.size > 0 && measurementByID.get(fixture.plantedCases.inactiveClean)?.isActive === false && !rowIDs.has(fixture.plantedCases.inactiveClean)
+  },
+  {
+    name: 'a non-error duplicate partner whose ID is a prefix of a longer error member ID',
+    isCovered: ({ rowIDs, rowByID, fixture }) => {
+      const { errorMember, nonErrorPartner } = fixture.plantedCases.phantomPartner;
+      return (
+        errorMember === PHANTOM_ERROR_MEMBER_ID &&
+        nonErrorPartner === PHANTOM_PARTNER_ID &&
+        String(errorMember).startsWith(String(nonErrorPartner)) &&
+        !rowIDs.has(nonErrorPartner) &&
+        rowByID.get(errorMember)?.contradictionTypes.includes(DUPLICATE) === true &&
+        rowByID.get(errorMember)?.relatedMeasurementIDs.includes(nonErrorPartner) === true
+      );
+    }
+  },
+  {
+    name: 'two catalog entries of one identity, one measurement linked to both and a second linked to one',
+    isCovered: ({ rowByID, fixture }) => {
+      const { linkedToBoth, linkedToFirstOnly } = fixture.plantedCases.sharedIdentity;
+      const sharedIdentityErrorIDs: readonly number[] = Object.values(SHARED_IDENTITY_ERROR_IDS);
+      const catalogEntries = fixture.errorTypes.filter(errorType => sharedIdentityErrorIDs.includes(errorType.errorID));
+      const sharedMessage = catalogEntries[0]?.message;
+      const bothRow = rowByID.get(linkedToBoth);
+      const firstOnlyRow = rowByID.get(linkedToFirstOnly);
+      return (
+        catalogEntries.length === sharedIdentityErrorIDs.length &&
+        catalogEntries.every(entry => entry.source === 'ingestion' && entry.code === null && entry.message === sharedMessage) &&
+        bothRow?.errorCount === 2 &&
+        bothRow.errorMessages.every(message => message === sharedMessage) &&
+        firstOnlyRow?.errorCount === 1 &&
+        firstOnlyRow.errorMessages.every(message => message === sharedMessage)
+      );
+    }
+  }
 ];
 
 function isLeftOutOfPlotOneGroups(context: CoverageContext, mismatchedID: number): boolean {
@@ -897,7 +952,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
       expect(whole.rows.length).toBeGreaterThan(2);
       const changedField = { ...whole, rows: whole.rows.map((row, index) => (index === 1 ? { ...row, errorCount: row.errorCount + 1 } : row)) };
       const droppedRow = { ...whole, rows: whole.rows.slice(1) };
-      const changedSummary = { ...whole, summary: { ...whole.summary, total: whole.summary.total + 1 } };
+      const changedTotalRows = { ...whole, totalRows: whole.totalRows + 1 };
       const changedGroupKeyOutsideWitness = {
         ...whole,
         rows: whole.rows.map(row =>
@@ -910,7 +965,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
       const mutations: Array<{ name: string; mutated: unknown; expectedPath: string }> = [
         { name: 'a changed field', mutated: changedField, expectedPath: '$.rows[1].errorCount' },
         { name: 'a dropped row', mutated: droppedRow, expectedPath: '$.rows.length' },
-        { name: 'a changed summary', mutated: changedSummary, expectedPath: '$.summary.total' },
+        { name: 'a changed total', mutated: changedTotalRows, expectedPath: '$.totalRows' },
         { name: 'a changed group key outside the witness rows', mutated: changedGroupKeyOutsideWitness, expectedPath: 'contradictionGroupKey' }
       ];
       for (const { name, mutated, expectedPath } of mutations) {
@@ -929,7 +984,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
       'queryErrorExplorer: every filter, scope, page size and page',
       async () =>
         runTimed('queryErrorExplorer', async () => {
-          for (const { scope, named } of PRESET_COMBINATIONS) {
+          for (const { scope, named } of SHOW_SET_COMBINATIONS) {
             const whole = await oracleWholeList(scope, named.filters);
             for (const page of pagesFor(whole.totalRows, DERIVATION_PAGE_SIZE)) {
               apiCalls++;
@@ -1036,8 +1091,8 @@ describe('errors explorer: frozen oracle against production on generated data', 
 
     it('buildErrorExplorerFacets lists the semicolon message as one whole value', async () => {
       const facets: ErrorExplorerFacetsResponse = await production.buildErrorExplorerFacets(productionExecutor(), facetRequest(GROUPED_SCOPE, DEFAULT_FILTERS));
-      const messageValues = facets.messages.map(option => option.value);
-      console.log(`[facets] seed=${seed} messages=${JSON.stringify(messageValues)}`);
+      const messageValues = facets.errorTypes.map(errorType => errorType.message);
+      console.log(`[facets] seed=${seed} error-type messages=${JSON.stringify(messageValues)}`);
       expect(messageValues).toContain(FIXTURE_MESSAGES.semicolonMessage);
       expect(messageValues.filter(value => value.includes('condition'))).toEqual([FIXTURE_MESSAGES.semicolonMessage]);
     });
@@ -1101,11 +1156,11 @@ describe('errors explorer: frozen oracle against production on generated data', 
     );
 
     it(
-      'buildErrorExportRows: the presets and the semicolon message filter',
+      'buildErrorExportRows: the Show sets and the semicolon message filter',
       async () =>
         runTimed('buildErrorExportRows', async () => {
           const exportFilters: NamedFilters[] = [
-            ...PRESET_FILTERS,
+            ...SHOW_SET_FILTERS,
             { label: 'semicolon message', filters: oracleFilters({ exactMessages: [FIXTURE_MESSAGES.semicolonMessage] }), sweepWithSearch: false, axes: [] }
           ];
           for (const scope of [...SCOPES, ...PLOT_SCOPES]) {

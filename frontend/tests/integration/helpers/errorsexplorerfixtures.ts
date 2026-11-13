@@ -6,6 +6,17 @@ import { runQueryDispatch } from '../../setup/runquerydispatch';
 import { cleanupTimingConnections, createTestDatabaseStrict } from '../../setup/stricttestdatabasecleanup';
 import { TEST_DB_DRIVER_TIMEZONE } from '../../setup/test-db-connection';
 import { NO_LOG_ERROR_MESSAGE, readStatementLabel } from '@/app/api/errors/explorer/errorsetsql';
+import { applyShowValue, DEFAULT_ERROR_EXPLORER_FILTERS, ERRORS_EXPLORER_SHOW_OPTIONS, type ErrorExplorerFilters } from '@/config/errorsexplorer';
+
+export interface ShowFilterSet {
+  label: string;
+  filters: ErrorExplorerFilters;
+}
+
+export const SHOW_FILTER_SETS: readonly ShowFilterSet[] = ERRORS_EXPLORER_SHOW_OPTIONS.map(option => ({
+  label: option.value,
+  filters: applyShowValue(DEFAULT_ERROR_EXPLORER_FILTERS, option.value)
+}));
 
 export const EQUIVALENCE_GROUP_CONCAT_MAX_LEN = 1_048_576;
 export const FIXTURE_CONNECTION_CHARSET = 'UTF8MB4_0900_AI_CI';
@@ -32,6 +43,8 @@ export const FIXTURE_ERROR_TYPE_IDS = {
   nullCode: 12
 } as const;
 
+export const SHARED_IDENTITY_ERROR_IDS = { first: 13, second: 14 } as const;
+
 export const FIXTURE_MESSAGES = {
   dbhGrowth: 'DBH grew more than allowed since the prior census',
   dbhShrinkage: 'DBH shrank more than allowed since the prior census',
@@ -44,6 +57,7 @@ export const FIXTURE_MESSAGES = {
   invalidSpecies: 'Species code is not in the species list',
   sqlException: 'The database rejected this row',
   nullCode: 'Row failed ingestion for an unrecorded reason',
+  sharedIdentity: 'Two catalog entries describe this one failure',
   noLogFallback: NO_LOG_ERROR_MESSAGE,
   matchesNothing: 'No such message'
 } as const;
@@ -67,6 +81,18 @@ export const SEARCH_PAIR_TREE_TAG = 'T12';
 export const SEARCH_PAIR_STEM_TAG = '1';
 export const PLOT_MISMATCH_TREE_TAG = 'D1';
 export const PLOT_MISMATCH_STEM_TAG = '1';
+export const PRIOR_DBH_TREE_TAG = 'PD';
+export const PRIOR_DBH_STEM_TAG = '1';
+export const PRIOR_DBH_PLANTED_MEASURED_DBH = 12.5;
+export const PRIOR_DBH_ZERO = 0;
+export const PRIOR_DBH_NULL = null;
+export const PRIOR_DBH_ROUNDED_VALUE = 9;
+export const PRIOR_DBH_ROUNDED_PERCENT = 38.9;
+export const INACTIVE_CLEAN_TREE_TAG = 'IN1';
+export const PHANTOM_PARTNER_ID = 70;
+export const PHANTOM_ERROR_MEMBER_ID = 701;
+export const PHANTOM_TREE_TAG = 'PH1';
+export const PHANTOM_STEM_TAG = '1';
 
 const DEFAULT_SEEDS: readonly number[] = [544, 20261104, 4242];
 export const EQUIVALENCE_SEEDS_ENV = 'ERRORS_EXPLORER_EQUIVALENCE_SEEDS';
@@ -146,6 +172,28 @@ export interface WitnessGroups {
   singleErrorStemTagPair: number[];
   singleErrorSameBatchPair: number[];
 }
+export interface DbhChangeRowIDs {
+  priorZero: number;
+  priorNull: number;
+  priorRounded: number;
+}
+export interface SharedIdentityRowIDs {
+  /** Linked to both catalog entries of the shared identity. */
+  linkedToBoth: number;
+  /** Linked to the first catalog entry only. */
+  linkedToFirstOnly: number;
+}
+export interface PhantomPartnerRowIDs {
+  /** A longer ID whose duplicate group also holds a non-error partner; the partner's ID is a prefix of this ID. */
+  errorMember: number;
+  nonErrorPartner: number;
+}
+export interface PlantedCaseRowIDs {
+  dbhChange: DbhChangeRowIDs;
+  sharedIdentity: SharedIdentityRowIDs;
+  phantomPartner: PhantomPartnerRowIDs;
+  inactiveClean: number;
+}
 export interface GeneratedFixture extends ExplorerFixture {
   seed: number;
   /** Rows whose contradictionGroupKey spelling depends on which group member MySQL picks: compared under the collation. */
@@ -153,6 +201,7 @@ export interface GeneratedFixture extends ExplorerFixture {
   witnessGroups: WitnessGroups;
   /** Rows whose summary PlotID differs from their census's plot. */
   mismatchedPlotRowIDs: number[];
+  plantedCases: PlantedCaseRowIDs;
 }
 
 export function resolveEquivalenceSeeds(rawEnvValue: string | undefined = process.env[EQUIVALENCE_SEEDS_ENV]): number[] {
@@ -685,6 +734,12 @@ const FIXTURE_ERROR_TYPES: FixtureErrorType[] = [
   { errorID: FIXTURE_ERROR_TYPE_IDS.nullCode, source: 'ingestion', code: null, message: FIXTURE_MESSAGES.nullCode }
 ];
 
+/** Two catalog rows with a NULL code and one message are one identity under two ErrorIDs. They are kept out of FIXTURE_ERROR_TYPES so the seeded random draw is unchanged. */
+const SHARED_IDENTITY_ERROR_TYPES: FixtureErrorType[] = [
+  { errorID: SHARED_IDENTITY_ERROR_IDS.first, source: 'ingestion', code: null, message: FIXTURE_MESSAGES.sharedIdentity },
+  { errorID: SHARED_IDENTITY_ERROR_IDS.second, source: 'ingestion', code: null, message: FIXTURE_MESSAGES.sharedIdentity }
+];
+
 /** Code '5' has empty criteria (fallback field map), code '9' has no validation row, and codes '1', '5' and '10' have no description, so their message comes from the error catalog. */
 const FIXTURE_VALIDATIONS: FixtureValidation[] = [
   { validationID: 1, procedureName: 'ValidateDBHGrowth', description: null, criteria: 'measuredDBH' },
@@ -784,6 +839,7 @@ interface PlantedRows {
   witnessRowIDs: number[];
   witnessGroups: WitnessGroups;
   mismatchedPlotRowIDs: number[];
+  plantedCases: PlantedCaseRowIDs;
 }
 
 /** Every seed carries the same planted rows: they are the cases the random draw cannot be trusted to produce. */
@@ -793,7 +849,7 @@ function plantedRows(): PlantedRows {
   const logs: FixtureLog[] = [];
   let nextID = PLANTED_FIRST_ID;
   const plant = (overrides: Partial<FixtureMeasurement> = {}, unresolvedErrorIDs: number[] = [], resolvedErrorIDs: number[] = []): number => {
-    const coreMeasurementID = nextID++;
+    const coreMeasurementID = overrides.coreMeasurementID ?? nextID++;
     measurements.push({
       coreMeasurementID,
       plotID: MAIN_PLOT_ID,
@@ -897,6 +953,26 @@ function plantedRows(): PlantedRows {
   plant({ treeTag: 'A1', stemTag: '1', attributes: ATTRIBUTES_ONLY_TOKEN }, [ET.fallbackFields]);
   plant({ treeTag: SEARCH_PAIR_TREE_TAG, stemTag: SEARCH_PAIR_STEM_TAG }, [ET.fallbackFields]);
 
+  const plantPriorDBHRow = (treeTag: string, errorID: number, priorDBH: number | null): number => {
+    const coreMeasurementID = plant({ treeTag, stemTag: PRIOR_DBH_STEM_TAG, measuredDBH: PRIOR_DBH_PLANTED_MEASURED_DBH });
+    logs.push({ measurementID: coreMeasurementID, errorID, isResolved: false, priorCensusID: null, priorDBH, priorHOM: null });
+    return coreMeasurementID;
+  };
+  const dbhChange: DbhChangeRowIDs = {
+    priorZero: plantPriorDBHRow(`${PRIOR_DBH_TREE_TAG}1`, ET.dbhGrowth, PRIOR_DBH_ZERO),
+    priorNull: plantPriorDBHRow(`${PRIOR_DBH_TREE_TAG}2`, ET.dbhShrinkage, PRIOR_DBH_NULL),
+    priorRounded: plantPriorDBHRow(`${PRIOR_DBH_TREE_TAG}3`, ET.dbhGrowth, PRIOR_DBH_ROUNDED_VALUE)
+  };
+  const inactiveClean = plant({ treeTag: INACTIVE_CLEAN_TREE_TAG, stemTag: '1', isActive: false });
+  const sharedIdentity: SharedIdentityRowIDs = {
+    linkedToBoth: plant({ treeTag: 'SI1', stemTag: '1' }, [SHARED_IDENTITY_ERROR_IDS.first, SHARED_IDENTITY_ERROR_IDS.second]),
+    linkedToFirstOnly: plant({ treeTag: 'SI2', stemTag: '1' }, [SHARED_IDENTITY_ERROR_IDS.first])
+  };
+  const phantomPartner: PhantomPartnerRowIDs = {
+    nonErrorPartner: plant({ coreMeasurementID: PHANTOM_PARTNER_ID, treeTag: PHANTOM_TREE_TAG, stemTag: PHANTOM_STEM_TAG }),
+    errorMember: plant({ coreMeasurementID: PHANTOM_ERROR_MEMBER_ID, treeTag: PHANTOM_TREE_TAG, stemTag: PHANTOM_STEM_TAG }, [ET.tagMismatch])
+  };
+
   const witnessGroups: WitnessGroups = {
     treeTagVariants: [...witnessTreeErrorRowIDs, witnessTreeNonErrorRowID],
     stemTagVariants: [...witnessStemErrorRowIDs, witnessStemNonErrorRowID],
@@ -919,7 +995,8 @@ function plantedRows(): PlantedRows {
       ...witnessGroups.singleErrorSameBatchPair
     ],
     witnessGroups,
-    mismatchedPlotRowIDs
+    mismatchedPlotRowIDs,
+    plantedCases: { dbhChange, sharedIdentity, phantomPartner, inactiveClean }
   };
 }
 
@@ -939,13 +1016,14 @@ export function generateEquivalenceFixture(seed: number): GeneratedFixture {
     seed,
     plotIDs: [MAIN_PLOT_ID, DECOY_PLOT_ID],
     censuses: FIXTURE_CENSUSES.map(census => ({ ...census })),
-    errorTypes: FIXTURE_ERROR_TYPES.map(type => ({ ...type })),
+    errorTypes: [...FIXTURE_ERROR_TYPES, ...SHARED_IDENTITY_ERROR_TYPES].map(type => ({ ...type })),
     validations: FIXTURE_VALIDATIONS.map(validation => ({ ...validation })),
     measurements: [...measurements, ...planted.measurements],
     logs: [...logs, ...planted.logs],
     witnessRowIDs: planted.witnessRowIDs,
     witnessGroups: planted.witnessGroups,
-    mismatchedPlotRowIDs: planted.mismatchedPlotRowIDs
+    mismatchedPlotRowIDs: planted.mismatchedPlotRowIDs,
+    plantedCases: planted.plantedCases
   };
 }
 
@@ -1051,25 +1129,6 @@ export function localeTieMessageFixture(): ExplorerFixture {
       { errorID: secondTypeID, source: 'ingestion', code: `${FIXTURE_GENERATED_ROW_CODE}_${secondTypeID}`, message: LOCALE_TIE_NFD_TEXT }
     ],
     [],
-    [
-      { measurementID: LOCALE_TIE_MEASUREMENT_IDS.carriesSecondType, errorIDs: [secondTypeID] },
-      { measurementID: LOCALE_TIE_MEASUREMENT_IDS.carriesFirstType, errorIDs: [firstTypeID] }
-    ]
-  );
-}
-
-/** Two validation types with distinct messages whose criteria are the NFC and NFD forms of one field name. */
-export function localeTieFieldFixture(): ExplorerFixture {
-  const [firstTypeID, secondTypeID] = [1, 2];
-  return signatureFixture(
-    [
-      { errorID: firstTypeID, source: 'validation', code: String(firstTypeID), message: 'Field tie first' },
-      { errorID: secondTypeID, source: 'validation', code: String(secondTypeID), message: 'Field tie second' }
-    ],
-    [
-      { validationID: firstTypeID, procedureName: 'ValidateFieldTieFirst', description: 'Field tie first', criteria: LOCALE_TIE_NFC_FIELD },
-      { validationID: secondTypeID, procedureName: 'ValidateFieldTieSecond', description: 'Field tie second', criteria: LOCALE_TIE_NFD_FIELD }
-    ],
     [
       { measurementID: LOCALE_TIE_MEASUREMENT_IDS.carriesSecondType, errorIDs: [secondTypeID] },
       { measurementID: LOCALE_TIE_MEASUREMENT_IDS.carriesFirstType, errorIDs: [firstTypeID] }
