@@ -135,19 +135,34 @@ async function renderRealGrid(userStatus: string, rows: Array<Record<string, unk
 let currentRows: Array<Record<string, unknown>> = [ROW];
 let stemStateFilterRequests: number[] = [];
 let quadratFilterRequests: number[] = [];
+let sortModelRequests: unknown[] = [];
 const FILTER_SETTLE_MS = 600;
+const DEFAULT_SORT_MODEL = [{ field: 'measurementDate', sort: 'asc' }];
+// MUI opens a tooltip after its 100 ms enter delay; a header with no tooltip fails fast instead of on the test timeout.
+const TOOLTIP_WAIT_MS = 500;
+// Hovers every visible header in turn, waiting out each tooltip's open and close (~0.7 s per header).
+const HEADER_TOOLTIP_TEST_TIMEOUT_MS = 30_000;
+const UNSORTED_ARIA_SORT = 'none';
+const ASCENDING_ARIA_SORT = 'ascending';
+const MUI_SORT_ASCENDING_MENU_ITEM = 'Sort by ASC';
+
+const headerOf = (field: string) => document.querySelector(`[role="columnheader"][data-field="${field}"]`) as HTMLElement;
+const headerTitleOf = (header: Element) => header.querySelector('.MuiDataGrid-columnHeaderTitle') as HTMLElement;
 
 describe('MeasurementsCommons on the real DataGrid', () => {
   beforeEach(() => {
     currentRows = [ROW];
     stemStateFilterRequests = [];
     quadratFilterRequests = [];
+    sortModelRequests = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.startsWith('/api/fixeddatafilter/')) {
-          const requestedFilter = JSON.parse(String(init?.body ?? '{}')).filterModel;
+          const requestBody = JSON.parse(String(init?.body ?? '{}'));
+          sortModelRequests.push(requestBody.sortModel);
+          const requestedFilter = requestBody.filterModel;
           const isStemStateFiltered = (requestedFilter?.tss?.length ?? ALL_TREE_STEM_STATES.length) < ALL_TREE_STEM_STATES.length;
           stemStateFilterRequests.push(isStemStateFiltered ? 1 : 0);
           const isQuadratFiltered = (requestedFilter?.items ?? []).some((item: { field: string }) => item.field === 'quadratName');
@@ -420,6 +435,51 @@ describe('MeasurementsCommons on the real DataGrid', () => {
       if ((VIEW_DATA_SORTABLE_FIELDS as readonly string[]).includes(header.field ?? '')) expect(header).toEqual({ field: header.field, hasMenu: true });
     }
     expect(observed.find(header => header.field === 'actions')?.hasMenu).toBe(false);
+  });
+
+  it(
+    'shows each header title in a tooltip on hover, because narrow columns cut their titles off',
+    async () => {
+      await renderRealGrid('field crew');
+      const user = userEvent.setup();
+      const fields = Array.from(document.querySelectorAll('[role="columnheader"]')).map(header => header.getAttribute('data-field') ?? '');
+      const observed: Array<{ field: string; tooltip: string | null }> = [];
+      for (const field of fields) {
+        const title = headerTitleOf(headerOf(field));
+        await user.hover(title);
+        const tooltip = await screen.findByRole('tooltip', {}, { timeout: TOOLTIP_WAIT_MS }).catch(() => null);
+        observed.push({ field, tooltip: tooltip?.textContent ?? null });
+        await user.unhover(title);
+        await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+      }
+      console.log('[real grid] header tooltips', JSON.stringify(observed));
+      expect(observed).toEqual(fields.map(field => ({ field, tooltip: field === 'actions' ? VIEW_DATA_TEXT.actionsHeader : VIEW_DATA_COLUMN_HEADERS[field] })));
+    },
+    HEADER_TOOLTIP_TEST_TIMEOUT_MS
+  );
+
+  it('sorts only from the column menu: no header shows a sort arrow and clicking a header title leaves the sort alone', async () => {
+    await renderRealGrid('field crew');
+    const user = userEvent.setup();
+    const headersWithSortArrow = Array.from(document.querySelectorAll('[role="columnheader"]'))
+      .filter(header => header.querySelector('.MuiDataGrid-sortButton'))
+      .map(header => header.getAttribute('data-field'));
+    console.log('[real grid] headers with a sort arrow', JSON.stringify(headersWithSortArrow));
+    expect(headersWithSortArrow).toEqual([]);
+
+    await user.click(headerTitleOf(headerOf('treeTag')));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, FILTER_SETTLE_MS));
+    });
+    console.log('[real grid] sort requests after a header click', JSON.stringify(sortModelRequests));
+    expect(headerOf('treeTag').getAttribute('aria-sort')).toBe(UNSORTED_ARIA_SORT);
+    expect(sortModelRequests.at(-1)).toEqual(DEFAULT_SORT_MODEL);
+
+    await user.click(headerOf('treeTag').querySelector('.MuiDataGrid-menuIcon button') as HTMLElement);
+    await user.click(await screen.findByRole('menuitem', { name: MUI_SORT_ASCENDING_MENU_ITEM }));
+    await waitFor(() => expect(sortModelRequests.at(-1)).toEqual([{ field: 'treeTag', sort: 'asc' }]));
+    console.log('[real grid] sort requests after the column-menu sort', JSON.stringify(sortModelRequests));
+    expect(headerOf('treeTag').getAttribute('aria-sort')).toBe(ASCENDING_ARIA_SORT);
   });
 
   it('renders 44 px rows with one line of text per data cell', async () => {
