@@ -3,19 +3,31 @@ import {
   DEFAULT_ERROR_EXPLORER_FILTERS,
   FALLBACK_ERROR_CODE,
   FALLBACK_ERROR_MESSAGE,
+  type ErrorExplorerColumnFilter,
+  type ErrorExplorerDetailsResponse,
   type ErrorExplorerFacetsResponse,
   type ErrorExplorerFilters,
+  type ErrorExplorerQueryResponse,
+  type ErrorExplorerSortItem,
   type ErrorTypeIdentity
 } from '@/config/errorsexplorer';
 import * as production from '@/app/api/errors/explorer/_shared';
-import { ERROR_EXPLORER_STATEMENT_LABELS } from '@/app/api/errors/explorer/errorsetsql';
+import {
+  buildRelatedRowsOutsideErrorSetStatement,
+  CENSUS_LIST_SIZE,
+  ERROR_EXPLORER_STATEMENT_LABELS,
+  ID_LIST_SIZE,
+  type RelatedRowOutsideErrorSetRow
+} from '@/app/api/errors/explorer/errorsetsql';
 import { buildActiveMeasurementCountQuery } from '../oracles/errors-explorer-legacy-activecount';
 import { DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
+import { runQueryDispatch } from '../setup/runquerydispatch';
 import {
   assertLocalOrRefuse,
   createFixtureDatabaseSession,
   createRecordingExecutor,
   DECOY_CENSUS_ID,
+  DECOY_PLOT_ID,
   FIRST_CENSUS_ID,
   FIXTURE_HOOK_TIMEOUT_MS,
   MAIN_PLOT_ID,
@@ -176,6 +188,174 @@ function viewErrorsFixture(): ExplorerFixture {
   };
 }
 
+const GROWTH_ERROR_ID = 5;
+const SAME_BATCH_21_ERROR_ID = 6;
+const GROWTH_VALIDATION_ID = 1;
+const SAME_BATCH_21_VALIDATION_ID = 21;
+const GROWTH_MESSAGE = 'DBH growth exceeds maximum rate of 65 mm';
+const SAME_BATCH_21_MESSAGE = 'Same-batch species conflict';
+const GROWTH: ErrorTypeIdentity = { source: 'validation', code: String(GROWTH_VALIDATION_ID), message: GROWTH_MESSAGE };
+const SAME_BATCH_21: ErrorTypeIdentity = { source: 'validation', code: String(SAME_BATCH_21_VALIDATION_ID), message: SAME_BATCH_21_MESSAGE };
+const QUERY_ERROR_TYPES: FixtureErrorType[] = [
+  ...ERROR_TYPES,
+  { errorID: GROWTH_ERROR_ID, source: GROWTH.source, code: GROWTH.code, message: 'Catalog text that the validation description replaces' },
+  { errorID: SAME_BATCH_21_ERROR_ID, source: SAME_BATCH_21.source, code: SAME_BATCH_21.code, message: 'Catalog text that the validation description replaces' }
+];
+const QUERY_VALIDATIONS: FixtureValidation[] = [
+  ...VALIDATIONS,
+  { validationID: GROWTH_VALIDATION_ID, procedureName: 'ValidateDBHGrowth', description: GROWTH_MESSAGE, criteria: 'measuredDBH' },
+  { validationID: SAME_BATCH_21_VALIDATION_ID, procedureName: 'ValidateSameBatch', description: SAME_BATCH_21_MESSAGE, criteria: '' }
+];
+
+function explorerFixture(measurements: FixtureMeasurement[], logs: FixtureLog[]): ExplorerFixture {
+  return {
+    plotIDs: [MAIN_PLOT_ID, DECOY_PLOT_ID],
+    censuses: [
+      { censusID: FIRST_CENSUS_ID, plotID: MAIN_PLOT_ID, plotCensusNumber: FIRST_CENSUS_ID },
+      { censusID: SECOND_CENSUS_ID, plotID: MAIN_PLOT_ID, plotCensusNumber: SECOND_CENSUS_ID },
+      { censusID: DECOY_CENSUS_ID, plotID: DECOY_PLOT_ID, plotCensusNumber: DECOY_CENSUS_ID }
+    ],
+    errorTypes: QUERY_ERROR_TYPES,
+    validations: QUERY_VALIDATIONS,
+    measurements,
+    logs
+  };
+}
+
+const SORT_FIRST_ID = 300;
+const SORT_GROUP_SIZE = 25;
+const SORT_PAGE_SIZE = 10;
+const SORT_SECOND_PAGE = 1;
+const SORT_ELEVENTH_LARGEST_DBH = 16;
+const SORT_TIED_LARGEST_DBH = 25;
+const SORT_BLANK_ROW_ID = 400;
+const SORT_TIE_ROW_ID = 401;
+const SORT_LARGEST_GROUP_ROW_ID = SORT_FIRST_ID + SORT_GROUP_SIZE - 1;
+
+function sortFixture(): ExplorerFixture {
+  const groupRows = Array.from({ length: SORT_GROUP_SIZE }, (_, index) => measurement(SORT_FIRST_ID + index, { measuredDBH: index + 1 }));
+  const measurements = [
+    ...groupRows,
+    measurement(SORT_BLANK_ROW_ID, { measuredDBH: null }),
+    measurement(SORT_TIE_ROW_ID, { measuredDBH: SORT_TIED_LARGEST_DBH })
+  ];
+  return explorerFixture(
+    measurements,
+    measurements.map(row => unresolvedLog(row.coreMeasurementID, VALIDATION_14_ERROR_ID))
+  );
+}
+
+const FILTER_ROWS = { alpha: 601, lowerAlpha: 602, beta: 603 } as const;
+const FILTER_SPECIES_MATCHING_SEARCH = 'ACERRU';
+
+function columnFilterFixture(): ExplorerFixture {
+  const measurements = [
+    measurement(FILTER_ROWS.alpha, { treeTag: 'ALPHA-1', speciesCode: FILTER_SPECIES_MATCHING_SEARCH }),
+    measurement(FILTER_ROWS.lowerAlpha, { treeTag: 'alpha-2', speciesCode: 'QUERCO' }),
+    measurement(FILTER_ROWS.beta, { treeTag: 'BETA-3', speciesCode: FILTER_SPECIES_MATCHING_SEARCH })
+  ];
+  return explorerFixture(
+    measurements,
+    measurements.map(row => unresolvedLog(row.coreMeasurementID, VALIDATION_14_ERROR_ID))
+  );
+}
+
+const GROWTH_ROWS = { roundedUp: 701, roundedDown: 702, noPrior: 703, zeroPrior: 704 } as const;
+const GROWTH_PRIOR_DBH = 100;
+const GROWTH_FIXED_DBH = 50;
+const GROWTH_ROUNDED_UP_DBH = 120.06;
+const GROWTH_ROUNDED_DOWN_DBH = 120.04;
+const GROWTH_PERCENT_THRESHOLD = 20;
+const GROWTH_PERCENT_ABOVE_THRESHOLD = 20.1;
+
+function growthFixture(): ExplorerFixture {
+  const growthRow = (id: number, measuredDBH: number) => measurement(id, { censusID: SECOND_CENSUS_ID, measuredDBH });
+  const growthLog = (measurementID: number, priorDBH: number | null): FixtureLog => ({
+    measurementID,
+    errorID: GROWTH_ERROR_ID,
+    isResolved: false,
+    priorCensusID: FIRST_CENSUS_ID,
+    priorDBH
+  });
+  return explorerFixture(
+    [
+      growthRow(GROWTH_ROWS.roundedUp, GROWTH_ROUNDED_UP_DBH),
+      growthRow(GROWTH_ROWS.roundedDown, GROWTH_ROUNDED_DOWN_DBH),
+      growthRow(GROWTH_ROWS.noPrior, GROWTH_FIXED_DBH),
+      growthRow(GROWTH_ROWS.zeroPrior, GROWTH_FIXED_DBH)
+    ],
+    [
+      growthLog(GROWTH_ROWS.roundedUp, GROWTH_PRIOR_DBH),
+      growthLog(GROWTH_ROWS.roundedDown, GROWTH_PRIOR_DBH),
+      growthLog(GROWTH_ROWS.noPrior, null),
+      growthLog(GROWTH_ROWS.zeroPrior, 0)
+    ]
+  );
+}
+
+const DUPLICATE_FIELDS_ROW_ID = 801;
+const EXPORT_ROWS = { codeA: 101, codeB: 102, both: 103 } as const;
+
+const OUTSIDE_PARTNER_ROWS = { clean: 301, flagged: 302 } as const;
+const OUTSIDE_PARTNER_TREE_TAG = 'SB-1';
+const OUTSIDE_PARTNER_UPLOAD = { fileID: 'file-1', batchID: 'batch-1' } as const;
+const OUTSIDE_PARTNER_DBH = 10;
+const OUTSIDE_PARTNER_SPECIES = 'AAA';
+const FLAGGED_ROW_SPECIES = 'BBB';
+const CLEAN_ROW_STEM_TAG = '2';
+
+function sameBatchPartnerRows(): FixtureMeasurement[] {
+  const upload = { uploadFileID: OUTSIDE_PARTNER_UPLOAD.fileID, uploadBatchID: OUTSIDE_PARTNER_UPLOAD.batchID, treeTag: OUTSIDE_PARTNER_TREE_TAG };
+  return [
+    measurement(OUTSIDE_PARTNER_ROWS.clean, {
+      ...upload,
+      stemTag: CLEAN_ROW_STEM_TAG,
+      speciesCode: OUTSIDE_PARTNER_SPECIES,
+      measuredDBH: OUTSIDE_PARTNER_DBH,
+      coreIsValidated: true,
+      summaryIsValidated: true
+    }),
+    measurement(OUTSIDE_PARTNER_ROWS.flagged, { ...upload, speciesCode: FLAGGED_ROW_SPECIES })
+  ];
+}
+
+const GUARD_ROWS = {
+  error: 901,
+  cleanPartner: 902,
+  inactivePartner: 903,
+  otherCensusRow: 904,
+  otherPlotRow: 905,
+  secondCensusError: 906,
+  secondCensusPartner: 907
+} as const;
+const GUARD_TREE_TAG = 'GUARD';
+const GUARD_SECOND_CENSUS_TREE_TAG = 'GUARD2';
+const GUARD_SUMMARY_VALUES = { measuredDBH: 11.25, measuredHOM: 1.35, measurementDate: '2020-06-02', description: 'summary description' } as const;
+const GUARD_CORE_DECOY_VALUES = { measuredDBH: 999.5, measuredHOM: 9.9, measurementDate: '1999-01-01', description: 'core description' } as const;
+const GUARD_UPLOAD = { fileID: 'file-902', batchID: 'batch-902' } as const;
+
+function outsideLookupGuardFixture(): ExplorerFixture {
+  const cleanRow = (id: number, overrides: Partial<FixtureMeasurement>) =>
+    measurement(id, { treeTag: GUARD_TREE_TAG, coreIsValidated: true, summaryIsValidated: true, ...overrides });
+  return explorerFixture(
+    [
+      measurement(GUARD_ROWS.error, { treeTag: GUARD_TREE_TAG }),
+      cleanRow(GUARD_ROWS.cleanPartner, {
+        ...GUARD_SUMMARY_VALUES,
+        uploadFileID: GUARD_UPLOAD.fileID,
+        uploadBatchID: GUARD_UPLOAD.batchID,
+        speciesCode: 'CLN'
+      }),
+      cleanRow(GUARD_ROWS.inactivePartner, { isActive: false }),
+      cleanRow(GUARD_ROWS.otherCensusRow, { censusID: SECOND_CENSUS_ID }),
+      cleanRow(GUARD_ROWS.otherPlotRow, { plotID: DECOY_PLOT_ID }),
+      measurement(GUARD_ROWS.secondCensusError, { treeTag: GUARD_SECOND_CENSUS_TREE_TAG, censusID: SECOND_CENSUS_ID }),
+      cleanRow(GUARD_ROWS.secondCensusPartner, { treeTag: GUARD_SECOND_CENSUS_TREE_TAG, censusID: SECOND_CENSUS_ID })
+    ],
+    [unresolvedLog(GUARD_ROWS.error, VALIDATION_14_ERROR_ID), unresolvedLog(GUARD_ROWS.secondCensusError, VALIDATION_14_ERROR_ID)]
+  );
+}
+
 type ProductionExecutor = Parameters<typeof production.queryErrorExplorer>[0];
 
 const kindOf = (statement: RecordedStatement): string =>
@@ -224,10 +404,45 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
     return response.totalRows;
   }
 
+  /** Registers a beforeAll in the calling describe that replaces the database's rows, so a describe never reads another's fixture. */
+  function useFixture(fixture: ExplorerFixture = viewErrorsFixture()): void {
+    beforeAll(async () => replaceFixture((fixtureDatabase as FixtureDatabase).setupConnection, fixture), FIXTURE_HOOK_TIMEOUT_MS);
+  }
+
+  async function queryFor(
+    overrides: {
+      page?: number;
+      pageSize?: number;
+      errorType?: ErrorTypeIdentity;
+      sortModel?: ErrorExplorerSortItem[];
+      columnFilters?: ErrorExplorerColumnFilter[];
+    },
+    filters: Partial<ErrorExplorerFilters> = {}
+  ): Promise<ErrorExplorerQueryResponse> {
+    const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });
+    const response = await production.queryErrorExplorer(recorder as unknown as ProductionExecutor, {
+      ...scope(),
+      page: FIRST_PAGE,
+      pageSize: LARGE_PAGE_SIZE,
+      filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, ...filters },
+      ...overrides
+    });
+    console.log(
+      '[view-errors query]',
+      JSON.stringify({
+        overrides,
+        filters,
+        totalRows: response.totalRows,
+        ids: response.rows.map(row => row.coreMeasurementID),
+        kinds: sortedKindsOf(recorder.statements)
+      })
+    );
+    return response;
+  }
+
   beforeAll(async () => {
     assertLocalOrRefuse();
     fixtureDatabase = await fixtureSession.open();
-    await replaceFixture((fixtureDatabase as FixtureDatabase).setupConnection, viewErrorsFixture());
   }, FIXTURE_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -236,6 +451,8 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
   }, FIXTURE_HOOK_TIMEOUT_MS);
 
   describe('facets errorTypes (P2-1)', () => {
+    useFixture();
+
     it('lists two identities for one message shared by two codes, ordered by count then message, source, code', async () => {
       const { facets, statements } = await facetsFor();
 
@@ -287,6 +504,8 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
   });
 
   describe('facets censusTotals', () => {
+    useFixture();
+
     it('counts the whole error set and ignores every filter', async () => {
       const defaults = (await facetsFor()).facets.censusTotals;
       const narrowed = (await facetsFor({ source: 'validation', quickSearch: 'zeta', exactMessages: [VALIDATION_14_MESSAGE] })).facets.censusTotals;
@@ -353,6 +572,8 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
   });
 
   describe('message counts', () => {
+    useFixture();
+
     it("matches the View Errors query: each message's count is that message's totalRows, and the total is censusTotals.affectedMeasurements", async () => {
       const counts = await production.buildErrorMessageCounts(
         createRecordingExecutor(explorerConnection(), { measureJsonBytes: false }) as unknown as ProductionExecutor,
@@ -366,6 +587,275 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
       for (const { value, count } of counts.messages) {
         expect(await queryTotalRows({ exactMessages: [value] }), value).toBe(count);
       }
+    });
+  });
+  describe('queries on the Node path: sort, column filter and display values', () => {
+    describe('sort across the whole error-type group', () => {
+      useFixture(sortFixture());
+
+      it('starts page 1 of a DBH-descending sort with the 11th largest DBH overall', async () => {
+        const response = await queryFor({
+          errorType: VALIDATION_14,
+          page: SORT_SECOND_PAGE,
+          pageSize: SORT_PAGE_SIZE,
+          sortModel: [{ field: 'measuredDBH', sort: 'desc' }]
+        });
+
+        expect(response.totalRows).toBe(SORT_GROUP_SIZE + 2);
+        expect(Number(response.rows[0].measuredDBH), 'the first row of page 1 is the 11th largest, not the 1st of the page-0 slice').toBe(
+          SORT_ELEVENTH_LARGEST_DBH
+        );
+      });
+
+      it('puts blanks last in both directions and breaks ties by ID ascending', async () => {
+        const descending = await queryFor({ errorType: VALIDATION_14, sortModel: [{ field: 'measuredDBH', sort: 'desc' }] });
+        const ascending = await queryFor({ errorType: VALIDATION_14, sortModel: [{ field: 'measuredDBH', sort: 'asc' }] });
+
+        expect(
+          descending.rows.slice(0, 2).map(row => row.coreMeasurementID),
+          `DBH ${SORT_TIED_LARGEST_DBH} is carried by two rows`
+        ).toEqual([SORT_LARGEST_GROUP_ROW_ID, SORT_TIE_ROW_ID]);
+        expect(descending.rows.at(-1)?.coreMeasurementID).toBe(SORT_BLANK_ROW_ID);
+        expect(ascending.rows.at(-1)?.coreMeasurementID).toBe(SORT_BLANK_ROW_ID);
+      });
+    });
+
+    describe('column filter before pagination', () => {
+      useFixture(columnFilterFixture());
+
+      it('reflects the filter in totalRows and ANDs it with Search', async () => {
+        const startsWithAlpha: ErrorExplorerColumnFilter = { field: 'treeTag', operator: 'startsWith', value: 'alpha' };
+
+        const filtered = await queryFor({ errorType: VALIDATION_14, columnFilters: [startsWithAlpha] });
+        const searched = await queryFor({ errorType: VALIDATION_14, columnFilters: [startsWithAlpha] }, { quickSearch: FILTER_SPECIES_MATCHING_SEARCH });
+
+        expect(filtered.totalRows, 'ALPHA-1 and alpha-2 start with alpha').toBe(2);
+        expect(
+          searched.rows.map(row => row.coreMeasurementID),
+          'only ALPHA-1 also carries the searched species'
+        ).toEqual([FILTER_ROWS.alpha]);
+        expect(searched.totalRows).toBe(1);
+      });
+    });
+
+    describe('prior DBH and Change', () => {
+      useFixture(growthFixture());
+
+      it('computes the rounded percent and leaves it blank without a usable prior', async () => {
+        const response = await queryFor({ errorType: GROWTH });
+
+        const percentByID = Object.fromEntries(response.rows.map(row => [row.coreMeasurementID, row.dbhChangePercent]));
+        expect(percentByID).toEqual({
+          [GROWTH_ROWS.roundedUp]: GROWTH_PERCENT_ABOVE_THRESHOLD,
+          [GROWTH_ROWS.roundedDown]: GROWTH_PERCENT_THRESHOLD,
+          [GROWTH_ROWS.noPrior]: null,
+          [GROWTH_ROWS.zeroPrior]: null
+        });
+      });
+
+      it.each<[ErrorExplorerColumnFilter, number[]]>([
+        [{ field: 'priorDBH', operator: 'isEmpty' }, [GROWTH_ROWS.noPrior]],
+        [{ field: 'priorDBH', operator: 'isNotEmpty' }, [GROWTH_ROWS.roundedUp, GROWTH_ROWS.roundedDown, GROWTH_ROWS.zeroPrior]],
+        [{ field: 'priorDBH', operator: '!=', value: GROWTH_PRIOR_DBH }, [GROWTH_ROWS.noPrior, GROWTH_ROWS.zeroPrior]],
+        [{ field: 'priorDBH', operator: '>', value: 0 }, [GROWTH_ROWS.roundedUp, GROWTH_ROWS.roundedDown]],
+        [{ field: 'dbhChangePercent', operator: '>', value: GROWTH_PERCENT_THRESHOLD }, [GROWTH_ROWS.roundedUp]]
+      ])('%j keeps rows %j', async (filter, expectedIDs) => {
+        const response = await queryFor({ errorType: GROWTH, columnFilters: [filter] });
+
+        expect(response.rows.map(row => row.coreMeasurementID).sort()).toEqual([...expectedIDs].sort());
+        expect(response.totalRows).toBe(expectedIDs.length);
+      });
+    });
+
+    describe('DUPLICATE_TAG_STEMTAG fields', () => {
+      useFixture(explorerFixture([measurement(DUPLICATE_FIELDS_ROW_ID)], [unresolvedLog(DUPLICATE_FIELDS_ROW_ID, DUPLICATE_ERROR_ID)]));
+
+      it('highlights the tree and stem tag columns', async () => {
+        const response = await queryFor({ errorType: DUPLICATE });
+
+        expect(response.rows.map(row => row.errorFields)).toEqual([['treeTag', 'stemTag']]);
+      });
+    });
+  });
+
+  describe('export of one error type', () => {
+    useFixture(
+      explorerFixture(
+        [measurement(EXPORT_ROWS.codeA), measurement(EXPORT_ROWS.codeB), measurement(EXPORT_ROWS.both)],
+        [
+          unresolvedLog(EXPORT_ROWS.codeA, CODE_A_ERROR_ID),
+          unresolvedLog(EXPORT_ROWS.codeB, CODE_B_ERROR_ID),
+          unresolvedLog(EXPORT_ROWS.both, CODE_A_ERROR_ID),
+          unresolvedLog(EXPORT_ROWS.both, CODE_B_ERROR_ID)
+        ]
+      )
+    );
+
+    it('exports only the occurrences of the requested identity', async () => {
+      const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });
+      const grouped = await production.fetchGroupedErrorRows(recorder as unknown as ProductionExecutor, database(), MAIN_PLOT_ID, CENSUS_IDS);
+
+      const everything = production.buildErrorExportRows(grouped, DEFAULT_ERROR_EXPLORER_FILTERS);
+      const onlyCodeA = production.buildErrorExportRows(grouped, DEFAULT_ERROR_EXPLORER_FILTERS, CODE_A);
+      console.log(
+        '[view-errors export]',
+        JSON.stringify({
+          everything: everything.map(row => [row.CoreMeasurementID, row.ErrorCode]),
+          onlyCodeA: onlyCodeA.map(row => [row.CoreMeasurementID, row.ErrorCode])
+        })
+      );
+
+      expect(everything, 'two codes sharing one message are four occurrences').toHaveLength(4);
+      expect(onlyCodeA.map(row => row.ErrorCode)).toEqual([CODE_A.code, CODE_A.code]);
+      expect(onlyCodeA.map(row => row.CoreMeasurementID).sort()).toEqual([EXPORT_ROWS.codeA, EXPORT_ROWS.both]);
+    });
+  });
+
+  describe('details related rows outside the error set', () => {
+    async function detailsFor(
+      measurementID: number,
+      censusID: number = FIRST_CENSUS_ID
+    ): Promise<{ details: ErrorExplorerDetailsResponse; statements: RecordedStatement[] }> {
+      const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });
+      const details = await production.buildErrorExplorerDetails(
+        recorder as unknown as ProductionExecutor,
+        { schema: database(), plotID: MAIN_PLOT_ID, censusID },
+        measurementID
+      );
+      console.log(
+        '[view-errors details]',
+        JSON.stringify({ measurementID, censusID, relatedRows: details.relatedRows, kinds: sortedKindsOf(recorder.statements) })
+      );
+      return { details, statements: [...recorder.statements] };
+    }
+    const lookupsIn = (statements: readonly RecordedStatement[]) =>
+      statements.filter(statement => statement.label === ERROR_EXPLORER_STATEMENT_LABELS.relatedRowsOutsideErrorSet);
+
+    describe('a clean same-batch partner', () => {
+      useFixture(explorerFixture(sameBatchPartnerRows(), [unresolvedLog(OUTSIDE_PARTNER_ROWS.flagged, SAME_BATCH_21_ERROR_ID)]));
+
+      it("returns validation 21's clean first row as a related row outside the error set", async () => {
+        const { details, statements } = await detailsFor(OUTSIDE_PARTNER_ROWS.flagged);
+
+        expect(details.relatedRows).toEqual([
+          expect.objectContaining({
+            coreMeasurementID: OUTSIDE_PARTNER_ROWS.clean,
+            inErrorSet: false,
+            errorCount: 0,
+            errorMessages: [],
+            measuredDBH: OUTSIDE_PARTNER_DBH,
+            speciesCode: OUTSIDE_PARTNER_SPECIES
+          })
+        ]);
+        const [lookup, ...otherLookups] = lookupsIn(statements);
+        expect(otherLookups, 'one outside ID is one lookup').toEqual([]);
+        expect(lookup.params[0], 'the plot').toBe(MAIN_PLOT_ID);
+        expect(lookup.params.slice(1, 1 + CENSUS_LIST_SIZE), 'the details census, padded').toEqual([
+          FIRST_CENSUS_ID,
+          ...Array(CENSUS_LIST_SIZE - 1).fill(null)
+        ]);
+        expect(lookup.params.slice(1 + CENSUS_LIST_SIZE), 'the outside ID, padded').toEqual([
+          OUTSIDE_PARTNER_ROWS.clean,
+          ...Array(ID_LIST_SIZE - 1).fill(null)
+        ]);
+      });
+
+      it('keeps the clean row out of every count and group', async () => {
+        const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });
+
+        const facets = await production.buildErrorExplorerFacets(recorder as unknown as ProductionExecutor, {
+          ...scope(),
+          filters: DEFAULT_ERROR_EXPLORER_FILTERS
+        });
+
+        console.log('[view-errors clean partner facets]', JSON.stringify({ errorTypes: facets.errorTypes, censusTotals: facets.censusTotals }));
+        expect(facets.censusTotals.affectedMeasurements, 'only the flagged row is in the error set').toBe(1);
+        expect(facets.errorTypes.map(type => type.count)).toEqual([1]);
+      });
+    });
+
+    describe('a partner that is in the error set too', () => {
+      useFixture(
+        explorerFixture(sameBatchPartnerRows(), [
+          unresolvedLog(OUTSIDE_PARTNER_ROWS.flagged, SAME_BATCH_21_ERROR_ID),
+          unresolvedLog(OUTSIDE_PARTNER_ROWS.clean, VALIDATION_14_ERROR_ID)
+        ])
+      );
+
+      it('runs no lookup when every related row is in the error set, and marks those rows inErrorSet', async () => {
+        const { details, statements } = await detailsFor(OUTSIDE_PARTNER_ROWS.flagged);
+
+        expect(details.relatedRows.map(row => [row.coreMeasurementID, row.inErrorSet])).toEqual([[OUTSIDE_PARTNER_ROWS.clean, true]]);
+        expect(lookupsIn(statements), 'no outside ID, no lookup').toEqual([]);
+      });
+    });
+
+    describe('the lookup guards', () => {
+      useFixture(outsideLookupGuardFixture());
+
+      beforeAll(async () => {
+        const { setupConnection } = fixtureDatabase as FixtureDatabase;
+        await setupConnection.query('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+          await setupConnection.query(
+            'UPDATE coremeasurements SET MeasuredDBH = ?, MeasuredHOM = ?, MeasurementDate = ?, Description = ? WHERE CoreMeasurementID = ?',
+            [
+              GUARD_CORE_DECOY_VALUES.measuredDBH,
+              GUARD_CORE_DECOY_VALUES.measuredHOM,
+              GUARD_CORE_DECOY_VALUES.measurementDate,
+              GUARD_CORE_DECOY_VALUES.description,
+              GUARD_ROWS.cleanPartner
+            ]
+          );
+        } finally {
+          await setupConnection.query('SET FOREIGN_KEY_CHECKS = 1');
+        }
+      }, FIXTURE_HOOK_TIMEOUT_MS);
+
+      async function runLookup(censusIDs: number[], measurementIDs: number[]): Promise<RelatedRowOutsideErrorSetRow[]> {
+        const statement = buildRelatedRowsOutsideErrorSetStatement({ schema: database(), plotID: MAIN_PLOT_ID, censusIDs }, measurementIDs);
+        const rows = (await runQueryDispatch(explorerConnection(), statement.sql, statement.params)) as RelatedRowOutsideErrorSetRow[];
+        console.log('[view-errors outside lookup]', JSON.stringify({ censusIDs, measurementIDs, returned: rows.map(row => row.RelatedCoreMeasurementID) }));
+        return rows;
+      }
+
+      const EVERY_CANDIDATE = [GUARD_ROWS.cleanPartner, GUARD_ROWS.inactivePartner, GUARD_ROWS.otherCensusRow, GUARD_ROWS.otherPlotRow];
+
+      it('returns an active partner of the details census and drops the inactive, other-census and other-plot rows', async () => {
+        const { details, statements } = await detailsFor(GUARD_ROWS.error);
+
+        expect(
+          details.relatedRows.map(row => [row.coreMeasurementID, row.inErrorSet]),
+          `the duplicate group lists the inactive ${GUARD_ROWS.inactivePartner} too`
+        ).toEqual([[GUARD_ROWS.cleanPartner, false]]);
+        expect(lookupsIn(statements)).toHaveLength(1);
+        expect((await runLookup([FIRST_CENSUS_ID], EVERY_CANDIDATE)).map(row => Number(row.RelatedCoreMeasurementID))).toEqual([GUARD_ROWS.cleanPartner]);
+      });
+
+      it('binds the details census, not the first census of the scope', async () => {
+        const { details } = await detailsFor(GUARD_ROWS.secondCensusError, SECOND_CENSUS_ID);
+
+        expect(details.relatedRows.map(row => [row.coreMeasurementID, row.inErrorSet])).toEqual([[GUARD_ROWS.secondCensusPartner, false]]);
+        expect((await runLookup([SECOND_CENSUS_ID], EVERY_CANDIDATE)).map(row => Number(row.RelatedCoreMeasurementID))).toEqual([GUARD_ROWS.otherCensusRow]);
+        expect((await runLookup([FIRST_CENSUS_ID, SECOND_CENSUS_ID], EVERY_CANDIDATE)).map(row => Number(row.RelatedCoreMeasurementID)).sort()).toEqual([
+          GUARD_ROWS.cleanPartner,
+          GUARD_ROWS.otherCensusRow
+        ]);
+      });
+
+      it('reads the display columns from measurementssummary and the upload IDs from coremeasurements', async () => {
+        const [row] = await runLookup([FIRST_CENSUS_ID], [GUARD_ROWS.cleanPartner]);
+
+        expect(Number(row.MeasuredDBH), `coremeasurements holds the decoy ${GUARD_CORE_DECOY_VALUES.measuredDBH}`).toBe(GUARD_SUMMARY_VALUES.measuredDBH);
+        expect(Number(row.MeasuredHOM)).toBe(GUARD_SUMMARY_VALUES.measuredHOM);
+        expect(row.MeasurementDescription).toBe(GUARD_SUMMARY_VALUES.description);
+        expect(new Date(row.MeasurementDate as Date | string).toISOString().slice(0, GUARD_SUMMARY_VALUES.measurementDate.length)).toBe(
+          GUARD_SUMMARY_VALUES.measurementDate
+        );
+        expect(row.UploadFileID).toBe(GUARD_UPLOAD.fileID);
+        expect(row.UploadBatchID).toBe(GUARD_UPLOAD.batchID);
+        expect(row.SpeciesCode).toBe('CLN');
+      });
     });
   });
 });

@@ -25,6 +25,7 @@ import {
   createRecordingExecutor,
   EQUIVALENCE_GROUP_CONCAT_MAX_LEN,
   FIRST_CENSUS_ID,
+  FIXTURE_GENERATED_ROW_CODE,
   FIXTURE_HOOK_TIMEOUT_MS,
   groupConcatTruncationFixture,
   MAIN_PLOT_ID,
@@ -32,8 +33,11 @@ import {
   setGroupConcatMaxLen,
   SHOW_FILTER_SETS,
   TRUNCATION_DUPLICATE_MEMBER_IDS,
+  TRUNCATION_ERROR_ID,
   TRUNCATION_LIMITS,
+  TRUNCATION_PHANTOM_ROW_ID,
   TRUNCATION_UNRELATED_ERROR_ROW_ID,
+  TRUNCATION_UNRELATED_ERROR_TYPE_ID,
   type FixtureDatabase,
   type RecordedStatement
 } from './helpers/errorsexplorerfixtures';
@@ -47,6 +51,10 @@ const WHOLE_MEMBER_LIST = TRUNCATION_DUPLICATE_MEMBER_IDS.join(',');
 const CONTRADICTIONS_SHOW_LABEL = 'contradictions';
 const DUPLICATE_CONTRADICTION: ContradictionType = 'duplicate_tag_stem';
 const DETAILS_FIXED_STATEMENT_COUNT = 3;
+const ACTIVE_COUNT_SQL_MARKER = 'SELECT COUNT(*) AS n';
+const ACTIVE_COUNT_KIND = 'active-count';
+const FACET_ERROR_TYPE_CODE_OF_MEMBERS = `${FIXTURE_GENERATED_ROW_CODE}_${TRUNCATION_ERROR_ID}`;
+const FACET_ERROR_TYPE_CODE_OF_UNRELATED_ROW = `${FIXTURE_GENERATED_ROW_CODE}_${TRUNCATION_UNRELATED_ERROR_TYPE_ID}`;
 const NON_POSITIVE_OR_FRACTIONAL_IDS = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 2];
 
 const QUERY_ORDER_ALL_ERRORS = [...TRUNCATION_DUPLICATE_MEMBER_IDS, TRUNCATION_UNRELATED_ERROR_ROW_ID];
@@ -55,14 +63,16 @@ const MEMBER_LIST_COMPLETE_BY_LIMIT: Record<number, number> = {
   [TRUNCATION_LIMITS.whole]: SQL_TRUE,
   [TRUNCATION_LIMITS.cutInsideThirdID]: SQL_FALSE,
   [TRUNCATION_LIMITS.cutAtSeparator]: SQL_FALSE,
-  [TRUNCATION_LIMITS.cutInsideSecondID]: SQL_FALSE
+  [TRUNCATION_LIMITS.cutInsideSecondID]: SQL_FALSE,
+  [TRUNCATION_LIMITS.cutAfterFirstDigitOfSecondID]: SQL_FALSE
 };
 /** Hand-written from the whole-token rule (spec §4, D4): a cut list keeps only the tokens a separator follows. The list is "1001,1002,1003" cut to the limit. */
 const RELATED_SUPERSET_BY_LIMIT: Record<number, number[]> = {
   [TRUNCATION_LIMITS.whole]: [1001, 1002, 1003],
   [TRUNCATION_LIMITS.cutInsideThirdID]: [1001, 1002],
   [TRUNCATION_LIMITS.cutAtSeparator]: [1001, 1002],
-  [TRUNCATION_LIMITS.cutInsideSecondID]: [1001]
+  [TRUNCATION_LIMITS.cutInsideSecondID]: [1001],
+  [TRUNCATION_LIMITS.cutAfterFirstDigitOfSecondID]: [1001]
 };
 const LIMITS = Object.values(TRUNCATION_LIMITS);
 
@@ -83,6 +93,7 @@ interface LimitRun {
   facetsWarnedMessages: unknown[];
   detailsByMeasurementID: Map<number, ErrorExplorerDetailsResponse>;
   detailsStatementCountByMeasurementID: Map<number, number>;
+  detailsLabelsByMeasurementID: Map<number, Array<string | null>>;
   memberGroupRow: DuplicateMemberGroupRow;
 }
 
@@ -139,7 +150,7 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
     const warningsBeforeFacets = vi.mocked(ailogger.warn).mock.calls.length;
     const facetsRun = await runWithLimit(limit, async (executor, recorded) => ({
       response: await production.buildErrorExplorerFacets(executor, { ...requestScope(), filters: DEFAULT_ERROR_EXPLORER_FILTERS }),
-      labels: recorded.map(statement => statement.label)
+      labels: recorded.map(statement => statement.label ?? (statement.sql.includes(ACTIVE_COUNT_SQL_MARKER) ? ACTIVE_COUNT_KIND : null))
     }));
     const facetsWarnedMessages = vi
       .mocked(ailogger.warn)
@@ -148,10 +159,15 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
     const facets = facetsRun.response;
     const detailsByMeasurementID = new Map<number, ErrorExplorerDetailsResponse>();
     const detailsStatementCountByMeasurementID = new Map<number, number>();
+    const detailsLabelsByMeasurementID = new Map<number, Array<string | null>>();
     for (const measurementID of TRUNCATION_DUPLICATE_MEMBER_IDS) {
       await runWithLimit(limit, async (executor, recorded) => {
         detailsByMeasurementID.set(measurementID, await production.buildErrorExplorerDetails(executor, requestScope(), measurementID));
         detailsStatementCountByMeasurementID.set(measurementID, recorded.length);
+        detailsLabelsByMeasurementID.set(
+          measurementID,
+          recorded.map(statement => statement.label)
+        );
       });
     }
     console.log(
@@ -169,6 +185,7 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       facetsWarnedMessages,
       detailsByMeasurementID,
       detailsStatementCountByMeasurementID,
+      detailsLabelsByMeasurementID,
       memberGroupRow
     };
   }
@@ -233,8 +250,10 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       expect(run.showQuery.rows.every(row => row.hasContradiction)).toBe(true);
     });
 
-    it('facets are answered by the catalog and the flagged histogram alone: no fallback to the scope raw rows, no warning', () => {
-      expect(run.facetsLabels, 'facets statements').toEqual([ERROR_EXPLORER_STATEMENT_LABELS.catalog, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags]);
+    it('facets are answered by the catalog, the flagged histogram and the active count: no fallback to the scope raw rows, no warning', () => {
+      expect([...run.facetsLabels].sort(), 'facets statements').toEqual(
+        [ERROR_EXPLORER_STATEMENT_LABELS.catalog, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags, ACTIVE_COUNT_KIND].sort()
+      );
       expect(run.facetsWarnedMessages, 'ailogger.warn messages logged by the facets run').toEqual([]);
     });
 
@@ -242,6 +261,18 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       expect(run.facets.censusTotals.duplicateTagStem).toBe(TRUNCATION_DUPLICATE_MEMBER_IDS.length);
       expect(run.facets.censusTotals.sameBatchConflict).toBe(0);
       expect(run.facets.censusTotals.affectedMeasurements).toBe(QUERY_ORDER_ALL_ERRORS.length);
+    });
+
+    it('facets mark the error type of the group members as contradicting and the unrelated row’s type as not, whatever the cut', () => {
+      const contradictionByCode = Object.fromEntries(run.facets.errorTypes.map(type => [type.code, type.hasContradiction]));
+      console.log(
+        `[truncation] limit=${limit} errorTypes=${JSON.stringify(run.facets.errorTypes.map(type => [type.code, type.count, type.hasContradiction]))}`
+      );
+
+      expect(contradictionByCode).toEqual({
+        [FACET_ERROR_TYPE_CODE_OF_MEMBERS]: true,
+        [FACET_ERROR_TYPE_CODE_OF_UNRELATED_ROW]: false
+      });
     });
 
     it.each(TRUNCATION_DUPLICATE_MEMBER_IDS.map(id => [id]))('member %i is flagged and its related IDs are whole tokens of the cut list', measurementID => {
@@ -266,6 +297,7 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       everyRelatedList.forEach(list => {
         expect(list).not.toContain(0);
         expect(list).not.toContain(TRUNCATION_UNRELATED_ERROR_ROW_ID);
+        expect(list, 'a cut token is never an ID').not.toContain(TRUNCATION_PHANTOM_ROW_ID);
         expect(list).not.toContain(measurementID);
       });
     });
@@ -280,6 +312,20 @@ describe('errors explorer: GROUP_CONCAT truncation of member lists (#544, D4)', 
       );
       expect(unrelatedDetails.row?.hasContradiction).toBe(false);
       expect(unrelatedDetails.relatedRows).toEqual([]);
+    });
+
+    it('details never looks up a cut token: no outside lookup runs and the clean row whose ID is a prefix of a member is not returned', () => {
+      TRUNCATION_DUPLICATE_MEMBER_IDS.forEach(measurementID => {
+        const details = run.detailsByMeasurementID.get(measurementID);
+        const labels = run.detailsLabelsByMeasurementID.get(measurementID) ?? [];
+        console.log(`[truncation] limit=${limit} member=${measurementID} detailsLabels=${JSON.stringify(labels)}`);
+
+        expect(labels, `member ${measurementID}: every related ID is a member, so none is outside the error set`).not.toContain(
+          ERROR_EXPLORER_STATEMENT_LABELS.relatedRowsOutsideErrorSet
+        );
+        expect(details?.relatedRows.map(row => row.coreMeasurementID)).not.toContain(TRUNCATION_PHANTOM_ROW_ID);
+        expect(details?.relatedRows.every(row => row.inErrorSet)).toBe(true);
+      });
     });
 
     it('details reads 3 statements plus one per 128 related IDs', () => {

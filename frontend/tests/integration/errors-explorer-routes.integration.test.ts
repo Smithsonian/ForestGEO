@@ -38,6 +38,8 @@ const UPLOAD_BATCH_ID_OF_DUPLICATE_ONLY_ROW = 'batch-2';
 const FIRST_MEASUREMENT_ID = 101;
 const SECOND_MEASUREMENT_ID = 102;
 const DUPLICATE_ONLY_MEASUREMENT_ID = 103;
+const CLEAN_PARTNER_MEASUREMENT_ID = 104;
+const UPLOAD_BATCH_ID_OF_CLEAN_PARTNER = 'batch-3';
 const DECOY_MEASUREMENT_ID = 301;
 const FAILED_MEASUREMENT_ID = 201;
 const RESOLVED_MEASUREMENT_ID = 202;
@@ -53,6 +55,7 @@ const FIRST_DESCRIPTION = 'row 101';
 const SECOND_DESCRIPTION = 'row 102';
 const DUPLICATE_ONLY_DESCRIPTION = 'row 103';
 const RESOLVED_DESCRIPTION = 'row 202';
+const CLEAN_PARTNER_DESCRIPTION = 'row 104';
 const SECOND_SPECIES_CODE = 'SP2';
 const DUPLICATE_TAG_STEM: ContradictionType = 'duplicate_tag_stem';
 const SAME_BATCH_CONFLICT: ContradictionType = 'same_batch_conflict';
@@ -211,6 +214,21 @@ function duplicateOnlyMeasurement(): FixtureMeasurement {
     summaryStemGUID: 23,
     uploadBatchID: UPLOAD_BATCH_ID_OF_DUPLICATE_ONLY_ROW,
     description: DUPLICATE_ONLY_DESCRIPTION,
+    userDefinedFields: {}
+  });
+}
+
+/** Shares TREE-1/A with 101 and 102 but has no unresolved error and is validated, so it is a duplicate-group partner outside the error set. */
+function cleanDuplicatePartner(): FixtureMeasurement {
+  return firstMeasurement({
+    coreMeasurementID: CLEAN_PARTNER_MEASUREMENT_ID,
+    treeID: 14,
+    coreStemGUID: 24,
+    summaryStemGUID: 24,
+    coreIsValidated: true,
+    summaryIsValidated: true,
+    uploadBatchID: UPLOAD_BATCH_ID_OF_CLEAN_PARTNER,
+    description: CLEAN_PARTNER_DESCRIPTION,
     userDefinedFields: {}
   });
 }
@@ -517,7 +535,8 @@ describe('errors explorer route behaviour on real MySQL', () => {
               uploadBatchID: UPLOAD_BATCH_ID_OF_DUPLICATE_ONLY_ROW,
               stemLocalX: DETAIL_STEM_LOCAL_X,
               stemLocalY: DETAIL_STEM_LOCAL_Y
-            })
+            }),
+            cleanDuplicatePartner()
           ],
           logs: [
             unresolvedLog(FIRST_MEASUREMENT_ID, DUPLICATE_TAG_VALIDATION_ERROR.errorID),
@@ -557,14 +576,31 @@ describe('errors explorer route behaviour on real MySQL', () => {
             stemLocalY: `${DETAIL_STEM_LOCAL_Y}${DECIMAL_SCALE_SUFFIX}`,
             description: SECOND_DESCRIPTION,
             errorCount: 1,
-            errorMessages: [SAME_BATCH_MESSAGE]
+            errorMessages: [SAME_BATCH_MESSAGE],
+            inErrorSet: true
           })
         ])
       );
+      expect(body.relatedRows, 'the validated partner without an unresolved error is returned from outside the error set').toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            coreMeasurementID: CLEAN_PARTNER_MEASUREMENT_ID,
+            description: CLEAN_PARTNER_DESCRIPTION,
+            errorCount: 0,
+            errorMessages: [],
+            inErrorSet: false
+          })
+        ])
+      );
+      expect(
+        body.relatedRows.map((related: { coreMeasurementID: number }) => related.coreMeasurementID),
+        'related-ID order is kept'
+      ).toEqual([SECOND_MEASUREMENT_ID, CLEAN_PARTNER_MEASUREMENT_ID]);
     });
 
     it('uses the requested contradiction type when a row belongs to multiple groups', async () => {
-      await replaceFixture(connection(), contradictingPairFixture({ userDefinedFields: {}, firstRowIngestionError: false, withDuplicateOnlyRow: true }));
+      const pairFixture = contradictingPairFixture({ userDefinedFields: {}, firstRowIngestionError: false, withDuplicateOnlyRow: true });
+      await replaceFixture(connection(), { ...pairFixture, measurements: [...pairFixture.measurements, cleanDuplicatePartner()] });
       const { GET } = await import('@/app/api/errors/explorer/details/[measurementID]/route');
 
       const response = await GET(detailsRequest(schema(), FIRST_MEASUREMENT_ID, SAME_BATCH_CONFLICT), detailsContext(FIRST_MEASUREMENT_ID));
@@ -596,7 +632,19 @@ describe('errors explorer route behaviour on real MySQL', () => {
       const duplicateRelatedIDs = duplicateBody.relatedRows.map((related: { coreMeasurementID: number }) => related.coreMeasurementID).sort();
       console.log('[details duplicate-type related rows]', JSON.stringify({ sameBatchRelatedIDs, duplicateRelatedIDs }));
       expect(duplicateBody.row.contradictionType).toBe(DUPLICATE_TAG_STEM);
-      expect(duplicateRelatedIDs, 'duplicate related rows include the duplicate-only row').toEqual([SECOND_MEASUREMENT_ID, DUPLICATE_ONLY_MEASUREMENT_ID]);
+      expect(duplicateRelatedIDs, 'duplicate related rows include the duplicate-only row and the partner outside the error set').toEqual([
+        SECOND_MEASUREMENT_ID,
+        DUPLICATE_ONLY_MEASUREMENT_ID,
+        CLEAN_PARTNER_MEASUREMENT_ID
+      ]);
+      expect(
+        duplicateBody.relatedRows.map((related: { coreMeasurementID: number; inErrorSet: boolean }) => [related.coreMeasurementID, related.inErrorSet]),
+        'rows with an unresolved error are in the set, the validated partner is not'
+      ).toEqual([
+        [SECOND_MEASUREMENT_ID, true],
+        [DUPLICATE_ONLY_MEASUREMENT_ID, true],
+        [CLEAN_PARTNER_MEASUREMENT_ID, false]
+      ]);
     });
   });
 });

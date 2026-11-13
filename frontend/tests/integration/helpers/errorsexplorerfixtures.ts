@@ -1236,32 +1236,41 @@ export async function seedDistinctSignatureMeasurements(connection: Connection):
 // ---- GROUP_CONCAT truncation witness (T15, spec Testing section 3, D4) ----
 
 export const TRUNCATION_ERROR_ID = 1;
+export const TRUNCATION_UNRELATED_ERROR_TYPE_ID = 2;
 export const TRUNCATION_UNRELATED_ERROR_ROW_ID = 100;
 export const TRUNCATION_DUPLICATE_MEMBER_IDS: readonly number[] = [1001, 1002, 1003];
+/** Not a member of the group and not in the error set; its ID is the first digit of 1002 and 1003, the whole token a cut list "1001,1" would otherwise yield. */
+export const TRUNCATION_PHANTOM_ROW_ID = 1;
 export const TRUNCATION_DUPLICATE_TREE_TAG = 'DUP';
 export const TRUNCATION_UNRELATED_TREE_TAG = 'SOLO';
+export const TRUNCATION_PHANTOM_TREE_TAG = 'PHANTOM';
 export const TRUNCATION_STEM_TAG = '1';
 /** "1001,1002,1003" is 14 characters; each smaller limit cuts the member list at a different place relative to the separators. */
-export const TRUNCATION_LIMITS = { whole: 14, cutInsideThirdID: 13, cutAtSeparator: 10, cutInsideSecondID: 9 } as const;
+export const TRUNCATION_LIMITS = { whole: 14, cutInsideThirdID: 13, cutAtSeparator: 10, cutInsideSecondID: 9, cutAfterFirstDigitOfSecondID: 6 } as const;
 
-/** Measurement 100 is an error row that shares no tag pair; 1001 to 1003 share one tag pair, so the three form one duplicate group. Every row carries one unresolved log of error type 1. */
+/**
+ * Measurement 100 is an error row of its own type that shares no tag pair; 1001 to 1003 share one tag pair, so the three form one duplicate group and carry error type 1.
+ * Measurement 1 is validated and has no error log: a clean active row of the same plot and census that no whole token of any member list names.
+ */
 export function groupConcatTruncationFixture(): ExplorerFixture {
   const taggedMeasurement = (coreMeasurementID: number, treeTag: string): FixtureMeasurement => ({
     ...signatureFixtureMeasurement(coreMeasurementID),
     treeTag,
     stemTag: TRUNCATION_STEM_TAG
   });
-  const measurements = [
-    taggedMeasurement(TRUNCATION_UNRELATED_ERROR_ROW_ID, TRUNCATION_UNRELATED_TREE_TAG),
-    ...TRUNCATION_DUPLICATE_MEMBER_IDS.map(memberID => taggedMeasurement(memberID, TRUNCATION_DUPLICATE_TREE_TAG))
-  ];
+  const unrelatedErrorRow = taggedMeasurement(TRUNCATION_UNRELATED_ERROR_ROW_ID, TRUNCATION_UNRELATED_TREE_TAG);
+  const memberRows = TRUNCATION_DUPLICATE_MEMBER_IDS.map(memberID => taggedMeasurement(memberID, TRUNCATION_DUPLICATE_TREE_TAG));
+  const phantomRow = taggedMeasurement(TRUNCATION_PHANTOM_ROW_ID, TRUNCATION_PHANTOM_TREE_TAG);
   return {
     plotIDs: [MAIN_PLOT_ID],
     censuses: [{ ...SIGNATURE_FIXTURE_CENSUS }],
-    errorTypes: [generatedErrorType(TRUNCATION_ERROR_ID)],
+    errorTypes: [generatedErrorType(TRUNCATION_ERROR_ID), generatedErrorType(TRUNCATION_UNRELATED_ERROR_TYPE_ID)],
     validations: [],
-    measurements,
-    logs: measurements.map(measurement => ({ measurementID: measurement.coreMeasurementID, errorID: TRUNCATION_ERROR_ID, isResolved: false }))
+    measurements: [unrelatedErrorRow, ...memberRows, phantomRow],
+    logs: [
+      { measurementID: unrelatedErrorRow.coreMeasurementID, errorID: TRUNCATION_UNRELATED_ERROR_TYPE_ID, isResolved: false },
+      ...memberRows.map(row => ({ measurementID: row.coreMeasurementID, errorID: TRUNCATION_ERROR_ID, isResolved: false }))
+    ]
   };
 }
 
