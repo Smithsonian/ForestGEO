@@ -106,25 +106,78 @@ const rawErrorRows = [
   }
 ];
 
+const duplicateMemberGroupRows = rawErrorRows.map(rawRow => ({
+  RequestedMeasurementID: rawRow.CoreMeasurementID,
+  CensusID: rawRow.CensusID,
+  TreeTag: 'TREE101',
+  StemTag: '1',
+  MeasurementIDs: '101,102',
+  MemberCount: 2,
+  MemberListComplete: SQL_TRUE
+}));
+
+const pageTotals = { TotalRows: 2 };
+// Both rows carry the duplicate flag and one error, so the page statement orders them by measurement date, then ID.
+const pageRows = rawErrorRows.map(rawRow => ({
+  CoreMeasurementID: rawRow.CoreMeasurementID,
+  CensusID: rawRow.CensusID,
+  HasContradiction: SQL_TRUE,
+  OccurrenceCount: 1,
+  MeasurementDate: rawRow.MeasurementDate,
+  ...pageTotals
+}));
+
 function makeConnection() {
   return {
-    executeQuery: vi.fn(async (query: string) => {
-      if (query.includes('SELECT COUNT(*) AS n')) {
-        return [{ n: 0 }];
+    executeQuery: vi.fn(async (query: string, params: unknown[] = []) => {
+      const label = readStatementLabel(query);
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.catalog) return catalogRows;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.page) return pageRows;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.idRawRows) return rawErrorRows.filter(rawRow => params.includes(rawRow.CoreMeasurementID));
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows) {
+        return rawErrorRows.map(rawRow => ({ ...rawRow, HasDuplicate: SQL_TRUE, HasSameBatch: SQL_FALSE }));
       }
-      if (query.includes('measurement_error_log')) {
-        return rawErrorRows;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups) {
+        return duplicateMemberGroupRows.filter(group => params.includes(group.RequestedMeasurementID));
       }
-      if (query.includes('GROUP_CONCAT(DISTINCT ms.CoreMeasurementID')) {
-        return [{ TreeTag: 'TREE101', StemTag: '1', MeasurementIDs: '101,102' }];
-      }
-      if (query.includes('GROUP_CONCAT(DISTINCT cm.CoreMeasurementID')) {
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups) {
         return [];
       }
-      throw new Error(`Unexpected query in contract test: ${query}`);
+      throw new Error(`Unexpected statement in test: ${label}`);
     })
   } as any;
 }
+
+const ABSENT_CENSUS_ID = 9001;
+
+/** Records every statement. A page statement that names ABSENT_CENSUS_ID finds no rows; every other page statement returns the two rows. */
+function makeWindowConnection() {
+  return {
+    executeQuery: vi.fn(async (query: string, params: unknown[] = []) => {
+      const label = readStatementLabel(query);
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.catalog) return catalogRows;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.page) return params.includes(ABSENT_CENSUS_ID) ? [] : pageRows;
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.totals) return params.includes(ABSENT_CENSUS_ID) ? [{ ...pageTotals, TotalRows: 0 }] : [pageTotals];
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.idRawRows) return rawErrorRows.filter(rawRow => params.includes(rawRow.CoreMeasurementID));
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups) {
+        return duplicateMemberGroupRows.filter(group => params.includes(group.RequestedMeasurementID));
+      }
+      if (label === ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups) return [];
+      throw new Error(`Unexpected statement in the window test: ${label}`);
+    })
+  } as any;
+}
+
+function paramsOfStatements(connection: ReturnType<typeof makeWindowConnection>, label: string): unknown[][] {
+  return connection.executeQuery.mock.calls.filter(([query]: [string]) => readStatementLabel(query) === label).map(([, params]: [string, unknown[]]) => params);
+}
+
+const PAGE_WINDOW_PARAM_COUNT = 2;
+const SINGLE_CHUNK_CENSUS_IDS = [5];
+const FIRST_CHUNK_CENSUS_IDS = [5, 101, 102, 103, 104, 105, 106, 107];
+const TWO_CHUNK_CENSUS_IDS = [...FIRST_CHUNK_CENSUS_IDS, 108];
+const SPARSE_CHUNK_CENSUS_IDS = [...FIRST_CHUNK_CENSUS_IDS, ABSENT_CENSUS_ID];
+const ROWS_PER_CHUNK_TOTAL = 2;
 
 function makeFacetsConnection() {
   return {
@@ -152,9 +205,25 @@ function makeRequest(overrides: Partial<ErrorExplorerQueryRequest> = {}): ErrorE
 
 describe('API response shape contracts', () => {
   it('keeps Errors Explorer query rows aligned with the UI contract', async () => {
-    const response = await queryErrorExplorer(makeConnection(), makeRequest());
+    const connection = makeConnection();
+    const response = await queryErrorExplorer(connection, makeRequest());
 
-    console.log('[view-errors contract query]', JSON.stringify({ keys: Object.keys(response), totalRows: response.totalRows }));
+    const statementLabels = connection.executeQuery.mock.calls.map(([query]: [string]) => readStatementLabel(query));
+    console.log('[view-errors contract query]', JSON.stringify({ keys: Object.keys(response), totalRows: response.totalRows, statementLabels }));
+    expect(
+      statementLabels.filter((label: string | null) => label === ERROR_EXPLORER_STATEMENT_LABELS.page),
+      'one page statement'
+    ).toHaveLength(1);
+    expect(statementLabels, 'the SQL path never reads the whole error set').not.toContain(ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows);
+    expect([...statementLabels].sort()).toEqual(
+      [
+        ERROR_EXPLORER_STATEMENT_LABELS.catalog,
+        ERROR_EXPLORER_STATEMENT_LABELS.page,
+        ERROR_EXPLORER_STATEMENT_LABELS.idRawRows,
+        ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups,
+        ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups
+      ].sort()
+    );
     expect(Object.keys(response).sort(), 'the query response is exactly rows and totalRows').toEqual(['rows', 'totalRows']);
     expect(response.totalRows).toBe(2);
     expect(response.rows).toHaveLength(2);
@@ -196,6 +265,21 @@ describe('API response shape contracts', () => {
     });
   });
 
+  it('keeps a quick-search Errors Explorer query on the Node path with the same row shape', async () => {
+    const connection = makeConnection();
+    const response = await queryErrorExplorer(connection, makeRequest({ filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, quickSearch: 'TREE101' } }));
+
+    const statementLabels = connection.executeQuery.mock.calls.map(([query]: [string]) => readStatementLabel(query));
+    console.log('[view-errors contract quick search]', JSON.stringify({ keys: Object.keys(response), totalRows: response.totalRows, statementLabels }));
+    expect(statementLabels, 'a quick search reads the whole error set once').toContain(ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows);
+    expect(statementLabels).not.toContain(ERROR_EXPLORER_STATEMENT_LABELS.page);
+    expect(statementLabels).not.toContain(ERROR_EXPLORER_STATEMENT_LABELS.catalog);
+    expect(Object.keys(response).sort(), 'the Node path answers the same two keys').toEqual(['rows', 'totalRows']);
+    expect(response.rows.map(row => row.coreMeasurementID)).toEqual([101]);
+    expect(response.totalRows).toBe(1);
+    expect(response.rows[0]).toMatchObject({ treeTag: 'TREE101', relatedMeasurementIDs: [102], contradictionTypes: ['duplicate_tag_stem'] });
+  });
+
   it('keeps Errors Explorer facets stable for filters and chips', async () => {
     const facets = await buildErrorExplorerFacets(makeFacetsConnection(), makeRequest());
 
@@ -217,5 +301,138 @@ describe('API response shape contracts', () => {
         sameBatchConflict: 0
       }
     });
+  });
+});
+
+describe('Errors Explorer query page window', () => {
+  const LABELS = ERROR_EXPLORER_STATEMENT_LABELS;
+  const windowTail = (params: unknown[]) => params.slice(-PAGE_WINDOW_PARAM_COUNT);
+
+  interface WindowCase {
+    name: string;
+    censusIDs: number[];
+    page: number;
+    pageSize: number;
+    expectedPageWindows: string[][];
+    expectedTotalsStatements: number;
+    expectedTotalRows: number;
+  }
+
+  const SINGLE_CHUNK_TOTAL = ROWS_PER_CHUNK_TOTAL;
+  const TWO_CHUNK_TOTAL = 2 * ROWS_PER_CHUNK_TOTAL;
+  const windowCases: WindowCase[] = [
+    {
+      name: 'single chunk, page 0 of 10',
+      censusIDs: SINGLE_CHUNK_CENSUS_IDS,
+      page: 0,
+      pageSize: 10,
+      expectedPageWindows: [['10', '0']],
+      expectedTotalsStatements: 0,
+      expectedTotalRows: SINGLE_CHUNK_TOTAL
+    },
+    {
+      name: 'single chunk, page 3 of 25',
+      censusIDs: SINGLE_CHUNK_CENSUS_IDS,
+      page: 3,
+      pageSize: 25,
+      expectedPageWindows: [['25', '75']],
+      expectedTotalsStatements: 0,
+      expectedTotalRows: SINGLE_CHUNK_TOTAL
+    },
+    {
+      name: 'single chunk, fractional page 1.5 of 25',
+      censusIDs: SINGLE_CHUNK_CENSUS_IDS,
+      page: 1.5,
+      pageSize: 25,
+      expectedPageWindows: [['25', '37']],
+      expectedTotalsStatements: 0,
+      expectedTotalRows: SINGLE_CHUNK_TOTAL
+    },
+    {
+      name: 'single chunk, NaN page selects nothing',
+      censusIDs: SINGLE_CHUNK_CENSUS_IDS,
+      page: NaN,
+      pageSize: 10,
+      expectedPageWindows: [],
+      expectedTotalsStatements: 1,
+      expectedTotalRows: SINGLE_CHUNK_TOTAL
+    },
+    {
+      name: 'single chunk, Infinity page selects nothing',
+      censusIDs: SINGLE_CHUNK_CENSUS_IDS,
+      page: Infinity,
+      pageSize: 10,
+      expectedPageWindows: [],
+      expectedTotalsStatements: 1,
+      expectedTotalRows: SINGLE_CHUNK_TOTAL
+    },
+    {
+      name: 'two chunks, page 3 of 25 reads the first 100 rows of each chunk',
+      censusIDs: TWO_CHUNK_CENSUS_IDS,
+      page: 3,
+      pageSize: 25,
+      expectedPageWindows: [
+        ['100', '0'],
+        ['100', '0']
+      ],
+      expectedTotalsStatements: 0,
+      expectedTotalRows: TWO_CHUNK_TOTAL
+    },
+    {
+      name: 'two chunks, fractional page 1.5 of 10 reads the first 25 rows of each chunk',
+      censusIDs: TWO_CHUNK_CENSUS_IDS,
+      page: 1.5,
+      pageSize: 10,
+      expectedPageWindows: [
+        ['25', '0'],
+        ['25', '0']
+      ],
+      expectedTotalsStatements: 0,
+      expectedTotalRows: TWO_CHUNK_TOTAL
+    },
+    {
+      name: 'two chunks, NaN page needs one totals statement per chunk',
+      censusIDs: TWO_CHUNK_CENSUS_IDS,
+      page: NaN,
+      pageSize: 10,
+      expectedPageWindows: [],
+      expectedTotalsStatements: 2,
+      expectedTotalRows: TWO_CHUNK_TOTAL
+    },
+    {
+      name: 'two chunks, Infinity page needs one totals statement per chunk',
+      censusIDs: TWO_CHUNK_CENSUS_IDS,
+      page: Infinity,
+      pageSize: 10,
+      expectedPageWindows: [],
+      expectedTotalsStatements: 2,
+      expectedTotalRows: TWO_CHUNK_TOTAL
+    },
+    {
+      name: 'two chunks, the second finds no rows: it adds nothing and needs no totals statement',
+      censusIDs: SPARSE_CHUNK_CENSUS_IDS,
+      page: 0,
+      pageSize: 10,
+      expectedPageWindows: [
+        ['10', '0'],
+        ['10', '0']
+      ],
+      expectedTotalsStatements: 0,
+      expectedTotalRows: SINGLE_CHUNK_TOTAL
+    }
+  ];
+
+  it.each(windowCases)('$name', async ({ censusIDs, page, pageSize, expectedPageWindows, expectedTotalsStatements, expectedTotalRows }) => {
+    const connection = makeWindowConnection();
+    const response = await queryErrorExplorer(connection, makeRequest({ censusID: censusIDs[0], censusIDs, page, pageSize }));
+
+    const pageWindows = paramsOfStatements(connection, LABELS.page).map(windowTail);
+    const totalsStatements = paramsOfStatements(connection, LABELS.totals);
+    console.log(
+      `[window] censusIDs=${censusIDs.length} page=${page} size=${pageSize} pageWindows=${JSON.stringify(pageWindows)} totals=${totalsStatements.length} totalRows=${response.totalRows}`
+    );
+    expect(pageWindows, 'LIMIT and OFFSET bound by each page statement').toEqual(expectedPageWindows);
+    expect(totalsStatements, 'totals statements').toHaveLength(expectedTotalsStatements);
+    expect(response.totalRows, 'totalRows is the sum of the chunks').toBe(expectedTotalRows);
   });
 });

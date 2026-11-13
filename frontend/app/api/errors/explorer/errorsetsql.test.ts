@@ -57,7 +57,6 @@ const PLACEHOLDER = /\?/g;
 const THREE_CENSUS_IDS = [11, 12, 13];
 const OVERSIZED_ID_LIST_LENGTH = ID_LIST_SIZE + 1;
 const OVERSIZED_CENSUS_LIST_LENGTH = CENSUS_LIST_SIZE + 1;
-const KEY_SET_PARAM_COUNT = 3;
 const FLAG_PARAM_COUNT = 5;
 const PAGE_WINDOW_PARAM_COUNT = 2;
 const FLAG_BIT_NONE = 1;
@@ -71,8 +70,6 @@ const PLOT_IDS = [PLOT_ID, SECOND_PLOT_ID];
 const ALL_KEYS_MATCH_VALUES = [true, false];
 const SINGLE_KEY = 7;
 const KEY_SETS: Record<string, readonly number[]> = { empty: [], single: [SINGLE_KEY], many: range(MANY_KEYS_COUNT) };
-const VALIDATION_KEY_PARITY_MODULUS = 2;
-const VALIDATION_KEY_PARITY_REMAINDER = 0;
 const PAGE_WINDOWS: PageWindow[] = [
   { limit: PAGE_SIZE, offset: FIRST_OFFSET },
   { limit: PAGE_SIZE, offset: SECOND_OFFSET },
@@ -103,15 +100,8 @@ function flagCombinationsFromBits(bits: number): FlagCombinations {
   };
 }
 
-const isValidationKey = (key: number) => key % VALIDATION_KEY_PARITY_MODULUS === VALIDATION_KEY_PARITY_REMAINDER;
-
 function keyFilterFor(allKeysMatch: boolean, keys: readonly number[]): ErrorTypeKeyFilter {
-  return {
-    allKeysMatch,
-    matchingKeys: keys,
-    matchingValidationKeys: keys.filter(isValidationKey),
-    matchingIngestionKeys: keys.filter(key => !isValidationKey(key))
-  };
+  return { allKeysMatch, matchingKeys: keys };
 }
 
 function filterWindowPlotVariants(): StatementVariant[] {
@@ -307,12 +297,12 @@ describe('errorsetsql statement builders', () => {
     }
   });
 
-  it('binds key sets as comma-joined digit strings and flags as 1/0 after the match-count params', () => {
+  it('binds the key set as one comma-joined digit string and flags as 1/0 after the match-count param', () => {
     const { params } = buildPageStatement(scopeFor([2]), KEY_FILTER, ALL_FLAGS, WINDOW);
     const keyStart = params.indexOf('1,7');
     console.log(`page params from key sets: ${JSON.stringify(params.slice(keyStart))}`);
     expect(keyStart).toBeGreaterThanOrEqual(0);
-    expect(params.slice(keyStart, keyStart + KEY_SET_PARAM_COUNT)).toEqual(['1,7', '1', '7']);
+    expect(params.slice(keyStart, keyStart + 2), 'the key set is one param: the next one is the plot of the duplicate-group scope').toEqual(['1,7', PLOT_ID]);
     const allowFlagParams = params.slice(-(FLAG_PARAM_COUNT + PAGE_WINDOW_PARAM_COUNT), -PAGE_WINDOW_PARAM_COUNT);
     console.log(`allow flag params: ${JSON.stringify(allowFlagParams)}`);
     expect(allowFlagParams).toEqual([0, 1, 1, 1, 1]);

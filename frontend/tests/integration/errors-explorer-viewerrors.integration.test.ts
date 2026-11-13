@@ -53,6 +53,7 @@ const ACTIVE_COUNT_KIND = 'active-count';
 const UNLABELLED_KIND = 'unlabelled';
 const LARGE_PAGE_SIZE = 100;
 const FIRST_PAGE = 0;
+const PAGE_PAST_THE_END = 5;
 const CENSUS_IDS = [FIRST_CENSUS_ID, SECOND_CENSUS_ID];
 
 const SHARED_MESSAGE = 'Shared message';
@@ -199,17 +200,23 @@ const GROWTH_VALIDATION_ID = 1;
 const SAME_BATCH_21_VALIDATION_ID = 21;
 const GROWTH_MESSAGE = 'DBH growth exceeds maximum rate of 65 mm';
 const SAME_BATCH_21_MESSAGE = 'Same-batch species conflict';
+const SHRINK_ERROR_ID = 7;
+const SHRINK_VALIDATION_ID = 2;
+const SHRINK_MESSAGE = 'DBH shrinks by more than allowed';
 const GROWTH: ErrorTypeIdentity = { source: 'validation', code: String(GROWTH_VALIDATION_ID), message: GROWTH_MESSAGE };
+const SHRINK: ErrorTypeIdentity = { source: 'validation', code: String(SHRINK_VALIDATION_ID), message: SHRINK_MESSAGE };
 const SAME_BATCH_21: ErrorTypeIdentity = { source: 'validation', code: String(SAME_BATCH_21_VALIDATION_ID), message: SAME_BATCH_21_MESSAGE };
 const QUERY_ERROR_TYPES: FixtureErrorType[] = [
   ...ERROR_TYPES,
   { errorID: GROWTH_ERROR_ID, source: GROWTH.source, code: GROWTH.code, message: 'Catalog text that the validation description replaces' },
-  { errorID: SAME_BATCH_21_ERROR_ID, source: SAME_BATCH_21.source, code: SAME_BATCH_21.code, message: 'Catalog text that the validation description replaces' }
+  { errorID: SAME_BATCH_21_ERROR_ID, source: SAME_BATCH_21.source, code: SAME_BATCH_21.code, message: 'Catalog text that the validation description replaces' },
+  { errorID: SHRINK_ERROR_ID, source: SHRINK.source, code: SHRINK.code, message: 'Catalog text that the validation description replaces' }
 ];
 const QUERY_VALIDATIONS: FixtureValidation[] = [
   ...VALIDATIONS,
   { validationID: GROWTH_VALIDATION_ID, procedureName: 'ValidateDBHGrowth', description: GROWTH_MESSAGE, criteria: 'measuredDBH' },
-  { validationID: SAME_BATCH_21_VALIDATION_ID, procedureName: 'ValidateSameBatch', description: SAME_BATCH_21_MESSAGE, criteria: '' }
+  { validationID: SAME_BATCH_21_VALIDATION_ID, procedureName: 'ValidateSameBatch', description: SAME_BATCH_21_MESSAGE, criteria: '' },
+  { validationID: SHRINK_VALIDATION_ID, procedureName: 'ValidateDBHShrinkage', description: SHRINK_MESSAGE, criteria: 'measuredDBH' }
 ];
 
 function explorerFixture(measurements: FixtureMeasurement[], logs: FixtureLog[]): ExplorerFixture {
@@ -236,6 +243,11 @@ const SORT_TIED_LARGEST_DBH = 25;
 const SORT_BLANK_ROW_ID = 400;
 const SORT_TIE_ROW_ID = 401;
 const SORT_LARGEST_GROUP_ROW_ID = SORT_FIRST_ID + SORT_GROUP_SIZE - 1;
+const SORT_OTHER_IDENTITY_ROW_ID = 410;
+const SORT_TWO_IDENTITY_ROW_ID = 411;
+const SORT_OTHER_IDENTITY_DBH = 99;
+const SORT_SMALLEST_DBH = 0.5;
+const SORT_ROWS_IN_IDENTITY = SORT_GROUP_SIZE + 3;
 
 function sortFixture(): ExplorerFixture {
   const groupRows = Array.from({ length: SORT_GROUP_SIZE }, (_, index) => measurement(SORT_FIRST_ID + index, { measuredDBH: index + 1 }));
@@ -244,9 +256,16 @@ function sortFixture(): ExplorerFixture {
     measurement(SORT_BLANK_ROW_ID, { measuredDBH: null }),
     measurement(SORT_TIE_ROW_ID, { measuredDBH: SORT_TIED_LARGEST_DBH })
   ];
+  const otherIdentityRow = measurement(SORT_OTHER_IDENTITY_ROW_ID, { measuredDBH: SORT_OTHER_IDENTITY_DBH });
+  const twoIdentityRow = measurement(SORT_TWO_IDENTITY_ROW_ID, { measuredDBH: SORT_SMALLEST_DBH });
   return explorerFixture(
-    measurements,
-    measurements.map(row => unresolvedLog(row.coreMeasurementID, VALIDATION_14_ERROR_ID))
+    [...measurements, otherIdentityRow, twoIdentityRow],
+    [
+      ...measurements.map(row => unresolvedLog(row.coreMeasurementID, VALIDATION_14_ERROR_ID)),
+      unresolvedLog(SORT_OTHER_IDENTITY_ROW_ID, CODE_A_ERROR_ID),
+      unresolvedLog(SORT_TWO_IDENTITY_ROW_ID, VALIDATION_14_ERROR_ID),
+      unresolvedLog(SORT_TWO_IDENTITY_ROW_ID, CODE_A_ERROR_ID)
+    ]
   );
 }
 
@@ -298,6 +317,26 @@ function growthFixture(): ExplorerFixture {
   );
 }
 
+const TWO_PRIORS_ROW_ID = 721;
+const TWO_PRIORS_GROWTH_PRIOR_DBH = 100;
+const TWO_PRIORS_SHRINK_PRIOR_DBH = 40;
+const TWO_PRIORS_MEASURED_DBH = 50;
+
+/** One row carries both DBH-change errors, each with its own prior DBH: the Prior DBH column shows the prior of the error type being viewed. */
+function twoPriorsFixture(): ExplorerFixture {
+  const priorLog = (errorID: number, priorDBH: number): FixtureLog => ({
+    measurementID: TWO_PRIORS_ROW_ID,
+    errorID,
+    isResolved: false,
+    priorCensusID: FIRST_CENSUS_ID,
+    priorDBH
+  });
+  return explorerFixture(
+    [measurement(TWO_PRIORS_ROW_ID, { censusID: SECOND_CENSUS_ID, measuredDBH: TWO_PRIORS_MEASURED_DBH })],
+    [priorLog(GROWTH_ERROR_ID, TWO_PRIORS_GROWTH_PRIOR_DBH), priorLog(SHRINK_ERROR_ID, TWO_PRIORS_SHRINK_PRIOR_DBH)]
+  );
+}
+
 const CENSUS_TIE_ROWS = { firstCensus: 811, secondCensus: 812 } as const;
 const CENSUS_TIE_NFC_ERROR_ID = 1;
 const CENSUS_TIE_NFD_ERROR_ID = 2;
@@ -328,6 +367,39 @@ function censusTieFixture(): ExplorerFixture {
 
 const DUPLICATE_FIELDS_ROW_ID = 801;
 const EXPORT_ROWS = { codeA: 101, codeB: 102, both: 103 } as const;
+
+/** Two ingestion codes share one message: 101 carries CODE_A, 102 carries CODE_B, 103 carries both. */
+function sharedMessageCodesFixture(): ExplorerFixture {
+  return explorerFixture(
+    [measurement(EXPORT_ROWS.codeA), measurement(EXPORT_ROWS.codeB), measurement(EXPORT_ROWS.both)],
+    [
+      unresolvedLog(EXPORT_ROWS.codeA, CODE_A_ERROR_ID),
+      unresolvedLog(EXPORT_ROWS.codeB, CODE_B_ERROR_ID),
+      unresolvedLog(EXPORT_ROWS.both, CODE_A_ERROR_ID),
+      unresolvedLog(EXPORT_ROWS.both, CODE_B_ERROR_ID)
+    ]
+  );
+}
+
+const MIXED_SOURCE_ROW_ID = 201;
+const ORDER_ROWS = { oneOccurrence: 501, threeOccurrences: 502 } as const;
+const ORDER_EARLIER_DATE = '2024-01-01';
+const ORDER_LATER_DATE = '2024-02-01';
+
+function orderFixture(): ExplorerFixture {
+  return explorerFixture(
+    [
+      measurement(ORDER_ROWS.oneOccurrence, { measurementDate: ORDER_EARLIER_DATE }),
+      measurement(ORDER_ROWS.threeOccurrences, { measurementDate: ORDER_LATER_DATE })
+    ],
+    [
+      unresolvedLog(ORDER_ROWS.oneOccurrence, VALIDATION_14_ERROR_ID),
+      unresolvedLog(ORDER_ROWS.threeOccurrences, VALIDATION_14_ERROR_ID),
+      unresolvedLog(ORDER_ROWS.threeOccurrences, CODE_A_ERROR_ID),
+      unresolvedLog(ORDER_ROWS.threeOccurrences, CODE_B_ERROR_ID)
+    ]
+  );
+}
 
 const OUTSIDE_PARTNER_ROWS = { clean: 301, flagged: 302 } as const;
 const OUTSIDE_PARTNER_TREE_TAG = 'SB-1';
@@ -399,6 +471,24 @@ const SQL_FACET_KINDS = [ERROR_EXPLORER_STATEMENT_LABELS.catalog, ERROR_EXPLORER
 const TIE_FALLBACK_FACET_KINDS = [...SQL_FACET_KINDS, ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows].sort();
 const TIE_FALLBACK_MESSAGE_COUNT_KINDS = [...SQL_MESSAGE_COUNT_KINDS, ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows].sort();
 const NODE_FACET_KINDS = [ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows, ACTIVE_COUNT_KIND].sort();
+const SQL_QUERY_KINDS = [
+  ERROR_EXPLORER_STATEMENT_LABELS.catalog,
+  ERROR_EXPLORER_STATEMENT_LABELS.page,
+  ERROR_EXPLORER_STATEMENT_LABELS.idRawRows,
+  ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups,
+  ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups
+].sort();
+const SQL_QUERY_WITHOUT_ROWS_KINDS = [
+  ERROR_EXPLORER_STATEMENT_LABELS.catalog,
+  ERROR_EXPLORER_STATEMENT_LABELS.page,
+  ERROR_EXPLORER_STATEMENT_LABELS.totals
+].sort();
+const IMPOSSIBLE_IDENTITY_QUERY_KINDS = [ERROR_EXPLORER_STATEMENT_LABELS.catalog];
+const NODE_QUERY_KINDS = [
+  ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows,
+  ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups,
+  ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups
+].sort();
 
 const identityOf = ({ source, code, message }: ErrorTypeIdentity): ErrorTypeIdentity => ({ source, code, message });
 
@@ -445,16 +535,18 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
     beforeAll(async () => replaceFixture((fixtureDatabase as FixtureDatabase).setupConnection, fixture), FIXTURE_HOOK_TIMEOUT_MS);
   }
 
-  async function queryFor(
-    overrides: {
-      page?: number;
-      pageSize?: number;
-      errorType?: ErrorTypeIdentity;
-      sortModel?: ErrorExplorerSortItem[];
-      columnFilters?: ErrorExplorerColumnFilter[];
-    },
+  interface QueryOverrides {
+    page?: number;
+    pageSize?: number;
+    errorType?: ErrorTypeIdentity;
+    sortModel?: ErrorExplorerSortItem[];
+    columnFilters?: ErrorExplorerColumnFilter[];
+  }
+
+  async function queryWithKinds(
+    overrides: QueryOverrides,
     filters: Partial<ErrorExplorerFilters> = {}
-  ): Promise<ErrorExplorerQueryResponse> {
+  ): Promise<{ response: ErrorExplorerQueryResponse; kinds: string[] }> {
     const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });
     const response = await production.queryErrorExplorer(recorder as unknown as ProductionExecutor, {
       ...scope(),
@@ -463,17 +555,16 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
       filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, ...filters },
       ...overrides
     });
+    const kinds = sortedKindsOf(recorder.statements);
     console.log(
       '[view-errors query]',
-      JSON.stringify({
-        overrides,
-        filters,
-        totalRows: response.totalRows,
-        ids: response.rows.map(row => row.coreMeasurementID),
-        kinds: sortedKindsOf(recorder.statements)
-      })
+      JSON.stringify({ overrides, filters, totalRows: response.totalRows, ids: response.rows.map(row => row.coreMeasurementID), kinds })
     );
-    return response;
+    return { response, kinds };
+  }
+
+  async function queryFor(overrides: QueryOverrides, filters: Partial<ErrorExplorerFilters> = {}): Promise<ErrorExplorerQueryResponse> {
+    return (await queryWithKinds(overrides, filters)).response;
   }
 
   beforeAll(async () => {
@@ -692,19 +783,140 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
     });
   });
 
+  describe('queries on the SQL path: one error type', () => {
+    describe('two codes that share a message', () => {
+      useFixture(sharedMessageCodesFixture());
+
+      it('returns only the rows of the requested code when two codes share a message', async () => {
+        const codeA = await queryWithKinds({ errorType: CODE_A });
+        const codeB = await queryWithKinds({ errorType: CODE_B });
+
+        expect(
+          codeA.response.rows.map(row => row.coreMeasurementID),
+          'rows carrying CODE_A, the two-error row first'
+        ).toEqual([EXPORT_ROWS.both, EXPORT_ROWS.codeA]);
+        expect(
+          codeB.response.rows.map(row => row.coreMeasurementID),
+          'rows carrying CODE_B, the two-error row first'
+        ).toEqual([EXPORT_ROWS.both, EXPORT_ROWS.codeB]);
+        expect(codeA.response.totalRows).toBe(2);
+        expect(codeB.response.totalRows).toBe(2);
+        expect(codeA.kinds, 'an identity alone is answered by the page statement').toEqual(SQL_QUERY_KINDS);
+        expect(codeB.kinds).toEqual(SQL_QUERY_KINDS);
+      });
+
+      it('counts every occurrence in totalErrorCount and only the identity in errorCount', async () => {
+        const { response } = await queryWithKinds({ errorType: CODE_A });
+
+        const sharedRow = response.rows.find(row => row.coreMeasurementID === EXPORT_ROWS.both);
+        console.log('[view-errors identity counts]', JSON.stringify({ sharedRow }));
+        expect(sharedRow?.totalErrorCount, 'two codes sharing a message are two errors').toBe(2);
+        expect(sharedRow?.errorCount).toBe(1);
+        expect(sharedRow?.errorCodes).toEqual([CODE_A.code]);
+      });
+
+      it('matches the unrestricted oracle for the identity: the same rows in the same order with the same counts', async () => {
+        const { response } = await queryWithKinds({ errorType: CODE_A });
+
+        const expected = await oracle.queryErrorExplorer(createRecordingExecutor(explorerConnection(), { measureJsonBytes: false }) as never, {
+          ...scope(),
+          page: FIRST_PAGE,
+          pageSize: LARGE_PAGE_SIZE,
+          filters: DEFAULT_ERROR_EXPLORER_FILTERS,
+          errorType: CODE_A
+        });
+
+        const summarize = (rows: ErrorExplorerQueryResponse['rows']) =>
+          rows.map(row => [row.coreMeasurementID, row.errorCount, row.totalErrorCount, row.errorCodes]);
+        console.log('[view-errors identity oracle]', JSON.stringify({ production: summarize(response.rows), oracle: summarize(expected.rows) }));
+        expect(summarize(response.rows)).toEqual(summarize(expected.rows));
+        expect(response.totalRows).toBe(expected.totalRows);
+      });
+    });
+
+    describe('mixed sources under Show → Validation', () => {
+      useFixture(
+        explorerFixture(
+          [measurement(MIXED_SOURCE_ROW_ID)],
+          [unresolvedLog(MIXED_SOURCE_ROW_ID, VALIDATION_14_ERROR_ID), unresolvedLog(MIXED_SOURCE_ROW_ID, CODE_A_ERROR_ID)]
+        )
+      );
+
+      it('lists the row in its validation identity and not in its ingestion identity', async () => {
+        const validationIdentity = await queryWithKinds({ errorType: VALIDATION_14 }, { source: 'validation' });
+        const ingestionIdentity = await queryWithKinds({ errorType: CODE_A }, { source: 'validation' });
+
+        expect(validationIdentity.response.totalRows).toBe(1);
+        expect(
+          validationIdentity.response.rows.map(row => row.errorSources),
+          'the row shows only the validation error'
+        ).toEqual([['validation']]);
+        expect(ingestionIdentity.response.totalRows, 'Show → Validation filters the ingestion identity out').toBe(0);
+        expect(ingestionIdentity.response.rows).toEqual([]);
+        expect(ingestionIdentity.kinds, 'an identity the filters exclude needs only the catalog').toEqual(IMPOSSIBLE_IDENTITY_QUERY_KINDS);
+      });
+    });
+
+    describe('the default order is by the occurrences of the whole group', () => {
+      useFixture(orderFixture());
+
+      it('orders a three-occurrence row before a one-occurrence row although both show errorCount 1 in the group', async () => {
+        const { response, kinds } = await queryWithKinds({ errorType: VALIDATION_14 });
+
+        console.log('[view-errors identity order]', JSON.stringify(response.rows.map(row => [row.coreMeasurementID, row.errorCount, row.totalErrorCount])));
+        expect(response.rows.map(row => [row.coreMeasurementID, row.errorCount, row.totalErrorCount])).toEqual([
+          [ORDER_ROWS.threeOccurrences, 1, 3],
+          [ORDER_ROWS.oneOccurrence, 1, 1]
+        ]);
+        expect(kinds).toEqual(SQL_QUERY_KINDS);
+      });
+    });
+
+    describe('an identity that no error carries', () => {
+      useFixture();
+
+      it('answers an empty page from the catalog and the page statement, and counts nothing', async () => {
+        const absent: ErrorTypeIdentity = { source: 'ingestion', code: CODE_A.code, message: `${SHARED_MESSAGE} with a different text` };
+
+        const { response, kinds } = await queryWithKinds({ errorType: absent });
+
+        expect(response).toEqual({ rows: [], totalRows: 0 });
+        expect(kinds, 'no catalog entry carries the identity').toEqual(IMPOSSIBLE_IDENTITY_QUERY_KINDS);
+      });
+
+      it('answers a page past the end with the total and no rows', async () => {
+        const { response, kinds } = await queryWithKinds({ errorType: VALIDATION_14, page: 1, pageSize: 1 });
+
+        expect(
+          response.rows.map(row => row.coreMeasurementID),
+          'validation 14 is on rows 103 and 201; page 1 of size 1 is the second'
+        ).toEqual([ROW.secondCensusZeta]);
+        const pastTheEnd = await queryWithKinds({ errorType: VALIDATION_14, page: PAGE_PAST_THE_END, pageSize: 1 });
+        expect(pastTheEnd.response.rows).toEqual([]);
+        expect(pastTheEnd.response.totalRows, 'a page past the end still reports the total').toBe(2);
+        expect(pastTheEnd.kinds, 'a page with no rows carries no total, so the totals statement answers it').toEqual(SQL_QUERY_WITHOUT_ROWS_KINDS);
+        expect(kinds).toEqual(SQL_QUERY_KINDS);
+      });
+    });
+  });
+
   describe('queries on the Node path: sort, column filter and display values', () => {
     describe('sort across the whole error-type group', () => {
       useFixture(sortFixture());
 
       it('starts page 1 of a DBH-descending sort with the 11th largest DBH overall', async () => {
-        const response = await queryFor({
+        const { response, kinds } = await queryWithKinds({
           errorType: VALIDATION_14,
           page: SORT_SECOND_PAGE,
           pageSize: SORT_PAGE_SIZE,
           sortModel: [{ field: 'measuredDBH', sort: 'desc' }]
         });
 
-        expect(response.totalRows).toBe(SORT_GROUP_SIZE + 2);
+        expect(kinds, 'a sort is answered from the scope raw rows, never the page statement').toEqual(NODE_QUERY_KINDS);
+
+        expect(response.totalRows, 'the 25 group rows, the blank, the tie and the row that also carries CODE_A; not the CODE_A-only row').toBe(
+          SORT_ROWS_IN_IDENTITY
+        );
         expect(Number(response.rows[0].measuredDBH), 'the first row of page 1 is the 11th largest, not the 1st of the page-0 slice').toBe(
           SORT_ELEVENTH_LARGEST_DBH
         );
@@ -721,6 +933,23 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
         expect(descending.rows.at(-1)?.coreMeasurementID).toBe(SORT_BLANK_ROW_ID);
         expect(ascending.rows.at(-1)?.coreMeasurementID).toBe(SORT_BLANK_ROW_ID);
       });
+
+      it('leaves out a row of another error type and shows only the identity on a row that carries two', async () => {
+        const { response, kinds } = await queryWithKinds({ errorType: VALIDATION_14, sortModel: [{ field: 'measuredDBH', sort: 'desc' }] });
+
+        const ids = response.rows.map(row => row.coreMeasurementID);
+        const twoIdentityRow = response.rows.find(row => row.coreMeasurementID === SORT_TWO_IDENTITY_ROW_ID);
+        console.log('[view-errors sort identity]', JSON.stringify({ ids, twoIdentityRow, kinds }));
+        expect(kinds, 'a sort is answered from the scope raw rows').toEqual(NODE_QUERY_KINDS);
+        expect(
+          ids,
+          `the CODE_A-only row ${SORT_OTHER_IDENTITY_ROW_ID} has the largest DBH, so a sort that ignored the identity would list it first`
+        ).not.toContain(SORT_OTHER_IDENTITY_ROW_ID);
+        expect(response.totalRows).toBe(SORT_ROWS_IN_IDENTITY);
+        expect(twoIdentityRow?.errorCodes, 'the row carries CODE_A too, which the identity hides').toEqual([VALIDATION_14.code]);
+        expect(twoIdentityRow?.errorCount).toBe(1);
+        expect(twoIdentityRow?.totalErrorCount).toBe(2);
+      });
     });
 
     describe('column filter before pagination', () => {
@@ -729,7 +958,8 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
       it('reflects the filter in totalRows and ANDs it with Search', async () => {
         const startsWithAlpha: ErrorExplorerColumnFilter = { field: 'treeTag', operator: 'startsWith', value: 'alpha' };
 
-        const filtered = await queryFor({ errorType: VALIDATION_14, columnFilters: [startsWithAlpha] });
+        const { response: filtered, kinds } = await queryWithKinds({ errorType: VALIDATION_14, columnFilters: [startsWithAlpha] });
+        expect(kinds, 'a column filter is answered from the scope raw rows, never the page statement').toEqual(NODE_QUERY_KINDS);
         const searched = await queryFor({ errorType: VALIDATION_14, columnFilters: [startsWithAlpha] }, { quickSearch: FILTER_SPECIES_MATCHING_SEARCH });
 
         expect(filtered.totalRows, 'ALPHA-1 and alpha-2 start with alpha').toBe(2);
@@ -770,6 +1000,27 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
       });
     });
 
+    describe('a row with two DBH-change errors', () => {
+      useFixture(twoPriorsFixture());
+
+      it.each<[string, ErrorTypeIdentity, number]>([
+        ['growth', GROWTH, TWO_PRIORS_GROWTH_PRIOR_DBH],
+        ['shrinkage', SHRINK, TWO_PRIORS_SHRINK_PRIOR_DBH]
+      ])('filters the %s identity on the prior DBH of that error', async (_label, identity, priorDBH) => {
+        const otherPriorDBH = priorDBH === TWO_PRIORS_GROWTH_PRIOR_DBH ? TWO_PRIORS_SHRINK_PRIOR_DBH : TWO_PRIORS_GROWTH_PRIOR_DBH;
+
+        const matching = await queryFor({ errorType: identity, columnFilters: [{ field: 'priorDBH', operator: '=', value: priorDBH }] });
+        const otherError = await queryFor({ errorType: identity, columnFilters: [{ field: 'priorDBH', operator: '=', value: otherPriorDBH }] });
+
+        console.log(
+          '[view-errors two priors]',
+          JSON.stringify({ identity: identity.code, matching: matching.rows.map(row => row.priorDBH), other: otherError.rows })
+        );
+        expect(matching.rows.map(row => [row.coreMeasurementID, Number(row.priorDBH)])).toEqual([[TWO_PRIORS_ROW_ID, priorDBH]]);
+        expect(otherError.totalRows, `the ${otherPriorDBH} prior belongs to the other error, which this identity hides`).toBe(0);
+      });
+    });
+
     describe('DUPLICATE_TAG_STEMTAG fields', () => {
       useFixture(explorerFixture([measurement(DUPLICATE_FIELDS_ROW_ID)], [unresolvedLog(DUPLICATE_FIELDS_ROW_ID, DUPLICATE_ERROR_ID)]));
 
@@ -782,17 +1033,7 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
   });
 
   describe('export of one error type', () => {
-    useFixture(
-      explorerFixture(
-        [measurement(EXPORT_ROWS.codeA), measurement(EXPORT_ROWS.codeB), measurement(EXPORT_ROWS.both)],
-        [
-          unresolvedLog(EXPORT_ROWS.codeA, CODE_A_ERROR_ID),
-          unresolvedLog(EXPORT_ROWS.codeB, CODE_B_ERROR_ID),
-          unresolvedLog(EXPORT_ROWS.both, CODE_A_ERROR_ID),
-          unresolvedLog(EXPORT_ROWS.both, CODE_B_ERROR_ID)
-        ]
-      )
-    );
+    useFixture(sharedMessageCodesFixture());
 
     it('exports only the occurrences of the requested identity', async () => {
       const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });

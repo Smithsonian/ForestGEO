@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { Connection } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
-import type { ContradictionType, ErrorExplorerFilters, ErrorExplorerRow } from '@/config/errorsexplorer';
+import type { ContradictionType, ErrorExplorerFilters, ErrorExplorerQueryRequest, ErrorExplorerRow, ErrorTypeIdentity } from '@/config/errorsexplorer';
 import { ERROR_EXPLORER_STATEMENT_LABELS, readStatementLabel } from '@/app/api/errors/explorer/errorsetsql';
 import { DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import {
@@ -38,7 +38,7 @@ const UPLOAD_BATCH_ID_OF_DUPLICATE_ONLY_ROW = 'batch-2';
 const FIRST_MEASUREMENT_ID = 101;
 const SECOND_MEASUREMENT_ID = 102;
 const DUPLICATE_ONLY_MEASUREMENT_ID = 103;
-const CLEAN_PARTNER_MEASUREMENT_ID = 104;
+const CLEAN_PARTNER_MEASUREMENT_ID = 100;
 const UPLOAD_BATCH_ID_OF_CLEAN_PARTNER = 'batch-3';
 const DECOY_MEASUREMENT_ID = 301;
 const FAILED_MEASUREMENT_ID = 201;
@@ -55,11 +55,12 @@ const FIRST_DESCRIPTION = 'row 101';
 const SECOND_DESCRIPTION = 'row 102';
 const DUPLICATE_ONLY_DESCRIPTION = 'row 103';
 const RESOLVED_DESCRIPTION = 'row 202';
-const CLEAN_PARTNER_DESCRIPTION = 'row 104';
+const CLEAN_PARTNER_DESCRIPTION = 'row 100';
 const SECOND_SPECIES_CODE = 'SP2';
 const DUPLICATE_TAG_STEM: ContradictionType = 'duplicate_tag_stem';
 const SAME_BATCH_CONFLICT: ContradictionType = 'same_batch_conflict';
 
+const DUPLICATE_TAG_INGESTION_CODE = 'DUPLICATE_TAG_CONFLICT';
 const DUPLICATE_TAG_MESSAGE = 'Duplicate tree/stem tag';
 const SAME_BATCH_MESSAGE = 'Same-batch species conflict';
 const DUPLICATE_TAG_INGESTION_MESSAGE = 'Conflicting duplicate TreeTag/StemTag rows detected in upload batch';
@@ -109,6 +110,19 @@ function executedKinds(): string[] {
 }
 
 const UNSEARCHED_FACET_KINDS = [ERROR_EXPLORER_STATEMENT_LABELS.catalog, ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags, ACTIVE_COUNT_KIND].sort();
+
+const DEFAULT_QUERY_KINDS = [
+  ERROR_EXPLORER_STATEMENT_LABELS.catalog,
+  ERROR_EXPLORER_STATEMENT_LABELS.page,
+  ERROR_EXPLORER_STATEMENT_LABELS.idRawRows,
+  ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups,
+  ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups
+].sort();
+const NODE_QUERY_KINDS = [
+  ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows,
+  ERROR_EXPLORER_STATEMENT_LABELS.duplicateMemberGroups,
+  ERROR_EXPLORER_STATEMENT_LABELS.sameBatchMemberGroups
+].sort();
 
 const NO_FILTERS: ErrorExplorerFilters = {
   source: 'all',
@@ -275,7 +289,7 @@ const SAME_BATCH_VALIDATION_ERROR: FixtureErrorType = {
 const DUPLICATE_TAG_INGESTION_ERROR: FixtureErrorType = {
   errorID: 3,
   source: 'ingestion',
-  code: 'DUPLICATE_TAG_CONFLICT',
+  code: DUPLICATE_TAG_INGESTION_CODE,
   message: DUPLICATE_TAG_INGESTION_MESSAGE
 };
 
@@ -305,11 +319,13 @@ function contradictingPairFixture(options: {
   });
 }
 
-function queryRequest(schema: string, filters: ErrorExplorerFilters): NextRequest {
+type QueryRequestExtras = Partial<Pick<ErrorExplorerQueryRequest, 'errorType' | 'sortModel' | 'columnFilters'>>;
+
+function queryRequest(schema: string, filters: ErrorExplorerFilters, extras: QueryRequestExtras = {}): NextRequest {
   return new NextRequest(QUERY_ROUTE_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ schema, plotID: PLOT_ID, censusID: CENSUS_ID, page: QUERY_PAGE, pageSize: QUERY_PAGE_SIZE, filters })
+    body: JSON.stringify({ schema, plotID: PLOT_ID, censusID: CENSUS_ID, page: QUERY_PAGE, pageSize: QUERY_PAGE_SIZE, filters, ...extras })
   });
 }
 
@@ -355,10 +371,18 @@ describe('errors explorer route behaviour on real MySQL', () => {
       );
       const { POST } = await import('@/app/api/errors/explorer/query/route');
 
+      sharedState.executedSql = [];
+
       const response = await POST(queryRequest(schema(), NO_FILTERS), ROUTE_CONTEXT);
 
       const body = await readSuccessfulBody(response);
-      console.log('[query contradiction links]', JSON.stringify({ totalRows: body.totalRows, summary: body.summary, firstRow: body.rows[0] }));
+      const rowsWithType = (type: ContradictionType) => body.rows.filter((row: ErrorExplorerRow) => row.contradictionTypes.includes(type)).length;
+      const rowFlagCounts = {
+        withContradiction: body.rows.filter((row: ErrorExplorerRow) => row.hasContradiction).length,
+        duplicateTagStem: rowsWithType(DUPLICATE_TAG_STEM),
+        sameBatchConflict: rowsWithType(SAME_BATCH_CONFLICT)
+      };
+      console.log('[query contradiction links]', JSON.stringify({ totalRows: body.totalRows, rowFlagCounts, firstRow: body.rows[0], kinds: executedKinds() }));
 
       expect(body.totalRows).toBe(2);
       expect(body.rows[0]).toMatchObject({
@@ -371,9 +395,12 @@ describe('errors explorer route behaviour on real MySQL', () => {
       expect(body.rows[0].errorMessages).toContain(DUPLICATE_TAG_MESSAGE);
       expect(body.rows[0].errorSources).toEqual(expect.arrayContaining(['validation', 'ingestion']));
       expect(body.rows[0].relatedMeasurementIDs).toEqual([SECOND_MEASUREMENT_ID]);
-      expect(body.summary.contradictions).toBe(2);
-      expect(body.summary.duplicateTagStem).toBe(2);
-      expect(body.summary.sameBatchConflict).toBe(2);
+      expect(rowFlagCounts.withContradiction).toBe(2);
+      expect(rowFlagCounts.duplicateTagStem).toBe(2);
+      expect(rowFlagCounts.sameBatchConflict).toBe(2);
+      expect(body, 'the query response is rows and totalRows only').not.toHaveProperty('summary');
+      expect(Object.keys(body).sort()).toEqual(['rows', 'totalRows']);
+      expect(executedKinds(), 'an unrestricted query is answered by the page statement').toEqual(DEFAULT_QUERY_KINDS);
     });
 
     it('surfaces overlapping contradiction rows in same-batch filters', async () => {
@@ -395,6 +422,76 @@ describe('errors explorer route behaviour on real MySQL', () => {
         contradictionType: SAME_BATCH_CONFLICT,
         relatedMeasurementIDs: [SECOND_MEASUREMENT_ID]
       });
+    });
+
+    it('forwards errorType to the query: only that identity is listed, counted and shown, from the page statement', async () => {
+      await replaceFixture(
+        connection(),
+        contradictingPairFixture({ userDefinedFields: { treestemstate: 'old tree' }, firstRowIngestionError: true, withDuplicateOnlyRow: false })
+      );
+      const { POST } = await import('@/app/api/errors/explorer/query/route');
+      const ingestionIdentity: ErrorTypeIdentity = {
+        source: 'ingestion',
+        code: DUPLICATE_TAG_INGESTION_CODE,
+        message: DUPLICATE_TAG_INGESTION_MESSAGE
+      };
+      sharedState.executedSql = [];
+
+      const response = await POST(queryRequest(schema(), NO_FILTERS, { errorType: ingestionIdentity }), ROUTE_CONTEXT);
+
+      const body = await readSuccessfulBody(response);
+      console.log('[query error type]', JSON.stringify({ totalRows: body.totalRows, rows: body.rows, kinds: executedKinds() }));
+      expect(body.totalRows, 'only row 101 carries the ingestion identity').toBe(1);
+      expect(body.rows.map((row: ErrorExplorerRow) => row.coreMeasurementID)).toEqual([FIRST_MEASUREMENT_ID]);
+      expect(body.rows[0].errorMessages, 'the row shows only the identity').toEqual([DUPLICATE_TAG_INGESTION_MESSAGE]);
+      expect(body.rows[0].errorCount).toBe(1);
+      expect(body.rows[0].totalErrorCount, 'the row still has its validation error').toBe(2);
+      expect(executedKinds()).toEqual(DEFAULT_QUERY_KINDS);
+    });
+
+    it('forwards a sort to the query and answers it from the scope raw rows', async () => {
+      await replaceFixture(
+        connection(),
+        contradictingPairFixture({ userDefinedFields: { treestemstate: 'old tree' }, firstRowIngestionError: false, withDuplicateOnlyRow: false })
+      );
+      const { POST } = await import('@/app/api/errors/explorer/query/route');
+      sharedState.executedSql = [];
+
+      const response = await POST(queryRequest(schema(), NO_FILTERS, { sortModel: [{ field: 'measuredDBH', sort: 'desc' }] }), ROUTE_CONTEXT);
+
+      const body = await readSuccessfulBody(response);
+      console.log(
+        '[query sort]',
+        JSON.stringify({ ids: body.rows.map((row: ErrorExplorerRow) => [row.coreMeasurementID, row.measuredDBH]), kinds: executedKinds() })
+      );
+      expect(
+        body.rows.map((row: ErrorExplorerRow) => row.coreMeasurementID),
+        'the default order is 101 then 102; the sort puts the larger DBH 6.2 of row 102 first'
+      ).toEqual([SECOND_MEASUREMENT_ID, FIRST_MEASUREMENT_ID]);
+      expect(executedKinds(), 'a sort never reads the page statement').toEqual(NODE_QUERY_KINDS);
+    });
+
+    it('forwards a column filter to the query: totalRows counts after the filter, from the scope raw rows', async () => {
+      await replaceFixture(
+        connection(),
+        contradictingPairFixture({ userDefinedFields: { treestemstate: 'old tree' }, firstRowIngestionError: false, withDuplicateOnlyRow: false })
+      );
+      const { POST } = await import('@/app/api/errors/explorer/query/route');
+      sharedState.executedSql = [];
+
+      const response = await POST(
+        queryRequest(schema(), NO_FILTERS, { columnFilters: [{ field: 'speciesCode', operator: 'equals', value: SECOND_SPECIES_CODE }] }),
+        ROUTE_CONTEXT
+      );
+
+      const body = await readSuccessfulBody(response);
+      console.log(
+        '[query column filter]',
+        JSON.stringify({ totalRows: body.totalRows, ids: body.rows.map((row: ErrorExplorerRow) => row.coreMeasurementID), kinds: executedKinds() })
+      );
+      expect(body.totalRows, 'only row 102 has species SP2').toBe(1);
+      expect(body.rows.map((row: ErrorExplorerRow) => row.coreMeasurementID)).toEqual([SECOND_MEASUREMENT_ID]);
+      expect(executedKinds(), 'a column filter never reads the page statement').toEqual(NODE_QUERY_KINDS);
     });
 
     // Regression: derive isFailedRow from cm.StemGUID (aliased as CoreStemGUID),
@@ -594,8 +691,8 @@ describe('errors explorer route behaviour on real MySQL', () => {
       );
       expect(
         body.relatedRows.map((related: { coreMeasurementID: number }) => related.coreMeasurementID),
-        'related-ID order is kept'
-      ).toEqual([SECOND_MEASUREMENT_ID, CLEAN_PARTNER_MEASUREMENT_ID]);
+        'related-ID order is kept: the outside partner has the smallest ID, so rows in the error set are not listed first'
+      ).toEqual([CLEAN_PARTNER_MEASUREMENT_ID, SECOND_MEASUREMENT_ID]);
     });
 
     it('uses the requested contradiction type when a row belongs to multiple groups', async () => {
@@ -629,21 +726,21 @@ describe('errors explorer route behaviour on real MySQL', () => {
 
       const duplicateResponse = await GET(detailsRequest(schema(), FIRST_MEASUREMENT_ID, DUPLICATE_TAG_STEM), detailsContext(FIRST_MEASUREMENT_ID));
       const duplicateBody = await readSuccessfulBody(duplicateResponse);
-      const duplicateRelatedIDs = duplicateBody.relatedRows.map((related: { coreMeasurementID: number }) => related.coreMeasurementID).sort();
+      const duplicateRelatedIDs = duplicateBody.relatedRows.map((related: { coreMeasurementID: number }) => related.coreMeasurementID);
       console.log('[details duplicate-type related rows]', JSON.stringify({ sameBatchRelatedIDs, duplicateRelatedIDs }));
       expect(duplicateBody.row.contradictionType).toBe(DUPLICATE_TAG_STEM);
-      expect(duplicateRelatedIDs, 'duplicate related rows include the duplicate-only row and the partner outside the error set').toEqual([
+      expect(duplicateRelatedIDs, 'duplicate related rows include the duplicate-only row and the partner outside the error set, in related-ID order').toEqual([
+        CLEAN_PARTNER_MEASUREMENT_ID,
         SECOND_MEASUREMENT_ID,
-        DUPLICATE_ONLY_MEASUREMENT_ID,
-        CLEAN_PARTNER_MEASUREMENT_ID
+        DUPLICATE_ONLY_MEASUREMENT_ID
       ]);
       expect(
         duplicateBody.relatedRows.map((related: { coreMeasurementID: number; inErrorSet: boolean }) => [related.coreMeasurementID, related.inErrorSet]),
         'rows with an unresolved error are in the set, the validated partner is not'
       ).toEqual([
+        [CLEAN_PARTNER_MEASUREMENT_ID, false],
         [SECOND_MEASUREMENT_ID, true],
-        [DUPLICATE_ONLY_MEASUREMENT_ID, true],
-        [CLEAN_PARTNER_MEASUREMENT_ID, false]
+        [DUPLICATE_ONLY_MEASUREMENT_ID, true]
       ]);
     });
   });

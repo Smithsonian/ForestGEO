@@ -108,9 +108,7 @@ export function computeErrorKeySets(catalog: ErrorTypeCatalog, filters: ErrorExp
   );
   return {
     allKeysMatch: errorType === undefined && !filtersRestrictErrorTypes(filters),
-    matchingKeys: matching.map(([key]) => key),
-    matchingValidationKeys: matching.filter(([, record]) => record.source === 'validation').map(([key]) => key),
-    matchingIngestionKeys: matching.filter(([, record]) => record.source === 'ingestion').map(([key]) => key)
+    matchingKeys: matching.map(([key]) => key)
   };
 }
 

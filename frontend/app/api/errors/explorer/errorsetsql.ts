@@ -46,8 +46,6 @@ export interface ErrorSetScope {
 export interface ErrorTypeKeyFilter {
   readonly allKeysMatch: boolean;
   readonly matchingKeys: readonly number[];
-  readonly matchingValidationKeys: readonly number[];
-  readonly matchingIngestionKeys: readonly number[];
 }
 
 export interface FlagCombinations {
@@ -287,12 +285,10 @@ function matchCountMeasurementCte(keyFilter: ErrorTypeKeyFilter): BuiltStatement
     sql: `error_measurement AS (
   SELECT eo.CoreMeasurementID,
          COUNT(*) AS OccurrenceCount,
-         SUM(FIND_IN_SET(${ERROR_TYPE_KEY}, ?) > 0) AS MatchingCount,
-         SUM(FIND_IN_SET(${ERROR_TYPE_KEY}, ?) > 0) AS MatchingValidationCount,
-         SUM(FIND_IN_SET(${ERROR_TYPE_KEY}, ?) > 0) AS MatchingIngestionCount
+         SUM(FIND_IN_SET(${ERROR_TYPE_KEY}, ?) > 0) AS MatchingCount
     FROM error_occurrence eo
    GROUP BY eo.CoreMeasurementID)`,
-    params: [joinKeys(keyFilter.matchingKeys), joinKeys(keyFilter.matchingValidationKeys), joinKeys(keyFilter.matchingIngestionKeys)]
+    params: [joinKeys(keyFilter.matchingKeys)]
   };
 }
 

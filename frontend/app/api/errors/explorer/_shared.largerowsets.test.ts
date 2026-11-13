@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fetchGroupedErrorRows, queryErrorExplorer, type RawErrorOccurrenceRow } from './_shared';
-import { DEFAULT_ERROR_EXPLORER_FILTERS } from '@/config/errorsexplorer';
+import { applyShowValue, DEFAULT_ERROR_EXPLORER_FILTERS } from '@/config/errorsexplorer';
 import {
   CENSUS_LIST_SIZE,
   ERROR_EXPLORER_STATEMENT_LABELS,
@@ -35,6 +35,7 @@ const SEARCH_HIT_EVERY = 2;
 const DUPLICATE_FLAG_EVERY = 10;
 const SEARCH_PAGE_SIZE = 25;
 const SEARCH_PAGE = 1;
+const QUICK_SEARCH_REQUEST_COUNT = 2;
 
 const VALIDATION_ERROR_ID = 1;
 const INGESTION_ERROR_ID = 2;
@@ -193,31 +194,30 @@ describe('error explorer row sets larger than push() can spread', () => {
       const hitCount = MEASUREMENTS_BEYOND_SPREAD_LIMIT / SEARCH_HIT_EVERY;
       const duplicateHitCount = MEASUREMENTS_BEYOND_SPREAD_LIMIT / DUPLICATE_FLAG_EVERY;
 
-      const response = await queryErrorExplorer(connection, {
-        schema: SCHEMA,
-        plotID: PLOT_ID,
-        censusID: FIRST_CENSUS_ID,
-        page: SEARCH_PAGE,
-        pageSize: SEARCH_PAGE_SIZE,
-        filters: { ...DEFAULT_ERROR_EXPLORER_FILTERS, quickSearch: SEARCH_HIT_SPECIES_CODE.toLowerCase() }
-      });
+      const searchFilters = { ...DEFAULT_ERROR_EXPLORER_FILTERS, quickSearch: SEARCH_HIT_SPECIES_CODE.toLowerCase() };
+      const queryWith = (filters: typeof searchFilters) =>
+        queryErrorExplorer(connection, { schema: SCHEMA, plotID: PLOT_ID, censusID: FIRST_CENSUS_ID, page: SEARCH_PAGE, pageSize: SEARCH_PAGE_SIZE, filters });
+
+      const response = await queryWith(searchFilters);
+      const contradictionsResponse = await queryWith(applyShowValue(searchFilters, 'contradictions'));
 
       const pageIDs = response.rows.map(row => row.coreMeasurementID);
-      console.log(`[large row sets] quick search total ${response.totalRows}; summary ${JSON.stringify(response.summary)}; page IDs ${pageIDs.join(',')}`);
+      console.log(
+        `[large row sets] quick search total ${response.totalRows}; contradictions total ${contradictionsResponse.totalRows}; page IDs ${pageIDs.join(',')}`
+      );
       expect(response.totalRows, 'every even measurement matches').toBe(hitCount);
-      expect(response.summary).toEqual({
-        total: hitCount,
-        validation: hitCount,
-        ingestion: hitCount,
-        contradictions: duplicateHitCount,
-        duplicateTagStem: duplicateHitCount,
-        sameBatchConflict: 0
-      });
+      expect(
+        contradictionsResponse.totalRows,
+        'Show → Contradictions counts the whole set: every tenth measurement carries a duplicate flag, and the flags are read from rows past the spread limit'
+      ).toBe(duplicateHitCount);
       const firstIDOnPage = SEARCH_PAGE * SEARCH_PAGE_SIZE * DUPLICATE_FLAG_EVERY + DUPLICATE_FLAG_EVERY;
       expect(pageIDs, 'contradiction rows sort first, then ascending ID: page 1 is the second 25 multiples of ten').toEqual(
         Array.from({ length: SEARCH_PAGE_SIZE }, (_, index) => firstIDOnPage + index * DUPLICATE_FLAG_EVERY)
       );
-      expect(executedLabels.filter(label => label === ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows)).toHaveLength(1);
+      expect(
+        executedLabels.filter(label => label === ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows),
+        'each of the two requests reads the scope once'
+      ).toHaveLength(QUICK_SEARCH_REQUEST_COUNT);
     });
   });
 

@@ -23,7 +23,7 @@ export const STATEMENT_PLOT_ID = 3;
 const STATEMENT_PAGE_SIZE = 25;
 const STATEMENT_PAGE_OFFSET = 50;
 
-export const KEY_FILTER: ErrorTypeKeyFilter = { allKeysMatch: false, matchingKeys: [1, 7], matchingValidationKeys: [1], matchingIngestionKeys: [7] };
+export const KEY_FILTER: ErrorTypeKeyFilter = { allKeysMatch: false, matchingKeys: [1, 7] };
 export const ALL_FLAGS: FlagCombinations = { none: true, sameBatchOnly: true, duplicateOnly: true, both: true };
 export const WINDOW: PageWindow = { limit: STATEMENT_PAGE_SIZE, offset: STATEMENT_PAGE_OFFSET };
 

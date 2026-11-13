@@ -6,7 +6,8 @@ import {
   type ErrorExplorerFilters,
   type ErrorExplorerQueryRequest,
   type ErrorExplorerQueryResponse,
-  type ErrorExplorerRow
+  type ErrorExplorerRow,
+  type ErrorTypeIdentity
 } from '@/config/errorsexplorer';
 import * as production from '@/app/api/errors/explorer/_shared';
 import { buildRelatedMeasurementIDs, toSliceBounds } from '@/app/api/errors/explorer/errorsetcounts';
@@ -168,7 +169,10 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
       ROW.carriesAOnlyLast
     ];
     const MESSAGE_A_ORDER = [ROW.duplicateErrorMember, ROW.carriesAAndB, ROW.carriesAAndBAfter, ROW.earliestWithA, ROW.carriesAOnly, ROW.carriesAOnlyLast];
-    const interleavingRequest = (filters: ErrorExplorerFilters) => queryRequest([FIRST_CENSUS_ID], filters, FIRST_PAGE, SMALL_PAGE_SIZE);
+    const interleavingRequest = (filters: ErrorExplorerFilters, errorType?: ErrorTypeIdentity): ErrorExplorerQueryRequest => ({
+      ...queryRequest([FIRST_CENSUS_ID], filters, FIRST_PAGE, SMALL_PAGE_SIZE),
+      errorType
+    });
 
     async function updateExactlyOneRow(description: string, sql: string, params: unknown[]): Promise<void> {
       const [result] = await setupConnection().query<ResultSetHeader>(sql, params);
@@ -196,18 +200,18 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
     const deleteSummaryRow = (measurementID: number) => () =>
       updateExactlyOneRow(`delete the summary row of ${measurementID}`, 'DELETE FROM measurementssummary WHERE CoreMeasurementID = ?', [measurementID]);
 
-    async function queryOnFreshFixture(filters: ErrorExplorerFilters) {
+    async function queryOnFreshFixture(filters: ErrorExplorerFilters, errorType?: ErrorTypeIdentity) {
       await loadFixture(interleavingFixture());
       const recorder = createRecordingExecutor(explorerConnection());
-      const response = await production.queryErrorExplorer(recorder as unknown as ProductionExecutor, interleavingRequest(filters));
+      const response = await production.queryErrorExplorer(recorder as unknown as ProductionExecutor, interleavingRequest(filters, errorType));
       return { response, recorder };
     }
 
-    async function queryWithChangeAfter(filters: ErrorExplorerFilters, statementLabel: string, change: () => Promise<void>) {
+    async function queryWithChangeAfter(filters: ErrorExplorerFilters, statementLabel: string, change: () => Promise<void>, errorType?: ErrorTypeIdentity) {
       await loadFixture(interleavingFixture());
       const recorder = createRecordingExecutor(explorerConnection());
       recorder.afterStatementOnce(statementLabel, change);
-      const response = await production.queryErrorExplorer(recorder as unknown as ProductionExecutor, interleavingRequest(filters));
+      const response = await production.queryErrorExplorer(recorder as unknown as ProductionExecutor, interleavingRequest(filters, errorType));
       return { response, recorder };
     }
 
@@ -351,6 +355,36 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
           idsOf(afterwards.rows).indexOf(ROW.earliestWithA),
           'a fresh sort moves the row ahead, so the case does tell the selected order apart'
         ).toBeLessThan(selectedIndex);
+      },
+      FIXTURE_HOOK_TIMEOUT_MS
+    );
+
+    it(
+      "(e) the identity's only matching error is resolved after the page statement: the row is dropped although it keeps another error, and totalRows does not change",
+      async () => {
+        const messageBIdentity: ErrorTypeIdentity = { source: 'ingestion', code: `INTERLEAVE_${ERROR_ID.messageB}`, message: MESSAGE.messageB };
+        const control = await queryOnFreshFixture(DEFAULT_ERROR_EXPLORER_FILTERS, messageBIdentity);
+        console.log(`[interleaving e] control ids=${JSON.stringify(idsOf(control.response.rows))} totalRows=${control.response.totalRows}`);
+        expect(idsOf(control.response.rows), 'control: rows carrying message B, the two-error rows first').toEqual([
+          ROW.carriesAAndB,
+          ROW.carriesAAndBAfter,
+          ROW.carriesBOnly
+        ]);
+
+        const changed = await queryWithChangeAfter(
+          DEFAULT_ERROR_EXPLORER_FILTERS,
+          LABELS.page,
+          resolveLog(ROW.carriesAAndB, ERROR_ID.messageB),
+          messageBIdentity
+        );
+        changed.recorder.assertAllHooksFired();
+        console.log(`[interleaving e] ids=${JSON.stringify(idsOf(changed.response.rows))} totalRows=${changed.response.totalRows}`);
+        expect(
+          idsOf(changed.response.rows),
+          'row 101 still passes the page filters through message A, but no longer carries the identity, so it is not shown'
+        ).toEqual([ROW.carriesAAndBAfter, ROW.carriesBOnly]);
+        expect(changed.response.totalRows, 'totalRows is the page statement count from before the change').toBe(control.response.totalRows);
+        expectOnePageStatementAndOneCatalog(changed.recorder.statements);
       },
       FIXTURE_HOOK_TIMEOUT_MS
     );
@@ -655,7 +689,7 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
     );
 
     it(
-      'details for a first, middle, last and solo error row and a non-error member equal the oracle, reading 3 statements plus one per 128 related IDs',
+      'details for a first, middle, last and solo error row and a non-error member equal the oracle, reading 3 statements plus one per 128 related IDs and one per 128 related IDs outside the error set',
       async () => {
         expect(LARGE_GROUP_ERROR_MEMBER_IDS, 'the derived error members match the fixture count').toHaveLength(LARGE_GROUP_ERROR_SET_COUNT);
         const memberIDs = [
@@ -678,10 +712,15 @@ describe('errors explorer: the SQL query path under concurrent change, census ch
               expected
             );
             const relatedCount = expected.row?.relatedMeasurementIDs.length ?? 0;
-            console.log(`[large group] details ${measurementID} type=${activeType ?? null} related=${relatedCount} statements=${recorder.statements.length}`);
-            expect(recorder.statements.length, `details ${measurementID}: statements`).toBe(
-              DETAILS_FIXED_STATEMENT_COUNT + Math.ceil(relatedCount / ID_LIST_SIZE)
+            const outsideCount = expected.relatedRows.filter(related => !related.inErrorSet).length;
+            const expectedStatementCount = DETAILS_FIXED_STATEMENT_COUNT + Math.ceil(relatedCount / ID_LIST_SIZE) + Math.ceil(outsideCount / ID_LIST_SIZE);
+            console.log(
+              `[large group] details ${measurementID} type=${activeType ?? null} related=${relatedCount} outside=${outsideCount} statements=${recorder.statements.length} expected=${expectedStatementCount}`
             );
+            expect(countLabel(recorder.statements, LABELS.relatedRowsOutsideErrorSet), `details ${measurementID}: one outside lookup per 128 outside IDs`).toBe(
+              Math.ceil(outsideCount / ID_LIST_SIZE)
+            );
+            expect(recorder.statements.length, `details ${measurementID}: statements`).toBe(expectedStatementCount);
           }
         }
       },

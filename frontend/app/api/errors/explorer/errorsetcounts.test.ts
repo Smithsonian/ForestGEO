@@ -530,8 +530,6 @@ describe('error type key sets', () => {
     console.log('[key sets] default', keySets);
     expect(keySets.allKeysMatch).toBe(true);
     expect(keySets.matchingKeys).toEqual([NO_LOG_ERROR_TYPE_KEY, ...CATALOG_TYPES.map(type => type.key)]);
-    expect(keySets.matchingIngestionKeys).toEqual([NO_LOG_ERROR_TYPE_KEY, 7]);
-    expect(keySets.matchingValidationKeys).toEqual([1, 2, 3, 4, 5, 6]);
     expect(isImpossibleKeyFilter(keySets)).toBe(false);
   });
 
@@ -554,7 +552,6 @@ describe('error type key sets', () => {
     expect(bySharedMessage.matchingKeys).toEqual([2, 3]);
     expect(bySharedMessage.allKeysMatch).toBe(false);
     expect(byIngestion.matchingKeys).toEqual([NO_LOG_ERROR_TYPE_KEY, 7]);
-    expect(byIngestion.matchingValidationKeys).toEqual([]);
   });
 
   it('affected fields keep only types with one of those fields', () => {
@@ -597,8 +594,6 @@ describe('error type key sets for one error type identity', () => {
     expect(sharedMessageTypeA.message, 'precondition: another code shares this message').toBe(CATALOG_TYPES[2].message);
     expect(keySets.allKeysMatch, 'an identity restricts the keys even under default filters').toBe(false);
     expect(keySets.matchingKeys).toEqual([sharedMessageTypeA.key]);
-    expect(keySets.matchingValidationKeys).toEqual([sharedMessageTypeA.key]);
-    expect(keySets.matchingIngestionKeys).toEqual([]);
   });
 
   it('finds the no-log type by its identity', () => {
@@ -611,7 +606,6 @@ describe('error type key sets for one error type identity', () => {
     });
 
     expect(keySets.matchingKeys).toEqual([NO_LOG_ERROR_TYPE_KEY]);
-    expect(keySets.matchingIngestionKeys).toEqual([NO_LOG_ERROR_TYPE_KEY]);
   });
 
   it('keeps every catalog key that carries the identity when two ErrorIDs normalise to one', () => {
@@ -620,7 +614,6 @@ describe('error type key sets for one error type identity', () => {
     const keySets = computeErrorKeySets(catalog, DEFAULT_ERROR_EXPLORER_FILTERS, identityOf(sharedIdentityTypes[0]));
 
     expect(keySets.matchingKeys).toEqual([8, 9]);
-    expect(keySets.matchingIngestionKeys).toEqual([8, 9]);
   });
 
   it('leaves no key when the page filters exclude the identity, so the response is empty', () => {
