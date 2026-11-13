@@ -431,6 +431,82 @@ it('compares response paths without exposing values and checks group keys separa
   });
 });
 
+describe('user-defined JSON in response comparison', () => {
+  const PRIVATE_KEY = 'PRIVATE-CUSTOM-KEY-544';
+  const PRIVATE_VALUE_A = 'PRIVATE-VALUE-A-544';
+  const PRIVATE_VALUE_B = 'PRIVATE-VALUE-B-544';
+  const USER_DEFINED_FIELDS_PATH = '$.rows[0].userDefinedFields';
+  const rowWith = (userDefinedFields: unknown, contradictionGroupKey: string | null = null) => ({
+    rows: [{ id: 1, userDefinedFields, contradictionGroupKey }]
+  });
+
+  it('reports a user-defined JSON difference at the enclosing field path without leaking its keys or values', () => {
+    const comparison = compareResponses(
+      rowWith({ [PRIVATE_KEY]: PRIVATE_VALUE_A, nested: { [`${PRIVATE_KEY}-DEEP`]: 1 } }),
+      rowWith({ [PRIVATE_KEY]: PRIVATE_VALUE_B, nested: { [`${PRIVATE_KEY}-DEEP`]: 2 } })
+    );
+    const printedLine = `differs ${comparison.paths.join(', ')}`;
+    const summaryJson = JSON.stringify({ comparisons: { queryPage0: [{ run: 1, ...comparison }] } });
+    console.log('comparison', comparison, 'printed', printedLine);
+    expect(comparison).toEqual({ identical: false, paths: [USER_DEFINED_FIELDS_PATH], groupKeysIdentical: true });
+    for (const output of [printedLine, summaryJson]) {
+      expect(output).not.toContain(PRIVATE_KEY);
+      expect(output).not.toContain('PRIVATE-VALUE');
+    }
+  });
+
+  it('reports a key that exists on one side only at the enclosing field path', () => {
+    const comparison = compareResponses(rowWith({ [PRIVATE_KEY]: PRIVATE_VALUE_A }), rowWith({}));
+    expect(comparison.paths).toEqual([USER_DEFINED_FIELDS_PATH]);
+    expect(JSON.stringify(comparison)).not.toContain(PRIVATE_KEY);
+  });
+
+  it('reports user-defined JSON that is present on one side only', () => {
+    const comparison = compareResponses(rowWith({ [PRIVATE_KEY]: PRIVATE_VALUE_A }), { rows: [{ id: 1, contradictionGroupKey: null }] });
+    expect(comparison.identical).toBe(false);
+    expect(comparison.paths).toEqual([USER_DEFINED_FIELDS_PATH]);
+  });
+
+  it('treats a case-only difference in a user-defined contradictionGroupKey as a mismatch', () => {
+    const comparison = compareResponses(rowWith({ contradictionGroupKey: 'CaseSensitiveValue' }), rowWith({ contradictionGroupKey: 'casesensitivevalue' }));
+    console.log('comparison', comparison);
+    expect(comparison.identical).toBe(false);
+    expect(comparison.paths).toEqual([USER_DEFINED_FIELDS_PATH]);
+  });
+
+  it('treats a missing user-defined contradictionGroupKey as a mismatch', () => {
+    const comparison = compareResponses(rowWith({ contradictionGroupKey: 'x' }), rowWith({}));
+    expect(comparison.identical).toBe(false);
+    expect(comparison.paths).toEqual([USER_DEFINED_FIELDS_PATH]);
+  });
+
+  it('does not let a user-defined contradictionGroupKey change the group-key verdict', () => {
+    const comparison = compareResponses(rowWith({ contradictionGroupKey: 'CaseSensitiveValue' }), rowWith({ contradictionGroupKey: 'casesensitivevalue' }));
+    expect(comparison.groupKeysIdentical).toBe(true);
+  });
+
+  it('keeps the case and accent normalization for explorer contradictionGroupKey fields in query rows', () => {
+    const comparison = compareResponses(rowWith({ same: true }, 'duplicate:2:Ab1:1'), rowWith({ same: true }, 'duplicate:2:áb1:1'));
+    expect(comparison).toEqual({ identical: true, paths: [], groupKeysIdentical: true });
+  });
+
+  it('keeps the normalization for the details row and still flags a different group', () => {
+    const detailsWith = (contradictionGroupKey: string) => ({ row: { id: 1, contradictionGroupKey }, allErrors: [], relatedRows: [] });
+    expect(compareResponses(detailsWith('duplicate:2:Ab1:1'), detailsWith('duplicate:2:áb1:1'))).toEqual({
+      identical: true,
+      paths: [],
+      groupKeysIdentical: true
+    });
+    expect(compareResponses(detailsWith('duplicate:2:Ab1:1'), detailsWith('duplicate:2:Ab2:1')).groupKeysIdentical).toBe(false);
+  });
+
+  it('does not apply the normalization to a contradictionGroupKey outside the explorer row positions', () => {
+    const comparison = compareResponses({ other: { contradictionGroupKey: 'Ab1' } }, { other: { contradictionGroupKey: 'ab1' } });
+    expect(comparison.identical).toBe(false);
+    expect(comparison.paths).toEqual(['$.other.contradictionGroupKey']);
+  });
+});
+
 it('compares dates by their serialized value', () => {
   const comparison = compareResponses({ date: new Date('2020-01-01T00:00:00Z') }, { date: new Date('2021-01-01T00:00:00Z') });
   expect(comparison.paths).toEqual(['$.date']);

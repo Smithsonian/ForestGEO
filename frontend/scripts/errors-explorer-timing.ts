@@ -111,6 +111,10 @@ type TimingRecord = {
 
 type WaveStatement = { issuedAt: number; startedAt: number; endedAt: number };
 const STATEMENT_TEXT_LIMIT = 9;
+const FREE_FORM_JSON_FIELDS: ReadonlySet<string> = new Set(['userDefinedFields']);
+const CONTRADICTION_GROUP_KEY_FIELD = 'contradictionGroupKey';
+const EXPLORER_ROW_LIST_FIELD = 'rows';
+const EXPLORER_ROW_FIELD = 'row';
 export function groupIntoWaves<T extends WaveStatement>(statements: readonly T[]): T[][] {
   const waves: T[][] = [];
   for (const statement of statements) {
@@ -139,7 +143,11 @@ export function diffFieldPaths(a: unknown, b: unknown, path = '$'): string[] {
   const left = a as Record<string, unknown>;
   const right = b as Record<string, unknown>;
   const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
-  return [...keys].flatMap(key => diffFieldPaths(left[key], right[key], Array.isArray(a) ? `${path}[${key}]` : `${path}.${key}`));
+  return [...keys].flatMap(key => {
+    const fieldPath = Array.isArray(a) ? `${path}[${key}]` : `${path}.${key}`;
+    if (FREE_FORM_JSON_FIELDS.has(key)) return JSON.stringify(left[key]) === JSON.stringify(right[key]) ? [] : [fieldPath];
+    return diffFieldPaths(left[key], right[key], fieldPath);
+  });
 }
 
 export function armOrder(run: number): readonly ['oracle', 'current'] | readonly ['current', 'oracle'] {
@@ -428,25 +436,33 @@ type CallResult = { run: number; response: unknown; records: TimingRecord[]; sta
 function hashResponse(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
-function compareGroupKeys(a: unknown, b: unknown): boolean {
-  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return true;
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  if ('contradictionGroupKey' in left || 'contradictionGroupKey' in right) {
-    const x = left.contradictionGroupKey;
-    const y = right.contradictionGroupKey;
-    if (typeof x === 'string' && typeof y === 'string' ? !groupKeysEqual(x, y) : x !== y) return false;
-  }
-  return [...new Set([...Object.keys(left), ...Object.keys(right)])].every(key => compareGroupKeys(left[key], right[key]));
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
-function withoutGroupKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutGroupKeys);
-  if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => key !== 'contradictionGroupKey')
-      .map(([key, item]) => [key, withoutGroupKeys(item)])
-  );
+function explorerRowsOf(response: unknown): Record<string, unknown>[] {
+  if (!isRecord(response)) return [];
+  const listed = Array.isArray(response[EXPLORER_ROW_LIST_FIELD]) ? (response[EXPLORER_ROW_LIST_FIELD] as unknown[]) : [];
+  return [...listed, response[EXPLORER_ROW_FIELD]].filter(isRecord);
+}
+function compareGroupKeys(a: unknown, b: unknown): boolean {
+  const rightRows = explorerRowsOf(b);
+  return explorerRowsOf(a).every((left, index) => {
+    const right = rightRows[index];
+    if (!right) return true;
+    const x = left[CONTRADICTION_GROUP_KEY_FIELD];
+    const y = right[CONTRADICTION_GROUP_KEY_FIELD];
+    return typeof x === 'string' && typeof y === 'string' ? groupKeysEqual(x, y) : x === y;
+  });
+}
+function withoutRowGroupKey(row: unknown): unknown {
+  return isRecord(row) ? Object.fromEntries(Object.entries(row).filter(([key]) => key !== CONTRADICTION_GROUP_KEY_FIELD)) : row;
+}
+function withoutGroupKeys(response: unknown): unknown {
+  if (!isRecord(response)) return response;
+  const stripped = { ...response };
+  if (Array.isArray(response[EXPLORER_ROW_LIST_FIELD])) stripped[EXPLORER_ROW_LIST_FIELD] = response[EXPLORER_ROW_LIST_FIELD].map(withoutRowGroupKey);
+  if (EXPLORER_ROW_FIELD in response) stripped[EXPLORER_ROW_FIELD] = withoutRowGroupKey(response[EXPLORER_ROW_FIELD]);
+  return stripped;
 }
 export function compareResponses(a: unknown, b: unknown): { identical: boolean; paths: string[]; groupKeysIdentical: boolean } {
   const left = withoutGroupKeys(JSON.parse(JSON.stringify(a)) as unknown);
