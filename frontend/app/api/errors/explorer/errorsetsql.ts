@@ -1,11 +1,12 @@
+import { ERROR_SOURCE, FALLBACK_ERROR_CODE, FALLBACK_ERROR_MESSAGE } from '@/config/errorsexplorer';
 import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 export const CENSUS_LIST_SIZE = 8;
 export const ID_LIST_SIZE = 128;
 export const NO_LOG_ERROR_TYPE_KEY = 0;
-export const NO_LOG_ERROR_SOURCE = 'ingestion';
-export const NO_LOG_ERROR_CODE = 'failed_no_log';
-export const NO_LOG_ERROR_MESSAGE = 'Measurement is marked invalid but has no unresolved error log entry.';
+export const NO_LOG_ERROR_SOURCE = ERROR_SOURCE.ingestion;
+export const NO_LOG_ERROR_CODE = FALLBACK_ERROR_CODE;
+export const NO_LOG_ERROR_MESSAGE = FALLBACK_ERROR_MESSAGE;
 export const LIST_SEPARATOR = ',';
 
 export const SQL_TRUE = 1;
@@ -81,11 +82,6 @@ export interface SelectedRowSortKeys {
 
 export interface ErrorSetTotalsRow {
   TotalRows: SqlCount;
-  ValidationRows: SqlCount | null;
-  IngestionRows: SqlCount | null;
-  ContradictionRows: SqlCount | null;
-  DuplicateTagStemRows: SqlCount | null;
-  SameBatchConflictRows: SqlCount | null;
 }
 
 export interface SelectedPageRow extends SelectedRowSortKeys, ErrorSetTotalsRow {
@@ -412,15 +408,6 @@ matching AS (
   };
 }
 
-function summaryAggregates(over: string): string {
-  return `COUNT(*)${over} AS TotalRows,
-       SUM(m.MatchingValidationCount > 0)${over} AS ValidationRows,
-       SUM(m.MatchingIngestionCount > 0)${over} AS IngestionRows,
-       SUM(m.HasContradiction)${over} AS ContradictionRows,
-       SUM(m.HasDuplicate)${over} AS DuplicateTagStemRows,
-       SUM(m.HasSameBatch)${over} AS SameBatchConflictRows`;
-}
-
 /** The SQL twin of compareSelectedRows; keep them in step (spec §5 "Order and ties"). */
 export const SELECTED_ROW_ORDER = 'm.HasContradiction DESC, m.OccurrenceCount DESC, m.MeasurementDate ASC, m.CoreMeasurementID ASC';
 
@@ -452,7 +439,7 @@ export function buildPageStatement(scope: ErrorSetScope, keyFilter: ErrorTypeKey
       matchingCte(keyFilter, flags),
       `
 SELECT m.CoreMeasurementID, m.CensusID, m.HasContradiction, m.OccurrenceCount, m.MeasurementDate,
-       ${summaryAggregates(' OVER ()')}
+       COUNT(*) OVER () AS TotalRows
   FROM matching m
  ORDER BY ${SELECTED_ROW_ORDER}
  LIMIT ? OFFSET ?`,
@@ -468,7 +455,7 @@ export function buildTotalsStatement(scope: ErrorSetScope, keyFilter: ErrorTypeK
     joinFragments([
       errorSetCtes(scope, matchCountMeasurementCte(keyFilter), true),
       matchingCte(keyFilter, flags),
-      `\nSELECT ${summaryAggregates('')}\n  FROM matching m`
+      '\nSELECT COUNT(*) AS TotalRows\n  FROM matching m'
     ])
   );
 }

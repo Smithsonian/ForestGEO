@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ERROR_SOURCE, FALLBACK_ERROR_CODE, FALLBACK_ERROR_MESSAGE } from '@/config/errorsexplorer';
 import { ALL_FLAGS, everyErrorSetStatement, KEY_FILTER, WINDOW, type ErrorSetStatementVariant } from '@/tests/setup/errorsetstatements';
 import {
   buildCatalogStatement,
@@ -41,6 +42,11 @@ const ID_LIST_LENGTHS = [1, 2, 127, 128, 129, 200, 256, 257, 300];
 const MAX_ID_LIST_LENGTH = Math.max(...ID_LIST_LENGTHS);
 const EXPECTED_STATEMENT_SHAPES = 9;
 const UNLABELLED = 'unlabelled';
+const SUMMARY_COLUMN_NAMES = ['ValidationRows', 'IngestionRows', 'ContradictionRows', 'DuplicateTagStemRows', 'SameBatchConflictRows'];
+const TOTAL_ROWS_COLUMN = 'TotalRows';
+const WINDOWED_COUNT = /COUNT\(\*\) OVER \(\)/g;
+const ANY_WINDOW = /\bOVER\s*\(/g;
+const EXPECTED_NO_LOG_DISPLAY_PARAMS = [ERROR_SOURCE.ingestion, FALLBACK_ERROR_CODE, FALLBACK_ERROR_MESSAGE];
 const FIRST_TABLE_REFERENCE = /\b(?:FROM|JOIN)\s+(\S+)/i;
 const SQL_PREVIEW_LENGTH = 120;
 const QUALIFIED_SCHEMA_PREFIX = `\`${SCHEMA}\`.`;
@@ -329,5 +335,43 @@ describe('errorsetsql statement builders', () => {
     const sortedIDs = [...rows].sort(compareSelectedRows).map(row => row.CoreMeasurementID);
     console.log(`sorted ids: ${sortedIDs}`);
     expect(sortedIDs).toEqual([5, 4, 6, 3, 8, 7, 9]);
+  });
+
+  it('returns only the total from the page statement, with one windowed count and no summary sums', () => {
+    const { sql } = buildPageStatement(scopeFor([2]), KEY_FILTER, ALL_FLAGS, WINDOW);
+
+    console.log(`page statement windows: ${sql.match(ANY_WINDOW)?.length ?? 0}, windowed counts: ${sql.match(WINDOWED_COUNT)?.length ?? 0}`);
+    expect(sql.match(WINDOWED_COUNT)?.length, 'the page statement keeps one COUNT(*) OVER ()').toBe(1);
+    expect(sql.match(ANY_WINDOW)?.length, 'and no other window function').toBe(1);
+    expect(sql).toContain(`AS ${TOTAL_ROWS_COLUMN}`);
+    for (const column of SUMMARY_COLUMN_NAMES) expect(sql, `page statement still selects ${column}`).not.toContain(column);
+  });
+
+  it('returns only the total from the totals statement, with no window and no summary sums', () => {
+    const { sql } = buildTotalsStatement(scopeFor([2]), KEY_FILTER, ALL_FLAGS);
+
+    console.log(`totals statement windows: ${sql.match(ANY_WINDOW)?.length ?? 0}`);
+    expect(sql.match(ANY_WINDOW), 'the totals statement is a plain aggregate').toBeNull();
+    expect(sql).toContain(`COUNT(*) AS ${TOTAL_ROWS_COLUMN}`);
+    for (const column of SUMMARY_COLUMN_NAMES) expect(sql, `totals statement still selects ${column}`).not.toContain(column);
+  });
+
+  it('binds the no-log occurrence display values from the shared config constants', () => {
+    const scope = scopeFor([2]);
+    const displayParamCarriers: Array<[string, BuiltStatement]> = [
+      ['catalog', buildCatalogStatement(SCHEMA)],
+      ['scopeRawRows', buildScopeRawRowsStatement(scope)],
+      ['idRawRows', buildIDRawRowsStatement(scope, [10])]
+    ];
+    for (const [name, statement] of displayParamCarriers) {
+      const firstDisplayParam = statement.params.indexOf(ERROR_SOURCE.ingestion);
+      console.log(
+        `${name}: display params at ${firstDisplayParam}: ${JSON.stringify(statement.params.slice(firstDisplayParam, firstDisplayParam + EXPECTED_NO_LOG_DISPLAY_PARAMS.length))}`
+      );
+      expect(firstDisplayParam, `${name} binds the ingestion source`).toBeGreaterThanOrEqual(0);
+      expect(statement.params.slice(firstDisplayParam, firstDisplayParam + EXPECTED_NO_LOG_DISPLAY_PARAMS.length), name).toEqual(
+        EXPECTED_NO_LOG_DISPLAY_PARAMS
+      );
+    }
   });
 });

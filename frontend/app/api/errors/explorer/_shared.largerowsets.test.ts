@@ -241,12 +241,7 @@ describe('error explorer row sets larger than push() can spread', () => {
               HasContradiction: SQL_FALSE,
               OccurrenceCount: 1,
               MeasurementDate: null,
-              TotalRows: ROWS_AVAILABLE_PER_CHUNK,
-              ValidationRows: ROWS_AVAILABLE_PER_CHUNK,
-              IngestionRows: 0,
-              ContradictionRows: 0,
-              DuplicateTagStemRows: 0,
-              SameBatchConflictRows: 0
+              TotalRows: ROWS_AVAILABLE_PER_CHUNK
             })
           );
         }
