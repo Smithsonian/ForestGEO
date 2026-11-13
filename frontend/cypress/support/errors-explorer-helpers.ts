@@ -279,4 +279,11 @@ export function mockErrorsExplorerApi({
     statusCode: refreshResponse.statusCode,
     body: refreshResponse.body
   }).as('refreshMeasurementsSummary');
+
+  // A saved edit refreshes both views before re-reading rows; an unmocked
+  // viewfulltable refresh answers 401 and the explorer never re-reads.
+  cy.intercept('POST', '**/api/refreshviews/viewfulltable/*', {
+    statusCode: refreshResponse.statusCode,
+    body: refreshResponse.body
+  }).as('refreshViewFullTable');
 }

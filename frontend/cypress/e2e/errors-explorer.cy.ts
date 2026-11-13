@@ -116,7 +116,7 @@ describe('Errors Explorer', () => {
 
     openErrorsExplorer();
 
-    cy.wait('@fetchErrorsExplorerRows').then(interception => {
+    cy.get('@fetchErrorsExplorerRows').then(interception => {
       expect(interception.request.body.schema).to.equal('luquillo');
       expect(interception.request.body.plotID).to.equal(1);
       expect(interception.request.body.censusID).to.equal(5);
@@ -133,6 +133,8 @@ describe('Errors Explorer', () => {
     cy.contains('Row 101').should('be.visible');
     cy.contains('validation:INVALID_SPECIES').should('be.visible');
     cy.contains('Invalid species reference').should('be.visible');
+    // One page request per load, and opening a row fetches its details only (#544).
+    cy.get('@fetchErrorsExplorerRows.all').should('have.length', 1);
   });
 
   it('applies filters and stores them per census scope', () => {
@@ -245,7 +247,7 @@ describe('Errors Explorer', () => {
     cy.wait('@previewEdit');
     cy.get('[data-testid="edit-preview-apply"]').click();
     cy.wait('@applyEdit').its('request.body.newRow.SpeciesCode').should('eq', 'ANOPKL');
-    cy.wait('@refreshMeasurementsSummary');
+    cy.wait(['@refreshMeasurementsSummary', '@refreshViewFullTable']);
     cy.wait('@fetchErrorsExplorerRows');
 
     getExplorerRow('Invalid species reference').find('[data-field="speciesCode"]').should('contain', 'ANOPKL');
