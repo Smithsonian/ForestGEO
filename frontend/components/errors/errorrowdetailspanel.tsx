@@ -30,6 +30,7 @@ import {
   type ErrorExplorerDetailsResponse,
   type RelatedContradictionRow
 } from '@/config/errorsexplorer';
+import { designTokens } from '@/config/design-tokens';
 import { getCodesMismatchMessage, getMaterializedCodesValue, getUploadedCodesValue, hasCodesMismatch, renderCodesChips } from './errorcodes';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { ErrorSourceChip } from './errorsourcechip';
@@ -158,6 +159,7 @@ export default function ErrorRowDetailsPanel(props: ErrorRowDetailsPanelProps) {
       anchor="right"
       open={open}
       onClose={onClose}
+      sx={{ zIndex: designTokens.zIndex.detailsSheet }}
       slotProps={{
         content: { sx: { width: { xs: '100%', sm: ERROR_DETAILS_SHEET_WIDTH }, p: 2, gap: 1.5 }, 'data-testid': 'error-row-details-sheet' } as never
       }}

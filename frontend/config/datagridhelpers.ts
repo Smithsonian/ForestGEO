@@ -150,6 +150,7 @@ export type TSSFilter = 'multi stem' | 'old tree' | 'new recruit';
 export interface ExtendedGridFilterModel extends GridFilterModel {
   visible: VisibleFilter[];
   tss: TSSFilter[];
+  stemStatus?: string[];
 }
 
 export interface RowControlBreakdown {
@@ -287,7 +288,6 @@ export interface MeasurementsCommonsProps {
   gridType: string;
   gridColumns: GridColDef[];
   initialVisibleFilters?: VisibleFilter[];
-  showToolbarActions?: boolean;
   rows: GridRowsProp;
   setRows: Dispatch<SetStateAction<GridRowsProp>>;
   rowCount: number;
@@ -305,7 +305,6 @@ export interface MeasurementsCommonsProps {
   shouldAddRowAfterFetch: boolean;
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
-  dynamicButtons: DynamicButton[];
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;
   enablePageJump?: boolean;

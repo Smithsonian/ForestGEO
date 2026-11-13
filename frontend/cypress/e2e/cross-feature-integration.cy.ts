@@ -287,13 +287,13 @@ describe('Cross-Feature Integration', () => {
     selectDefaultCensusContext();
     cy.openCensusHubLink('View Data');
 
-    cy.contains('[role="row"]', 'TREE101').find('[data-field="isValidated"] button').click({ force: true });
+    cy.contains('[role="row"]', 'TREE101').find('button[aria-label^="Details for tree"]').click({ force: true });
 
-    cy.contains('[role="alertdialog"]', 'The following validation errors were found in this row:').should('be.visible');
-    cy.contains('button', 'Clear Errors').click();
+    cy.contains('[role="dialog"]', 'Invalid species reference').should('be.visible');
+    cy.contains('button', 'Clear validation errors').click();
 
-    cy.contains('Validation errors cleared successfully').should('be.visible');
-    cy.contains('[role="alertdialog"]', 'The following validation errors were found in this row:').should('not.exist');
+    cy.contains('Validation errors cleared. The row is pending until validations run again.').should('be.visible');
+    cy.get('button[aria-label="Close details"]').click();
     cy.contains('[role="row"]', 'TREE101').should('be.visible');
 
     cy.openCensusHubLink('View Errors');

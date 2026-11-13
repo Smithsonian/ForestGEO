@@ -9,6 +9,7 @@ import {
   NON_NEGATIVE_FIELD_MESSAGE,
   PER_COLUMN_DECIMAL_PRECISION
 } from '@/config/editplan/fieldpolicy';
+import { VIEW_DATA_FIELDS } from '@/config/viewdata';
 import { fieldChanged } from '@/config/editplan/storedfieldcomparison';
 import { areArraysEqual, areFilterItemsEqual, isActiveFilterItem, sanitizeQuickFilterValues, toServerFilterItem } from '@/lib/datagrid/filterModel';
 import { EditRevertRequest, requestEditRevert } from '@/lib/editplan/requestrevert';
@@ -17,6 +18,7 @@ import type { ApplyResult } from '@/config/editplan/types';
 import { formatMeasurementForDisplay } from '@/config/measurementdisplay';
 
 import { ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
+import type { OrgCensus } from '@/lib/db/definitions/timekeeping';
 
 export { NEW_ROW_ADDED_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
 
@@ -233,6 +235,7 @@ export function areExtendedFilterModelsEqual(left: ExtendedGridFilterModel, righ
     areArraysEqual(left.quickFilterValues, right.quickFilterValues) &&
     areArraysEqual(left.visible, right.visible) &&
     areArraysEqual(left.tss, right.tss) &&
+    areArraysEqual(left.stemStatus, right.stemStatus) &&
     left.logicOperator === right.logicOperator &&
     left.quickFilterLogicOperator === right.quickFilterLogicOperator &&
     left.quickFilterExcludeHiddenColumns === right.quickFilterExcludeHiddenColumns
@@ -256,14 +259,22 @@ export function mergeMeasurementFilterModel(
 }
 
 export function toServerMeasurementFilterModel(model: ExtendedGridFilterModel): ExtendedGridFilterModel {
-  const items = (model.items ?? []).filter(isActiveFilterItem).map(toServerFilterItem);
+  const activeItems = (model.items ?? []).filter(isActiveFilterItem).map(toServerFilterItem);
+  // Stem state and Stem status are not columns: they travel as tss and stemStatus, never as filter items.
+  const stemStateItem = activeItems.find(item => item.field === VIEW_DATA_FIELDS.stemState);
+  const stemStatusItem = activeItems.find(item => item.field === VIEW_DATA_FIELDS.stemStatus);
+  const items = activeItems.filter(item => item.field !== VIEW_DATA_FIELDS.stemState && item.field !== VIEW_DATA_FIELDS.stemStatus);
   const quickFilterValues = sanitizeQuickFilterValues(model.quickFilterValues);
   const serverModel: ExtendedGridFilterModel = {
     items,
     quickFilterValues,
     visible: [...(model.visible ?? [])],
-    tss: [...(model.tss ?? [])]
+    tss: stemStateItem ? [stemStateItem.value as TSSFilter] : [...(model.tss ?? [])]
   };
+
+  if (stemStatusItem) {
+    serverModel.stemStatus = [String(stemStatusItem.value)];
+  }
 
   if (items.length > 1 && model.logicOperator) {
     serverModel.logicOperator = model.logicOperator;
@@ -459,4 +470,31 @@ export function revertMeasurementEdit(scope: EditRevertRequest, effects: Measure
     notify: effects.notify,
     logError: effects.logError
   });
+}
+
+/** CensusID → plot census number from the org census list, skipping a list or entries that have not loaded (A10). */
+export function findPlotCensusNumberForCensusID(censusList: ReadonlyArray<OrgCensus> | undefined, censusID: number): number | null {
+  const match = censusList?.find(census => census?.censusIDs?.includes(censusID));
+  return match?.plotCensusNumber ?? null;
+}
+
+export type EnterNavigationTarget = { kind: 'focusField'; field: string } | { kind: 'highlightSave' };
+
+/** Next visible editable field after the current one; Save once there is none. Works whatever the Actions column's position. */
+export function resolveEnterNavigationTarget(
+  visibleFields: readonly string[],
+  currentField: string,
+  isFieldEditable: (field: string) => boolean
+): EnterNavigationTarget {
+  const currentIndex = visibleFields.indexOf(currentField);
+  const nextField = visibleFields.slice(currentIndex + 1).find(field => field !== VIEW_DATA_FIELDS.actions && isFieldEditable(field));
+  return nextField ? { kind: 'focusField', field: nextField } : { kind: 'highlightSave' };
+}
+
+const LEADING_SQL_CALC_FOUND_ROWS = /^(\s*SELECT\s+)SQL_CALC_FOUND_ROWS\s+/i;
+const TRAILING_PAGE_LIMIT = /\bLIMIT\s+\d+\s*,\s*\d+(?=\s*;?\s*$)/i;
+
+/** Only the clauses the server put at the two ends of the query: a search value can contain the same words. */
+export function toUnpaginatedExportQuery(finishedQuery: string): string {
+  return finishedQuery.replace(LEADING_SQL_CALC_FOUND_ROWS, '$1').replace(TRAILING_PAGE_LIMIT, '').trim();
 }

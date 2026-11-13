@@ -68,6 +68,15 @@ export interface MeasurementsSummaryRDS {
   rawCodes?: string;
   userDefinedFields?: string;
   errors?: string;
+  // View Data projection (fixeddatafilter measurementssummary branch); see config/viewdata.ts toViewDataRowSummary.
+  measurementStatus?: string;
+  unresolvedErrorCount?: number;
+  primaryErrorMessage?: string;
+  primaryErrorSource?: string;
+  unresolvedErrorCodes?: string;
+  unresolvedErrorMessages?: string;
+  hasContradiction?: boolean | number;
+  stemStatuses?: string;
 }
 
 export type MeasurementsSummaryResult = ResultType<MeasurementsSummaryRDS>;

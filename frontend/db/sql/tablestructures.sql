@@ -111,6 +111,9 @@ create index idx_measurementdate
 create index idx_mss_dup_detect
     on measurementssummary (CensusID, QuadratName, StemGUID, MeasurementDate, MeasuredDBH, MeasuredHOM, Attributes);
 
+create index idx_mss_plot_census_scope
+    on measurementssummary (PlotID, CensusID, MeasurementDate, StemGUID, IsValidated);
+
 create index idx_plotid
     on measurementssummary (PlotID);
 

@@ -2,25 +2,29 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
-import { Snackbar, Typography } from '@mui/joy';
+import { Snackbar } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
-import { FormType, SourceFormat } from '@/config/macros/formdetails';
+import { DatagridType, FormType, SourceFormat } from '@/config/macros/formdetails';
 import { MeasurementsSummaryRDS } from '@/lib/db/definitions/views';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
-import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
+import { Alert, AlertProps } from '@mui/material';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
-import { AssignmentOutlined, BuildCircleOutlined, CachedOutlined, UploadFileOutlined } from '@mui/icons-material';
 import ailogger from '@/ailogger';
 import { useRouter } from 'next/navigation';
 import { VisibleFilter } from '@/config/datagridhelpers';
 import { getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
 import { useSession } from 'next-auth/react';
+import ViewDataHeader, { AddMeasurementsMenu } from '@/components/viewdata/viewdataheader';
+import ViewDataFilterBar from '@/components/viewdata/viewdatafilterbar';
+import type { ViewDataAboveGridControls } from '@/components/viewdata/viewdatacontrols';
+import HeaderReferenceDialog from '@/components/client/modals/headerreferencedialog';
+import { canEditMeasurementRows, formatViewDataScopeLine } from '@/config/viewdata';
 
 // Identity under which CustomGridPagination persists the rows-per-page choice;
 // the initializer below must read the same key.
@@ -78,8 +82,7 @@ export default function MeasurementsSummaryViewDataGrid({
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
-  const [openAlert, setOpenAlert] = useState(false);
-  const [openViewResetAlert, setOpenViewResetAlert] = useState(false);
+  const [isHeaderReferenceOpen, setIsHeaderReferenceOpen] = useState(false);
   const [openFSM, setOpenFSM] = useState(false);
   const [isReingesting, setIsReingesting] = useState(false);
   const [uploadCompleted, setUploadCompleted] = useState(false);
@@ -239,6 +242,51 @@ export default function MeasurementsSummaryViewDataGrid({
     }
   };
 
+  const addMeasurementsHandlers = useMemo(
+    () => ({
+      onManualEntry: () => setIsManualEntryFormOpen(true),
+      onUploadCsv: () => setIsUploadModalOpen(true),
+      onImportArcgis: () => setIsArcgisUploadOpen(true)
+    }),
+    []
+  );
+  const emptyCensusAction = useMemo(
+    () => (showToolbarActions ? <AddMeasurementsMenu {...addMeasurementsHandlers} /> : null),
+    [showToolbarActions, addMeasurementsHandlers]
+  );
+  const isReadOnly = !canEditMeasurementRows(session?.user?.userStatus);
+
+  const renderAboveGrid = (controls: ViewDataAboveGridControls) => (
+    <>
+      <ViewDataHeader
+        scopeLine={formatViewDataScopeLine(currentSite?.siteName, currentPlot?.plotName, currentCensus?.plotCensusNumber)}
+        stateCounts={controls.stateCounts}
+        isReadOnly={isReadOnly}
+        showActions={showToolbarActions}
+        failedUploadCount={failedRowCount}
+        canFixFailedUploads={canRecoverFailedRows}
+        onFixFailedUploads={() => setOpenFSM(true)}
+        onExportCsv={controls.onOpenExport}
+        onRunValidations={controls.onRunValidations}
+        onOverrideValidations={controls.onOverrideValidations}
+        onResetValidations={controls.onResetValidations}
+        onRefreshView={reloadMSV}
+        onOpenHeaderReference={() => setIsHeaderReferenceOpen(true)}
+        {...addMeasurementsHandlers}
+      />
+      <ViewDataFilterBar
+        stateCounts={controls.stateCounts}
+        showOption={controls.showOption}
+        onShowOptionChange={controls.onShowOptionChange}
+        searchText={controls.searchText}
+        appliedSearchText={controls.appliedSearchText}
+        onSearchTextChange={controls.onSearchTextChange}
+        onSearchApply={controls.onSearchApply}
+        onSearchClear={controls.onSearchClear}
+      />
+    </>
+  );
+
   return (
     <>
       {globalError && (
@@ -256,9 +304,7 @@ export default function MeasurementsSummaryViewDataGrid({
           setIsReingesting(false);
           setUploadCompleted(false);
           if (wasCompleted) {
-            reloadMSV().then(() => {
-              setOpenAlert(true);
-            });
+            void reloadMSV();
           }
         }}
         formType={FormType.measurements}
@@ -272,9 +318,7 @@ export default function MeasurementsSummaryViewDataGrid({
           setIsArcgisUploadOpen(false);
           setUploadCompleted(false);
           if (wasCompleted) {
-            reloadMSV().then(() => {
-              setOpenAlert(true);
-            });
+            void reloadMSV();
           }
         }}
         formType={FormType.measurements}
@@ -288,7 +332,6 @@ export default function MeasurementsSummaryViewDataGrid({
             reloadMSV().then(() => {
               setIsManualEntryFormOpen(false);
               setManualEntryCompleted(false);
-              setOpenAlert(true);
             });
           } else {
             setIsManualEntryFormOpen(false);
@@ -298,11 +341,11 @@ export default function MeasurementsSummaryViewDataGrid({
         onSubmitComplete={() => setManualEntryCompleted(true)}
       />
       <FailedMeasurementsModal open={openFSM} handleCloseModal={handleCloseFailedMeasurementsModal} autoCloseWhenEmpty={!autoOpenFailedMeasurements} />
+      <HeaderReferenceDialog open={isHeaderReferenceOpen} onClose={() => setIsHeaderReferenceOpen(false)} datagridType={DatagridType.measurementssummaryview} />
       <MeasurementsCommons
         gridType={MEASUREMENTS_SUMMARY_GRID_TYPE}
         gridColumns={MeasurementsSummaryViewGridColumns}
         initialVisibleFilters={initialVisibleFilters}
-        showToolbarActions={showToolbarActions}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}
@@ -320,66 +363,11 @@ export default function MeasurementsSummaryViewDataGrid({
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={addNewRowToGrid}
-        dynamicButtons={[
-          {
-            label: 'Manual Entry Form',
-            onClick: () => setIsManualEntryFormOpen(true),
-            tooltip: 'Submit data by filling out a form',
-            icon: <AssignmentOutlined />
-          },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
-          ...(canRecoverFailedRows && failedRowCount > 0
-            ? [
-                {
-                  label: 'Fix Failed Rows',
-                  onClick: () => setOpenFSM(true),
-                  tooltip: 'Review rows that failed upload, correct them, and reingest',
-                  icon: <BuildCircleOutlined />,
-                  badgeCount: failedRowCount,
-                  prominentWarning: true
-                }
-              ]
-            : []),
-          {
-            label: 'Import ArcGIS',
-            onClick: () => setIsArcgisUploadOpen(true),
-            tooltip: 'Import an ArcGIS Field Maps .xlsx workbook',
-            icon: <UploadFileOutlined />
-          },
-          { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view', icon: <CachedOutlined /> }
-        ]}
+        renderAboveGrid={renderAboveGrid}
+        emptyCensusAction={emptyCensusAction}
         enablePageJump
         enableInfiniteScroll
       />
-      <Collapse in={openAlert || openViewResetAlert} sx={{ width: '100%' }}>
-        <Snackbar
-          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-          open={openAlert}
-          autoHideDuration={6000}
-          onClose={() => setOpenAlert(false)}
-          variant={'plain'}
-          sx={{ display: 'flex', flex: 1, alignSelf: 'center', justifySelf: 'center', alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Alert variant={'standard'} onClose={() => setOpenAlert(false)}>
-            <AlertTitle>Changes detected!</AlertTitle>
-            Please press the refresh button to update the grid.
-          </Alert>
-        </Snackbar>
-        <Snackbar
-          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-          open={openViewResetAlert}
-          autoHideDuration={6000}
-          onClose={() => setOpenViewResetAlert(false)}
-          variant={'plain'}
-          sx={{ display: 'flex', flex: 1, alignSelf: 'center', justifySelf: 'center', alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Alert variant={'outlined'} onClose={() => setOpenViewResetAlert(false)} sx={{ display: 'flex', flex: 1, width: '100%', flexDirection: 'column' }}>
-            <AlertTitle>CORE CHANGES DETECTED!</AlertTitle>
-            <Typography fontWeight={'bold'}>You must reset the view to see your changes.</Typography>
-            <Typography fontWeight={'bold'}>Press the view reset button!</Typography>
-          </Alert>
-        </Snackbar>
-      </Collapse>
     </>
   );
 }

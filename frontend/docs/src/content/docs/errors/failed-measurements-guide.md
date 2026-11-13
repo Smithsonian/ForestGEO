@@ -22,7 +22,7 @@ Failed measurements are rows that came in through an upload but didn't pass vali
 | Surface | What you see |
 |---|---|
 | **Census Hub → View Errors** | The main place to work. Errors are grouped by type; open a row's **Details** for every error on it and the original CSV codes. |
-| **Census Hub → View Data** | Failed rows appear inline alongside successful ones, visually flagged. Use the status filter to show only failures. |
+| **Census Hub → View Data** | Failed rows appear in the grid with an Ingestion chip in the Validation column. Set **Show** to **With errors** to list only rows with errors, or use **Fix _n_ failed uploads** to correct and re-ingest them. |
 
 ---
 

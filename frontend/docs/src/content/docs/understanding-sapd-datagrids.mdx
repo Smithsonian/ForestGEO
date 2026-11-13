@@ -113,6 +113,30 @@ Each filter will only trigger after all **three** categories of the filter row a
 
 ---
 
+### View Data
+
+View Data (Census Hub → View Data) shows every measurement in the selected census as one spreadsheet-like grid.
+
+**Header.** The header names the site, plot and census and states how many active measurements the census has and the dates they were measured. It holds the page actions: **Fix _n_ failed uploads** (only when uploads left rows that failed ingestion), **Export CSV**, **More actions** (Run validations, Override validations, Reset all validation states, Refresh the view, Header reference) and **Add measurements** (Manual entry form, Upload a CSV, Import an ArcGIS workbook). If your role is pending, the header says the rows are read-only.
+
+**Show and Search.** **Show** narrows the grid to All, Passed, Pending or With errors, and each option shows its census total. **Search** matches tree tags, stem tags, species, quadrats and codes in every column; press Enter to apply it. A search and a column filter combine: a row must match both.
+
+**Columns.** After two state columns, the columns follow the measurement upload form: tag, stem tag, species, quadrat, X, Y, plot X, plot Y, DBH, HOM, date, codes, stem status and description.
+
+| Column | What it shows |
+| --- | --- |
+| Validation | The row's validation result: its first unresolved error, with a Validation or Ingestion chip and "+_n_" when there are more; "Marked invalid, no error logged"; Pending; or Passed. Sort by it; filter by it with **Show**. |
+| Stem state | Old tree, Multi-stem or New recruit, or "—" for a row that failed ingestion. Filter with "is". |
+| Stem status | What the row's codes say about the stem, using each code's status on the Stem Codes page, for example "Alive · Dead". Filter with "is": a row matches when any of its codes carries that status. It cannot be sorted. |
+
+Species name, Subspecies, Plot X, Plot Y and Description start hidden; turn them on from **Columns**. A cell an error points at shows its value in bold warning colour.
+
+**Sorting, filters and density.** Click a header, or use its ▾ menu, to sort. The sort covers every row in the census, not only the page on screen, and blank values come last. The grid toolbar has **Columns**, **Filters**, **Density** and **Hide empty columns**.
+
+**Editing.** Every role except pending can edit rows: double-click a cell or use **Edit**. Enter moves to the next field and, after the last one, to Save; Esc cancels. Only global and database administrators can change a species code.
+
+**Details.** **Details** opens a side sheet with the row's fields and, for a row with errors, one card per error, its uploaded and stored codes, and a comparison with any row it contradicts. From the sheet you can edit or delete the row, open View Errors on the same error, and use **Clear validation errors**, which removes the row's validation errors and sets it back to pending so the next validation run checks it again. Ingestion failures are fixed through **Fix failed uploads** instead.
+
 ### Search All Fields & Refresh Button
 
 #### Quick Search
@@ -132,8 +156,8 @@ The `Refresh` button triggers a **local** reload of the grid view:
 - Useful after other users make changes
 - Clears any unsaved local state
 
-:::caution
-**Local vs Global Refresh**: In the View Data grid (measurements), there's a distinction between local refresh (grid only) and global refresh (entire application state). This difference is not relevant for the supporting-data grids.
+:::note
+View Data has its own Search box and no Refresh button: use **More actions → Refresh the view**, which rebuilds the measurements summary and reloads the grid.
 :::
 
 ---

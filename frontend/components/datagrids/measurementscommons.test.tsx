@@ -3,6 +3,7 @@ import { GridLogicOperator } from '@mui/x-data-grid';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
   ALL_VALID_SNACKBAR_MESSAGE,
+  areExtendedFilterModelsEqual,
   areGridSortModelsEqual,
   buildEditableFieldsDiff,
   buildEditableFieldsDiffWithMetaForSurface,
@@ -13,14 +14,17 @@ import {
   describeMeasurementRow,
   EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE,
   EDIT_REVERTED_SNACKBAR_MESSAGE,
+  findPlotCensusNumberForCensusID,
   mergeMeasurementFilterModel,
   PENDING_VALIDATION_SNACKBAR_MESSAGE,
+  resolveEnterNavigationTarget,
   RESET_THEN_VALIDATE_SNACKBAR_MESSAGE,
   revertMeasurementEdit,
   selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
   toServerMeasurementFilterModel,
+  toUnpaginatedExportQuery,
   UNDO_FAILED_SNACKBAR_MESSAGE,
   UNRESOLVED_ERRORS_SNACKBAR_MESSAGE,
   type MeasurementEditRevertEffects,
@@ -29,6 +33,7 @@ import {
 import { UNCONFIRMED_OUTCOME_MESSAGE, type EditRevertRequest } from '@/lib/editplan/requestrevert';
 import type { ApplyResult, EditPlan } from '@/config/editplan/types';
 import { HTTPResponses } from '@/config/macros';
+import { buildMeasurementsSummaryPageQueries } from '@/lib/viewdata/measurementssummaryquery';
 
 describe('MeasurementsCommons - Bug Fix Tests', () => {
   beforeEach(() => {
@@ -713,5 +718,153 @@ describe('describeMeasurementRow: delete-confirmation wording (#524 item 6)', ()
 
   it('describes a null row generically', () => {
     expect(describeMeasurementRow(null)).toBe('this measurement');
+  });
+});
+
+describe('toServerMeasurementFilterModel: View Data stem state and stem status translation', () => {
+  const ALL_VISIBLE = ['errors', 'valid', 'pending'] as ('errors' | 'valid' | 'pending')[];
+  const ALL_TSS = ['old tree', 'multi stem', 'new recruit'] as ('old tree' | 'multi stem' | 'new recruit')[];
+
+  it('moves a stemState item into tss and out of items', () => {
+    const server = toServerMeasurementFilterModel({
+      items: [{ id: 1, field: 'stemState', operator: 'is', value: 'old tree' }],
+      quickFilterValues: [],
+      visible: ALL_VISIBLE,
+      tss: ALL_TSS
+    });
+    console.log('[translation] stemState', JSON.stringify(server));
+    expect(server.items).toEqual([]);
+    expect(server.tss).toEqual(['old tree']);
+    expect(server).not.toHaveProperty('stemStatus');
+  });
+
+  it('sends all three states when the stemState item has no value', () => {
+    const server = toServerMeasurementFilterModel({
+      items: [{ id: 1, field: 'stemState', operator: 'is', value: '' }],
+      quickFilterValues: [],
+      visible: ALL_VISIBLE,
+      tss: ALL_TSS
+    });
+    console.log('[translation] stemState empty', JSON.stringify(server));
+    expect(server.items).toEqual([]);
+    expect(server.tss).toEqual(ALL_TSS);
+  });
+
+  it('moves a stemStatus item into stemStatus and keeps other items', () => {
+    const server = toServerMeasurementFilterModel({
+      items: [
+        { id: 1, field: 'stemStatus', operator: 'is', value: 'dead' },
+        { id: 2, field: 'speciesCode', operator: 'equals', value: 'ACRU' }
+      ],
+      logicOperator: GridLogicOperator.And,
+      quickFilterValues: [],
+      visible: ALL_VISIBLE,
+      tss: ALL_TSS
+    });
+    console.log('[translation] stemStatus', JSON.stringify(server));
+    expect(server.items).toEqual([{ field: 'speciesCode', operator: 'equals', value: 'ACRU' }]);
+    expect(server.stemStatus).toEqual(['dead']);
+    expect(server).not.toHaveProperty('logicOperator');
+  });
+
+  it('treats models that differ only in stemStatus as different', () => {
+    const base = { items: [], quickFilterValues: [], visible: ALL_VISIBLE, tss: ALL_TSS };
+    expect(areExtendedFilterModelsEqual({ ...base, stemStatus: ['dead'] }, { ...base, stemStatus: ['alive'] })).toBe(false);
+    expect(areExtendedFilterModelsEqual({ ...base, stemStatus: ['dead'] }, { ...base, stemStatus: ['dead'] })).toBe(true);
+  });
+});
+
+describe('findPlotCensusNumberForCensusID (DBH fact line, A10)', () => {
+  const CENSUS_LIST = [undefined, { plotCensusNumber: 3, censusIDs: [68, 69] }, { plotCensusNumber: 4, censusIDs: [70] }] as unknown as Parameters<
+    typeof findPlotCensusNumberForCensusID
+  >[0];
+
+  it.each([
+    [70, 4],
+    [69, 3],
+    [999, null]
+  ])('maps CensusID %s to plot census number %s, skipping missing entries', (censusID, expected) => {
+    const observed = findPlotCensusNumberForCensusID(CENSUS_LIST, censusID);
+    console.log('[findPlotCensusNumberForCensusID]', censusID, observed);
+    expect(observed).toBe(expected);
+  });
+
+  it('returns null when the census list has not loaded', () => {
+    expect(findPlotCensusNumberForCensusID(undefined, 70)).toBeNull();
+  });
+});
+
+describe('resolveEnterNavigationTarget (Actions is now the first column)', () => {
+  const VISIBLE = ['actions', 'measurementStatus', 'stemState', 'treeTag', 'stemTag', 'speciesCode', 'quadratName', 'measuredDBH'];
+  const EDITABLE_FOR_FIELD_CREW = new Set(['treeTag', 'stemTag', 'quadratName', 'measuredDBH']);
+  const isEditable = (field: string) => EDITABLE_FOR_FIELD_CREW.has(field);
+
+  it.each([
+    ['treeTag', { kind: 'focusField', field: 'stemTag' }],
+    ['stemTag', { kind: 'focusField', field: 'quadratName' }],
+    ['quadratName', { kind: 'focusField', field: 'measuredDBH' }],
+    ['measuredDBH', { kind: 'highlightSave' }],
+    ['measurementStatus', { kind: 'focusField', field: 'treeTag' }]
+  ])('from %s → %j', (current, expected) => {
+    const observed = resolveEnterNavigationTarget(VISIBLE, current, isEditable);
+    console.log('[enter navigation]', current, JSON.stringify(observed));
+    expect(observed).toEqual(expected);
+  });
+
+  it('never targets the actions column even if it reports editable', () => {
+    expect(resolveEnterNavigationTarget(['treeTag', 'actions'], 'treeTag', () => true)).toEqual({ kind: 'highlightSave' });
+  });
+});
+
+describe('toUnpaginatedExportQuery (the export strips only the page LIMIT the server appended)', () => {
+  const EXPORT_SCHEMA = 'forestgeo_testing';
+  const EXPORT_PAGE = 3;
+  const EXPORT_PAGE_SIZE = 25;
+  const PAGE_LIMIT = `LIMIT ${EXPORT_PAGE * EXPORT_PAGE_SIZE}, ${EXPORT_PAGE_SIZE}`;
+  const LIMIT_LOOKING_SEARCH = 'LIMIT 1, 2';
+  const exportQueryFor = (searchValue: string) =>
+    buildMeasurementsSummaryPageQueries({
+      schema: EXPORT_SCHEMA,
+      columns: ['treeTag', 'stemTag'],
+      filterModel: { items: [], quickFilterValues: [searchValue], visible: [], tss: [] },
+      sortModel: [],
+      plotID: 1,
+      plotCensusNumber: 1,
+      page: EXPORT_PAGE,
+      pageSize: EXPORT_PAGE_SIZE
+    }).exportQuery;
+
+  it('removes the trailing page LIMIT from the real export query', () => {
+    const exportQuery = exportQueryFor('010203');
+    const observed = toUnpaginatedExportQuery(exportQuery);
+    console.log('[export query] before', JSON.stringify(exportQuery.slice(-120)), 'after', JSON.stringify(observed.slice(-120)));
+    expect(exportQuery).toContain(PAGE_LIMIT);
+    expect(observed).not.toContain(PAGE_LIMIT);
+    expect(observed).toContain('ORDER BY');
+  });
+
+  it('keeps a search value that reads like a LIMIT clause, and still removes the page LIMIT', () => {
+    const exportQuery = exportQueryFor(LIMIT_LOOKING_SEARCH);
+    const observed = toUnpaginatedExportQuery(exportQuery);
+    console.log(
+      '[export query] search literal case',
+      JSON.stringify({
+        literalBefore: exportQuery.includes(LIMIT_LOOKING_SEARCH),
+        literalAfter: observed.includes(LIMIT_LOOKING_SEARCH),
+        pageLimitAfter: observed.includes(PAGE_LIMIT)
+      })
+    );
+    expect(exportQuery).toContain(LIMIT_LOOKING_SEARCH);
+    expect(observed).toContain(LIMIT_LOOKING_SEARCH);
+    expect(observed).not.toContain(PAGE_LIMIT);
+  });
+
+  it('keeps a search value that reads like SQL_CALC_FOUND_ROWS', () => {
+    const observed = toUnpaginatedExportQuery(exportQueryFor('SQL_CALC_FOUND_ROWS '));
+    expect(observed).toContain('SQL_CALC_FOUND_ROWS ');
+  });
+
+  it('removes a leading SQL_CALC_FOUND_ROWS from a legacy paginated query', () => {
+    expect(toUnpaginatedExportQuery('SELECT SQL_CALC_FOUND_ROWS * FROM t ORDER BY a LIMIT 0, 10;')).toBe('SELECT * FROM t ORDER BY a ;');
   });
 });

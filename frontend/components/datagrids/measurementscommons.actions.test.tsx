@@ -22,7 +22,12 @@ const ROW_ADDED_BY_JOB = { ...MEASUREMENT_ROW, id: 2, coreMeasurementID: 502, tr
 const FINISHED_JOB_ID = 9001;
 const PAGE_SIZE = 10;
 const GRID_COLUMNS: GridColDef[] = [{ field: 'treeTag', headerName: 'Tree Tag', editable: true }];
-const DELETE_DIALOG_CONFIRM_LABEL = 'Confirm';
+const DETAILS_ACTION_LABEL = 'Details';
+const SHEET_DELETE_LABEL = 'Delete';
+const SHEET_DELETE_CONFIRM_LABEL = 'Delete measurement';
+// One millisecond after the advance to GUARD_MS - 1 lands exactly on the guard's expiry.
+const GUARD_EXPIRY_BOUNDARY_STEP_MS = 1;
+const DELETE_URL_PREFIX = '/api/fixeddata/measurementssummary/testschema/';
 const FILTERED_GRID_URL_PREFIX = '/api/fixeddatafilter/';
 const VALIDATION_ERRORS_URL_PREFIX = '/api/validations/validationerrordisplay';
 const QUERY_URL = '/api/query';
@@ -45,6 +50,7 @@ const stableHarnessContext = vi.hoisted(() => {
     plot: { plotID: 1, plotName: 'Test Plot' },
     census: { plotCensusNumber: 1, dateRanges: [{ censusID: 1 }] },
     site: { schemaName: 'testschema', siteName: 'Test Site' },
+    censusList: [{ plotCensusNumber: 1, censusIDs: [1] }],
     loading: { setLoading: noop },
     // Measurements actions render only for global / db admin sessions.
     session: { data: { user: { userStatus: 'global' } }, status: 'authenticated' },
@@ -61,7 +67,8 @@ const stableHarnessContext = vi.hoisted(() => {
 vi.mock('@/app/contexts/compat-hooks', () => ({
   usePlotContext: () => stableHarnessContext.plot,
   useOrgCensusContext: () => stableHarnessContext.census,
-  useSiteContext: () => stableHarnessContext.site
+  useSiteContext: () => stableHarnessContext.site,
+  useOrgCensusListContext: () => stableHarnessContext.censusList
 }));
 vi.mock('@/app/contexts/loadingprovider', () => ({ useLoading: () => stableHarnessContext.loading }));
 vi.mock('next-auth/react', () => ({ useSession: () => stableHarnessContext.session }));
@@ -75,14 +82,6 @@ vi.mock('@/lib/db/definitions/taxonomies', async importOriginal => importOrigina
 vi.mock('@/lib/db/definitions/timekeeping', async importOriginal => importOriginal());
 vi.mock('@/lib/db/definitions/validations', async importOriginal => importOriginal());
 vi.mock('@/lib/db/definitions/admin', async importOriginal => importOriginal());
-vi.mock('@/components/client/modals/confirmationdialog', () => ({
-  default: ({ open, onConfirm }: { open: boolean; onConfirm: () => void }) =>
-    open ? (
-      <button type="button" onClick={onConfirm}>
-        Confirm
-      </button>
-    ) : null
-}));
 vi.mock('@/components/client/datagridelements', () => ({ EditToolbar: () => <div>Toolbar</div> }));
 // Plain functions, not vi.fn: the unit config sets mockReset, which would make a vi.fn return undefined.
 vi.mock('@/components/client/clientmacros', async importOriginal => ({
@@ -90,7 +89,10 @@ vi.mock('@/components/client/clientmacros', async importOriginal => ({
   loadSelectableOptions: async () => undefined,
   getSelectableOptionsForField: () => []
 }));
-vi.mock('@/app/hooks/useEditPreviewFlow', () => ({ useEditPreviewFlow: () => stableHarnessContext.editPreviewFlow }));
+vi.mock('@/app/hooks/useEditPreviewFlow', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/app/hooks/useEditPreviewFlow')>()),
+  useEditPreviewFlow: () => stableHarnessContext.editPreviewFlow
+}));
 vi.mock('@mui/x-data-grid', async importOriginal => {
   const actual = await importOriginal<typeof import('@mui/x-data-grid')>();
   return {
@@ -103,7 +105,8 @@ vi.mock('@mui/x-data-grid', async importOriginal => {
     )
   };
 });
-vi.mock('@/config/styleddatagrid', () => ({
+vi.mock('@/config/styleddatagrid', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/config/styleddatagrid')>()),
   StyledDataGrid: (props: {
     rows?: Array<{ id: number }>;
     columns?: GridColDef[];
@@ -200,7 +203,6 @@ function MeasurementsGridHarness({ enableInfiniteScroll = false }: { enableInfin
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={() => undefined}
-        dynamicButtons={[]}
         enableInfiniteScroll={enableInfiniteScroll}
       />
     </SWRConfig>
@@ -240,10 +242,10 @@ describe('MeasurementsCommons row actions: Delete right after Cancel (#525 item 
     vi.unstubAllGlobals();
   });
 
-  it('renders the real Edit and Delete actions for each row and then stops fetching (harness self-check)', async () => {
+  it('renders the real Edit and Details actions for each row, no row Delete, and then stops fetching (harness self-check)', async () => {
     render(<MeasurementsGridHarness />);
     const editButtons = await screen.findAllByRole('button', { name: 'Edit' });
-    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
+    const detailsButtons = screen.getAllByRole('button', { name: DETAILS_ACTION_LABEL });
     const settledFetchCount = await waitForHarnessToSettle();
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, HARNESS_QUIET_PERIOD_MS));
@@ -251,55 +253,69 @@ describe('MeasurementsCommons row actions: Delete right after Cancel (#525 item 
     const fetchCountAfterQuietPeriod = mockFetch.mock.calls.length;
 
     console.log(
-      `[#525 item 1] harness rendered ${editButtons.length} Edit / ${deleteButtons.length} Delete; fetches settled at ${settledFetchCount}, ${fetchCountAfterQuietPeriod} after ${HARNESS_QUIET_PERIOD_MS}ms more: ${mockFetch.mock.calls.map(([url]) => String(url)).join(', ')}`
+      `[#525 item 1] harness rendered ${editButtons.length} Edit / ${detailsButtons.length} Details; fetches settled at ${settledFetchCount}, ${fetchCountAfterQuietPeriod} after ${HARNESS_QUIET_PERIOD_MS}ms more: ${mockFetch.mock.calls.map(([url]) => String(url)).join(', ')}`
     );
     expect(editButtons).toHaveLength(1);
-    expect(deleteButtons).toHaveLength(1);
+    expect(detailsButtons).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: SHEET_DELETE_LABEL })).not.toBeInTheDocument();
     expect(fetchCountAfterQuietPeriod, 'the harness kept fetching after it settled: a render/fetch loop, not a Delete bug').toBe(settledFetchCount);
   });
 
-  it('(a) disables Delete straight after Cancel and re-enables it when the guard window ends', async () => {
+  async function openSheetDelete(): Promise<HTMLElement> {
+    fireEvent.click(screen.getByRole('button', { name: DETAILS_ACTION_LABEL }));
+    return screen.findByRole('button', { name: SHEET_DELETE_LABEL });
+  }
+
+  it('(a) disables the sheet Delete straight after Cancel and re-enables it when the guard window ends', async () => {
     render(<MeasurementsGridHarness />);
     const cancelButton = await enterEditModeAndFindCancel();
+    // Fake timers go in before the Cancel click: the guard's expiry timer is created by that click.
     vi.useFakeTimers();
-
     fireEvent.click(cancelButton);
-    const disabledRightAfterCancel = screen.getByRole('button', { name: 'Delete' }).getAttribute('data-disabled');
+    fireEvent.click(screen.getByRole('button', { name: DETAILS_ACTION_LABEL }));
+    const sheetDelete = screen.getByRole('button', { name: SHEET_DELETE_LABEL });
+    const disabledRightAfterCancel = sheetDelete.hasAttribute('disabled');
     act(() => vi.advanceTimersByTime(DELETE_AFTER_CANCEL_GUARD_MS - 1));
-    const disabledJustBeforeExpiry = screen.getByRole('button', { name: 'Delete' }).getAttribute('data-disabled');
-    act(() => vi.advanceTimersByTime(1));
-    const disabledAtExpiry = screen.getByRole('button', { name: 'Delete' }).getAttribute('data-disabled');
-
-    console.log(`[#525 item 1] measurements Delete data-disabled: ${disabledRightAfterCancel} → ${disabledJustBeforeExpiry} → ${disabledAtExpiry}`);
-    expect(disabledRightAfterCancel).toBe('true');
-    expect(disabledJustBeforeExpiry).toBe('true');
-    expect(disabledAtExpiry).toBe('false');
+    const disabledJustBeforeExpiry = screen.getByRole('button', { name: SHEET_DELETE_LABEL }).hasAttribute('disabled');
+    act(() => vi.advanceTimersByTime(GUARD_EXPIRY_BOUNDARY_STEP_MS));
+    const disabledAtExpiry = screen.getByRole('button', { name: SHEET_DELETE_LABEL }).hasAttribute('disabled');
+    console.log(`[#525 item 1] sheet Delete disabled: ${disabledRightAfterCancel} → ${disabledJustBeforeExpiry} → ${disabledAtExpiry}`);
+    expect(disabledRightAfterCancel).toBe(true);
+    expect(disabledJustBeforeExpiry).toBe(true);
+    expect(disabledAtExpiry).toBe(false);
   });
 
-  it('(b) swallows the second click of a double-click on Cancel even though it lands on Delete', async () => {
+  it('(b) a double-click on Cancel lands its second click on Details, so the sheet opens with Delete disabled: no confirmation, no DELETE request', async () => {
     const user = userEvent.setup();
     render(<MeasurementsGridHarness />);
     const cancelButton = await enterEditModeAndFindCancel();
-
     await user.dblClick(cancelButton);
-
-    console.log(
-      `[#525 item 1] measurements slot-2 action after the double-click: "${cancelButton.textContent}"; delete dialog open: ${Boolean(screen.queryByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL }))}`
+    const reusedNodeLabel = cancelButton.textContent;
+    const sheetDelete = await screen.findByRole('button', { name: SHEET_DELETE_LABEL });
+    const deleteRequests = mockFetch.mock.calls.filter(
+      ([url, init]) => String(url).startsWith(DELETE_URL_PREFIX) && (init as RequestInit | undefined)?.method === 'DELETE'
     );
-    expect(cancelButton).toHaveTextContent('Delete');
-    expect(screen.queryByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL })).not.toBeInTheDocument();
+    console.log(
+      `[#525 item 1] after double-click: node now reads "${reusedNodeLabel}", sheet Delete disabled ${sheetDelete.hasAttribute('disabled')}, confirm open ${Boolean(screen.queryByRole('alertdialog'))}, DELETE requests ${deleteRequests.length}`
+    );
+    expect(reusedNodeLabel).toBe(DETAILS_ACTION_LABEL);
+    expect(sheetDelete).toBeDisabled();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(deleteRequests).toHaveLength(0);
   });
 
-  it('(c) opens the delete dialog for a deliberate click once the guard window has passed', async () => {
+  it('(c) deletes deliberately from the sheet once the guard window has passed', async () => {
     render(<MeasurementsGridHarness />);
     const cancelButton = await enterEditModeAndFindCancel();
     vi.useFakeTimers();
-
     fireEvent.click(cancelButton);
     act(() => vi.advanceTimersByTime(DELETE_AFTER_CANCEL_GUARD_MS));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-
-    expect(screen.getByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL })).toBeInTheDocument();
+    vi.useRealTimers();
+    fireEvent.click(await openSheetDelete());
+    fireEvent.click(screen.getByRole('button', { name: SHEET_DELETE_CONFIRM_LABEL }));
+    await waitFor(() =>
+      expect(mockFetch.mock.calls.some(([url, init]) => String(url).startsWith(DELETE_URL_PREFIX) && (init as RequestInit).method === 'DELETE')).toBe(true)
+    );
   });
 });
 

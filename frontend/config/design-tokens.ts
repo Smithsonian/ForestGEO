@@ -55,6 +55,9 @@ export const designTokens = {
     popover: 1500,
     tooltip: 1600,
     header: 9995,
+    detailsSheet: 9996,
+    notificationOverDetailsSheet: 9997,
+    tooltipOverDetailsSheet: 9998,
     loadingOverlay: 1999
   },
 
