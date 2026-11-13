@@ -97,6 +97,69 @@ const ERROR_TYPE_TABLE: ErrorTypeDefinition[] = [
 
 const CATALOG_TYPES = ERROR_TYPE_TABLE.filter(type => type.key !== NO_LOG_ERROR_TYPE_KEY);
 
+const TIE_MESSAGE = 'Tag already used in plot';
+const DBH_SHRANK_MESSAGE = 'DBH shrank between censuses';
+
+const DBH_SHRANK_TYPE: ErrorTypeDefinition = {
+  key: 1,
+  source: 'validation',
+  code: '1',
+  message: DBH_SHRANK_MESSAGE,
+  criteria: 'measuredDBH',
+  procedureName: 'ValidateDBHShrinkage'
+};
+const DBH_SHRANK_TYPE_DUPLICATE_IDENTITY: ErrorTypeDefinition = { ...DBH_SHRANK_TYPE, key: 8, procedureName: 'ValidateDBHShrinkageLegacy' };
+const CODE_TIE_HIGHER_CODE_FIRST: ErrorTypeDefinition = {
+  key: 2,
+  source: 'validation',
+  code: '4',
+  message: SHARED_MESSAGE,
+  criteria: 'speciesCode',
+  procedureName: 'ValidateSpeciesB'
+};
+const CODE_TIE_LOWER_CODE_SECOND: ErrorTypeDefinition = {
+  key: 3,
+  source: 'validation',
+  code: '3',
+  message: SHARED_MESSAGE,
+  criteria: 'speciesCode',
+  procedureName: 'ValidateSpeciesA'
+};
+const SOURCE_TIE_VALIDATION: ErrorTypeDefinition = {
+  key: 6,
+  source: 'validation',
+  code: '5',
+  message: TIE_MESSAGE,
+  criteria: '',
+  procedureName: 'ValidateDuplicateTag'
+};
+const SOURCE_TIE_INGESTION: ErrorTypeDefinition = {
+  key: 9,
+  source: 'ingestion',
+  code: 'DUPLICATE_TREE_TAG',
+  message: TIE_MESSAGE,
+  criteria: '',
+  procedureName: ''
+};
+
+/**
+ * Types that always travel together, so the pair's counts tie under every filter that keeps both:
+ * - one identity through two ErrorIDs (dev's per-measurement dedupe),
+ * - two codes with one source and message (the code tie-break; the lower code has the higher key, so insertion order is wrong),
+ * - one message under both sources (the source tie-break; the validation type has the lower key, so insertion order is wrong).
+ */
+const PARITY_TYPE_UNITS: ErrorTypeDefinition[][] = [
+  [DBH_SHRANK_TYPE, DBH_SHRANK_TYPE_DUPLICATE_IDENTITY],
+  [CODE_TIE_HIGHER_CODE_FIRST, CODE_TIE_LOWER_CODE_SECOND],
+  [SOURCE_TIE_VALIDATION, SOURCE_TIE_INGESTION],
+  [{ key: 4, source: 'validation', code: '7', message: SEMICOLON_MESSAGE, criteria: 'quadratName', procedureName: 'ValidateSemicolon' }],
+  [{ key: 5, source: 'validation', code: '8', message: 'Tag pair is wrong', criteria: 'treeTag;stemTag', procedureName: 'ValidateTagPair' }],
+  [{ key: 7, source: 'ingestion', code: 'MISSING_FIELD_TREETAG', message: 'Tree tag is missing', criteria: '', procedureName: '' }],
+  [NO_LOG_TYPE]
+];
+
+const PARITY_CATALOG_TYPES = PARITY_TYPE_UNITS.flat().filter(type => type.key !== NO_LOG_ERROR_TYPE_KEY);
+
 function toCatalogRows(types: readonly ErrorTypeDefinition[]): ErrorTypeCatalogRow[] {
   return types.map(type => ({
     ErrorID: type.key,
@@ -136,8 +199,8 @@ interface GeneratedErrorSet {
 }
 
 function pickDistinctTypes(random: () => number, count: number): ErrorTypeDefinition[] {
-  const remaining = [...ERROR_TYPE_TABLE];
-  return Array.from({ length: count }, () => remaining.splice(Math.floor(random() * remaining.length), 1)[0]);
+  const remaining = [...PARITY_TYPE_UNITS];
+  return Array.from({ length: count }, () => remaining.splice(Math.floor(random() * remaining.length), 1)[0]).flat();
 }
 
 function pickMemberIDs(random: () => number): number[] {
@@ -219,7 +282,7 @@ function firstDifferingFacet(expected: Record<string, unknown>, actual: Record<s
 describe.each(RANDOM_SEEDS)('weighted facet and message math against the frozen oracle (seed %i)', seed => {
   const generated = generateErrorSet(seed);
   const executor = fakeExecutor(generated);
-  const catalog = buildErrorTypeCatalog(toCatalogRows(CATALOG_TYPES));
+  const catalog = buildErrorTypeCatalog(toCatalogRows(PARITY_CATALOG_TYPES));
 
   async function weightedRowSets() {
     const grouped = await oracle.fetchGroupedErrorRows(executor, SCHEMA, PLOT_ID, [CENSUS_ID]);
@@ -251,6 +314,33 @@ describe.each(RANDOM_SEEDS)('weighted facet and message math against the frozen 
     expect(contradictionTotals.failed, 'and some must not be').toBeLessThan(grouped.size);
     expect(collapsed.length, 'collapsing must actually merge measurements').toBeLessThan(grouped.size);
     expect(collapsed.reduce((total, row) => total + row.measurementCount, 0)).toBe(grouped.size);
+  });
+
+  it('reaches a duplicate identity, a source tie and a code tie in the oracle facets of every seed', async () => {
+    const duplicateIdentityKeys = [DBH_SHRANK_TYPE.key, DBH_SHRANK_TYPE_DUPLICATE_IDENTITY.key];
+    const measurementsCarryingBothDuplicateKeys = Array.from(generated.typeKeysByMeasurement.values()).filter(keys =>
+      duplicateIdentityKeys.every(key => keys.includes(key))
+    ).length;
+    const { errorTypes } = await oracle.buildErrorExplorerFacets(executor, {
+      schema: SCHEMA,
+      plotID: PLOT_ID,
+      censusID: CENSUS_ID,
+      censusIDs: [CENSUS_ID],
+      filters: DEFAULT_ERROR_EXPLORER_FILTERS
+    });
+    const adjacentTies = errorTypes.flatMap((errorType, index) => {
+      const next = errorTypes[index + 1];
+      return next !== undefined && next.count === errorType.count && next.message === errorType.message ? [[errorType, next] as const] : [];
+    });
+    const sourceTies = adjacentTies.filter(([first, second]) => first.source !== second.source);
+    const codeTies = adjacentTies.filter(([first, second]) => first.source === second.source && first.code !== second.code);
+    console.log(`[seed ${seed}] measurements carrying the duplicate identity twice ${measurementsCarryingBothDuplicateKeys}`, {
+      sourceTies: sourceTies.map(pair => pair.map(type => `${type.source}/${type.code}`)),
+      codeTies: codeTies.map(pair => pair.map(type => `${type.source}/${type.code}`))
+    });
+    expect(measurementsCarryingBothDuplicateKeys, 'a measurement must reach one identity through two ErrorIDs').toBeGreaterThan(0);
+    expect(sourceTies.length, 'a message shared by both sources with equal counts').toBeGreaterThan(0);
+    expect(codeTies.length, 'two codes of one source and message with equal counts').toBeGreaterThan(0);
   });
 
   it.each(FACET_FILTER_CASES)(
