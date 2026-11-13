@@ -83,6 +83,8 @@ const GROUP_OPTIONAL_FIELDS = [
   'description'
 ] as const;
 const DBH_CHANGE_COLUMNS = ['priorDBH', 'measuredDBH', 'dbhChangePercent'] as const;
+/** Editable fields a group may hide by default; shown for the duration of a row edit so any of them can be corrected. */
+export const GROUP_EDIT_REVEAL_FIELDS = ['attributes', 'stemLocalX', 'stemLocalY', 'measuredDBH', 'measuredHOM', 'description'] as const;
 
 /** The flat grid's defaults: today's hidden set plus the new Change column (#525 item 7). */
 export const ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS: GridColumnVisibilityModel = {

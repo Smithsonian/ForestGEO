@@ -611,29 +611,35 @@ function formatHOMChangedForExport(comparison: ErrorComparisonContext | null, cu
 // unresolved errors produces three CSV rows, each carrying its own comparison
 // context. Sort mirrors queryErrorExplorer's unfiltered grid order so the
 // export reads the same top-to-bottom as the grid the user was looking at.
-export function buildErrorExportRows(groupedRows: Map<number, GroupedErrorRow>, filters: ErrorExplorerFilters): ErrorExportRow[] {
+export function buildErrorExportRows(
+  groupedRows: Map<number, GroupedErrorRow>,
+  filters: ErrorExplorerFilters,
+  errorType?: ErrorTypeIdentity
+): ErrorExportRow[] {
   return buildFilteredRows(groupedRows, filters)
     .sort(sortRows)
     .flatMap(row =>
-      materializeMatchingErrors(row, filters).map(
-        (error): ErrorExportRow => ({
-          CoreMeasurementID: Number(row.baseRow.coreMeasurementID),
-          TreeTag: row.baseRow.treeTag ?? '',
-          StemTag: row.baseRow.stemTag ?? '',
-          SpeciesCode: row.baseRow.speciesCode ?? '',
-          QuadratName: row.baseRow.quadratName ?? '',
-          MeasurementDate: row.baseRow.measurementDate ?? '',
-          MeasuredDBH: row.baseRow.measuredDBH ?? '',
-          MeasuredHOM: row.baseRow.measuredHOM ?? '',
-          ErrorSource: error.source,
-          ErrorCode: error.code,
-          ErrorMessage: error.message,
-          PriorCensusID: error.comparison?.priorCensusID ?? '',
-          PriorDBH: error.comparison?.priorDBH ?? '',
-          PriorHOM: error.comparison?.priorHOM ?? '',
-          HOMChanged: formatHOMChangedForExport(error.comparison, row.baseRow.measuredHOM)
-        })
-      )
+      materializeMatchingErrors(row, filters)
+        .filter(error => !errorType || matchesErrorTypeIdentity(error, errorType))
+        .map(
+          (error): ErrorExportRow => ({
+            CoreMeasurementID: Number(row.baseRow.coreMeasurementID),
+            TreeTag: row.baseRow.treeTag ?? '',
+            StemTag: row.baseRow.stemTag ?? '',
+            SpeciesCode: row.baseRow.speciesCode ?? '',
+            QuadratName: row.baseRow.quadratName ?? '',
+            MeasurementDate: row.baseRow.measurementDate ?? '',
+            MeasuredDBH: row.baseRow.measuredDBH ?? '',
+            MeasuredHOM: row.baseRow.measuredHOM ?? '',
+            ErrorSource: error.source,
+            ErrorCode: error.code,
+            ErrorMessage: error.message,
+            PriorCensusID: error.comparison?.priorCensusID ?? '',
+            PriorDBH: error.comparison?.priorDBH ?? '',
+            PriorHOM: error.comparison?.priorHOM ?? '',
+            HOMChanged: formatHOMChangedForExport(error.comparison, row.baseRow.measuredHOM)
+          })
+        )
     );
 }
 

@@ -27,8 +27,10 @@ import {
   FALLBACK_ERROR_MESSAGE,
   formatContradictionCaption,
   formatDbhChange,
+  formatErrorCodeLine,
   formatErrorTypeLabel,
   formatFixFailedUploads,
+  formatPriorHomFact,
   formatViewErrorsFactsLine,
   INGESTION_ERROR_FIELD_MAP,
   isErrorExplorerNumberField,
@@ -293,6 +295,25 @@ describe('text helpers', () => {
 
   it('maps DUPLICATE_TAG_STEMTAG to the tree and stem tag columns (P2-6)', () => {
     expect(INGESTION_ERROR_FIELD_MAP.DUPLICATE_TAG_STEMTAG).toEqual(['treeTag', 'stemTag']);
+  });
+});
+
+describe('details sheet fact formatters', () => {
+  it.each([
+    ['14', 'ValidateFindInvalidAttributeCodes', 'Code 14 · ValidateFindInvalidAttributeCodes'],
+    ['14', null, 'Code 14'],
+    ['14', '', 'Code 14'],
+    ['INVALID_SPECIES', undefined, 'Code INVALID_SPECIES']
+  ])('formats code %s with procedure %s', (code, procedureName, expected) => {
+    expect(formatErrorCodeLine(code, procedureName)).toBe(expected);
+  });
+
+  it.each([
+    [1.3, false, 'Prior HOM 1.3'],
+    [1.3, true, 'Prior HOM 1.3 (HOM changed)'],
+    [null, true, null]
+  ])('formats prior HOM %s changed=%s', (priorHOM, homChanged, expected) => {
+    expect(formatPriorHomFact(priorHOM, homChanged)).toBe(expected);
   });
 });
 

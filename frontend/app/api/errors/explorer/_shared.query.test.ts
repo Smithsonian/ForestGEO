@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_ERROR_EXPLORER_FILTERS, type ErrorExplorerFilters, type ErrorExplorerQueryRequest, type ErrorTypeIdentity } from '@/config/errorsexplorer';
-import { queryErrorExplorer, groupErrorRowsForTest, type RawErrorOccurrenceRow } from './_shared';
+import { buildErrorExportRows, fetchGroupedErrorRows, queryErrorExplorer, groupErrorRowsForTest, type RawErrorOccurrenceRow } from './_shared';
 import {
   EXPLORER_TEST_CENSUS_ID,
   EXPLORER_TEST_PLOT_ID,
@@ -62,6 +62,30 @@ describe('queryErrorExplorer — error-type identity (P2-1)', () => {
     expect(row103?.totalErrorCount, 'two codes sharing a message are two errors').toBe(2);
     expect(row103?.errorCount).toBe(1);
     expect(row103?.errorCodes).toEqual(['CODE_A']);
+  });
+});
+
+describe('buildErrorExportRows — one error type', () => {
+  const fixture: ExplorerConnectionFixture = {
+    rawRowsByCensus: { [EXPLORER_TEST_CENSUS_ID]: [occurrence(101, CODE_A), occurrence(102, CODE_B), occurrence(103, CODE_A), occurrence(103, CODE_B)] }
+  };
+
+  it('exports only the occurrences of the requested identity', async () => {
+    const { connection } = explorerConnection(fixture);
+    const grouped = await fetchGroupedErrorRows(connection, EXPLORER_TEST_SCHEMA, EXPLORER_TEST_PLOT_ID, [EXPLORER_TEST_CENSUS_ID]);
+    const everything = buildErrorExportRows(grouped, DEFAULT_ERROR_EXPLORER_FILTERS);
+    const onlyCodeA = buildErrorExportRows(grouped, DEFAULT_ERROR_EXPLORER_FILTERS, CODE_A);
+    console.log(
+      '[view-errors export]',
+      JSON.stringify({
+        everything: everything.map(row => [row.CoreMeasurementID, row.ErrorCode]),
+        onlyCodeA: onlyCodeA.map(row => [row.CoreMeasurementID, row.ErrorCode])
+      })
+    );
+
+    expect(everything).toHaveLength(4);
+    expect(onlyCodeA.map(row => row.ErrorCode)).toEqual([CODE_A.code, CODE_A.code]);
+    expect(onlyCodeA.map(row => row.CoreMeasurementID).sort()).toEqual([101, 103]);
   });
 });
 

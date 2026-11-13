@@ -23,7 +23,7 @@ interface UndoToastProps {
   onUndo: (confirmedPlanHash?: string) => Promise<UndoRevertOutcome>;
   onDismiss: () => void;
   timeoutMs?: number;
-  /** While set, Undo is disabled and this is its tooltip (the page's edit lock, D-i). The dismiss timer keeps running. */
+  /** While set, Undo is disabled with this tooltip and the dismiss timer is held; it restarts when the lock releases. */
   disabledReason?: string | null;
 }
 
@@ -155,12 +155,12 @@ export default function UndoToast({ editOperationID, onUndo, onDismiss, timeoutM
     // While unexpectedError is set it is the only explanation the user has
     // for why the undo did not complete; letting the timer auto-dismiss it
     // would silently remove that message with no way to recover it.
-    if (busy || previewPlan || unexpectedError) return;
+    if (busy || previewPlan || unexpectedError || disabledReason) return;
     const timer = setTimeout(() => {
       triggerDismiss();
     }, timeoutMs);
     return () => clearTimeout(timer);
-  }, [timeoutMs, busy, previewPlan, unexpectedError, triggerDismiss]);
+  }, [timeoutMs, busy, previewPlan, unexpectedError, disabledReason, triggerDismiss]);
 
   return (
     <>
