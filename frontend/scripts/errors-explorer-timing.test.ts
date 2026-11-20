@@ -5,6 +5,7 @@ import { everyErrorSetStatement } from '@/tests/setup/errorsetstatements';
 import * as oracle from '@/tests/oracles/errors-explorer-legacy';
 import { buildActiveMeasurementCountQuery } from '@/lib/activemeasurementcount';
 import { ACTIVE_COUNT_STATEMENT, ORACLE_OUTSIDE_ROWS_STATEMENT } from '@/tests/setup/errorsetstatements';
+import { SCENARIO_NAMES } from '@/tests/benchmarks/lib/errorsexplorerscenarios';
 import { buildF1MembershipProbe, buildF2MembershipProbe, MEMBERSHIP_PROBE_LABELS, runMembershipProbeRepetition } from '@/tests/benchmarks/lib/membershipprobe';
 import { CENSUS_LIST_SIZE, chunkCensusIDs, ERROR_EXPLORER_STATEMENT_LABELS, readStatementLabel } from '@/app/api/errors/explorer/errorsetsql';
 import {
@@ -962,5 +963,71 @@ describe('a full measurement run over a 26-census scope (fake database)', () => 
   it('merges the histogram chunks into the distinct signature count', async () => {
     const { output } = await runScope();
     expect(output).toMatch(/distinct signatures: with flags \d+, without flags \d+/);
+  });
+});
+
+describe('the oracle outside-partner lookup in the timing output (fake database)', () => {
+  const PLOT_ID = 1;
+  const CENSUS_ID = 2;
+  const SELECTED_ID = 10;
+  const OUTSIDE_PARTNER_ID = 99;
+  const RUNS = 1;
+  const OUTSIDE_LOOKUP_ERROR = { code: 'ER_PARSE_ERROR', errno: 1064, message: 'sentinel_user_544 SENTINEL-PASSWORD-544' };
+  const OUTSIDE_LABEL_PATTERN = new RegExp(`${ORACLE_OUTSIDE_ROWS_STATEMENT}`);
+  const rawRow = {
+    CoreMeasurementID: SELECTED_ID,
+    PlotID: PLOT_ID,
+    CensusID: CENSUS_ID,
+    CoreStemGUID: 5,
+    ErrorSource: 'ingestion',
+    ErrorCode: 'FAKE_CODE',
+    DisplayMessage: 'fake message',
+    ValidationCriteria: null,
+    ProcedureName: null
+  };
+  const ZERO_TOTALS = { TotalRows: 0, ValidationRows: 0, IngestionRows: 0, ContradictionRows: 0, DuplicateTagStemRows: 0, SameBatchConflictRows: 0 };
+  const outsideRow = { RelatedCoreMeasurementID: OUTSIDE_PARTNER_ID, TreeTag: 'T', StemTag: '1' };
+
+  function databaseWithOutsidePartner(options: { failOutsideLookup: boolean }) {
+    const base = fake();
+    base.connection.query.mockResolvedValue([[{ readOnly: 1, Value: '1' }], []]);
+    base.connection.execute.mockImplementation(async (sql: string) => {
+      const statementClass = classifyStatement(sql);
+      if (statementClass === ORACLE_OUTSIDE_ROWS_STATEMENT) {
+        if (options.failOutsideLookup) throw OUTSIDE_LOOKUP_ERROR;
+        return [[outsideRow], []];
+      }
+      if (readStatementLabel(sql) === ERROR_EXPLORER_STATEMENT_LABELS.totals) return [[ZERO_TOTALS], []];
+      if (statementClass === 'raw-rows') return [[rawRow], []];
+      if (statementClass === 'duplicate-groups') return [[{ TreeTag: 'T', StemTag: '1', MeasurementIDs: `${SELECTED_ID},${OUTSIDE_PARTNER_ID}` }], []];
+      if (sql.includes('AS maxLen')) return [[{ maxLen: 1_048_576 }], []];
+      if (sql.includes('SET_VAR')) return [[{ probe: 4 }], []];
+      if (sql.includes('COUNT(*) AS n')) return [[{ n: 0 }], []];
+      return [[], []];
+    });
+    return base;
+  }
+
+  async function runWithOutsidePartner(options: { failOutsideLookup: boolean }) {
+    const f = databaseWithOutsidePartner(options);
+    const result = await runTimingCli(['--schema', BUILDER_SCHEMA, '--plot', String(PLOT_ID), '--census', String(CENSUS_ID), '--runs', String(RUNS)], f.deps);
+    return { f, result, output: f.stdout.join('\n'), errorOutput: f.stderr.join('\n') };
+  }
+
+  it('names the lookup in its statement timing line instead of unlabelled', async () => {
+    const { output, result, errorOutput } = await runWithOutsidePartner({ failOutsideLookup: false });
+    const detailsLines = output.split('\n').filter(line => line.startsWith(`statement ${SCENARIO_NAMES.detailsWithOutsidePartner} oracle`));
+    console.log(`exit=${result.exitCode} stderr=${errorOutput}\n${detailsLines.join('\n')}`);
+    expect(detailsLines.length, 'the details scenario must have run on the oracle arm').toBeGreaterThan(0);
+    expect(detailsLines.some(line => OUTSIDE_LABEL_PATTERN.test(line))).toBe(true);
+    expect(detailsLines.some(line => /: unlabelled,/.test(line))).toBe(false);
+    expect(output).toContain('unlabelled statements: 0');
+  });
+
+  it('names the lookup in the failure diagnostic instead of unlabelled, without leaking the driver message', async () => {
+    const { result, errorOutput } = await runWithOutsidePartner({ failOutsideLookup: true });
+    console.log(`exit=${result.exitCode} stderr=${errorOutput}`);
+    expect(errorOutput).toMatch(new RegExp(`^timing: statement failed \\(ER_PARSE_ERROR, errno 1064\\) in .+/${ORACLE_OUTSIDE_ROWS_STATEMENT}$`));
+    expect(errorOutput).not.toMatch(/SENTINEL|sentinel/);
   });
 });

@@ -21,6 +21,7 @@ import {
   classifyStatement,
   describeCensusScope,
   lastPageNumber,
+  ORACLE_OUTSIDE_ROWS_STATEMENT,
   pastTheEndPageNumber,
   UNLABELLED_STATEMENT
 } from '@/tests/setup/errorsetstatements';
@@ -90,6 +91,7 @@ const SAFE_CONTEXT = new Set([
   'same-batch-groups',
   ...Object.values(SCENARIO_NAMES),
   ACTIVE_COUNT_STATEMENT,
+  ORACLE_OUTSIDE_ROWS_STATEMENT,
   M1_PROBE_SCENARIO,
   ...Object.values(ERROR_EXPLORER_STATEMENT_LABELS),
   ...Object.values(MEMBERSHIP_PROBE_LABELS)
