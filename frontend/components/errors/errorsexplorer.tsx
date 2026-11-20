@@ -258,23 +258,32 @@ export default function ErrorsExplorer() {
   const deepLinkRef = useRef<{ filters: ErrorExplorerFilters | null; appliedStorageKey: string | null } | null>(null);
   if (deepLinkRef.current === null) deepLinkRef.current = { filters: resolveErrorsExplorerDeepLinkFilters(searchParams), appliedStorageKey: null };
 
+  const [restoredStorageKey, setRestoredStorageKey] = useState<string | null>(null);
+  const filtersRestored = storageKey !== null && restoredStorageKey === storageKey;
+
   useEffect(() => {
-    if (!storageKey) return;
     const deepLink = deepLinkRef.current;
+    if (!storageKey) {
+      if (deepLink && deepLink.appliedStorageKey !== null) deepLink.filters = null;
+      setRestoredStorageKey(null);
+      return;
+    }
     if (deepLink?.filters) {
       if (deepLink.appliedStorageKey === null || deepLink.appliedStorageKey === storageKey) {
         deepLink.appliedStorageKey = storageKey;
         setFilters(deepLink.filters);
+        setRestoredStorageKey(storageKey);
         return;
       }
       deepLink.filters = null;
     }
     setFilters(parseStoredErrorExplorerFilters(readStoredFilters(storageKey)));
+    setRestoredStorageKey(storageKey);
   }, [storageKey]);
 
   useEffect(() => {
-    if (storageKey) writeStoredFilters(storageKey, serializeStoredErrorExplorerFilters(filters));
-  }, [filters, storageKey]);
+    if (storageKey && filtersRestored) writeStoredFilters(storageKey, serializeStoredErrorExplorerFilters(filters));
+  }, [filters, filtersRestored, storageKey]);
 
   useEffect(() => {
     if (!currentSite?.schemaName) return;
@@ -284,7 +293,7 @@ export default function ErrorsExplorer() {
   }, [currentSite, currentPlot, currentCensus]);
 
   const facets = useErrorsExplorerRequest<ErrorExplorerFacetsResponse>({
-    requestKey: readScope ? `facets|${readScopeKey}|${JSON.stringify(filters)}` : null,
+    requestKey: readScope && filtersRestored ? `facets|${readScopeKey}|${JSON.stringify(filters)}` : null,
     load: signal => {
       if (!readScope) throw new Error(VIEW_ERRORS_TEXT.totalsLoadFailed);
       return postErrorsExplorerFacets(readScope, filters, signal);
@@ -624,7 +633,7 @@ export default function ErrorsExplorer() {
         <FilteredToChip exactMessages={filters.exactMessages} onClear={clearExactMessages} clearDisabledReason={pageLockReason} />
       )}
 
-      {effectiveGroupMode === 'none' && (
+      {effectiveGroupMode === 'none' && filtersRestored && (
         <ErrorsExplorerGrid
           key={`${readScopeKey}::${FLAT_GRID_KEY}`}
           {...gridProps}

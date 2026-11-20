@@ -1,13 +1,15 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_ERROR_EXPLORER_FILTERS,
   ERRORS_EXPLORER_MESSAGE_PARAM,
   ERRORS_EXPLORER_VIEW_ALL,
   ERRORS_EXPLORER_VIEW_PARAM,
+  VIEW_ERRORS_TEXT,
   type ErrorExplorerFilters
 } from '@/config/errorsexplorer';
+import userEvent from '@testing-library/user-event';
 import { getDateRangeCensusIDs } from '@/lib/censusscope';
 import type { OrgCensusRDS } from '@/lib/db/definitions/timekeeping';
 import ErrorsExplorer, { getFilterStorageKey } from './errorsexplorer';
@@ -46,7 +48,7 @@ vi.mock('@/components/client/clientmacros', () => ({
   loadSelectableOptions: vi.fn(async () => undefined)
 }));
 vi.mock('@/components/errors/contradictioncomparisonpanel', () => ({ default: () => null }));
-vi.mock('./errorsexplorergrid', () => ({ default: () => <div data-testid="styled-grid" /> }));
+vi.mock('@/config/styleddatagrid', async () => (await import('@/tests/fixtures/errorsexplorer/grid-capture')).styledDataGridCaptureModule());
 // The page imports the real column builder for its default visibility, which needs the real operator helpers.
 vi.mock('@mui/x-data-grid', async importOriginal => ({
   ...(await importOriginal<typeof import('@mui/x-data-grid')>()),
@@ -100,7 +102,7 @@ function savedFilters(censusID: number): ErrorExplorerFilters {
   return JSON.parse(stored) as ErrorExplorerFilters;
 }
 
-function requestBodies(endpoint: string): Array<{ censusID: number; censusIDs: number[]; filters: ErrorExplorerFilters }> {
+function requestBodies(endpoint: string): Array<{ censusID: number; censusIDs: number[]; filters: ErrorExplorerFilters; errorType?: { code: string } }> {
   return fetchMock.mock.calls.filter(([input]) => String(input).includes(endpoint)).map(([, init]) => JSON.parse(String((init as RequestInit).body)));
 }
 
@@ -126,16 +128,25 @@ async function expectLatestRequestsToFilter(exactMessages: string[]): Promise<vo
 const SETTLE_MS = 50;
 const settle = () => new Promise(resolve => setTimeout(resolve, SETTLE_MS));
 
-async function expectExactlyOneLoadRound(exactMessages: string[]): Promise<void> {
+const TOP_GROUP_ERROR_CODE = 'INVALID_SPECIES';
+
+function requestedEndpointsInOrder(): string[] {
+  return fetchMock.mock.calls.map(([input]) => String(input)).filter(url => url.includes(FACETS_ENDPOINT) || url.includes(QUERY_ENDPOINT));
+}
+
+// When the scope returns, the retained facets still name the group, so its query may precede the refreshed facets.
+async function expectOneFacetsRequestThenOneTopGroupQuery(exactMessages: string[], { facetsFirst = true }: { facetsFirst?: boolean } = {}): Promise<void> {
   await expectLatestRequestsToFilter(exactMessages);
   await settle();
   const queries = requestBodies(QUERY_ENDPOINT);
   const facets = requestBodies(FACETS_ENDPOINT);
   console.log(
-    `[#544 C1] query bodies ${JSON.stringify(queries.map(body => body.filters.exactMessages))}, facets bodies ${JSON.stringify(facets.map(body => body.filters.exactMessages))}`
+    `[#544 C1] request order ${JSON.stringify(requestedEndpointsInOrder())}, query bodies ${JSON.stringify(queries.map(body => body.filters.exactMessages))}, facets bodies ${JSON.stringify(facets.map(body => body.filters.exactMessages))}`
   );
-  expect(queries).toHaveLength(1);
-  expect(facets).toHaveLength(1);
+  expect(facets, 'one facets request, carrying the saved filter').toHaveLength(1);
+  expect(queries, 'one query, for the top group').toHaveLength(1);
+  if (facetsFirst) expect(requestedEndpointsInOrder()[0], 'the query waits for the facets that name the group').toContain(FACETS_ENDPOINT);
+  expect(queries[0].errorType?.code).toBe(TOP_GROUP_ERROR_CODE);
 }
 
 describe('ErrorsExplorer deep links (#547)', () => {
@@ -243,20 +254,20 @@ describe('ErrorsExplorer deep links (#547)', () => {
     await expectLatestRequestsToFilter([LINKED_MESSAGE]);
   });
 
-  it('sends one query and one facets request on a load that restores a saved filter (#544 C1)', async () => {
+  it('sends one facets request, then one query for the top group, both with the saved filter (#544 C1)', async () => {
     saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
 
     render(<ErrorsExplorer />);
 
-    await expectExactlyOneLoadRound([SAVED_MESSAGE]);
+    await expectOneFacetsRequestThenOneTopGroupQuery([SAVED_MESSAGE]);
   });
 
-  it('sends one query and one facets request on a ?message= load (#544 C1)', async () => {
+  it('sends one facets request, then one query for the top group, on a ?message= load (#544 C1)', async () => {
     explorerState.search = new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: LINKED_MESSAGE }).toString();
 
     render(<ErrorsExplorer />);
 
-    await expectExactlyOneLoadRound([LINKED_MESSAGE]);
+    await expectOneFacetsRequestThenOneTopGroupQuery([LINKED_MESSAGE]);
   });
 
   it('keeps a plain saved filter under React StrictMode: requests carry it and it stays saved (#544 C1)', async () => {
@@ -285,7 +296,7 @@ describe('ErrorsExplorer deep links (#547)', () => {
     expect(savedFilters(FIRST_CENSUS_ID).exactMessages).toEqual([SAVED_MESSAGE]);
   });
 
-  it('sends one query and one facets round, both with the new census saved filter, when the census switches (#544 C1)', async () => {
+  it('sends one facets request, then one query, both with the new census saved filter, when the census switches (#544 C1)', async () => {
     saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
     saveFilters(SECOND_CENSUS_ID, [SECOND_CENSUS_SAVED_MESSAGE]);
     const { rerender } = render(<ErrorsExplorer />);
@@ -296,7 +307,7 @@ describe('ErrorsExplorer deep links (#547)', () => {
     explorerState.census = { dateRanges: [{ censusID: SECOND_CENSUS_ID }] };
     rerender(<ErrorsExplorer />);
 
-    await expectExactlyOneLoadRound([SECOND_CENSUS_SAVED_MESSAGE]);
+    await expectOneFacetsRequestThenOneTopGroupQuery([SECOND_CENSUS_SAVED_MESSAGE]);
     expect(requestBodies(QUERY_ENDPOINT)[0].censusID).toBe(SECOND_CENSUS_ID);
     expect(requestBodies(FACETS_ENDPOINT)[0].censusID).toBe(SECOND_CENSUS_ID);
   });
@@ -305,7 +316,7 @@ describe('ErrorsExplorer deep links (#547)', () => {
     const changedWhileAway = 'Species code not found';
     saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
     const { rerender } = render(<ErrorsExplorer />);
-    await expectExactlyOneLoadRound([SAVED_MESSAGE]);
+    await expectOneFacetsRequestThenOneTopGroupQuery([SAVED_MESSAGE]);
     fetchMock.mockClear();
 
     explorerState.census = { dateRanges: [] };
@@ -319,16 +330,16 @@ describe('ErrorsExplorer deep links (#547)', () => {
     explorerState.census = { dateRanges: [{ censusID: FIRST_CENSUS_ID }] };
     rerender(<ErrorsExplorer />);
 
-    await expectExactlyOneLoadRound([changedWhileAway]);
+    await expectOneFacetsRequestThenOneTopGroupQuery([changedWhileAway], { facetsFirst: false });
   });
 
   it('does not re-apply an already-applied ?message= link when the scope goes away and the same census returns (#544 C1)', async () => {
     const userQuickSearch = 'T-1';
     explorerState.search = new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: LINKED_MESSAGE }).toString();
     const { rerender, getByLabelText } = render(<ErrorsExplorer />);
-    await expectExactlyOneLoadRound([LINKED_MESSAGE]);
+    await expectOneFacetsRequestThenOneTopGroupQuery([LINKED_MESSAGE]);
 
-    fireEvent.change(getByLabelText('Quick Search'), { target: { value: userQuickSearch } });
+    fireEvent.change(getByLabelText(VIEW_ERRORS_TEXT.searchLabel), { target: { value: userQuickSearch } });
     await waitFor(() => expect(savedFilters(FIRST_CENSUS_ID).quickSearch).toBe(userQuickSearch));
     await settle();
     fetchMock.mockClear();
@@ -353,6 +364,27 @@ describe('ErrorsExplorer deep links (#547)', () => {
     expect(savedFilters(FIRST_CENSUS_ID).quickSearch, 'the link must not overwrite what the user saved').toBe(userQuickSearch);
   });
 
+  it('sends one flat-grid query, with the new census saved filter, when the census switches while ungrouped (#544 C1)', async () => {
+    saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
+    saveFilters(SECOND_CENSUS_ID, [SECOND_CENSUS_SAVED_MESSAGE]);
+    const { rerender } = render(<ErrorsExplorer />);
+    await expectLatestRequestsToFilter([SAVED_MESSAGE]);
+    await userEvent.click(screen.getByRole('combobox', { name: VIEW_ERRORS_TEXT.groupRowsLabel }));
+    await userEvent.click(await screen.findByRole('option', { name: VIEW_ERRORS_TEXT.noGrouping }));
+    await waitFor(() => expect(screen.getByRole('grid', { name: VIEW_ERRORS_TEXT.flatGridLabel })).toBeInTheDocument());
+    await settle();
+    fetchMock.mockClear();
+
+    explorerState.census = { dateRanges: [{ censusID: SECOND_CENSUS_ID }] };
+    rerender(<ErrorsExplorer />);
+
+    await expectLatestRequestsToFilter([SECOND_CENSUS_SAVED_MESSAGE]);
+    await settle();
+    const queryMessages = requestBodies(QUERY_ENDPOINT).map(body => body.filters.exactMessages);
+    console.log(`[#544 C1 flat] query bodies after the census switch ${JSON.stringify(queryMessages)}`);
+    expect(queryMessages, 'one flat query, never one that carries the previous census filter').toEqual([[SECOND_CENSUS_SAVED_MESSAGE]]);
+  });
+
   it('applies a ?message= link that arrived while no census was selected once the census appears (#544 C1)', async () => {
     explorerState.census = { dateRanges: [] };
     explorerState.search = new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: LINKED_MESSAGE }).toString();
@@ -363,8 +395,72 @@ describe('ErrorsExplorer deep links (#547)', () => {
     explorerState.census = { dateRanges: [{ censusID: FIRST_CENSUS_ID }] };
     rerender(<ErrorsExplorer />);
 
-    await expectExactlyOneLoadRound([LINKED_MESSAGE]);
+    await expectOneFacetsRequestThenOneTopGroupQuery([LINKED_MESSAGE]);
     await waitFor(() => expect(savedFilters(FIRST_CENSUS_ID).exactMessages).toEqual([LINKED_MESSAGE]));
+  });
+
+  describe('stored filters (#544 C1)', () => {
+    const storageKeyFor = (censusID: number) => getFilterStorageKey(TEST_SCHEMA, TEST_PLOT_ID, censusID) as string;
+    const SUPPORTED_STORED_KEYS = ['contradictionOnly', 'exactMessages', 'quickSearch', 'source'];
+
+    it.each([
+      { description: 'is not JSON', stored: '{not json' },
+      { description: 'has an invalid source', stored: JSON.stringify({ source: 'bogus-source', exactMessages: [SAVED_MESSAGE] }) }
+    ])('restores the defaults and sends them when the stored value $description', async ({ stored }) => {
+      window.localStorage.setItem(storageKeyFor(FIRST_CENSUS_ID), stored);
+
+      render(<ErrorsExplorer />);
+
+      await waitFor(() => expect(requestBodies(FACETS_ENDPOINT).length).toBeGreaterThan(0));
+      await settle();
+      const sentFilters = requestBodies(FACETS_ENDPOINT).map(body => body.filters);
+      console.log(`[#544 C1 storage] stored ${stored}, facets filters ${JSON.stringify(sentFilters)}`);
+      expect(sentFilters[0]).toEqual(DEFAULT_ERROR_EXPLORER_FILTERS);
+      sentFilters.forEach(filters => expect(filters).toEqual(DEFAULT_ERROR_EXPLORER_FILTERS));
+    });
+
+    it('restores only the four supported keys, sends no legacy filter and stores exactly the four', async () => {
+      window.localStorage.setItem(
+        storageKeyFor(FIRST_CENSUS_ID),
+        JSON.stringify({
+          source: 'ingestion',
+          contradictionOnly: false,
+          quickSearch: 'T-9',
+          exactMessages: [SAVED_MESSAGE],
+          affectedFields: ['speciesCode'],
+          contradictionTypes: ['hom']
+        })
+      );
+
+      render(<ErrorsExplorer />);
+
+      await waitFor(() => expect(requestBodies(FACETS_ENDPOINT).length).toBeGreaterThan(0));
+      await settle();
+      const lastFacets = lastRequestBody(FACETS_ENDPOINT).filters;
+      const storedAfterMount = window.localStorage.getItem(storageKeyFor(FIRST_CENSUS_ID)) as string;
+      console.log(`[#544 C1 legacy] facets filters ${JSON.stringify(lastFacets)}, stored ${storedAfterMount}`);
+      expect(lastFacets).toEqual({
+        ...DEFAULT_ERROR_EXPLORER_FILTERS,
+        source: 'ingestion',
+        quickSearch: 'T-9',
+        exactMessages: [SAVED_MESSAGE]
+      });
+      expect(Object.keys(JSON.parse(storedAfterMount)).sort()).toEqual(SUPPORTED_STORED_KEYS);
+    });
+
+    it('restores a saved validation source with contradictionOnly as Show Contradictions (source all)', async () => {
+      window.localStorage.setItem(storageKeyFor(FIRST_CENSUS_ID), JSON.stringify({ source: 'validation', contradictionOnly: true }));
+
+      render(<ErrorsExplorer />);
+
+      await waitFor(() => expect(requestBodies(FACETS_ENDPOINT).length).toBeGreaterThan(0));
+      await settle();
+      const lastFacets = lastRequestBody(FACETS_ENDPOINT).filters;
+      console.log(`[#544 C1 broaden] facets filters ${JSON.stringify(lastFacets)}`);
+      expect(lastFacets.source).toBe('all');
+      expect(lastFacets.contradictionOnly).toBe(true);
+      expect(JSON.parse(window.localStorage.getItem(storageKeyFor(FIRST_CENSUS_ID)) as string)).toMatchObject({ source: 'all', contradictionOnly: true });
+    });
   });
 
   it('queries every census behind a grouped plot census, as getDateRangeCensusIDs lists them', async () => {

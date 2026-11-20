@@ -512,29 +512,22 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     expect(mockBeginEdit.mock.calls[0][2]).toMatchObject({ dataType: 'measurementssummary', censusID: TEST_SECOND_CENSUS_ID });
   });
 
-  it('sends one details request and no query request when a row is clicked (#544 C2)', async () => {
-    const defaultFetchImplementation = mockFetch.getMockImplementation() as (input: RequestInfo | URL) => Promise<Response>;
-    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes(DETAILS_ENDPOINT_PREFIX)) {
-        return { ok: true, json: async () => ({ row: GRID_ROW, allErrors: [], relatedRows: [] }) } as Response;
-      }
-      return defaultFetchImplementation(input);
-    });
-    const requestedUrlsSince = (callCount: number) => mockFetch.mock.calls.slice(callCount).map(([input]) => String(input));
-
+  it('sends one details request and no query request when a row is opened (#544 C2)', async () => {
     await mountExplorer();
-    await screen.findByTestId(`select-row-${GRID_ROW.id}`);
+    await waitForGridRow(GROUP_GRID);
     await settle();
-    const callsBeforeClick = mockFetch.mock.calls.length;
-    fireEvent.click(screen.getByTestId(`select-row-${GRID_ROW.id}`));
-    await waitFor(() => expect(requestedUrlsSince(callsBeforeClick).some(url => url.includes(DETAILS_ENDPOINT_PREFIX))).toBe(true));
+    const callsBeforeOpen = mockFetch.mock.calls.length;
+    const requestedUrlsSinceOpen = () => mockFetch.mock.calls.slice(callsBeforeOpen).map(([input]) => urlOf(input));
+
+    await userEvent.click(screen.getAllByRole('menuitem', { name: VIEW_ERRORS_TEXT.detailsAction })[0]);
+    await waitFor(() => expect(requestedUrlsSinceOpen().some(url => url.includes(DETAILS_ENDPOINT_PREFIX))).toBe(true));
     await settle();
 
-    const urlsAfterClick = requestedUrlsSince(callsBeforeClick);
-    console.log('[#544 C2] requests after click', JSON.stringify(urlsAfterClick));
-    expect(urlsAfterClick.filter(url => url.includes(DETAILS_ENDPOINT_PREFIX))).toHaveLength(1);
-    expect(urlsAfterClick.filter(url => url.includes(QUERY_ENDPOINT))).toHaveLength(0);
+    const urlsAfterOpen = requestedUrlsSinceOpen();
+    console.log('[#544 C2] requests after opening a row', JSON.stringify(urlsAfterOpen));
+    expect(urlsAfterOpen.filter(url => url.includes(DETAILS_ENDPOINT_PREFIX))).toHaveLength(1);
+    expect(urlsAfterOpen.filter(url => url.includes(QUERY_ENDPOINT))).toHaveLength(0);
+    expect(urlsAfterOpen.filter(url => ROUTES.facets.test(url))).toHaveLength(0);
   });
 
   it('links ingestion failures to the failed-measurement recovery modal', async () => {
