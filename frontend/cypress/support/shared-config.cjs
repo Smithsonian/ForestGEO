@@ -12,6 +12,7 @@ function getSharedWebpackConfig(dirname, envVars = {}) {
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx'],
       mainFields: ['main', 'module', 'browser'],
+      byDependency: { esm: { mainFields: ['module', 'main', 'browser'] } },
       alias: {
         '@/': path.resolve(dirname, './'),
         'next-auth/react': path.resolve(dirname, 'cypress/mocks/nextauthmock.js'),

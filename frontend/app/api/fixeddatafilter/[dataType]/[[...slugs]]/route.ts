@@ -11,11 +11,20 @@ import {
   UnsupportedFilterLogicOperatorError
 } from '@/components/processors/processormacros';
 import { DELETE as coreApiDelete, PATCH as coreApiPatch, POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
-import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
+import {
+  attachMeasurementStatus,
+  buildMeasurementsSummaryPageQueries,
+  buildTreeStemStateClauseSql,
+  PAGINATED_QUERY_LIMIT_CLAUSE,
+  validateViewDataRequest,
+  ViewDataRequestError,
+  type MeasurementsSummaryPageQueries
+} from '@/lib/viewdata/measurementssummaryquery';
+import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
 // Shape of the resolved catch-all params for this slug route; the re-exported
@@ -60,9 +69,6 @@ type AllowedDataType = (typeof ALLOWED_DATA_TYPES)[number];
 function isValidDataType(dataType: string): dataType is AllowedDataType {
   return ALLOWED_DATA_TYPES.includes(dataType as AllowedDataType);
 }
-
-// Whitelist of allowed TSS values for measurements filter (for future validation)
-const _ALLOWED_TSS_VALUES = ['multi stem', 'old tree', 'new recruit'] as const;
 
 function parseOptionalPositiveInt(value: string | undefined): number | undefined {
   if (!value || value === 'undefined') return undefined;
@@ -122,6 +128,16 @@ async function postHandler(request: NextRequest, context: RouteContext) {
       if (!(error instanceof UnsupportedFilterLogicOperatorError)) throw error;
       ailogger.warn(`[fixeddatafilter API] rejected an unsupported filter logic operator for ${params.dataType}`);
       return new NextResponse(JSON.stringify({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE }), { status: HTTPResponses.INVALID_REQUEST });
+    }
+    if (params.dataType === 'measurementssummary') {
+      try {
+        validateViewDataRequest(filterModel, body.sortModel);
+      } catch (error) {
+        if (error instanceof ViewDataRequestError) {
+          return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+        }
+        throw error;
+      }
     }
     const page = parseInt(pageParam);
     const pageSize = parseInt(pageSizeParam);
@@ -196,6 +212,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
       let searchStub = '';
       let filterStub = '';
       let countQuery = '';
+      let viewDataQueries: MeasurementsSummaryPageQueries | undefined;
       const countParams: (string | number | undefined)[] = [];
 
       switch (params.dataType) {
@@ -335,22 +352,26 @@ async function postHandler(request: NextRequest, context: RouteContext) {
           }
           queryParams.push(plotID, page * pageSize, pageSize);
           break;
-        case 'measurementssummary':
+        case 'measurementssummary': {
+          viewDataQueries = buildMeasurementsSummaryPageQueries({
+            schema,
+            columns,
+            filterModel,
+            sortModel: body.sortModel,
+            plotID,
+            plotCensusNumber,
+            page,
+            pageSize
+          });
+          break;
+        }
         case 'measurementssummary_staging':
         case 'measurementssummaryview':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'vft');
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'vft');
           {
             const visibleClause = buildMeasurementVisibleClauseSql(schema, 'vft', filterModel.visible);
-            const ALL_TSS_STATES = ['multi stem', 'old tree', 'new recruit'] as const;
-            const validTss = filterModel.tss.filter(tss => (ALL_TSS_STATES as readonly string[]).includes(tss));
-            // Rows without an assigned tree-stem-state (hard-fail ingestion rows carry NULL
-            // UserDefinedFields) would be excluded by JSON_CONTAINS. Skip the clause when every
-            // state is selected so those rows remain visible alongside state-carrying rows.
-            const tssClause =
-              validTss.length > 0 && validTss.length < ALL_TSS_STATES.length
-                ? ` AND (${validTss.map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
-                : ``;
+            const tssClause = buildTreeStemStateClauseSql(filterModel.tss);
             const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
             const sharedWhere = `
             WHERE vft.PlotID = ?
@@ -430,25 +451,37 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             status: HTTPResponses.INVALID_REQUEST
           });
       }
-      paginatedQuery += ` LIMIT ?, ?;`;
+      let boundPaginatedQuery: string;
+      let boundCountQuery: string;
+      let finishedQuery: string;
+      if (viewDataQueries) {
+        boundPaginatedQuery = viewDataQueries.paginatedQuery;
+        boundCountQuery = viewDataQueries.countQuery;
+        finishedQuery = viewDataQueries.exportQuery;
+      } else {
+        paginatedQuery += PAGINATED_QUERY_LIMIT_CLAUSE;
 
-      // Route the schema identifier (?? placeholders) through safeFormatQuery before
-      // the value-placeholder accounting below, so the remaining `?` count matches
-      // queryParams/countParams exactly.
-      paginatedQuery = safeFormatQuery(schema, paginatedQuery);
-      countQuery = safeFormatQuery(schema, countQuery);
+        // Route the schema identifier (?? placeholders) through safeFormatQuery before
+        // the value-placeholder accounting below, so the remaining `?` count matches
+        // queryParams/countParams exactly.
+        paginatedQuery = safeFormatQuery(schema, paginatedQuery);
+        countQuery = safeFormatQuery(schema, countQuery);
 
-      if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
-        ailogger.error(
-          `Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`
-        );
-        return new NextResponse(JSON.stringify({ error: 'Query parameter mismatch - please contact support' }), {
-          status: HTTPResponses.INTERNAL_SERVER_ERROR
-        });
+        if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
+          ailogger.error(
+            `Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`
+          );
+          return new NextResponse(JSON.stringify({ error: 'Query parameter mismatch - please contact support' }), {
+            status: HTTPResponses.INTERNAL_SERVER_ERROR
+          });
+        }
+        boundPaginatedQuery = format(paginatedQuery, queryParams);
+        boundCountQuery = format(countQuery, countParams);
+        finishedQuery = boundPaginatedQuery;
       }
       const [paginatedResults, totalRowsResult] = await Promise.all([
-        connectionManager.executeQuery(format(paginatedQuery, queryParams)),
-        connectionManager.executeQuery(format(countQuery, countParams))
+        connectionManager.executeQuery(boundPaginatedQuery),
+        connectionManager.executeQuery(boundCountQuery)
       ]);
       paginatedResults.forEach((result: Record<string, unknown>) => {
         if (result.UserDefinedFields !== undefined && result.UserDefinedFields !== null) {
@@ -456,6 +489,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             result.UserDefinedFields = JSON.parse(result.UserDefinedFields).treestemstate;
           } else result.UserDefinedFields = (result.UserDefinedFields as { treestemstate?: unknown }).treestemstate;
         }
+        if (params.dataType === 'measurementssummary') attachMeasurementStatus(result);
       });
       const totalRows = totalRowsResult[0].totalRows;
       if (updatedMeasurementsExist) {
@@ -469,7 +503,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
             deprecated: MapperFactory.getMapper<any, any>(params.dataType).mapData(filteredDeprecated),
             totalCount: totalRows,
-            finishedQuery: format(paginatedQuery, queryParams)
+            finishedQuery
           }),
           { status: HTTPResponses.OK }
         );
@@ -479,7 +513,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
             output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
             deprecated: undefined,
             totalCount: totalRows,
-            finishedQuery: format(paginatedQuery, queryParams)
+            finishedQuery
           }),
           { status: HTTPResponses.OK }
         );

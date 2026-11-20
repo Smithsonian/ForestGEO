@@ -12,9 +12,10 @@ import {
 } from '@/components/processors/processormacros';
 import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
-import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
+import { buildMeasurementVisibleClauseSql, buildStemStatusFilterClauseSql } from '@/config/measurementstatefilters';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { toError } from '@/lib/errorhelpers';
+import { parseViewDataStemStatusFilter, ViewDataRequestError } from '@/lib/viewdata/measurementssummaryquery';
 import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -87,6 +88,16 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
     if (!(error instanceof UnsupportedFilterLogicOperatorError)) throw error;
     ailogger.warn(`[formdownload API] rejected an unsupported filter logic operator for ${dataType}`);
     return new NextResponse(JSON.stringify({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+  let stemStatuses: string[] = [];
+  if (dataType === 'measurements') {
+    try {
+      stemStatuses = parseViewDataStemStatusFilter(filterModel?.stemStatus);
+    } catch (error: unknown) {
+      if (!(error instanceof ViewDataRequestError)) throw error;
+      ailogger.warn(`[formdownload API] rejected an unsupported stem status filter for ${dataType}`);
+      return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+    }
   }
   const connectionManager = ConnectionManager.getInstance();
   let query = '';
@@ -265,6 +276,7 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
               JOIN ${schema}.plots p ON p.PlotID = q.PlotID
               JOIN ${schema}.species sp ON sp.SpeciesID = t.SpeciesID
               WHERE p.PlotID = ? AND cm.CensusID = ? ${buildMeasurementVisibleClauseSql(schema, 'cm', filterModel.visible)} 
+              ${buildStemStatusFilterClauseSql(schema, 'cm', stemStatuses)}
               ${(() => {
                 // Bug #4 fix: Validate TSS values against allowed set to prevent SQL injection
                 const validTss = filterModel.tss.filter((tss: any) => ['multi stem', 'old tree', 'new recruit'].includes(tss));
@@ -272,7 +284,10 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
                   ? ` AND (${validTss.map((tss: any) => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
                   : ``;
               })()} 
-              ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+              ${[searchStub, filterStub]
+                .filter(Boolean)
+                .map(clause => ` AND (${clause})`)
+                .join('\n              ')}`;
         results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
           measurementID: row.CoreMeasurementID,

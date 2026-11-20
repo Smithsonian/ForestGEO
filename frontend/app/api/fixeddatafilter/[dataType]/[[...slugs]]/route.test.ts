@@ -4,6 +4,7 @@ import { HTTPResponses } from '@/config/macros';
 import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { UNSUPPORTED_LOGIC_OPERATOR_MESSAGE } from '@/components/processors/processormacros';
+import ailogger from '@/ailogger';
 
 // -------------------- hoisted spies (safe for vi.mock factories) --------------------
 const { mapDataSpy, singlePostSpy, filterStubSpy, searchStubSpy } = vi.hoisted(() => ({
@@ -40,7 +41,22 @@ vi.mock('@/config/macros/coreapifunctions', () => ({
 // assertions reflect the backtick-wrapped schema the route now emits.
 vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
-    return ['myschema', 'testschema', 'schema_a', 'schema_b', 'schema_c', 'schema_d'].includes(schema);
+    return [
+      'myschema',
+      'testschema',
+      'schema_a',
+      'schema_b',
+      'schema_c',
+      'schema_d',
+      'vd_sort',
+      'vd_status',
+      'vd_search',
+      'vd_view',
+      'vd_staging',
+      'vd_rank',
+      'vd_export',
+      'vd_stemstatus'
+    ].includes(schema);
   }),
   safeFormatQuery: vi.fn((schema: string, query: string) => query.replace(/\?\?/g, `\`${schema}\``))
 }));
@@ -229,8 +245,8 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     const sqlStr = String(paginatedSQL);
     // Verify visible filter conditions were embedded via buildMeasurementVisibleClauseSql
     expect(sqlStr).toMatch(/measurement_error_log mel/);
-    expect(sqlStr).toMatch(/IsValidated = TRUE AND NOT EXISTS/);
-    expect(sqlStr).toMatch(/IsValidated IS NULL AND NOT EXISTS/);
+    expect(sqlStr).toMatch(/IsValidated = TRUE AND NOT \(vft\.CoreMeasurementID IN \(/);
+    expect(sqlStr).toMatch(/IsValidated IS NULL AND NOT \(vft\.CoreMeasurementID IN \(/);
     // Verify TSS filter conditions
     expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('multi stem'\), '\$\.treestemstate'\)/);
     expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('old tree'\), '\$\.treestemstate'\)/);
@@ -392,6 +408,141 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
 
     // The route does not use transactions -- errors are caught and connection is closed in finally
     expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('POST fixeddatafilter — measurementssummary (View Data)', () => {
+  const ALL_VISIBLE = ['errors', 'valid', 'pending'];
+  const ALL_TSS = ['old tree', 'multi stem', 'new recruit'];
+  const SEARCH_AND_FILTER_MODEL = {
+    items: [{ field: 'treeTag', operator: 'equals', value: 'T01' }],
+    quickFilterValues: ['abc'],
+    visible: ALL_VISIBLE,
+    tss: ALL_TSS
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function post(
+    dataType: string,
+    schemaName: string,
+    body: Record<string, unknown>,
+    rows: Record<string, unknown>[] = [{ CoreMeasurementID: 10, MeasurementStatusRank: 0, HasContradiction: 1 }]
+  ) {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery');
+    exec.mockReset();
+    exec.mockResolvedValueOnce([{ COLUMN_NAME: 'TreeTag' }]);
+    exec.mockResolvedValueOnce(rows);
+    exec.mockResolvedValueOnce([{ totalRows: rows.length }]);
+    const res = await POST(makeRequest(body), makeProps(dataType, [schemaName, '0', '25', '101', '7']));
+    const json = await res.json();
+    const paginatedSQL = String(exec.mock.calls[1]?.[0] ?? '');
+    console.log(`[fixeddatafilter ${dataType}]`, JSON.stringify({ status: res.status, calls: exec.mock.calls.length, json: json.error ?? json.output }));
+    return { res, json, exec, paginatedSQL };
+  }
+
+  it.each([
+    [
+      'an unknown sort field',
+      'vd_sort',
+      { filterModel: SEARCH_AND_FILTER_MODEL, sortModel: [{ field: 'coreMeasurementID', sort: 'asc' }] },
+      'Unsupported sort field'
+    ],
+    ['a bad sort direction', 'vd_sort', { filterModel: SEARCH_AND_FILTER_MODEL, sortModel: [{ field: 'treeTag', sort: 'up' }] }, 'Unsupported sort field'],
+    [
+      'an untranslated stemState filter item',
+      'vd_sort',
+      { filterModel: { ...SEARCH_AND_FILTER_MODEL, items: [{ field: 'stemState', operator: 'is', value: 'old tree' }] } },
+      'Unsupported filter field'
+    ],
+    ['an unknown stem status', 'vd_stemstatus', { filterModel: { ...SEARCH_AND_FILTER_MODEL, stemStatus: ['zombie'] } }, 'Unsupported stem status'],
+    ['visible sent as a string', 'vd_sort', { filterModel: { ...SEARCH_AND_FILTER_MODEL, visible: 'errors' } }, 'Unsupported visibility filter'],
+    ['an unknown visible entry', 'vd_sort', { filterModel: { ...SEARCH_AND_FILTER_MODEL, visible: ['errors', 'bogus'] } }, 'Unsupported visibility filter'],
+    ['tss sent as a string', 'vd_sort', { filterModel: { ...SEARCH_AND_FILTER_MODEL, tss: 'old tree' } }, 'Unsupported stem state filter'],
+    ['an unknown tss entry', 'vd_sort', { filterModel: { ...SEARCH_AND_FILTER_MODEL, tss: ['old tree', 'bogus'] } }, 'Unsupported stem state filter'],
+    ['quickFilterValues sent as a string', 'vd_sort', { filterModel: { ...SEARCH_AND_FILTER_MODEL, quickFilterValues: 'abc' } }, 'Unsupported quick filter'],
+    [
+      'a non-string quickFilterValues entry',
+      'vd_sort',
+      { filterModel: { ...SEARCH_AND_FILTER_MODEL, quickFilterValues: ['abc', 7] } },
+      'Unsupported quick filter'
+    ]
+  ])('returns 400 for %s and runs no SQL', async (_label, schemaName, body, message) => {
+    const { res, json, exec } = await post('measurementssummary', schemaName, body);
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(json.error).toBe(message);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('ANDs search and filter, adds the projection, the status ORDER BY and the Stem status clause', async () => {
+    const { res, paginatedSQL } = await post('measurementssummary', 'vd_status', {
+      filterModel: { ...SEARCH_AND_FILTER_MODEL, stemStatus: ['dead'] },
+      sortModel: [{ field: 'measurementStatus', sort: 'desc' }]
+    });
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(paginatedSQL).toMatch(/AND \(SEARCH_STUB\)\s+AND \(FILTER_STUB\)/);
+    expect(paginatedSQL).not.toContain('SEARCH_STUB OR FILTER_STUB');
+    expect(paginatedSQL).toContain('AS MeasurementStatusRank');
+    expect(paginatedSQL).toContain('ORDER BY MeasurementStatusRank DESC, vft.CoreMeasurementID ASC');
+    expect(paginatedSQL).toContain("sf_attr.Status IN ('dead')");
+  });
+
+  it('sorts by stem state through JSON_UNQUOTE with blanks last', async () => {
+    const { paginatedSQL } = await post('measurementssummary', 'vd_sort', {
+      filterModel: SEARCH_AND_FILTER_MODEL,
+      sortModel: [{ field: 'stemState', sort: 'asc' }]
+    });
+    expect(paginatedSQL).toContain("ORDER BY (NULLIF(JSON_UNQUOTE(JSON_EXTRACT(vft.UserDefinedFields, '$.treestemstate')), '') IS NULL)");
+  });
+
+  it.each([
+    ['measurementssummaryview', 'vd_view'],
+    ['measurementssummary_staging', 'vd_staging']
+  ])('%s keeps today: search OR filter, no projection, fixed date order', async (dataType, schemaName) => {
+    const { paginatedSQL } = await post(dataType, schemaName, {
+      filterModel: SEARCH_AND_FILTER_MODEL,
+      sortModel: [{ field: 'measurementStatus', sort: 'desc' }]
+    });
+    expect(paginatedSQL).toContain('(SEARCH_STUB OR FILTER_STUB)');
+    expect(paginatedSQL).not.toContain('MeasurementStatusRank');
+    expect(paginatedSQL).toContain('ORDER BY vft.MeasurementDate ASC');
+  });
+
+  it('maps the rank to MeasurementStatus before mapping and returns a boolean HasContradiction', async () => {
+    const { json } = await post('measurementssummary', 'vd_rank', { filterModel: SEARCH_AND_FILTER_MODEL });
+    expect(json.output).toEqual([{ CoreMeasurementID: 10, MeasurementStatus: 'ingestionFailed', HasContradiction: true }]);
+  });
+
+  it('returns a projection-free finishedQuery ordered by date for CSV export', async () => {
+    const { json } = await post('measurementssummary', 'vd_export', {
+      filterModel: SEARCH_AND_FILTER_MODEL,
+      sortModel: [{ field: 'treeTag', sort: 'desc' }]
+    });
+    console.log('[fixeddatafilter] finishedQuery', json.finishedQuery);
+    expect(json.finishedQuery).not.toContain('MeasurementStatusRank');
+    expect(json.finishedQuery).toMatch(/ORDER BY vft\.MeasurementDate ASC LIMIT \?, \?;/);
+  });
+
+  it('counts three copies of one tss state as one state: the stem state predicate stays', async () => {
+    const { res, paginatedSQL } = await post('measurementssummary', 'vd_search', {
+      filterModel: { ...SEARCH_AND_FILTER_MODEL, tss: ['old tree', 'old tree', 'old tree'] }
+    });
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(paginatedSQL).toContain("JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1");
+  });
+
+  it('warns about a rejected logic operator for measurementssummary as it does for every other data type', async () => {
+    const { res, json, exec } = await post('measurementssummary', 'vd_search', {
+      filterModel: { ...SEARCH_AND_FILTER_MODEL, logicOperator: ') OR (1=1) OR (' }
+    });
+    console.log('[fixeddatafilter] warn calls', JSON.stringify(vi.mocked(ailogger.warn).mock.calls));
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(json).toEqual({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE });
+    expect(exec).not.toHaveBeenCalled();
+    expect(ailogger.warn).toHaveBeenCalledWith('[fixeddatafilter API] rejected an unsupported filter logic operator for measurementssummary');
   });
 });
 

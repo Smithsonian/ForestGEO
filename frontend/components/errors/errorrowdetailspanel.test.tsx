@@ -16,6 +16,7 @@ import {
   type ErrorExplorerDetailsResponse,
   type ErrorExplorerRow
 } from '@/config/errorsexplorer';
+import { designTokens } from '@/config/design-tokens';
 import ErrorRowDetailsPanel, { type ErrorRowDetailsPanelProps } from './errorrowdetailspanel';
 import { getCodesMismatchMessage } from './errorcodes';
 
@@ -81,6 +82,15 @@ describe('ErrorRowDetailsPanel (shared, P5-3, P5-5)', () => {
     expect(within(sheet).queryByText(/unresolved error/)).toBeNull();
     expect(within(sheet).queryByRole('button', { name: DETAILS_SHEET_TEXT.editThisRow })).toBeNull();
     expect(within(sheet).queryByTestId('details-header-extras')).toBeNull();
+  });
+
+  it('stacks the sheet above the fixed app header, so the header cannot cover the sheet title and Close button on narrow screens', () => {
+    renderPanel();
+    const sheetRoot = screen.getByTestId('error-row-details-sheet').closest('[role="presentation"]') as HTMLElement;
+    const sheetZIndex = Number(getComputedStyle(sheetRoot).zIndex);
+    console.log(`[view-errors sheet z-index] sheet root z-index ${sheetZIndex}, app header z-index ${designTokens.zIndex.header}`);
+    expect(sheetRoot, 'the Drawer root that carries the stacking context').not.toBeNull();
+    expect(sheetZIndex).toBeGreaterThan(designTokens.zIndex.header);
   });
 
   it('labels each error, adds the DBH fact line and the Attributes link', () => {
