@@ -6,6 +6,7 @@ import {
   planQuadratResolution,
   resolveSpeciesByCode,
   CONFLICT_REASON_INACTIVE_TREE,
+  CONFLICT_REASON_SPECIES_CONFLICT,
   CONFLICT_REASON_INACTIVE_STEM,
   CONFLICT_REASON_DIFFERENT_QUADRAT
 } from '../resolvers';
@@ -57,6 +58,16 @@ export async function applyTreeStemRules(ctx: RuleContext): Promise<{ effects: E
       if (planned.conflictReason === CONFLICT_REASON_INACTIVE_TREE) {
         errors.push(
           buildError('tree', 'inactive', 'TreeTag', `Matching tree for TreeTag "${ctx.newRow.TreeTag ?? ctx.oldRow.TreeTag}" exists but is inactive`)
+        );
+      } else if (planned.conflictReason === CONFLICT_REASON_SPECIES_CONFLICT) {
+        const destinationTag = ctx.newRow.TreeTag ?? ctx.oldRow.TreeTag;
+        errors.push(
+          buildError(
+            'tree',
+            'species_conflict',
+            'TreeTag',
+            `TreeTag "${destinationTag}" is already recorded as species ${planned.conflictingSpeciesCode} (tree T#${planned.conflictingTreeID}) in this census, but this measurement is species ${currentCode}. Correct the species on one of the trees first, then move the measurement.`
+          )
         );
       } else if (!planned.existingTreeID && !planned.wouldCreate) {
         errors.push(buildError('tree', 'cannot_create', 'TreeTag', `Cannot resolve or create tree for TreeTag "${ctx.newRow.TreeTag ?? ctx.oldRow.TreeTag}"`));

@@ -15,7 +15,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 export class MeasurementResolutionError extends Error {
   constructor(
     public readonly subject: 'species' | 'quadrat' | 'tree' | 'stem',
-    public readonly reason: 'missing' | 'inactive' | 'different_quadrat',
+    public readonly reason: 'missing' | 'inactive' | 'different_quadrat' | 'species_conflict',
     message: string
   ) {
     super(message);
@@ -183,6 +183,25 @@ export async function resolveMeasurementSummaryTree(
       throw new MeasurementResolutionError('tree', 'inactive', `Tree resolution failed: matching tree exists but is inactive for TreeTag "${TreeTag}"`);
     return matchingTree.TreeID;
   }
+
+  const otherSpeciesRows = await connectionManager.executeQuery(
+    safeFormatQuery(
+      schema,
+      `SELECT TreeID
+       FROM ??.trees
+       WHERE TreeTag = ? AND CensusID = ? AND SpeciesID <> ? AND IsActive = 1
+       ORDER BY TreeID
+       LIMIT 1`
+    ),
+    [TreeTag, normalizedCensusID, normalizedSpeciesID],
+    transactionID
+  );
+  if (otherSpeciesRows.length > 0)
+    throw new MeasurementResolutionError(
+      'tree',
+      'species_conflict',
+      `Tree resolution failed: TreeTag "${TreeTag}" is already recorded as a different species (tree T#${otherSpeciesRows[0].TreeID}) in this census`
+    );
 
   const insertResult = await connectionManager.executeQuery(
     format(`INSERT INTO ?? SET ?`, [`${schema}.trees`, { TreeTag, SpeciesID: normalizedSpeciesID, CensusID: normalizedCensusID, IsActive: 1 }]),
