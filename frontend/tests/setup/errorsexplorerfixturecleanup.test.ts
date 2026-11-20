@@ -27,6 +27,7 @@ import {
   SAME_BATCH_PLOT_MISMATCH_TREE_TAG,
   DECOY_PLOT_ID,
   FIRST_CENSUS_ID,
+  SECOND_CENSUS_ID,
   MAIN_PLOT_ID,
   WITNESS_ERROR_STEM_TAGS,
   WITNESS_NON_ERROR_STEM_TAG,
@@ -59,6 +60,8 @@ const SPECIES_NAME_COLUMN_LENGTH = 64;
 const MIN_DISTINCT_COLUMN_VALUES = 50;
 const OTHER_SEED = 545;
 const FIRST_SEED = 544;
+const RANDOM_CENSUS_TWO_ROW_COUNT = 100;
+const PLANTED_CENSUS_TWO_ROW_COUNT = 1;
 
 interface FakeOptions {
   dropFailure?: Error;
@@ -575,9 +578,23 @@ describe('generateEquivalenceFixture', () => {
   it('holds the three censuses at the planned sizes plus the planted rows', () => {
     const countIn = (censusID: number) => fixture.measurements.filter(row => row.censusID === censusID).length;
     expect(countIn(1)).toBeGreaterThanOrEqual(260);
-    expect(countIn(2)).toBe(100);
+    expect(countIn(2)).toBe(RANDOM_CENSUS_TWO_ROW_COUNT + PLANTED_CENSUS_TWO_ROW_COUNT);
     expect(countIn(3)).toBe(40);
     expect(fixture.censuses.map(census => census.plotCensusNumber)).toEqual([null, null, null]);
+  });
+
+  it('plants one errored row per census that ties on date and error count and holds no contradiction', () => {
+    const { firstCensusRow, secondCensusRow } = fixture.plantedCases.censusTie;
+    const [first, second] = [firstCensusRow, secondCensusRow].map(id => fixture.measurements.find(row => row.coreMeasurementID === id) as FixtureMeasurement);
+    const unresolvedLogCount = (id: number) => fixture.logs.filter(log => log.measurementID === id && !log.isResolved).length;
+
+    expect([first.censusID, second.censusID]).toEqual([FIRST_CENSUS_ID, SECOND_CENSUS_ID]);
+    expect(first.measurementDate).toBe(second.measurementDate);
+    expect(unresolvedLogCount(firstCensusRow)).toBe(1);
+    expect(unresolvedLogCount(secondCensusRow)).toBe(1);
+    expect(first.treeTag, 'distinct trees, so neither row is a duplicate-tag contradiction').not.toBe(second.treeTag);
+    expect(first.uploadFileID, 'no upload, so neither row is a same-batch contradiction').toBeNull();
+    expect(second.uploadFileID).toBeNull();
   });
 
   const rowsOf = (ids: number[]) => ids.map(id => fixture.measurements.find(row => row.coreMeasurementID === id) as FixtureMeasurement);

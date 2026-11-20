@@ -121,7 +121,6 @@ const SQL_QUERY_STATEMENT_LABELS: ReadonlySet<string> = new Set([
 const PAGE_WINDOW_PARAM_COUNT = 2;
 const MEMBER_GROUP_KINDS_PER_ROW = 2;
 const BLANK_SEARCH = '';
-const MIN_ACTIVE_COUNT_PARAMS = 2;
 const ERROR_TYPE_PAGE_SIZE = 10;
 const ROUTING_PAGE_SIZE = 10;
 const NO_SUCH_ERROR_CODE = 'no-such-error-code';
@@ -149,6 +148,10 @@ interface Scope {
   censusID: number;
   censusIDs: number[];
 }
+interface ActiveCountAllowance {
+  plotID: number;
+  censusIDs: readonly number[];
+}
 interface NamedFilters {
   label: string;
   filters: ErrorExplorerFilters;
@@ -168,9 +171,13 @@ const PLOT_SCOPES: readonly Scope[] = [
 ];
 const GROUPED_SCOPE = SCOPES[1];
 const SECOND_CENSUS_FIRST_ORDER = 'census 2 first';
-/** Census 2 leads and census 1 closes a list of MANY_CENSUS_IDS.length IDs, so the chunks and the tie order differ from GROUPED_SCOPE. */
+/**
+ * Only censuses 1 and 2 hold rows; the other IDs are empty. Census 2 leads and census 1 closes a list of MANY_CENSUS_IDS.length IDs, so the rows
+ * of the two populated censuses come from different chunks and the tie order differs from GROUPED_SCOPE. Rows spread over many populated
+ * censuses are covered by the consistency file.
+ */
 const MANY_CENSUS_SCOPE: Scope = {
-  name: `${MANY_CENSUS_IDS.length} censuses, ${SECOND_CENSUS_FIRST_ORDER}`,
+  name: `${MANY_CENSUS_IDS.length} census IDs across chunks, two populated, ${SECOND_CENSUS_FIRST_ORDER}`,
   plotID: MAIN_PLOT_ID,
   censusID: FIRST_CENSUS_ID,
   censusIDs: [SECOND_CENSUS_ID, ...MANY_CENSUS_IDS.filter(censusID => censusID !== FIRST_CENSUS_ID && censusID !== SECOND_CENSUS_ID), FIRST_CENSUS_ID]
@@ -179,6 +186,10 @@ const DEFAULT_FILTERS: ErrorExplorerFilters = oracleFilters({});
 
 function oracleFilters(overrides: Partial<ErrorExplorerFilters>): ErrorExplorerFilters {
   return { source: 'all', exactMessages: [], affectedFields: [], contradictionOnly: false, contradictionTypes: [], quickSearch: '', ...overrides };
+}
+
+function activeCountAllowanceOf(scope: Scope): ActiveCountAllowance {
+  return { plotID: scope.plotID, censusIDs: scope.censusIDs.length ? scope.censusIDs : [scope.censusID] };
 }
 
 function scopeCensusArgument(scope: Scope): number | number[] {
@@ -786,11 +797,10 @@ describe('errors explorer: frozen oracle against production on generated data', 
     const witnessIDs = () => new Set(fixture.witnessRowIDs);
     const activeCountTexts = new Set<string>();
 
-    /** The one statement without a label: dev's active-measurement count, allowed only when its text is the one frozen at 02292176 for the same scope. */
-    const isFrozenActiveCountStatement = (statement: RecordedStatement): boolean => {
-      if (statement.label !== null || statement.params.length < MIN_ACTIVE_COUNT_PARAMS) return false;
-      const [plotID, ...censusIDs] = statement.params.map(Number);
-      const frozen = buildFrozenActiveMeasurementCountQuery(database(), plotID, censusIDs);
+    /** The one statement without a label: dev's active-measurement count. It is allowed only where a request is named as allowed, and only as the text and params frozen at 02292176 for that request's plot and censuses. */
+    const isFrozenActiveCountStatement = (statement: RecordedStatement, allowance: ActiveCountAllowance | null): boolean => {
+      if (allowance === null || statement.label !== null) return false;
+      const frozen = buildFrozenActiveMeasurementCountQuery(database(), allowance.plotID, allowance.censusIDs);
       return statement.sql === frozen.sql && isDeepStrictEqual(statement.params.map(Number), frozen.params);
     };
 
@@ -816,11 +826,12 @@ describe('errors explorer: frozen oracle against production on generated data', 
       context: Record<string, unknown>,
       statements: readonly RecordedStatement[],
       filters: ErrorExplorerFilters,
-      allowedLabels: ReadonlySet<string> = KNOWN_STATEMENT_LABELS
+      allowedLabels: ReadonlySet<string> = KNOWN_STATEMENT_LABELS,
+      activeCountAllowance: ActiveCountAllowance | null = null
     ): void => {
       const filterStrings = filterStringsOf(filters);
       for (const statement of statements) {
-        if (isFrozenActiveCountStatement(statement)) {
+        if (isFrozenActiveCountStatement(statement, activeCountAllowance)) {
           activeCountTexts.add(statement.sql);
           continue;
         }
@@ -1180,6 +1191,15 @@ describe('errors explorer: frozen oracle against production on generated data', 
         )
       };
 
+      const restrictedIDs = new Set(restrictedByErrorType.rows.map(row => Number(row.coreMeasurementID)));
+      const wholeIDs = new Set(whole.rows.map(row => Number(row.coreMeasurementID)));
+      const firstWitnessDroppedByRestriction = [...fixture.witnessRowIDs].sort((a, b) => a - b).find(id => wholeIDs.has(id) && !restrictedIDs.has(id));
+      expect(
+        firstWitnessDroppedByRestriction,
+        'the restricting error type must drop a witness row, so the helper names the witness row path that the ignored-error-type mutant is detected on'
+      ).toBeDefined();
+      const ignoredErrorTypePath = `contradictionGroupKey of row ${firstWitnessDroppedByRestriction} (compared under utf8mb4_0900_ai_ci).length`;
+
       const mutations: Array<{ name: string; mutated: unknown; expected: unknown; expectedPath: string }> = [
         { name: 'a changed field', mutated: changedField, expected: whole, expectedPath: '$.rows[1].errorCount' },
         { name: 'a dropped row', mutated: droppedRow, expected: whole, expectedPath: '$.rows.length' },
@@ -1190,7 +1210,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
           expected: whole,
           expectedPath: 'contradictionGroupKey'
         },
-        { name: 'an error type ignored', mutated: whole, expected: restrictedByErrorType, expectedPath: '.length' },
+        { name: 'an error type ignored', mutated: whole, expected: restrictedByErrorType, expectedPath: ignoredErrorTypePath },
         { name: 'a dropped dbhChangePercent', mutated: droppedDbhChangePercent, expected: whole, expectedPath: 'dbhChangePercent' },
         { name: 'a sort ignored', mutated: whole, expected: sortedByDbh, expectedPath: '$.rows[' },
         { name: 'an inErrorSet flag flipped', mutated: flippedInErrorSet, expected: detailsWithPartners, expectedPath: 'inErrorSet' }
@@ -1301,7 +1321,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
         runTimed('queryErrorExplorer error type', async () => {
           const maxTotalByReason = new Map<string, number>();
           let partialSelections = 0;
-          for (const scope of [...SCOPES, MANY_CENSUS_SCOPE]) {
+          for (const scope of [...SCOPES, ...PLOT_SCOPES, MANY_CENSUS_SCOPE]) {
             for (const named of ERROR_TYPE_FILTERS) {
               const unrestricted = await oracleWholeList(scope, named.filters);
               for (const { identity, reasons } of await errorTypeCasesFor(scope, named.filters)) {
@@ -1336,6 +1356,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
           );
           expect(maxTotalByReason.get(FACET_ERROR_TYPE_REASON), 'an identity from the oracle facets must select rows').toBeGreaterThan(0);
           expect(maxTotalByReason.get(NONEXISTENT_ERROR_TYPE_REASON), 'a nonexistent identity selects nothing').toBe(0);
+          expect(maxTotalByReason.get(FALLBACK_ERROR_TYPE_REASON), 'the marked-invalid fallback identity must select rows').toBeGreaterThan(0);
           expect(maxTotalByReason.get(UPPER_CASED_MESSAGE_REASON), 'a message in capitals is not the stored message').toBe(0);
           expect(maxTotalByReason.get(SWAPPED_CASE_TWIN_REASON), 'one code with the message of its case twin is no stored identity').toBe(0);
           expect(maxTotalByReason.get(TWO_CODES_FIRST_REASON), 'the first code of the shared message must select rows').toBeGreaterThan(0);
@@ -1391,6 +1412,20 @@ describe('errors explorer: frozen oracle against production on generated data', 
                 await compare(context, actual, sliceOracleWholeList(whole, page, ROUTING_PAGE_SIZE));
                 observeNodePathQuery(context, statements, DEFAULT_FILTERS, routed.label);
               }
+              apiCalls++;
+              const wholeListRequest = queryRequest(scope, DEFAULT_FILTERS, 0, WHOLE_LIST_PAGE_SIZE, routed.extras);
+              const { result: wholeListActual, statements: wholeListStatements } = await recordProduction(executor =>
+                production.queryErrorExplorer(executor, wholeListRequest)
+              );
+              const wholeListContext = {
+                scenario: 'queryErrorExplorer sort or column filter, whole list',
+                scope: scope.name,
+                errorType: errorType ?? null,
+                routed: routed.label,
+                oracleTotalRows: whole.totalRows
+              };
+              await compare(wholeListContext, wholeListActual, whole);
+              observeNodePathQuery(wholeListContext, wholeListStatements, DEFAULT_FILTERS, routed.label);
             }
             for (const field of SORT_SWEEP_FIELDS) {
               const hasSeveralValues = new Set(unrouted.rows.map(row => row[field])).size > 1;
@@ -1415,12 +1450,19 @@ describe('errors explorer: frozen oracle against production on generated data', 
       const censusTwoFirst = await oracleWholeList(MANY_CENSUS_SCOPE, DEFAULT_FILTERS);
       const idsOf = (response: ErrorExplorerQueryResponse) => response.rows.map(row => Number(row.coreMeasurementID));
       const tieKeyOf = (row: ErrorExplorerRow) => JSON.stringify([row.hasContradiction, row.errorCount, row.measurementDate]);
-      const censusTwoRowsByTieKey = new Map<string, ErrorExplorerRow>();
-      censusOneFirst.rows.filter(row => row.censusID === SECOND_CENSUS_ID).forEach(row => censusTwoRowsByTieKey.set(tieKeyOf(row), row));
-      const tiedCensusOneRow = censusOneFirst.rows.find(row => row.censusID === FIRST_CENSUS_ID && censusTwoRowsByTieKey.has(tieKeyOf(row)));
-      expect(tiedCensusOneRow, 'the seed must hold a census 1 row and a census 2 row that tie on contradiction, error count and date').toBeDefined();
-      const censusOneID = Number((tiedCensusOneRow as ErrorExplorerRow).coreMeasurementID);
-      const censusTwoID = Number(censusTwoRowsByTieKey.get(tieKeyOf(tiedCensusOneRow as ErrorExplorerRow))?.coreMeasurementID);
+      const { firstCensusRow: censusOneID, secondCensusRow: censusTwoID } = fixture.plantedCases.censusTie;
+      const plantedRows = [censusOneID, censusTwoID].map(id => censusOneFirst.rows.find(row => Number(row.coreMeasurementID) === id));
+      expect(
+        plantedRows.every(row => row !== undefined),
+        'both planted census-tie rows must be in the error set'
+      ).toBe(true);
+      expect(
+        plantedRows.map(row => row?.censusID),
+        'the planted pair spans the two censuses'
+      ).toEqual([FIRST_CENSUS_ID, SECOND_CENSUS_ID]);
+      expect(tieKeyOf(plantedRows[0] as ErrorExplorerRow), 'the planted pair ties on contradiction, error count and date').toBe(
+        tieKeyOf(plantedRows[1] as ErrorExplorerRow)
+      );
       const [lowerID, higherID] = [Math.min(censusOneID, censusTwoID), Math.max(censusOneID, censusTwoID)];
       const positionsOf = (response: ErrorExplorerQueryResponse) => ({ lower: idsOf(response).indexOf(lowerID), higher: idsOf(response).indexOf(higherID) });
       console.log(
@@ -1452,7 +1494,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
               );
               const context = { scenario: 'buildErrorExplorerFacets', scope: scope.name, filters: named.label, filterValues: searchFilters, quickSearch };
               await compare(context, actual, expected);
-              observeProduction(context, statements, searchFilters);
+              observeProduction(context, statements, searchFilters, KNOWN_STATEMENT_LABELS, activeCountAllowanceOf(scope));
             }
           }
         }),
@@ -1512,6 +1554,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
           for (const censusID of [FIRST_CENSUS_ID, SECOND_CENSUS_ID]) {
             const request = { schema: database(), plotID: MAIN_PLOT_ID, censusID };
             for (const measurementID of measurementIDs) {
+              let typeWithoutRequest: unknown;
               for (const activeType of activeTypes) {
                 apiCalls += 2;
                 const expected = await oracle.buildErrorExplorerDetails(oracleExecutor(), request, measurementID, activeType);
@@ -1523,7 +1566,8 @@ describe('errors explorer: frozen oracle against production on generated data', 
                 observeProduction(context, statements, DEFAULT_FILTERS, DETAILS_STATEMENT_LABELS);
                 partnerCounts.inErrorSet += expected.relatedRows.filter(related => related.inErrorSet).length;
                 partnerCounts.outsideErrorSet += expected.relatedRows.filter(related => !related.inErrorSet).length;
-                if (activeType !== undefined && expected.row?.contradictionType === activeType) partnerCounts.requestedTypeShown++;
+                if (activeType === undefined) typeWithoutRequest = expected.row?.contradictionType;
+                else if (expected.row?.contradictionType === activeType && typeWithoutRequest !== activeType) partnerCounts.requestedTypeShown++;
                 if (
                   measurementID === errorMember &&
                   expected.relatedRows.some(related => related.coreMeasurementID === outsidePartner && !related.inErrorSet)
@@ -1536,7 +1580,7 @@ describe('errors explorer: frozen oracle against production on generated data', 
           console.log(`[details] seed=${seed} partners=${JSON.stringify(partnerCounts)} plantedOutsidePartnerShown=${outsidePartnerShown}`);
           expect(partnerCounts.inErrorSet, 'the sweep must reach a related row that is in the error set').toBeGreaterThan(0);
           expect(partnerCounts.outsideErrorSet, 'the sweep must reach a related row outside the error set').toBeGreaterThan(0);
-          expect(partnerCounts.requestedTypeShown, 'the sweep must reach a row that shows the requested contradiction type').toBeGreaterThan(0);
+          expect(partnerCounts.requestedTypeShown, 'the sweep must reach a row whose displayed type the request changed').toBeGreaterThan(0);
           expect(outsidePartnerShown, `row ${errorMember} must list its outside partner ${outsidePartner} with inErrorSet false`).toBe(true);
         }),
       SEED_TEST_TIMEOUT_MS

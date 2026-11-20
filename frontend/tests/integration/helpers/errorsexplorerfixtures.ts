@@ -188,7 +188,13 @@ export interface OutsidePartnerRowIDs {
   errorMember: number;
   outsidePartner: number;
 }
+export interface CensusTieRowIDs {
+  /** Two errored rows, one per census, with one error each, the same date and no contradiction: they tie on every default-order key but the measurement ID. */
+  firstCensusRow: number;
+  secondCensusRow: number;
+}
 export interface PlantedCaseRowIDs {
+  censusTie: CensusTieRowIDs;
   dbhChange: DbhChangeRowIDs;
   sharedIdentity: SharedIdentityRowIDs;
   outsidePartner: OutsidePartnerRowIDs;
@@ -671,6 +677,7 @@ type Random = () => number;
 
 const MEASUREMENT_ID_BLOCK_SIZE = 1000;
 const PLANTED_FIRST_ID = 5000;
+const CENSUS_TIE_TREE_TAGS = ['CT1', 'CT2'] as const;
 const FIRST_CENSUS: FixtureCensus = { censusID: FIRST_CENSUS_ID, plotID: MAIN_PLOT_ID, plotCensusNumber: null };
 const SECOND_CENSUS: FixtureCensus = { censusID: SECOND_CENSUS_ID, plotID: MAIN_PLOT_ID, plotCensusNumber: null };
 const DECOY_CENSUS: FixtureCensus = { censusID: DECOY_CENSUS_ID, plotID: DECOY_PLOT_ID, plotCensusNumber: null };
@@ -968,6 +975,10 @@ function plantedRows(): PlantedRows {
     linkedToBoth: plant({ treeTag: 'SI1', stemTag: '1' }, [SHARED_IDENTITY_ERROR_IDS.first, SHARED_IDENTITY_ERROR_IDS.second]),
     linkedToFirstOnly: plant({ treeTag: 'SI2', stemTag: '1' }, [SHARED_IDENTITY_ERROR_IDS.first])
   };
+  const censusTie: CensusTieRowIDs = {
+    firstCensusRow: plant({ treeTag: CENSUS_TIE_TREE_TAGS[0], stemTag: '1' }, [ET.invalidSpecies]),
+    secondCensusRow: plant({ treeTag: CENSUS_TIE_TREE_TAGS[1], stemTag: '1', censusID: SECOND_CENSUS_ID }, [ET.invalidSpecies])
+  };
   const outsidePartner: OutsidePartnerRowIDs = {
     outsidePartner: plant({ coreMeasurementID: OUTSIDE_PARTNER_ID, treeTag: OUTSIDE_PARTNER_TREE_TAG, stemTag: OUTSIDE_PARTNER_STEM_TAG }),
     errorMember: plant({ coreMeasurementID: OUTSIDE_PARTNER_ERROR_MEMBER_ID, treeTag: OUTSIDE_PARTNER_TREE_TAG, stemTag: OUTSIDE_PARTNER_STEM_TAG }, [
@@ -998,7 +1009,7 @@ function plantedRows(): PlantedRows {
     ],
     witnessGroups,
     mismatchedPlotRowIDs,
-    plantedCases: { dbhChange, sharedIdentity, outsidePartner, inactiveClean }
+    plantedCases: { censusTie, dbhChange, sharedIdentity, outsidePartner, inactiveClean }
   };
 }
 
