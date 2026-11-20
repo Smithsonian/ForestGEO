@@ -469,9 +469,10 @@ export default function ErrorsExplorer() {
   const sheetStatus: ErrorRowDetailsStatus = details.isStale ? 'stale' : details.status === 'error' ? 'error' : details.data ? 'ready' : 'loading';
   const panelRow = details.data?.row ? toDetailsPanelRow(details.data.row) : (sheet?.row ?? null);
   const censusHasNoErrors = totals !== null && totals.affectedMeasurements === 0;
-  const groupsUnavailable = groupMode === 'byType' && facets.status === 'error' && !facets.data;
+  const facetsStatus = readScope && !filtersRestored ? 'loading' : facets.status;
+  const groupsUnavailable = groupMode === 'byType' && facetsStatus === 'error' && !facets.data;
   const effectiveGroupMode: ErrorsExplorerGroupMode = groupsUnavailable ? 'none' : groupMode;
-  const showsGroupEmptyState = effectiveGroupMode === 'byType' && facets.status === 'ready' && errorTypes.length === 0;
+  const showsGroupEmptyState = effectiveGroupMode === 'byType' && facetsStatus === 'ready' && errorTypes.length === 0;
   const showsFlatEmptyState = effectiveGroupMode === 'none' && view.flatTotalRows === 0;
 
   const factsLine = totals ? formatViewErrorsFactsLine(totals.affectedMeasurements, totals.activeMeasurements, totals.errorTypeCount) : null;
@@ -555,7 +556,7 @@ export default function ErrorsExplorer() {
 
       <ErrorsTotalsTiles
         totals={totals}
-        status={facets.status}
+        status={facetsStatus}
         isStale={facets.isStale}
         onRetry={() => (gated ? void rowEdit.retryRefresh() : void facets.reload())}
       />
@@ -564,7 +565,7 @@ export default function ErrorsExplorer() {
         showValue={resolveShowValue(filters)}
         onShowChange={value => setFilters(previous => applyShowValue(previous, value))}
         totals={totals}
-        totalsLoading={facets.status === 'loading'}
+        totalsLoading={facetsStatus === 'loading'}
         quickSearch={filters.quickSearch}
         onQuickSearchChange={quickSearch => setFilters(previous => ({ ...previous, quickSearch }))}
         groupMode={groupMode}

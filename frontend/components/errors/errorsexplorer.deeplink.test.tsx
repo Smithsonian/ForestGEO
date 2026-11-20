@@ -312,6 +312,35 @@ describe('ErrorsExplorer deep links (#547)', () => {
     expect(requestBodies(FACETS_ENDPOINT)[0].censusID).toBe(SECOND_CENSUS_ID);
   });
 
+  it('never mounts the empty state while a new census scope restores its saved filter (#544 P10-1)', async () => {
+    const EMPTY_STATE_TEST_ID = 'errors-explorer-empty';
+    saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
+    saveFilters(SECOND_CENSUS_ID, [SECOND_CENSUS_SAVED_MESSAGE]);
+    const { rerender, container } = render(<ErrorsExplorer />);
+    await expectOneFacetsRequestThenOneTopGroupQuery([SAVED_MESSAGE]);
+
+    const emptyStateMounts: string[] = [];
+    const observer = new MutationObserver(records => {
+      for (const record of records) {
+        record.addedNodes.forEach(node => {
+          if (!(node instanceof HTMLElement)) return;
+          if (node.dataset.testid === EMPTY_STATE_TEST_ID || node.querySelector(`[data-testid="${EMPTY_STATE_TEST_ID}"]`))
+            emptyStateMounts.push(node.outerHTML.slice(0, 80));
+        });
+      }
+    });
+    observer.observe(container, { childList: true, subtree: true });
+
+    explorerState.census = { dateRanges: [{ censusID: SECOND_CENSUS_ID }] };
+    rerender(<ErrorsExplorer />);
+    await expectLatestRequestsToFilter([SECOND_CENSUS_SAVED_MESSAGE]);
+    await settle();
+    observer.disconnect();
+
+    console.log(`[#544 P10-1] empty state mounts during census switch: ${JSON.stringify(emptyStateMounts)}`);
+    expect(emptyStateMounts, 'the empty state must not appear while the new scope is loading').toEqual([]);
+  });
+
   it('re-reads the saved filter, sending nothing while the scope is gone, when the same census returns (#544 C1)', async () => {
     const changedWhileAway = 'Species code not found';
     saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
