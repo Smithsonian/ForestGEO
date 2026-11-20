@@ -2315,7 +2315,7 @@ describe('tree-wide species correction (#427, integration)', () => {
       expect(Boolean(otherCmAfter.IsActive)).toBe(true);
     });
 
-    it('is a no-op (no speciesCorrection, no effects, no allocation) for a case-only spelling match, and applying it changes nothing', async () => {
+    it('treats a case-only spelling match as no species correction (no speciesCorrection, no effects, no new rows), yet applying it still rewrites the edited row RawSpCode to the typed spelling and clears that row validation errors', async () => {
       const lowerCaseCode = SPECIES_CODE_ACERRU.toLowerCase();
       const plan = await analyzeEdit(
         cm,
@@ -2338,6 +2338,15 @@ describe('tree-wide species correction (#427, integration)', () => {
       const speciesCountBefore = await countRows(connection, 'species');
       const treeCountBefore = await countRows(connection, 'trees');
       const stemCountBefore = await countRows(connection, 'stems');
+
+      // The legacy (non-correction) write path owns this edit: it re-syncs the
+      // edited row's Raw* columns and wipes that row's validation errors
+      // (resetting it to pending), so seed one to observe the wipe.
+      await seedMeasurementErrorLog(connection, fixture.coreMeasurementIDs.cm1, ERROR_SOURCE_VALIDATION, ERROR_CODE_PREVIOUS_CENSUS_SPECIES_MISMATCH, false);
+      const cm1BeforeApply = await loadCoreMeasurement(connection, fixture.coreMeasurementIDs.cm1);
+      expect(cm1BeforeApply.RawSpCode).toBe(SPECIES_CODE_ACERRU);
+      expect(await loadMeasurementErrorLog(connection, fixture.coreMeasurementIDs.cm1)).toHaveLength(1);
+      const cm3BeforeApply = await loadCoreMeasurement(connection, fixture.coreMeasurementIDs.cm3);
 
       // APPLY identity stability: actually applying the case-only edit must
       // not correct/re-link anything. TreeID/StemGUIDs/CoreMeasurementID stay
@@ -2364,6 +2373,19 @@ describe('tree-wide species correction (#427, integration)', () => {
       const cm1 = await loadCoreMeasurement(connection, fixture.coreMeasurementIDs.cm1);
       expect(Number(cm1.CoreMeasurementID)).toBe(fixture.coreMeasurementIDs.cm1);
       expect(Number(cm1.StemGUID)).toBe(fixture.stemGUIDs.s1);
+
+      // What the case-only apply really does to the edited row (measurementssummary writer, legacy path):
+      // RawSpCode takes the typed spelling, not the canonical code...
+      expect(cm1.RawSpCode, `RawSpCode before apply was ${String(cm1BeforeApply.RawSpCode)}`).toBe(lowerCaseCode);
+      // ...its validation errors are deleted and it is reset to pending...
+      const validationErrorsAfterApply = (await loadMeasurementErrorLog(connection, fixture.coreMeasurementIDs.cm1)).filter(
+        row => row.ErrorSource === ERROR_SOURCE_VALIDATION
+      );
+      expect(validationErrorsAfterApply, JSON.stringify(validationErrorsAfterApply)).toHaveLength(0);
+      expect(cm1.IsValidated).toBeNull();
+      // ...and no sibling is touched (this is not a tree-wide correction).
+      const cm3AfterApply = await loadCoreMeasurement(connection, fixture.coreMeasurementIDs.cm3);
+      expect(cm3AfterApply).toEqual(cm3BeforeApply);
     });
 
     it('throws SpeciesNotFoundError for an unknown species code', async () => {
@@ -2989,6 +3011,63 @@ describe('tree-wide species correction (#427, integration)', () => {
       ]);
       expect(speciesRows).toHaveLength(1);
       expect(speciesRows[0].SpeciesID).toBe(fixture.speciesIDs[SPECIES_CODE_QUERCO]);
+    });
+
+    it('corrects every sibling when the tree stems sit in a different quadrat than the edited stem: tree SpeciesID and each sibling RawSpCode move, quadrat links and tree/stem counts stay put', async () => {
+      await connection.query('UPDATE stems SET QuadratID = ? WHERE StemGUID IN (?, ?)', [
+        fixture.quadratIDs[QUADRAT_NAME_B],
+        fixture.stemGUIDs.s2,
+        fixture.stemGUIDs.s3
+      ]);
+      await connection.query('UPDATE coremeasurements SET RawQuadrat = ? WHERE CoreMeasurementID IN (?, ?)', [
+        QUADRAT_NAME_B,
+        fixture.coreMeasurementIDs.cm3,
+        fixture.coreMeasurementIDs.cm4
+      ]);
+      const treeCountBefore = await countRows(connection, 'trees');
+      const stemCountBefore = await countRows(connection, 'stems');
+
+      const plan = await analyzeEdit(
+        cm,
+        config.database,
+        'measurementssummary',
+        fixture.plotID,
+        fixture.censusID,
+        fixture.coreMeasurementIDs.cm1,
+        { SpeciesCode: SPECIES_CODE_QUERCO },
+        undefined,
+        { role: ADMIN_ROLE }
+      );
+      expect(plan.canApply, `plan errors: ${JSON.stringify(plan.errors)}`).toBe(true);
+      expect(plan.speciesCorrection!.stems.map(stem => stem.stemGUID).sort((a, b) => a - b)).toEqual(
+        [fixture.stemGUIDs.s1, fixture.stemGUIDs.s2, fixture.stemGUIDs.s3].sort((a, b) => a - b)
+      );
+      expect(plan.speciesCorrection!.measurements).toHaveLength(4);
+
+      await applyEdit(cm, {
+        dataType: 'measurementssummary',
+        schema: config.database,
+        plotID: fixture.plotID,
+        censusID: fixture.censusID,
+        targetID: fixture.coreMeasurementIDs.cm1,
+        newRow: { SpeciesCode: SPECIES_CODE_QUERCO },
+        expectedPlanHash: plan.planHash,
+        createdBy: CREATED_BY_APPLY,
+        role: ADMIN_ROLE
+      });
+
+      expect(await countRows(connection, 'trees')).toBe(treeCountBefore);
+      expect(await countRows(connection, 'stems')).toBe(stemCountBefore);
+      expect(Number((await loadTree(connection, fixture.treeID)).SpeciesID)).toBe(fixture.speciesIDs[SPECIES_CODE_QUERCO]);
+
+      for (const [label, coreMeasurementID] of Object.entries(fixture.coreMeasurementIDs)) {
+        const measurement = await loadCoreMeasurement(connection, coreMeasurementID);
+        expect(measurement.RawSpCode, `${label} RawSpCode after correction`).toBe(SPECIES_CODE_QUERCO);
+      }
+      expect(Number((await loadStem(connection, fixture.stemGUIDs.s1)).QuadratID)).toBe(fixture.quadratIDs[QUADRAT_NAME_A]);
+      expect(Number((await loadStem(connection, fixture.stemGUIDs.s2)).QuadratID)).toBe(fixture.quadratIDs[QUADRAT_NAME_B]);
+      expect(Number((await loadStem(connection, fixture.stemGUIDs.s3)).QuadratID)).toBe(fixture.quadratIDs[QUADRAT_NAME_B]);
+      expect((await loadCoreMeasurement(connection, fixture.coreMeasurementIDs.cm3)).RawQuadrat).toBe(QUADRAT_NAME_B);
     });
 
     it("preserves the edited row's own Raw* identity/position snapshot exactly when it started NULL (no fabrication from the canonical join) while correcting its RawSpCode to the canonical code, and leaves every sibling's raw columns completely untouched", async () => {
