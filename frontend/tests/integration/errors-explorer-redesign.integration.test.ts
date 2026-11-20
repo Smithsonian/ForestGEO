@@ -17,7 +17,8 @@ const sharedState = vi.hoisted(() => ({
 
 const TEST_TRANSACTION_ID_PREFIX = 'redesign-transaction-';
 
-vi.mock('@/lib/db/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const { runQueryDispatch } = await vi.importActual<typeof import('../setup/runquerydispatch')>('../setup/runquerydispatch');
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) {
@@ -26,8 +27,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
         throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
-      const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
-      return rows;
+      return runQueryDispatch(sharedState.connection, query, params);
     },
     beginTransaction: async () => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
@@ -226,6 +226,7 @@ describe('View Errors server facts against real MySQL', () => {
       filters: DEFAULT_ERROR_EXPLORER_FILTERS
     });
     const sameBatchType = facets.errorTypes.find(type => type.source === ERROR_SOURCE_VALIDATION && type.code === VALIDATION_CODE_SAME_BATCH_SPECIES_CONFLICT);
+    console.log('[view-errors one-sided 21 facets]', JSON.stringify({ sameBatchType, errorTypes: facets.errorTypes }));
     expect(sameBatchType?.count, JSON.stringify(facets.errorTypes)).toBe(1);
   });
 });

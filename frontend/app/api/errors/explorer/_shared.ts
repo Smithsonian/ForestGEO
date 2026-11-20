@@ -1,35 +1,90 @@
-import ConnectionManager from '@/lib/db/connectionmanager';
+import type ConnectionManager from '@/lib/db/connectionmanager';
+import ailogger from '@/ailogger';
 import {
   computeDbhChangePercent,
   ContradictionType,
   dedupeNumbers,
   DBH_CHANGE_VALIDATION_CODES,
   dedupeStrings,
-  ERROR_SOURCE,
   ErrorComparisonContext,
   ErrorDetailRecord,
   ErrorExplorerDetailsResponse,
   ErrorExplorerFacetsResponse,
   ErrorExplorerFilters,
+  ErrorExplorerColumnFilter,
   ErrorExplorerQueryRequest,
   ErrorExplorerQueryResponse,
   ErrorExplorerRow,
-  ErrorFacetOption,
-  ErrorCensusTotals,
-  ErrorTypeFacet,
   ErrorTypeIdentity,
   RelatedContradictionRow,
-  buildErrorTypeKey,
-  FALLBACK_ERROR_CODE,
-  FALLBACK_ERROR_MESSAGE,
-  INGESTION_ERROR_FIELD_MAP,
   toFiniteNumberOrNull
 } from '@/config/errorsexplorer';
 import { type ColumnValueRow, compareRowsBySortItem, matchesColumnFilter } from '@/lib/errorsexplorer/columnquery';
-import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildActiveMeasurementCountQuery, readActiveMeasurementCount } from '@/lib/activemeasurementcount';
+import {
+  buildCatalogStatement,
+  buildDuplicateMemberGroupsStatement,
+  buildHistogramWithFlagsStatement,
+  buildHistogramWithoutFlagsStatement,
+  buildIDRawRowsStatement,
+  buildRelatedRowsOutsideErrorSetStatement,
+  buildPageStatement,
+  buildSameBatchMemberGroupsStatement,
+  buildScopeRawRowsStatement,
+  buildTotalsStatement,
+  chunkCensusIDs,
+  chunkMeasurementIDs,
+  compareSelectedRows,
+  SQL_TRUE,
+  type BuiltStatement,
+  type ContradictionFlagColumns,
+  type DuplicateMemberGroupRow,
+  type ErrorSetScope,
+  type ErrorSetTotalsRow,
+  type ErrorSignatureRow,
+  type ErrorTypeCatalogRow,
+  type ErrorTypeKeyFilter,
+  type FlagCombinations,
+  type RelatedRowOutsideErrorSetRow,
+  type SameBatchMemberGroupRow,
+  type SelectedPageRow
+} from './errorsetsql';
+import {
+  allowedFlagCombinations,
+  anyFlagCombinationAllowed,
+  buildErrorTypeCatalog,
+  buildRelatedMeasurementIDs,
+  computeCensusTotals,
+  computeErrorKeySets,
+  computeErrorMessageCounts,
+  computeErrorTypeFacets,
+  contradictionFiltersAllow,
+  errorMatchesFilters,
+  findMissingErrorTypeKeys,
+  getOccurrenceFields,
+  hasErrorTypeOrderTie,
+  hasIncompleteSignature,
+  hasLocaleCompareTie,
+  isImpossibleKeyFilter,
+  mergeSignatureRows,
+  toSliceBounds,
+  toWeightedErrorRows,
+  type ErrorMessageCounts,
+  type ErrorTypeCatalog,
+  type SliceBounds,
+  type WeightedErrorRow
+} from './errorsetcounts';
 
-type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
+export type { ErrorMessageCounts } from './errorsetcounts';
+
+type ExplorerConnection = Pick<ReturnType<typeof ConnectionManager.getInstance>, 'executeQuery'>;
+type FacetsRequest = Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters'>;
+type SignatureRequestKind = 'facets' | 'message-counts';
+
+const ERROR_SIGNATURE_WARNING_THRESHOLD = 10_000;
+export const SIGNATURE_FALLBACK_WARNING = 'Errors explorer: a cut error-type signature sent this request to the Node path';
+export const SIGNATURE_THRESHOLD_WARNING = 'Errors explorer: the signature histogram returned more rows than the warning threshold';
+export const LOCALE_TIE_FALLBACK_WARNING = 'Errors explorer: facet values that localeCompare ties sent this request to the Node path';
 
 export interface RawErrorOccurrenceRow {
   CoreMeasurementID: number;
@@ -77,7 +132,7 @@ export interface RawErrorOccurrenceRow {
 
 interface ContradictionInfo {
   type: ContradictionType;
-  groupKey: string;
+  groupKey: string | null;
   relatedMeasurementIDs: number[];
 }
 
@@ -86,11 +141,6 @@ export interface GroupedErrorRow {
   allErrors: ErrorDetailRecord[];
   contradictions: ContradictionInfo[];
 }
-
-const VALIDATION_ERROR_FIELD_FALLBACK_MAP: Record<string, string[]> = {
-  '5': ['treeTag', 'stemTag'],
-  '21': ['treeTag', 'speciesCode']
-};
 
 function normalizeDate(value: string | Date | null | undefined): string | null {
   if (!value) return null;
@@ -101,19 +151,6 @@ function normalizeDate(value: string | Date | null | undefined): string | null {
     return value.includes('T') ? value.split('T')[0] : value;
   }
   return null;
-}
-
-function splitValidationCriteria(criteria?: string | null): string[] {
-  if (!criteria) return [];
-  return dedupeStrings(criteria.split(';').map(part => part.trim()));
-}
-
-function getOccurrenceFields(source: 'validation' | 'ingestion', errorCode: string, validationCriteria?: string | null): string[] {
-  if (source === 'validation') {
-    const criteriaFields = splitValidationCriteria(validationCriteria);
-    return criteriaFields.length > 0 ? criteriaFields : (VALIDATION_ERROR_FIELD_FALLBACK_MAP[errorCode] ?? []);
-  }
-  return INGESTION_ERROR_FIELD_MAP[errorCode] ?? [];
 }
 
 function buildComparison(rawRow: RawErrorOccurrenceRow): ErrorComparisonContext | null {
@@ -128,17 +165,9 @@ function buildComparison(rawRow: RawErrorOccurrenceRow): ErrorComparisonContext 
   };
 }
 
-function parseMeasurementIDs(value: string | null | undefined): number[] {
-  if (!value) return [];
-  return value
-    .split(',')
-    .map(item => Number(item))
-    .filter(id => Number.isFinite(id));
-}
-
 function addContradiction(contradictionMap: Map<number, ContradictionInfo[]>, measurementID: number, contradiction: ContradictionInfo) {
   const existing = contradictionMap.get(measurementID) ?? [];
-  if (existing.some(item => item.groupKey === contradiction.groupKey)) {
+  if (existing.some(item => item.type === contradiction.type)) {
     return;
   }
   contradictionMap.set(measurementID, [...existing, contradiction]);
@@ -172,144 +201,6 @@ function getVisibleContradictions(
       ? dedupeNumbers(contradictions.filter(contradiction => contradiction.type === primaryType).flatMap(contradiction => contradiction.relatedMeasurementIDs))
       : []
   };
-}
-
-function buildRawErrorsQuery(schema: string): string {
-  return safeFormatQuery(
-    schema,
-    `SELECT ms.CoreMeasurementID,
-            ms.PlotID,
-            ms.CensusID,
-            ms.QuadratID,
-            ms.TreeID,
-            ms.StemGUID,
-            cm.StemGUID AS CoreStemGUID,
-            ms.SpeciesID,
-            ms.TreeTag,
-            ms.StemTag,
-            ms.SpeciesName,
-            ms.SubspeciesName,
-            ms.SpeciesCode,
-            ms.QuadratName,
-            ms.StemLocalX,
-            ms.StemLocalY,
-            ms.StemPlotX,
-            ms.StemPlotY,
-            ms.MeasurementDate,
-            ms.MeasuredDBH,
-            ms.MeasuredHOM,
-            ms.IsValidated,
-            ms.Description AS MeasurementDescription,
-            ms.Attributes,
-            cm.RawCodes,
-            ms.UserDefinedFields,
-            cm.UploadFileID,
-            cm.UploadBatchID,
-            mel.PriorCensusID,
-            mel.PriorDBH,
-            mel.PriorHOM,
-            COALESCE(me.ErrorSource, '${ERROR_SOURCE.ingestion}') AS ErrorSource,
-            COALESCE(me.ErrorCode, '${FALLBACK_ERROR_CODE}') AS ErrorCode,
-            COALESCE(
-              NULLIF(ve.Description, ''),
-              me.ErrorMessage,
-              '${FALLBACK_ERROR_MESSAGE}'
-            ) AS DisplayMessage,
-            COALESCE(NULLIF(ve.Criteria, ''), '') AS ValidationCriteria,
-            COALESCE(NULLIF(ve.ProcedureName, ''), '') AS ProcedureName
-     FROM ??.coremeasurements cm
-     JOIN ??.measurementssummary ms ON ms.CoreMeasurementID = cm.CoreMeasurementID
-     LEFT JOIN ??.measurement_error_log mel
-       ON mel.MeasurementID = cm.CoreMeasurementID
-      AND COALESCE(mel.IsResolved, FALSE) = FALSE
-     LEFT JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
-     LEFT JOIN ??.sitespecificvalidations ve
-       ON me.ErrorSource = 'validation'
-      AND me.ErrorCode = CAST(ve.ValidationID AS CHAR)
-     WHERE ms.PlotID = ?
-       AND ms.CensusID = ?
-       AND COALESCE(cm.IsActive, TRUE) = TRUE
-       AND (mel.MeasurementID IS NOT NULL OR ms.IsValidated = FALSE)
-     ORDER BY ms.CoreMeasurementID ASC, me.ErrorSource ASC, me.ErrorCode ASC`
-  );
-}
-
-function buildDuplicateGroupsQuery(schema: string): string {
-  return safeFormatQuery(
-    schema,
-    `SELECT ms.TreeTag,
-            ms.StemTag,
-            GROUP_CONCAT(DISTINCT ms.CoreMeasurementID ORDER BY ms.CoreMeasurementID SEPARATOR ',') AS MeasurementIDs
-     FROM ??.measurementssummary ms
-     WHERE ms.PlotID = ?
-       AND ms.CensusID = ?
-       AND COALESCE(ms.TreeTag, '') <> ''
-       AND COALESCE(ms.StemTag, '') <> ''
-     GROUP BY ms.TreeTag, ms.StemTag
-     HAVING COUNT(DISTINCT ms.CoreMeasurementID) > 1`
-  );
-}
-
-function buildSameBatchConflictGroupsQuery(schema: string): string {
-  return safeFormatQuery(
-    schema,
-    `SELECT cm.UploadFileID,
-            cm.UploadBatchID,
-            ms.TreeTag,
-            GROUP_CONCAT(DISTINCT cm.CoreMeasurementID ORDER BY cm.CoreMeasurementID SEPARATOR ',') AS MeasurementIDs
-     FROM ??.coremeasurements cm
-     JOIN ??.measurementssummary ms ON ms.CoreMeasurementID = cm.CoreMeasurementID
-     WHERE ms.PlotID = ?
-       AND ms.CensusID = ?
-       AND COALESCE(ms.TreeTag, '') <> ''
-       AND cm.UploadFileID IS NOT NULL
-       AND cm.UploadBatchID IS NOT NULL
-       AND COALESCE(cm.IsActive, TRUE) = TRUE
-     GROUP BY cm.UploadFileID, cm.UploadBatchID, ms.TreeTag
-     HAVING COUNT(DISTINCT COALESCE(ms.SpeciesCode, '')) > 1
-        AND COUNT(DISTINCT cm.CoreMeasurementID) > 1`
-  );
-}
-
-async function buildContradictionMap(connectionManager: ExplorerConnection, schema: string, plotID: number, censusID: number) {
-  const contradictionMap = new Map<number, ContradictionInfo[]>();
-
-  const duplicateGroups = (await connectionManager.executeQuery(buildDuplicateGroupsQuery(schema), [plotID, censusID])) as Array<{
-    TreeTag?: string | null;
-    StemTag?: string | null;
-    MeasurementIDs?: string | null;
-  }>;
-
-  duplicateGroups.forEach(group => {
-    const measurementIDs = parseMeasurementIDs(group.MeasurementIDs);
-    measurementIDs.forEach(measurementID => {
-      addContradiction(contradictionMap, measurementID, {
-        type: 'duplicate_tag_stem',
-        groupKey: `duplicate:${censusID}:${group.TreeTag ?? ''}:${group.StemTag ?? ''}`,
-        relatedMeasurementIDs: measurementIDs.filter(id => id !== measurementID)
-      });
-    });
-  });
-
-  const sameBatchGroups = (await connectionManager.executeQuery(buildSameBatchConflictGroupsQuery(schema), [plotID, censusID])) as Array<{
-    UploadFileID?: string | null;
-    UploadBatchID?: string | null;
-    TreeTag?: string | null;
-    MeasurementIDs?: string | null;
-  }>;
-
-  sameBatchGroups.forEach(group => {
-    const measurementIDs = parseMeasurementIDs(group.MeasurementIDs);
-    measurementIDs.forEach(measurementID => {
-      addContradiction(contradictionMap, measurementID, {
-        type: 'same_batch_conflict',
-        groupKey: `same-batch:${censusID}:${group.UploadFileID ?? ''}:${group.UploadBatchID ?? ''}:${group.TreeTag ?? ''}`,
-        relatedMeasurementIDs: measurementIDs.filter(id => id !== measurementID)
-      });
-    });
-  });
-
-  return contradictionMap;
 }
 
 function groupErrorRows(rawRows: RawErrorOccurrenceRow[], contradictionMap: Map<number, ContradictionInfo[]>): Map<number, GroupedErrorRow> {
@@ -417,28 +308,14 @@ function matchesQuickSearch(row: ErrorExplorerRow, errors: ErrorDetailRecord[], 
 }
 
 function materializeMatchingErrors(row: GroupedErrorRow, filters: ErrorExplorerFilters): ErrorDetailRecord[] {
-  return row.allErrors.filter(error => {
-    if (filters.source !== 'all' && error.source !== filters.source) {
-      return false;
-    }
-    if (filters.exactMessages.length > 0 && !filters.exactMessages.includes(error.message)) {
-      return false;
-    }
-    if (filters.affectedFields.length > 0 && !error.fields.some(field => filters.affectedFields.includes(field))) {
-      return false;
-    }
-    return true;
-  });
+  return row.allErrors.filter(error => errorMatchesFilters(error, filters));
 }
 
 function rowMatchesFilters(row: GroupedErrorRow, matchingErrors: ErrorDetailRecord[], filters: ErrorExplorerFilters): boolean {
   if (matchingErrors.length === 0) {
     return false;
   }
-  if (filters.contradictionOnly && !row.baseRow.hasContradiction) {
-    return false;
-  }
-  if (filters.contradictionTypes.length > 0 && !row.baseRow.contradictionTypes.some(type => filters.contradictionTypes.includes(type))) {
+  if (!contradictionFiltersAllow(filters, row.baseRow.hasContradiction, row.baseRow.contradictionTypes)) {
     return false;
   }
   return matchesQuickSearch(row.baseRow, matchingErrors, filters.quickSearch);
@@ -506,35 +383,57 @@ function sortRows(a: GroupedErrorRow, b: GroupedErrorRow): number {
   return aID - bID;
 }
 
-interface GroupedErrorRowsOptions {
-  /** Contradictions annotate rows that are already in the error set; they never add or remove one. */
-  withContradictions: boolean;
+/** push(...rows) throws RangeError once rows outgrow the engine's argument limit; a statement can answer with hundreds of thousands. */
+function appendRows<Row>(target: Row[], rows: readonly Row[]): void {
+  for (const row of rows) target.push(row);
 }
 
-const GROUPED_ERROR_ROWS_WITH_CONTRADICTIONS: GroupedErrorRowsOptions = { withContradictions: true };
+async function runStatement<Row>(connectionManager: ExplorerConnection, statement: BuiltStatement): Promise<Row[]> {
+  return (await connectionManager.executeQuery(statement.sql, statement.params)) as Row[];
+}
 
-export async function fetchGroupedErrorRows(
+function uniquePositiveCensusIDs(censusIDs: number | number[]): number[] {
+  return Array.from(new Set((Array.isArray(censusIDs) ? censusIDs : [censusIDs]).filter(censusID => censusID > 0)));
+}
+
+function requestCensusIDs(request: { censusID: number; censusIDs?: number[] }): number[] {
+  return uniquePositiveCensusIDs(request.censusIDs?.length ? request.censusIDs : request.censusID);
+}
+
+function censusChunkScopes(schema: string, plotID: number, censusIDs: number[]): ErrorSetScope[] {
+  return chunkCensusIDs(censusIDs).map(chunk => ({ schema, plotID, censusIDs: chunk }));
+}
+
+type FlaggedRawErrorOccurrenceRow = RawErrorOccurrenceRow & ContradictionFlagColumns;
+
+function typeOnlyContradictions(rawRows: FlaggedRawErrorOccurrenceRow[]): Map<number, ContradictionInfo[]> {
+  const contradictionMap = new Map<number, ContradictionInfo[]>();
+  rawRows.forEach(rawRow => {
+    const measurementID = Number(rawRow.CoreMeasurementID);
+    if (Number(rawRow.HasDuplicate) === SQL_TRUE)
+      addContradiction(contradictionMap, measurementID, { type: 'duplicate_tag_stem', groupKey: null, relatedMeasurementIDs: [] });
+    if (Number(rawRow.HasSameBatch) === SQL_TRUE)
+      addContradiction(contradictionMap, measurementID, { type: 'same_batch_conflict', groupKey: null, relatedMeasurementIDs: [] });
+  });
+  return contradictionMap;
+}
+
+async function fetchFlaggedScopeRawRows(
   connectionManager: ExplorerConnection,
   schema: string,
   plotID: number,
-  censusIDs: number | number[],
-  { withContradictions }: GroupedErrorRowsOptions = GROUPED_ERROR_ROWS_WITH_CONTRADICTIONS
-) {
-  const uniqueCensusIDs = Array.from(new Set((Array.isArray(censusIDs) ? censusIDs : [censusIDs]).filter(censusID => censusID > 0)));
-  const groupedByCensus = await Promise.all(
-    uniqueCensusIDs.map(async censusID => {
-      const [rawRows, contradictionMap] = await Promise.all([
-        connectionManager.executeQuery(buildRawErrorsQuery(schema), [plotID, censusID]) as Promise<RawErrorOccurrenceRow[]>,
-        withContradictions ? buildContradictionMap(connectionManager, schema, plotID, censusID) : new Map<number, ContradictionInfo[]>()
-      ]);
-      return groupErrorRows(rawRows, contradictionMap);
-    })
-  );
+  censusIDs: number[]
+): Promise<FlaggedRawErrorOccurrenceRow[]> {
+  const rawRows: FlaggedRawErrorOccurrenceRow[] = [];
+  for (const scope of censusChunkScopes(schema, plotID, censusIDs)) {
+    appendRows(rawRows, await runStatement<FlaggedRawErrorOccurrenceRow>(connectionManager, buildScopeRawRowsStatement(scope)));
+  }
+  return rawRows;
+}
 
-  return groupedByCensus.reduce((combined, groupedRows) => {
-    groupedRows.forEach((row, measurementID) => combined.set(measurementID, row));
-    return combined;
-  }, new Map<number, GroupedErrorRow>());
+export async function fetchGroupedErrorRows(connectionManager: ExplorerConnection, schema: string, plotID: number, censusIDs: number | number[]) {
+  const rawRows = await fetchFlaggedScopeRawRows(connectionManager, schema, plotID, uniquePositiveCensusIDs(censusIDs));
+  return groupErrorRows(rawRows, typeOnlyContradictions(rawRows));
 }
 
 function toColumnValueRow(row: ErrorExplorerRow): ColumnValueRow {
@@ -546,23 +445,124 @@ interface QueryRowPair {
   display: ErrorExplorerRow;
 }
 
+interface RequestedRow {
+  measurementID: number;
+  censusID: number;
+}
+
+type RowSelection = Pick<ErrorExplorerQueryRequest, 'filters' | 'errorType'> & { columnFilter?: ErrorExplorerColumnFilter };
+
+const DETAILS_DISPLAY_FILTERS: ErrorExplorerFilters = {
+  source: 'all',
+  exactMessages: [],
+  affectedFields: [],
+  contradictionOnly: false,
+  contradictionTypes: [],
+  quickSearch: ''
+};
+
+function contradictionsFromMemberGroups(
+  duplicateGroups: DuplicateMemberGroupRow[],
+  sameBatchGroups: SameBatchMemberGroupRow[]
+): Map<number, ContradictionInfo[]> {
+  const contradictionMap = new Map<number, ContradictionInfo[]>();
+  duplicateGroups.forEach(group => {
+    const requestedID = Number(group.RequestedMeasurementID);
+    addContradiction(contradictionMap, requestedID, {
+      type: 'duplicate_tag_stem',
+      groupKey: `duplicate:${group.CensusID}:${group.TreeTag ?? ''}:${group.StemTag ?? ''}`,
+      relatedMeasurementIDs: buildRelatedMeasurementIDs(group.MeasurementIDs, Number(group.MemberListComplete) === SQL_TRUE, requestedID)
+    });
+  });
+  sameBatchGroups.forEach(group => {
+    const requestedID = Number(group.RequestedMeasurementID);
+    addContradiction(contradictionMap, requestedID, {
+      type: 'same_batch_conflict',
+      groupKey: `same-batch:${group.CensusID}:${group.UploadFileID ?? ''}:${group.UploadBatchID ?? ''}:${group.TreeTag ?? ''}`,
+      relatedMeasurementIDs: buildRelatedMeasurementIDs(group.MeasurementIDs, Number(group.MemberListComplete) === SQL_TRUE, requestedID)
+    });
+  });
+  return contradictionMap;
+}
+
+async function fetchMemberGroupContradictions(
+  connectionManager: ExplorerConnection,
+  scope: ErrorSetScope,
+  measurementIDs: number[]
+): Promise<Map<number, ContradictionInfo[]>> {
+  const [duplicateGroups, sameBatchGroups] = await Promise.all([
+    runStatement<DuplicateMemberGroupRow>(connectionManager, buildDuplicateMemberGroupsStatement(scope, measurementIDs)),
+    runStatement<SameBatchMemberGroupRow>(connectionManager, buildSameBatchMemberGroupsStatement(scope, measurementIDs))
+  ]);
+  return contradictionsFromMemberGroups(duplicateGroups, sameBatchGroups);
+}
+
+/** Display data for requested rows only: raw rows (already read, or from SQL) and their member groups, per census chunk, one wave each. */
+async function hydrateRequestedRows(
+  connectionManager: ExplorerConnection,
+  scopes: ErrorSetScope[],
+  requested: RequestedRow[],
+  knownRawRows: Map<number, RawErrorOccurrenceRow[]> | null
+): Promise<Map<number, GroupedErrorRow>> {
+  const rawRows: RawErrorOccurrenceRow[] = [];
+  const contradictionMap = new Map<number, ContradictionInfo[]>();
+  for (const scope of scopes) {
+    const scopeIDs = requested.filter(row => scope.censusIDs.includes(row.censusID)).map(row => row.measurementID);
+    for (const idChunk of chunkMeasurementIDs(scopeIDs)) {
+      const [chunkRawRows, chunkContradictions] = await Promise.all([
+        knownRawRows
+          ? Promise.resolve(idChunk.flatMap(id => knownRawRows.get(id) ?? []))
+          : runStatement<RawErrorOccurrenceRow>(connectionManager, buildIDRawRowsStatement(scope, idChunk)),
+        fetchMemberGroupContradictions(connectionManager, scope, idChunk)
+      ]);
+      appendRows(rawRows, chunkRawRows);
+      chunkContradictions.forEach((contradictions, measurementID) => contradictionMap.set(measurementID, contradictions));
+    }
+  }
+  return groupErrorRows(rawRows, contradictionMap);
+}
+
+function rowKeepsIdentity(row: GroupedErrorRow, filters: ErrorExplorerFilters, errorType: ErrorTypeIdentity | undefined): boolean {
+  return !errorType || materializeMatchingErrors(row, filters).some(error => matchesErrorTypeIdentity(error, errorType));
+}
+
+/** Selection order kept; rows that no longer match the request on the data they display are dropped (spec §5). */
+function recheckedDisplayRows(selectedIDs: number[], hydrated: Map<number, GroupedErrorRow>, selection: RowSelection): ErrorExplorerRow[] {
+  const { filters, errorType, columnFilter } = selection;
+  return selectedIDs
+    .map(measurementID => hydrated.get(measurementID))
+    .filter((row): row is GroupedErrorRow => row !== undefined)
+    .filter(row => rowMatchesFilters(row, materializeMatchingErrors(row, filters), filters) && rowKeepsIdentity(row, filters, errorType))
+    .map(row => toDisplayRow(row, filters, undefined, errorType))
+    .filter(display => !columnFilter || matchesColumnFilter(toColumnValueRow(display), columnFilter));
+}
+
+function rawRowsOfMeasurements(rawRows: RawErrorOccurrenceRow[], measurementIDs: ReadonlySet<number>): Map<number, RawErrorOccurrenceRow[]> {
+  const byMeasurement = new Map<number, RawErrorOccurrenceRow[]>();
+  for (const rawRow of rawRows) {
+    const measurementID = Number(rawRow.CoreMeasurementID);
+    if (!measurementIDs.has(measurementID)) continue;
+    const measurementRows = byMeasurement.get(measurementID);
+    if (measurementRows) measurementRows.push(rawRow);
+    else byMeasurement.set(measurementID, [rawRow]);
+  }
+  return byMeasurement;
+}
+
 /**
- * Spec Data → Query, steps 1-7: rebuild, page filters, identity (decided on the page-matching
- * errors, so search and Show behave exactly as the facets do), pair every row with the projection
- * its cells show, column filter, sort, slice. totalRows counts after the column filter.
+ * Spec Data → Query, steps 1-7 over the flagged scope raw rows: page filters, identity (decided on the page-matching errors, so
+ * search and Show behave exactly as the facets do), pair every row with the projection its cells show, column filter, sort, slice.
+ * totalRows counts after the column filter. The page's rows are then hydrated with their member groups and re-checked.
  */
-export async function queryErrorExplorer(connectionManager: ExplorerConnection, request: ErrorExplorerQueryRequest): Promise<ErrorExplorerQueryResponse> {
-  const groupedRows = await fetchGroupedErrorRows(
-    connectionManager,
-    request.schema,
-    request.plotID,
-    request.censusIDs?.length ? request.censusIDs : request.censusID
-  );
-  const pageMatchingRows = buildFilteredRows(groupedRows, request.filters);
+async function queryOnNodePath(
+  connectionManager: ExplorerConnection,
+  request: ErrorExplorerQueryRequest,
+  censusIDs: number[]
+): Promise<ErrorExplorerQueryResponse> {
+  const rawRows = await fetchFlaggedScopeRawRows(connectionManager, request.schema, request.plotID, censusIDs);
+  const groupedRows = groupErrorRows(rawRows, typeOnlyContradictions(rawRows));
   const identity = request.errorType;
-  const identityRows = identity
-    ? pageMatchingRows.filter(row => materializeMatchingErrors(row, request.filters).some(error => matchesErrorTypeIdentity(error, identity)))
-    : pageMatchingRows;
+  const identityRows = buildFilteredRows(groupedRows, request.filters).filter(row => rowKeepsIdentity(row, request.filters, identity));
   const pairs: QueryRowPair[] = identityRows.map(grouped => ({ grouped, display: toDisplayRow(grouped, request.filters, undefined, identity) }));
   const columnFilter = request.columnFilters?.[0];
   const filteredPairs = columnFilter ? pairs.filter(pair => matchesColumnFilter(toColumnValueRow(pair.display), columnFilter)) : pairs;
@@ -571,11 +571,118 @@ export async function queryErrorExplorer(connectionManager: ExplorerConnection, 
     sortItem ? compareRowsBySortItem(toColumnValueRow(a.display), toColumnValueRow(b.display), sortItem) : sortRows(a.grouped, b.grouped)
   );
   const start = request.page * request.pageSize;
+  const pageRows = filteredPairs.slice(start, start + request.pageSize).map(pair => pair.grouped);
+  const pageMeasurementIDs = pageRows.map(row => Number(row.baseRow.coreMeasurementID));
+  const hydrated = await hydrateRequestedRows(
+    connectionManager,
+    censusChunkScopes(request.schema, request.plotID, censusIDs),
+    pageRows.map(row => ({ measurementID: Number(row.baseRow.coreMeasurementID), censusID: Number(row.baseRow.censusID) })),
+    rawRowsOfMeasurements(rawRows, new Set(pageMeasurementIDs))
+  );
 
   return {
-    rows: filteredPairs.slice(start, start + request.pageSize).map(pair => pair.display),
+    rows: recheckedDisplayRows(pageMeasurementIDs, hydrated, { filters: request.filters, errorType: identity, columnFilter }),
     totalRows: filteredPairs.length
   };
+}
+
+async function loadErrorTypeCatalog(connectionManager: ExplorerConnection, schema: string): Promise<ErrorTypeCatalog> {
+  return buildErrorTypeCatalog(await runStatement<ErrorTypeCatalogRow>(connectionManager, buildCatalogStatement(schema)));
+}
+
+interface PageSelection {
+  rows: SelectedPageRow[];
+  totalRows: number;
+}
+
+function emptyQueryResponse(): ErrorExplorerQueryResponse {
+  return { rows: [], totalRows: 0 };
+}
+
+async function fetchTotalRows(
+  connectionManager: ExplorerConnection,
+  scope: ErrorSetScope,
+  keyFilter: ErrorTypeKeyFilter,
+  flags: FlagCombinations
+): Promise<number> {
+  const [totals] = await runStatement<ErrorSetTotalsRow>(connectionManager, buildTotalsStatement(scope, keyFilter, flags));
+  return Number(totals.TotalRows ?? 0);
+}
+
+async function selectSingleChunkPage(
+  connectionManager: ExplorerConnection,
+  scope: ErrorSetScope,
+  keyFilter: ErrorTypeKeyFilter,
+  flags: FlagCombinations,
+  bounds: SliceBounds
+): Promise<PageSelection> {
+  if (bounds.limit === 0) return { rows: [], totalRows: await fetchTotalRows(connectionManager, scope, keyFilter, flags) };
+  const rows = await runStatement<SelectedPageRow>(connectionManager, buildPageStatement(scope, keyFilter, flags, bounds));
+  if (rows.length === 0) return { rows, totalRows: await fetchTotalRows(connectionManager, scope, keyFilter, flags) };
+  return { rows, totalRows: Number(rows[0].TotalRows) };
+}
+
+/** More than CENSUS_LIST_SIZE censuses: each chunk's first offset + limit rows, merged in SQL order (spec §10). */
+async function selectMultiChunkPage(
+  connectionManager: ExplorerConnection,
+  scopes: ErrorSetScope[],
+  keyFilter: ErrorTypeKeyFilter,
+  flags: FlagCombinations,
+  bounds: SliceBounds
+): Promise<PageSelection> {
+  const prefixWindow: SliceBounds = { limit: bounds.offset + bounds.limit, offset: 0 };
+  const candidates: SelectedPageRow[] = [];
+  let totalRows = 0;
+  for (const scope of scopes) {
+    if (bounds.limit === 0) {
+      totalRows += await fetchTotalRows(connectionManager, scope, keyFilter, flags);
+      continue;
+    }
+    const rows = await runStatement<SelectedPageRow>(connectionManager, buildPageStatement(scope, keyFilter, flags, prefixWindow));
+    if (rows.length > 0) {
+      appendRows(candidates, rows);
+      totalRows += Number(rows[0].TotalRows);
+    }
+  }
+  return { rows: candidates.sort(compareSelectedRows).slice(bounds.offset, bounds.offset + bounds.limit), totalRows };
+}
+
+async function queryOnSqlPath(
+  connectionManager: ExplorerConnection,
+  request: ErrorExplorerQueryRequest,
+  censusIDs: number[]
+): Promise<ErrorExplorerQueryResponse> {
+  const flags = allowedFlagCombinations(request.filters);
+  if (censusIDs.length === 0 || !anyFlagCombinationAllowed(flags)) return emptyQueryResponse();
+  const keyFilter = computeErrorKeySets(await loadErrorTypeCatalog(connectionManager, request.schema), request.filters, request.errorType);
+  if (isImpossibleKeyFilter(keyFilter)) return emptyQueryResponse();
+  const scopes = censusChunkScopes(request.schema, request.plotID, censusIDs);
+  const bounds = toSliceBounds(request.page, request.pageSize);
+  const selection =
+    scopes.length === 1
+      ? await selectSingleChunkPage(connectionManager, scopes[0], keyFilter, flags, bounds)
+      : await selectMultiChunkPage(connectionManager, scopes, keyFilter, flags, bounds);
+  const selectedIDs = selection.rows.map(row => Number(row.CoreMeasurementID));
+  const hydrated = await hydrateRequestedRows(
+    connectionManager,
+    scopes,
+    selection.rows.map(row => ({ measurementID: Number(row.CoreMeasurementID), censusID: Number(row.CensusID) })),
+    null
+  );
+  return {
+    rows: recheckedDisplayRows(selectedIDs, hydrated, { filters: request.filters, errorType: request.errorType }),
+    totalRows: selection.totalRows
+  };
+}
+
+/** Search, sort and column filters read the whole error set in Node; the page statement cannot order or filter on those (plan decision D-A). */
+function mustRunOnNodePath(request: ErrorExplorerQueryRequest): boolean {
+  return request.filters.quickSearch.trim().length > 0 || (request.sortModel?.length ?? 0) > 0 || (request.columnFilters?.length ?? 0) > 0;
+}
+
+export async function queryErrorExplorer(connectionManager: ExplorerConnection, request: ErrorExplorerQueryRequest): Promise<ErrorExplorerQueryResponse> {
+  const censusIDs = requestCensusIDs(request);
+  return mustRunOnNodePath(request) ? queryOnNodePath(connectionManager, request, censusIDs) : queryOnSqlPath(connectionManager, request, censusIDs);
 }
 
 export interface ErrorExportRow {
@@ -643,149 +750,146 @@ export function buildErrorExportRows(
     );
 }
 
-function countMeasurementsPerMessage(rows: GroupedErrorRow[]): Map<string, number> {
-  const messageCounts = new Map<string, number>();
-  rows.forEach(row => {
-    new Set(row.allErrors.map(error => error.message)).forEach(message => messageCounts.set(message, (messageCounts.get(message) ?? 0) + 1));
-  });
-  return messageCounts;
+async function fetchSignatureRows(connectionManager: ExplorerConnection, scopes: ErrorSetScope[], withFlags: boolean): Promise<ErrorSignatureRow[]> {
+  const chunks: ErrorSignatureRow[][] = [];
+  for (const scope of scopes) {
+    chunks.push(
+      await runStatement<ErrorSignatureRow>(connectionManager, withFlags ? buildHistogramWithFlagsStatement(scope) : buildHistogramWithoutFlagsStatement(scope))
+    );
+  }
+  return mergeSignatureRows(chunks);
 }
 
-function sortFacetOptions(entries: Iterable<[string, number]>): ErrorFacetOption[] {
-  return Array.from(entries)
-    .map(([value, count]) => ({ value, count }))
-    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+async function resolveWeightedRows(
+  connectionManager: ExplorerConnection,
+  schema: string,
+  catalog: ErrorTypeCatalog,
+  rows: ErrorSignatureRow[]
+): Promise<WeightedErrorRow[]> {
+  if (findMissingErrorTypeKeys(rows, catalog).length === 0) return toWeightedErrorRows(rows, catalog);
+  return toWeightedErrorRows(rows, await loadErrorTypeCatalog(connectionManager, schema));
 }
 
-export interface ErrorMessageCounts {
-  /** Distinct measurements carrying at least one unresolved error or an invalid flag. */
-  totalMeasurements: number;
-  messages: ErrorFacetOption[];
+/** Catalog and histogram in parallel; null means the request must take the Node path (a cut signature). */
+async function readWeightedHistogram(
+  connectionManager: ExplorerConnection,
+  scope: { schema: string; plotID: number; censusIDs: number[] },
+  withFlags: boolean,
+  requestKind: SignatureRequestKind
+): Promise<WeightedErrorRow[] | null> {
+  const [catalog, rows] = await Promise.all([
+    loadErrorTypeCatalog(connectionManager, scope.schema),
+    fetchSignatureRows(connectionManager, censusChunkScopes(scope.schema, scope.plotID, scope.censusIDs), withFlags)
+  ]);
+  if (rows.length > ERROR_SIGNATURE_WARNING_THRESHOLD) {
+    ailogger.warn(SIGNATURE_THRESHOLD_WARNING, { requestKind, schema: scope.schema, signatureRows: rows.length, threshold: ERROR_SIGNATURE_WARNING_THRESHOLD });
+  }
+  if (hasIncompleteSignature(rows)) {
+    ailogger.warn(SIGNATURE_FALLBACK_WARNING, { requestKind, schema: scope.schema, plotID: scope.plotID, censusIDs: scope.censusIDs });
+    return null;
+  }
+  return resolveWeightedRows(connectionManager, scope.schema, catalog, rows);
+}
+
+function weightOnePerGroupedRow(rows: GroupedErrorRow[]): WeightedErrorRow[] {
+  return rows.map(row => ({
+    errors: row.allErrors,
+    contradictionTypes: row.baseRow.contradictionTypes,
+    hasContradiction: row.baseRow.hasContradiction,
+    isFailedRow: row.baseRow.isFailedRow,
+    measurementCount: 1
+  }));
+}
+
+/** Today's encounter order: censuses in request order, measurements by ID within each census (the oracle's merged map). */
+async function groupedRowsInLegacyOrder(
+  connectionManager: ExplorerConnection,
+  schema: string,
+  plotID: number,
+  censusIDs: number[]
+): Promise<GroupedErrorRow[]> {
+  const groupedRows = Array.from((await fetchGroupedErrorRows(connectionManager, schema, plotID, censusIDs)).values());
+  const censusRank = new Map(censusIDs.map((censusID, index) => [censusID, index]));
+  return groupedRows.sort(
+    (a, b) =>
+      (censusRank.get(Number(a.baseRow.censusID)) ?? 0) - (censusRank.get(Number(b.baseRow.censusID)) ?? 0) ||
+      Number(a.baseRow.coreMeasurementID) - Number(b.baseRow.coreMeasurementID)
+  );
+}
+
+async function buildMessageCountsOnNodePath(
+  connectionManager: ExplorerConnection,
+  request: { schema: string; plotID: number },
+  censusIDs: number[]
+): Promise<ErrorMessageCounts> {
+  return computeErrorMessageCounts(weightOnePerGroupedRow(await groupedRowsInLegacyOrder(connectionManager, request.schema, request.plotID, censusIDs)));
 }
 
 /**
- * The message list and measurement total buildErrorExplorerFacets returns under the
- * default filters, without the duplicate-tag and same-batch queries: contradictions
- * never change which rows are in the error set or what their messages are.
+ * The message list and measurement total the View Errors query reports under the default filters, read from the
+ * signature histogram without the duplicate-tag and same-batch work: contradictions never change which rows are in
+ * the error set or what their messages are. When a signature is cut or two messages tie under localeCompare it falls back to
+ * the scope raw-rows statement, whose SQL also evaluates the duplicate-tag and same-batch groups; that is the price of the fallback.
  */
 export async function buildErrorMessageCounts(
   connectionManager: ExplorerConnection,
   request: { schema: string; plotID: number; censusIDs: number[] }
 ): Promise<ErrorMessageCounts> {
-  const groupedRows = await fetchGroupedErrorRows(connectionManager, request.schema, request.plotID, request.censusIDs, { withContradictions: false });
-  const rows = Array.from(groupedRows.values());
-  return { totalMeasurements: rows.length, messages: sortFacetOptions(countMeasurementsPerMessage(rows).entries()) };
+  const censusIDs = uniquePositiveCensusIDs(request.censusIDs);
+  if (censusIDs.length === 0) return computeErrorMessageCounts([]);
+  const weighted = await readWeightedHistogram(connectionManager, { schema: request.schema, plotID: request.plotID, censusIDs }, false, 'message-counts');
+  if (!weighted) return buildMessageCountsOnNodePath(connectionManager, request, censusIDs);
+  const counts = computeErrorMessageCounts(weighted);
+  if (!hasLocaleCompareTie(counts.messages)) return counts;
+  ailogger.warn(LOCALE_TIE_FALLBACK_WARNING, { requestKind: 'message-counts', schema: request.schema });
+  return buildMessageCountsOnNodePath(connectionManager, request, censusIDs);
 }
 
-interface ErrorTypeAccumulator {
-  facet: ErrorTypeFacet;
-  measurementIDs: Set<number>;
-  fields: Set<string>;
+async function fetchActiveMeasurements(connectionManager: ExplorerConnection, schema: string, plotID: number, censusIDs: number[]): Promise<number> {
+  if (censusIDs.length === 0) return 0;
+  const activeCountQuery = buildActiveMeasurementCountQuery(schema, plotID, censusIDs);
+  return readActiveMeasurementCount(await connectionManager.executeQuery(activeCountQuery.sql, activeCountQuery.params));
 }
 
-function compareErrorTypeFacets(a: ErrorTypeFacet, b: ErrorTypeFacet): number {
-  return b.count - a.count || a.message.localeCompare(b.message) || a.source.localeCompare(b.source) || a.code.localeCompare(b.code);
-}
-
-/** Uses the query's own predicate, so each count equals that identity's query totalRows with no column filter. */
-function buildErrorTypeFacets(rows: GroupedErrorRow[], filters: ErrorExplorerFilters): ErrorTypeFacet[] {
-  const byIdentity = new Map<string, ErrorTypeAccumulator>();
-  rows.forEach(row => {
-    const matchingErrors = materializeMatchingErrors(row, filters);
-    if (!rowMatchesFilters(row, matchingErrors, filters)) return;
-    matchingErrors.forEach(error => {
-      const key = buildErrorTypeKey(error);
-      const entry = byIdentity.get(key) ?? {
-        facet: { source: error.source, code: error.code, message: error.message, fields: [], count: 0, hasContradiction: false },
-        measurementIDs: new Set<number>(),
-        fields: new Set<string>()
-      };
-      entry.measurementIDs.add(Number(row.baseRow.coreMeasurementID));
-      error.fields.forEach(field => entry.fields.add(field));
-      if (row.baseRow.hasContradiction) entry.facet.hasContradiction = true;
-      byIdentity.set(key, entry);
-    });
-  });
-  return Array.from(byIdentity.values())
-    .map(entry => ({ ...entry.facet, fields: Array.from(entry.fields), count: entry.measurementIDs.size }))
-    .sort(compareErrorTypeFacets);
-}
-
-function buildCensusTotals(rows: GroupedErrorRow[], activeMeasurements: number): ErrorCensusTotals {
-  const hasSource = (row: GroupedErrorRow, source: 'validation' | 'ingestion') => row.allErrors.some(error => error.source === source);
-  return {
-    affectedMeasurements: rows.length,
-    activeMeasurements,
-    errorTypeCount: new Set(rows.flatMap(row => row.allErrors.map(buildErrorTypeKey))).size,
-    validation: rows.filter(row => hasSource(row, 'validation')).length,
-    ingestion: rows.filter(row => hasSource(row, 'ingestion')).length,
-    failedMeasurements: rows.filter(row => row.baseRow.isFailedRow).length,
-    contradictions: rows.filter(row => row.baseRow.hasContradiction).length,
-    duplicateTagStem: rows.filter(row => row.baseRow.contradictionTypes.includes('duplicate_tag_stem')).length,
-    sameBatchConflict: rows.filter(row => row.baseRow.contradictionTypes.includes('same_batch_conflict')).length
-  };
-}
-
-export async function buildErrorExplorerFacets(
+/**
+ * The error types count the rows that pass the search over their filter-matching errors; the census totals describe the whole
+ * error set, so they come from the rows before any search.
+ */
+async function buildFacetsOnNodePath(
   connectionManager: ExplorerConnection,
-  request: Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters'>
+  request: FacetsRequest,
+  censusIDs: number[],
+  knownActiveMeasurements?: number
 ): Promise<ErrorExplorerFacetsResponse> {
-  const censusIDs = request.censusIDs?.length ? request.censusIDs : [request.censusID];
-  const activeCountQuery = buildActiveMeasurementCountQuery(request.schema, request.plotID, censusIDs);
-  const [groupedRows, activeRows] = await Promise.all([
-    fetchGroupedErrorRows(connectionManager, request.schema, request.plotID, censusIDs),
-    connectionManager.executeQuery(activeCountQuery.sql, activeCountQuery.params)
+  const [groupedRows, activeMeasurements] = await Promise.all([
+    groupedRowsInLegacyOrder(connectionManager, request.schema, request.plotID, censusIDs),
+    knownActiveMeasurements ?? fetchActiveMeasurements(connectionManager, request.schema, request.plotID, censusIDs)
   ]);
-  const allRows = Array.from(groupedRows.values());
-
+  const searchedRows = groupedRows.filter(row => matchesQuickSearch(row.baseRow, materializeMatchingErrors(row, request.filters), request.filters.quickSearch));
   return {
-    errorTypes: buildErrorTypeFacets(allRows, request.filters),
-    censusTotals: buildCensusTotals(allRows, readActiveMeasurementCount(activeRows))
+    errorTypes: computeErrorTypeFacets(weightOnePerGroupedRow(searchedRows), request.filters),
+    censusTotals: computeCensusTotals(weightOnePerGroupedRow(groupedRows), activeMeasurements)
   };
 }
 
-function buildRelatedRowsOutsideErrorSetQuery(schema: string, relatedCount: number): string {
-  return safeFormatQuery(
-    schema,
-    `SELECT ms.CoreMeasurementID AS RelatedCoreMeasurementID,
-            ms.TreeTag,
-            ms.StemTag,
-            ms.SpeciesCode,
-            ms.QuadratName,
-            ms.MeasurementDate,
-            ms.MeasuredDBH,
-            ms.MeasuredHOM,
-            ms.StemLocalX,
-            ms.StemLocalY,
-            ms.Description AS MeasurementDescription,
-            cm.UploadFileID,
-            cm.UploadBatchID
-     FROM ??.coremeasurements cm
-     JOIN ??.measurementssummary ms ON ms.CoreMeasurementID = cm.CoreMeasurementID
-     WHERE ms.PlotID = ?
-       AND ms.CensusID = ?
-       AND COALESCE(cm.IsActive, TRUE) = TRUE
-       AND cm.CoreMeasurementID IN (${buildInPlaceholders(relatedCount)})`
-  );
+export async function buildErrorExplorerFacets(connectionManager: ExplorerConnection, request: FacetsRequest): Promise<ErrorExplorerFacetsResponse> {
+  const censusIDs = requestCensusIDs(request);
+  if (request.filters.quickSearch.trim()) return buildFacetsOnNodePath(connectionManager, request, censusIDs);
+  const [weighted, activeMeasurements] = await Promise.all([
+    censusIDs.length === 0 ? [] : readWeightedHistogram(connectionManager, { schema: request.schema, plotID: request.plotID, censusIDs }, true, 'facets'),
+    fetchActiveMeasurements(connectionManager, request.schema, request.plotID, censusIDs)
+  ]);
+  if (!weighted) return buildFacetsOnNodePath(connectionManager, request, censusIDs, activeMeasurements);
+  const facets: ErrorExplorerFacetsResponse = {
+    errorTypes: computeErrorTypeFacets(weighted, request.filters),
+    censusTotals: computeCensusTotals(weighted, activeMeasurements)
+  };
+  if (!hasErrorTypeOrderTie(facets.errorTypes)) return facets;
+  ailogger.warn(LOCALE_TIE_FALLBACK_WARNING, { requestKind: 'facets', schema: request.schema });
+  return buildFacetsOnNodePath(connectionManager, request, censusIDs, activeMeasurements);
 }
 
-interface RelatedRowOutsideErrorSet {
-  RelatedCoreMeasurementID: number;
-  TreeTag?: string | null;
-  StemTag?: string | null;
-  SpeciesCode?: string | null;
-  QuadratName?: string | null;
-  MeasurementDate?: string | Date | null;
-  MeasuredDBH?: number | string | null;
-  MeasuredHOM?: number | string | null;
-  StemLocalX?: number | string | null;
-  StemLocalY?: number | string | null;
-  MeasurementDescription?: string | null;
-  UploadFileID?: string | null;
-  UploadBatchID?: string | null;
-}
-
-function toRelatedRowOutsideErrorSet(row: RelatedRowOutsideErrorSet): RelatedContradictionRow {
+function toRelatedRowOutsideErrorSet(row: RelatedRowOutsideErrorSetRow): RelatedContradictionRow {
   return {
     coreMeasurementID: Number(row.RelatedCoreMeasurementID),
     treeTag: row.TreeTag ?? undefined,
@@ -806,22 +910,70 @@ function toRelatedRowOutsideErrorSet(row: RelatedRowOutsideErrorSet): RelatedCon
   };
 }
 
+function toRelatedRowInErrorSet(grouped: GroupedErrorRow): RelatedContradictionRow {
+  return {
+    coreMeasurementID: Number(grouped.baseRow.coreMeasurementID),
+    treeTag: grouped.baseRow.treeTag,
+    stemTag: grouped.baseRow.stemTag,
+    speciesCode: grouped.baseRow.speciesCode,
+    quadratName: grouped.baseRow.quadratName,
+    measurementDate: typeof grouped.baseRow.measurementDate === 'string' ? grouped.baseRow.measurementDate : normalizeDate(grouped.baseRow.measurementDate),
+    measuredDBH: grouped.baseRow.measuredDBH ?? null,
+    measuredHOM: grouped.baseRow.measuredHOM ?? null,
+    stemLocalX: grouped.baseRow.stemLocalX ?? null,
+    stemLocalY: grouped.baseRow.stemLocalY ?? null,
+    description: grouped.baseRow.description ?? null,
+    uploadFileID: grouped.baseRow.uploadFileID ?? null,
+    uploadBatchID: grouped.baseRow.uploadBatchID ?? null,
+    primaryErrorMessage: grouped.baseRow.primaryErrorMessage,
+    errorCount: grouped.allErrors.length,
+    errorMessages: dedupeStrings(grouped.allErrors.map(error => error.message)),
+    inErrorSet: true
+  };
+}
+
+function emptyDetailsResponse(): ErrorExplorerDetailsResponse {
+  return { row: null, allErrors: [], relatedRows: [] };
+}
+
+async function fetchRelatedRowsInErrorSet(
+  connectionManager: ExplorerConnection,
+  scope: ErrorSetScope,
+  relatedMeasurementIDs: number[]
+): Promise<Map<number, GroupedErrorRow>> {
+  const relatedRawRows: RawErrorOccurrenceRow[] = [];
+  for (const idChunk of chunkMeasurementIDs(relatedMeasurementIDs)) {
+    appendRows(relatedRawRows, await runStatement<RawErrorOccurrenceRow>(connectionManager, buildIDRawRowsStatement(scope, idChunk)));
+  }
+  return groupErrorRows(relatedRawRows, new Map());
+}
+
+async function fetchRelatedRowsOutsideErrorSet(
+  connectionManager: ExplorerConnection,
+  scope: ErrorSetScope,
+  outsideMeasurementIDs: number[]
+): Promise<Map<number, RelatedContradictionRow>> {
+  const outsideRows: RelatedRowOutsideErrorSetRow[] = [];
+  for (const idChunk of chunkMeasurementIDs(outsideMeasurementIDs)) {
+    appendRows(outsideRows, await runStatement<RelatedRowOutsideErrorSetRow>(connectionManager, buildRelatedRowsOutsideErrorSetStatement(scope, idChunk)));
+  }
+  return new Map(outsideRows.map(row => [Number(row.RelatedCoreMeasurementID), toRelatedRowOutsideErrorSet(row)]));
+}
+
 export async function buildErrorExplorerDetails(
   connectionManager: ExplorerConnection,
   request: Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID'>,
   measurementID: number,
   activeContradictionType?: ContradictionType
 ): Promise<ErrorExplorerDetailsResponse> {
-  const groupedRows = await fetchGroupedErrorRows(connectionManager, request.schema, request.plotID, request.censusID);
-  const selected = groupedRows.get(measurementID);
-
-  if (!selected) {
-    return {
-      row: null,
-      allErrors: [],
-      relatedRows: []
-    };
-  }
+  if (!Number.isSafeInteger(measurementID) || measurementID <= 0 || !(request.censusID > 0)) return emptyDetailsResponse();
+  const scope: ErrorSetScope = { schema: request.schema, plotID: request.plotID, censusIDs: [request.censusID] };
+  const [selectedRawRows, selectedContradictions] = await Promise.all([
+    runStatement<RawErrorOccurrenceRow>(connectionManager, buildIDRawRowsStatement(scope, [measurementID])),
+    fetchMemberGroupContradictions(connectionManager, scope, [measurementID])
+  ]);
+  const selected = groupErrorRows(selectedRawRows, selectedContradictions).get(measurementID);
+  if (!selected) return emptyDetailsResponse();
 
   const relatedMeasurementIDs =
     activeContradictionType && selected.baseRow.contradictionTypes.includes(activeContradictionType)
@@ -832,59 +984,18 @@ export async function buildErrorExplorerDetails(
         )
       : dedupeNumbers(selected.contradictions.flatMap(contradiction => contradiction.relatedMeasurementIDs));
 
-  const outsideIDs = relatedMeasurementIDs.filter(id => !groupedRows.has(id));
-  const outsideRows =
-    outsideIDs.length > 0
-      ? ((await connectionManager.executeQuery(buildRelatedRowsOutsideErrorSetQuery(request.schema, outsideIDs.length), [
-          request.plotID,
-          request.censusID,
-          ...outsideIDs
-        ])) as RelatedRowOutsideErrorSet[])
-      : [];
-  const outsideByID = new Map(outsideRows.map(row => [Number(row.RelatedCoreMeasurementID), toRelatedRowOutsideErrorSet(row)]));
-
+  const relatedInErrorSet = await fetchRelatedRowsInErrorSet(connectionManager, scope, relatedMeasurementIDs);
+  const outsideMeasurementIDs = relatedMeasurementIDs.filter(id => !relatedInErrorSet.has(id));
+  const relatedOutsideErrorSet = await fetchRelatedRowsOutsideErrorSet(connectionManager, scope, outsideMeasurementIDs);
   const relatedRows = relatedMeasurementIDs.flatMap((id): RelatedContradictionRow[] => {
-    const grouped = groupedRows.get(id);
-    if (!grouped) {
-      const outside = outsideByID.get(id);
-      return outside ? [outside] : [];
-    }
-    return [
-      {
-        coreMeasurementID: Number(grouped.baseRow.coreMeasurementID),
-        treeTag: grouped.baseRow.treeTag,
-        stemTag: grouped.baseRow.stemTag,
-        speciesCode: grouped.baseRow.speciesCode,
-        quadratName: grouped.baseRow.quadratName,
-        measurementDate: typeof grouped.baseRow.measurementDate === 'string' ? grouped.baseRow.measurementDate : normalizeDate(grouped.baseRow.measurementDate),
-        measuredDBH: grouped.baseRow.measuredDBH ?? null,
-        measuredHOM: grouped.baseRow.measuredHOM ?? null,
-        stemLocalX: grouped.baseRow.stemLocalX ?? null,
-        stemLocalY: grouped.baseRow.stemLocalY ?? null,
-        description: grouped.baseRow.description ?? null,
-        uploadFileID: grouped.baseRow.uploadFileID ?? null,
-        uploadBatchID: grouped.baseRow.uploadBatchID ?? null,
-        primaryErrorMessage: grouped.baseRow.primaryErrorMessage,
-        errorCount: grouped.allErrors.length,
-        errorMessages: dedupeStrings(grouped.allErrors.map(error => error.message)),
-        inErrorSet: true
-      }
-    ];
+    const grouped = relatedInErrorSet.get(id);
+    if (grouped) return [toRelatedRowInErrorSet(grouped)];
+    const outside = relatedOutsideErrorSet.get(id);
+    return outside ? [outside] : [];
   });
 
   return {
-    row: toDisplayRow(
-      selected,
-      {
-        source: 'all',
-        exactMessages: [],
-        affectedFields: [],
-        contradictionOnly: false,
-        contradictionTypes: [],
-        quickSearch: ''
-      },
-      activeContradictionType
-    ),
+    row: toDisplayRow(selected, DETAILS_DISPLAY_FILTERS, activeContradictionType),
     allErrors: selected.allErrors,
     relatedRows
   };

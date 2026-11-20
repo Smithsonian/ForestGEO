@@ -216,6 +216,11 @@ function makeApplyResultBody(overrides: Partial<ApplyResult> = {}): ApplyResult 
   };
 }
 
+const SETTLE_MS = 50;
+const settle = () => new Promise(resolve => setTimeout(resolve, SETTLE_MS));
+const QUERY_ENDPOINT = '/api/errors/explorer/query';
+const DETAILS_ENDPOINT_PREFIX = '/api/errors/explorer/details/';
+
 const mockFetch = vi.fn();
 const mockBeginEdit = vi.fn();
 const mockConfirmDialog = vi.fn();
@@ -505,6 +510,24 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     await saveRowThroughGrid(GROUP_GRID, TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
     console.log('[view-errors repoint census]', JSON.stringify(mockBeginEdit.mock.calls[0]));
     expect(mockBeginEdit.mock.calls[0][2]).toMatchObject({ dataType: 'measurementssummary', censusID: TEST_SECOND_CENSUS_ID });
+  });
+
+  it('sends one details request and no query request when a row is opened (#544 C2)', async () => {
+    await mountExplorer();
+    await waitForGridRow(GROUP_GRID);
+    await settle();
+    const callsBeforeOpen = mockFetch.mock.calls.length;
+    const requestedUrlsSinceOpen = () => mockFetch.mock.calls.slice(callsBeforeOpen).map(([input]) => urlOf(input));
+
+    await userEvent.click(screen.getAllByRole('menuitem', { name: VIEW_ERRORS_TEXT.detailsAction })[0]);
+    await waitFor(() => expect(requestedUrlsSinceOpen().some(url => url.includes(DETAILS_ENDPOINT_PREFIX))).toBe(true));
+    await settle();
+
+    const urlsAfterOpen = requestedUrlsSinceOpen();
+    console.log('[#544 C2] requests after opening a row', JSON.stringify(urlsAfterOpen));
+    expect(urlsAfterOpen.filter(url => url.includes(DETAILS_ENDPOINT_PREFIX))).toHaveLength(1);
+    expect(urlsAfterOpen.filter(url => url.includes(QUERY_ENDPOINT))).toHaveLength(0);
+    expect(urlsAfterOpen.filter(url => ROUTES.facets.test(url))).toHaveLength(0);
   });
 
   it('links ingestion failures to the failed-measurement recovery modal', async () => {
