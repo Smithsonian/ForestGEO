@@ -15,6 +15,8 @@ import {
 const SCOPE = { schema: 'forestgeo_testsite', plotID: 3, censusIDs: [4, 5] };
 const TOP_GROUP = { source: 'validation' as const, code: '14', message: 'Invalid attribute code' };
 const OUTSIDE_PARTNER_ID = 77;
+const OUTSIDE_PARTNER_CENSUS_ID = 5;
+const OUTSIDE_PARTNER = { measurementID: OUTSIDE_PARTNER_ID, censusID: OUTSIDE_PARTNER_CENSUS_ID };
 const FLAT_TOTAL_ROWS = 60;
 const RAN = Symbol('executor');
 
@@ -58,7 +60,7 @@ async function runScenario(name: string, inputs: Parameters<typeof planScenarios
   return calls;
 }
 
-const FULL_INPUTS = { flatTotalRows: FLAT_TOTAL_ROWS, topGroup: TOP_GROUP, outsidePartnerMeasurementID: OUTSIDE_PARTNER_ID };
+const FULL_INPUTS = { flatTotalRows: FLAT_TOTAL_ROWS, topGroup: TOP_GROUP, outsidePartner: OUTSIDE_PARTNER };
 
 describe('planScenarios', () => {
   it('plans exactly the dev-shaped scenarios when the target has a top group and an outside partner', () => {
@@ -69,7 +71,7 @@ describe('planScenarios', () => {
   });
 
   it('reports the group and outside-partner scenarios absent, and keeps the flat ones, when the target has neither', () => {
-    const { scenarios, unavailable } = planScenarios(SCOPE, { flatTotalRows: 0, topGroup: null, outsidePartnerMeasurementID: null });
+    const { scenarios, unavailable } = planScenarios(SCOPE, { flatTotalRows: 0, topGroup: null, outsidePartner: null });
     console.log(`planned ${scenarios.map(item => item.name).join(', ')}; unavailable ${unavailable.join(', ')}`);
     expect(scenarios.map(item => item.name).sort()).toEqual(
       [SCENARIO_NAMES.facetsDefault, SCENARIO_NAMES.queryFlatPage0, SCENARIO_NAMES.queryPastTheEnd, SCENARIO_NAMES.messageCounts].sort()
@@ -116,6 +118,8 @@ describe('planScenarios', () => {
   it('opens details on the discovered outside-partner row and exports the top group', async () => {
     const [details] = await runScenario(SCENARIO_NAMES.detailsWithOutsidePartner, FULL_INPUTS);
     expect(details.measurementID).toBe(OUTSIDE_PARTNER_ID);
+    expect(details.request.censusID).toBe(OUTSIDE_PARTNER_CENSUS_ID);
+    expect(SCOPE.censusIDs[0]).not.toBe(OUTSIDE_PARTNER_CENSUS_ID);
     const [exported] = await runScenario(SCENARIO_NAMES.exportTopGroup, FULL_INPUTS);
     expect(exported.errorType).toEqual(TOP_GROUP);
   });
@@ -126,50 +130,70 @@ describe('planScenarios', () => {
 });
 
 describe('discoverScenarioInputs', () => {
-  const row = (coreMeasurementID: number) => ({ coreMeasurementID }) as ErrorExplorerRow;
+  const FIRST_CENSUS_ID = SCOPE.censusIDs[0];
+  const row = (coreMeasurementID: number, censusID = FIRST_CENSUS_ID) => ({ coreMeasurementID, censusID }) as ErrorExplorerRow;
   const facet = (identity: typeof TOP_GROUP): ErrorTypeFacet => ({ ...identity, fields: ['treeTag'], count: 3, hasContradiction: false });
 
-  function oracleFake(options: { contradictionIDs: number[]; outsideFor: number | null; errorTypes: ErrorTypeFacet[] }) {
-    const detailsAsked: number[] = [];
+  function oracleFake(options: {
+    contradictions: Array<{ measurementID: number; censusID: number }>;
+    outsideFor: { measurementID: number; censusID: number } | null;
+    errorTypes: ErrorTypeFacet[];
+  }) {
+    const detailsAsked: Array<{ measurementID: number; censusID: number }> = [];
     const arm: ExplorerCalls<typeof RAN> = {
       ...recordingArm([]),
       queryErrorExplorer: async (_executor, request) =>
         request.filters.contradictionOnly
-          ? { rows: options.contradictionIDs.map(row), totalRows: options.contradictionIDs.length }
+          ? { rows: options.contradictions.map(({ measurementID, censusID }) => row(measurementID, censusID)), totalRows: options.contradictions.length }
           : { rows: [], totalRows: FLAT_TOTAL_ROWS },
       buildErrorExplorerFacets: async () => ({ errorTypes: options.errorTypes, censusTotals: {} as never }),
-      buildErrorExplorerDetails: async (_executor, _request, measurementID) => {
-        detailsAsked.push(measurementID);
-        const related = measurementID === options.outsideFor ? [{ coreMeasurementID: 1, inErrorSet: false }] : [{ coreMeasurementID: 2, inErrorSet: true }];
+      buildErrorExplorerDetails: async (_executor, request, measurementID) => {
+        detailsAsked.push({ measurementID, censusID: request.censusID });
+        const isOutsideCandidate = measurementID === options.outsideFor?.measurementID && request.censusID === options.outsideFor?.censusID;
+        const related = isOutsideCandidate ? [{ coreMeasurementID: 1, inErrorSet: false }] : [{ coreMeasurementID: 2, inErrorSet: true }];
         return { row: null, allErrors: [], relatedRows: related };
       }
     };
     return { arm, detailsAsked };
   }
 
+  const inFirstCensus = (measurementID: number) => ({ measurementID, censusID: FIRST_CENSUS_ID });
+
   it('takes the first error type of the oracle as the top group and the first contradiction row with an outside partner', async () => {
     const { arm, detailsAsked } = oracleFake({
-      contradictionIDs: [10, 11, OUTSIDE_PARTNER_ID, 12],
-      outsideFor: OUTSIDE_PARTNER_ID,
+      contradictions: [10, 11, OUTSIDE_PARTNER_ID, 12].map(inFirstCensus),
+      outsideFor: inFirstCensus(OUTSIDE_PARTNER_ID),
       errorTypes: [facet(TOP_GROUP), facet({ ...TOP_GROUP, code: '15' })]
     });
     const inputs = await discoverScenarioInputs(arm, RAN, SCOPE);
     console.log(`discovered ${JSON.stringify(inputs)}; details asked for ${detailsAsked.join(', ')}`);
-    expect(inputs).toEqual({ flatTotalRows: FLAT_TOTAL_ROWS, topGroup: TOP_GROUP, outsidePartnerMeasurementID: OUTSIDE_PARTNER_ID });
-    expect(detailsAsked).toEqual([10, 11, OUTSIDE_PARTNER_ID]);
+    expect(inputs).toEqual({ flatTotalRows: FLAT_TOTAL_ROWS, topGroup: TOP_GROUP, outsidePartner: inFirstCensus(OUTSIDE_PARTNER_ID) });
+    expect(detailsAsked).toEqual([10, 11, OUTSIDE_PARTNER_ID].map(inFirstCensus));
   });
 
   it('reports no outside partner and stops after the candidate limit when none of the contradiction rows has one', async () => {
-    const contradictionIDs = Array.from({ length: OUTSIDE_PARTNER_CANDIDATE_LIMIT + 5 }, (_, index) => index + 100);
-    const { arm, detailsAsked } = oracleFake({ contradictionIDs, outsideFor: null, errorTypes: [] });
+    const contradictions = Array.from({ length: OUTSIDE_PARTNER_CANDIDATE_LIMIT + 5 }, (_, index) => inFirstCensus(index + 100));
+    const { arm, detailsAsked } = oracleFake({ contradictions, outsideFor: null, errorTypes: [] });
     const inputs = await discoverScenarioInputs(arm, RAN, SCOPE);
     console.log(`discovered ${JSON.stringify(inputs)}; details asked ${detailsAsked.length} times`);
-    expect(inputs).toEqual({ flatTotalRows: FLAT_TOTAL_ROWS, topGroup: null, outsidePartnerMeasurementID: null });
+    expect(inputs).toEqual({ flatTotalRows: FLAT_TOTAL_ROWS, topGroup: null, outsidePartner: null });
     expect(detailsAsked).toHaveLength(OUTSIDE_PARTNER_CANDIDATE_LIMIT);
   });
 
+  it('looks the candidate up in its own census so an outside partner in the second census of the scope is found', async () => {
+    const { arm, detailsAsked } = oracleFake({
+      contradictions: [inFirstCensus(10), { measurementID: OUTSIDE_PARTNER_ID, censusID: OUTSIDE_PARTNER_CENSUS_ID }],
+      outsideFor: OUTSIDE_PARTNER,
+      errorTypes: []
+    });
+    const inputs = await discoverScenarioInputs(arm, RAN, SCOPE);
+    console.log(`discovered ${JSON.stringify(inputs)}; details asked ${JSON.stringify(detailsAsked)}`);
+    expect(inputs.outsidePartner).toEqual(OUTSIDE_PARTNER);
+    expect(detailsAsked).toEqual([inFirstCensus(10), OUTSIDE_PARTNER]);
+  });
+
   it('copies only the identity of the top group, not its counts', async () => {
-    const { arm } = oracleFake({ contradictionIDs: [], outsideFor: null, errorTypes: [facet(TOP_GROUP)] });
+    const { arm } = oracleFake({ contradictions: [], outsideFor: null, errorTypes: [facet(TOP_GROUP)] });
     const { topGroup } = await discoverScenarioInputs(arm, RAN, SCOPE);
     expect(Object.keys(topGroup ?? {}).sort()).toEqual(['code', 'message', 'source']);
   });

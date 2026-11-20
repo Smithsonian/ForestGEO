@@ -49,10 +49,15 @@ export interface ExplorerCalls<Executor> {
   exportRows(executor: Executor, scope: ScenarioScope, filters: ErrorExplorerFilters, errorType?: ErrorTypeIdentity): Promise<unknown>;
 }
 
+export interface OutsidePartnerCandidate {
+  measurementID: number;
+  censusID: number;
+}
+
 export interface DiscoveredScenarioInputs {
   flatTotalRows: number;
   topGroup: ErrorTypeIdentity | null;
-  outsidePartnerMeasurementID: number | null;
+  outsidePartner: OutsidePartnerCandidate | null;
 }
 
 export interface TimingScenario<Executor> {
@@ -76,6 +81,10 @@ function groupRequest(scope: ScenarioScope, errorType: ErrorTypeIdentity, page: 
   return { ...flatRequest(scope), page, pageSize: GROUP_PAGE_SIZE, errorType };
 }
 
+function detailsRequest(request: ErrorExplorerQueryRequest, candidate: OutsidePartnerCandidate): ErrorExplorerQueryRequest {
+  return { ...request, censusID: candidate.censusID };
+}
+
 function identityOf({ source, code, message }: ErrorTypeIdentity): ErrorTypeIdentity {
   return { source, code, message };
 }
@@ -91,17 +100,18 @@ export async function discoverScenarioInputs<Executor>(
   const facets = await oracle.buildErrorExplorerFacets(executor, request);
   const contradictionRequest = { ...request, filters: applyShowValue(request.filters, 'contradictions') };
   const contradictionPage = await oracle.queryErrorExplorer(executor, contradictionRequest);
-  let outsidePartnerMeasurementID: number | null = null;
+  let outsidePartner: OutsidePartnerCandidate | null = null;
   for (const row of contradictionPage.rows.slice(0, OUTSIDE_PARTNER_CANDIDATE_LIMIT)) {
-    if (row.coreMeasurementID == null) continue;
-    const details = await oracle.buildErrorExplorerDetails(executor, request, row.coreMeasurementID);
+    if (row.coreMeasurementID == null || row.censusID == null) continue;
+    const candidate = { measurementID: row.coreMeasurementID, censusID: row.censusID };
+    const details = await oracle.buildErrorExplorerDetails(executor, detailsRequest(request, candidate), candidate.measurementID);
     if (details.relatedRows.some(related => !related.inErrorSet)) {
-      outsidePartnerMeasurementID = row.coreMeasurementID;
+      outsidePartner = candidate;
       break;
     }
   }
   const topGroup = facets.errorTypes[0];
-  return { flatTotalRows: flat.totalRows, topGroup: topGroup ? identityOf(topGroup) : null, outsidePartnerMeasurementID };
+  return { flatTotalRows: flat.totalRows, topGroup: topGroup ? identityOf(topGroup) : null, outsidePartner };
 }
 
 export function planScenarios<Executor>(
@@ -109,7 +119,7 @@ export function planScenarios<Executor>(
   inputs: DiscoveredScenarioInputs
 ): { scenarios: TimingScenario<Executor>[]; unavailable: string[] } {
   const request = flatRequest(scope);
-  const { topGroup, outsidePartnerMeasurementID } = inputs;
+  const { topGroup, outsidePartner } = inputs;
   const scenarios: TimingScenario<Executor>[] = [
     { name: SCENARIO_NAMES.facetsDefault, run: (arm, executor) => arm.buildErrorExplorerFacets(executor, request) },
     { name: SCENARIO_NAMES.queryFlatPage0, run: (arm, executor) => arm.queryErrorExplorer(executor, request) },
@@ -133,10 +143,10 @@ export function planScenarios<Executor>(
   } else {
     unavailable.push(SCENARIO_NAMES.queryTopGroupPage0, SCENARIO_NAMES.queryTopGroupPage1, SCENARIO_NAMES.queryTopGroupSorted, SCENARIO_NAMES.exportTopGroup);
   }
-  if (outsidePartnerMeasurementID !== null) {
+  if (outsidePartner !== null) {
     scenarios.push({
       name: SCENARIO_NAMES.detailsWithOutsidePartner,
-      run: (arm, executor) => arm.buildErrorExplorerDetails(executor, request, outsidePartnerMeasurementID)
+      run: (arm, executor) => arm.buildErrorExplorerDetails(executor, detailsRequest(request, outsidePartner), outsidePartner.measurementID)
     });
   } else {
     unavailable.push(SCENARIO_NAMES.detailsWithOutsidePartner);
