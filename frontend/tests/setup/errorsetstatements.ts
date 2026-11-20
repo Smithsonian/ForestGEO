@@ -41,11 +41,21 @@ export const UNLABELLED_STATEMENT = 'unlabelled';
 export const ACTIVE_COUNT_STATEMENT = 'active-count';
 const ACTIVE_COUNT_TEXT =
   /SELECT COUNT\(\*\) AS n\s+FROM\s+\S+\.coremeasurements cm\s+JOIN\s+\S+\.census c ON c\.CensusID = cm\.CensusID\s+WHERE c\.PlotID = \? AND cm\.IsActive = 1/;
+export const ORACLE_OUTSIDE_ROWS_STATEMENT = 'outside-rows';
+const ORACLE_OUTSIDE_ROWS_SHAPE = new RegExp(
+  [
+    '^SELECT ms\\.CoreMeasurementID AS RelatedCoreMeasurementID, ms\\.TreeTag, ms\\.StemTag, ms\\.SpeciesCode, ms\\.QuadratName, ms\\.MeasurementDate,',
+    'ms\\.MeasuredDBH, ms\\.MeasuredHOM, ms\\.StemLocalX, ms\\.StemLocalY, ms\\.Description AS MeasurementDescription, cm\\.UploadFileID, cm\\.UploadBatchID',
+    'FROM \\S+\\.coremeasurements cm JOIN \\S+\\.measurementssummary ms ON ms\\.CoreMeasurementID = cm\\.CoreMeasurementID',
+    'WHERE ms\\.PlotID = \\? AND ms\\.CensusID = \\? AND COALESCE\\(cm\\.IsActive, TRUE\\) = TRUE AND cm\\.CoreMeasurementID IN \\(\\?(, \\?)*\\)$'
+  ].join(' ')
+);
 const ORACLE_RAW_ROWS = /measurement_error_log\s+mel/i;
 const ORACLE_DUPLICATE_GROUPS = /GROUP_CONCAT\s*\(DISTINCT\s+ms\./i;
 const ORACLE_SAME_BATCH_GROUPS = /GROUP_CONCAT\s*\(DISTINCT\s+cm\./i;
 
 export function legacyStatementClass(sql: string): string {
+  if (ORACLE_OUTSIDE_ROWS_SHAPE.test(sql.replace(/\s+/g, ' ').trim())) return ORACLE_OUTSIDE_ROWS_STATEMENT;
   if (ORACLE_RAW_ROWS.test(sql)) return 'raw-rows';
   if (ORACLE_DUPLICATE_GROUPS.test(sql)) return 'duplicate-groups';
   if (ORACLE_SAME_BATCH_GROUPS.test(sql)) return 'same-batch-groups';

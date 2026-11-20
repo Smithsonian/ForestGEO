@@ -4,7 +4,7 @@ import { cleanupTimingConnections } from '@/tests/setup/stricttestdatabasecleanu
 import { everyErrorSetStatement } from '@/tests/setup/errorsetstatements';
 import * as oracle from '@/tests/oracles/errors-explorer-legacy';
 import { buildActiveMeasurementCountQuery } from '@/lib/activemeasurementcount';
-import { ACTIVE_COUNT_STATEMENT } from '@/tests/setup/errorsetstatements';
+import { ACTIVE_COUNT_STATEMENT, ORACLE_OUTSIDE_ROWS_STATEMENT } from '@/tests/setup/errorsetstatements';
 import { buildF1MembershipProbe, buildF2MembershipProbe, MEMBERSHIP_PROBE_LABELS, runMembershipProbeRepetition } from '@/tests/benchmarks/lib/membershipprobe';
 import { CENSUS_LIST_SIZE, chunkCensusIDs, ERROR_EXPLORER_STATEMENT_LABELS, readStatementLabel } from '@/app/api/errors/explorer/errorsetsql';
 import {
@@ -610,6 +610,40 @@ describe('statement classification', () => {
     const classes = recorded.map(classifyStatement);
     console.log(`oracle statements: ${recorded.length}; classes: ${classes.join(', ')}`);
     expect([...classes].sort()).toEqual([...ORACLE_STATEMENT_CLASSES].sort());
+  });
+
+  it('classifies the frozen oracle outside-partner lookup as an oracle shape, and only that statement', async () => {
+    const OUTSIDE_PARTNER_ID = 99;
+    const SELECTED_ID = 10;
+    const recorded: string[] = [];
+    const fakeRawRow = {
+      CoreMeasurementID: SELECTED_ID,
+      PlotID: 1,
+      CensusID: 2,
+      CoreStemGUID: 5,
+      ErrorSource: 'ingestion',
+      ErrorCode: 'FAKE_CODE',
+      DisplayMessage: 'fake message',
+      ValidationCriteria: null,
+      ProcedureName: null
+    };
+    const oracleExecutor = {
+      executeQuery: async (sql: string) => {
+        recorded.push(sql);
+        if (classifyStatement(sql) === 'raw-rows') return [fakeRawRow];
+        if (classifyStatement(sql) === 'duplicate-groups') return [{ TreeTag: 'T', StemTag: '1', MeasurementIDs: `${SELECTED_ID},${OUTSIDE_PARTNER_ID}` }];
+        return [];
+      }
+    };
+    await oracle.buildErrorExplorerDetails(oracleExecutor as never, { schema: BUILDER_SCHEMA, plotID: 1, censusID: 2 }, SELECTED_ID);
+    const classes = recorded.map(classifyStatement);
+    console.log(`oracle details statements: ${recorded.length}; classes: ${classes.join(', ')}`);
+    expect(classes.filter(statementClass => statementClass === ORACLE_OUTSIDE_ROWS_STATEMENT)).toHaveLength(1);
+    expect(classes, 'the lookup was the only statement that was unlabelled before').not.toContain('unlabelled');
+    const outsideSql = recorded[classes.indexOf(ORACLE_OUTSIDE_ROWS_STATEMENT)];
+    expect(classifyStatement(`${outsideSql} OR 1 = 1`), 'an appended clause is no longer the exact shape').toBe('unlabelled');
+    expect(classifyStatement(outsideSql.replace('measurementssummary', 'coremeasurements'))).toBe('unlabelled');
+    expect(classifyStatement('SELECT 1')).toBe('unlabelled');
   });
 
   it('names the shared active-count statement, so the statement log never shows it as unlabelled', () => {
