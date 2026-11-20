@@ -675,7 +675,7 @@ async function queryOnSqlPath(
   };
 }
 
-/** Search, sort and column filters read the whole error set in Node; the page statement cannot order or filter on those (spec D-A). */
+/** Search, sort and column filters read the whole error set in Node; the page statement cannot order or filter on those (plan decision D-A). */
 function mustRunOnNodePath(request: ErrorExplorerQueryRequest): boolean {
   return request.filters.quickSearch.trim().length > 0 || (request.sortModel?.length ?? 0) > 0 || (request.columnFilters?.length ?? 0) > 0;
 }

@@ -483,6 +483,7 @@ const SQL_QUERY_WITHOUT_ROWS_KINDS = [
   ERROR_EXPLORER_STATEMENT_LABELS.page,
   ERROR_EXPLORER_STATEMENT_LABELS.totals
 ].sort();
+const WHITESPACE_ONLY_SEARCH = '   ';
 const IMPOSSIBLE_IDENTITY_QUERY_KINDS = [ERROR_EXPLORER_STATEMENT_LABELS.catalog];
 const NODE_QUERY_KINDS = [
   ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows,
@@ -846,6 +847,7 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
         const validationIdentity = await queryWithKinds({ errorType: VALIDATION_14 }, { source: 'validation' });
         const ingestionIdentity = await queryWithKinds({ errorType: CODE_A }, { source: 'validation' });
 
+        expect(validationIdentity.kinds, 'an identity alone is answered by the page statement').toEqual(SQL_QUERY_KINDS);
         expect(validationIdentity.response.totalRows).toBe(1);
         expect(
           validationIdentity.response.rows.map(row => row.errorSources),
@@ -875,7 +877,7 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
     describe('an identity that no error carries', () => {
       useFixture();
 
-      it('answers an empty page from the catalog and the page statement, and counts nothing', async () => {
+      it('answers an empty page from the catalog alone, and counts nothing', async () => {
         const absent: ErrorTypeIdentity = { source: 'ingestion', code: CODE_A.code, message: `${SHARED_MESSAGE} with a different text` };
 
         const { response, kinds } = await queryWithKinds({ errorType: absent });
@@ -883,6 +885,10 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
         expect(response).toEqual({ rows: [], totalRows: 0 });
         expect(kinds, 'no catalog entry carries the identity').toEqual(IMPOSSIBLE_IDENTITY_QUERY_KINDS);
       });
+    });
+
+    describe('a page past the end of an error type', () => {
+      useFixture();
 
       it('answers a page past the end with the total and no rows', async () => {
         const { response, kinds } = await queryWithKinds({ errorType: VALIDATION_14, page: 1, pageSize: 1 });
@@ -896,6 +902,21 @@ describe('View Errors facets, counts and queries on real MySQL (#544)', () => {
         expect(pastTheEnd.response.totalRows, 'a page past the end still reports the total').toBe(2);
         expect(pastTheEnd.kinds, 'a page with no rows carries no total, so the totals statement answers it').toEqual(SQL_QUERY_WITHOUT_ROWS_KINDS);
         expect(kinds).toEqual(SQL_QUERY_KINDS);
+      });
+    });
+
+    describe('a search of whitespace only', () => {
+      useFixture();
+
+      it('stays on the SQL path and lists the same rows and total as no search at all', async () => {
+        const noSearch = await queryWithKinds({});
+        const whitespaceSearch = await queryWithKinds({}, { quickSearch: WHITESPACE_ONLY_SEARCH });
+
+        expect(noSearch.response.rows.length, 'the default query must list rows for the comparison to mean anything').toBeGreaterThan(0);
+        expect(whitespaceSearch.kinds, 'a blank search is no search, so no scope-wide raw-row read').toEqual(SQL_QUERY_KINDS);
+        expect(noSearch.kinds).toEqual(SQL_QUERY_KINDS);
+        expect(whitespaceSearch.response.rows.map(row => row.coreMeasurementID)).toEqual(noSearch.response.rows.map(row => row.coreMeasurementID));
+        expect(whitespaceSearch.response.totalRows).toBe(noSearch.response.totalRows);
       });
     });
   });
