@@ -2,13 +2,27 @@ import { isDeepStrictEqual } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  buildErrorTypeKey,
   type ContradictionType,
+  ERROR_EXPLORER_COLUMN_FIELDS,
+  ERROR_EXPLORER_NUMBER_OPERATORS,
+  ERROR_EXPLORER_SORT_DIRECTIONS,
+  ERROR_EXPLORER_TEXT_OPERATORS,
+  ERROR_SOURCE,
+  type ErrorExplorerColumnFilter,
   type ErrorExplorerFacetsResponse,
   type ErrorExplorerFilters,
+  type ErrorExplorerFilterOperator,
+  type ErrorExplorerNumberField,
   type ErrorExplorerQueryRequest,
   type ErrorExplorerQueryResponse,
   type ErrorExplorerRow,
-  type ErrorExplorerSource
+  type ErrorExplorerSortItem,
+  type ErrorExplorerSource,
+  type ErrorExplorerTextField,
+  type ErrorTypeIdentity,
+  FALLBACK_ERROR_CODE,
+  FALLBACK_ERROR_MESSAGE
 } from '@/config/errorsexplorer';
 import * as production from '@/app/api/errors/explorer/_shared';
 import { toSliceBounds } from '@/app/api/errors/explorer/errorsetcounts';
@@ -20,6 +34,7 @@ import {
   NO_LOG_ERROR_SOURCE
 } from '@/app/api/errors/explorer/errorsetsql';
 import * as oracle from '../oracles/errors-explorer-legacy';
+import { buildActiveMeasurementCountQuery as buildFrozenActiveMeasurementCountQuery } from '../oracles/errors-explorer-legacy-activecount';
 import { DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { runQueryDispatch } from '../setup/runquerydispatch';
 import {
@@ -30,8 +45,10 @@ import {
   DECOY_PLOT_ID,
   expectExplorerEqual,
   FIRST_CENSUS_ID,
+  FIXTURE_ERROR_TYPE_IDS,
   FIXTURE_MESSAGES,
   generateEquivalenceFixture,
+  MANY_CENSUS_IDS,
   MAIN_PLOT_ID,
   createFixtureDatabaseSession,
   FIXTURE_HOOK_TIMEOUT_MS,
@@ -57,6 +74,7 @@ import {
   SHARED_IDENTITY_ERROR_IDS,
   SHOW_FILTER_SETS,
   type FixtureDatabase,
+  type FixtureErrorType,
   type FixtureMeasurement,
   type GeneratedFixture,
   type RecordedStatement
@@ -84,8 +102,14 @@ const SAME_BATCH: ContradictionType = 'same_batch_conflict';
 const FAILED_NO_LOG_CODE = 'failed_no_log';
 const LABELS = ERROR_EXPLORER_STATEMENT_LABELS;
 const STATEMENT_SHAPE_COUNT = Object.keys(LABELS).length;
+const EXPECTED_STATEMENT_SHAPE_COUNT = 10;
 const KNOWN_STATEMENT_LABELS: ReadonlySet<string> = new Set(Object.values(LABELS));
-const DETAILS_STATEMENT_LABELS: ReadonlySet<string> = new Set([LABELS.idRawRows, LABELS.duplicateMemberGroups, LABELS.sameBatchMemberGroups]);
+const DETAILS_STATEMENT_LABELS: ReadonlySet<string> = new Set([
+  LABELS.idRawRows,
+  LABELS.relatedRowsOutsideErrorSet,
+  LABELS.duplicateMemberGroups,
+  LABELS.sameBatchMemberGroups
+]);
 const SQL_QUERY_STATEMENT_LABELS: ReadonlySet<string> = new Set([
   LABELS.catalog,
   LABELS.page,
@@ -97,6 +121,22 @@ const SQL_QUERY_STATEMENT_LABELS: ReadonlySet<string> = new Set([
 const PAGE_WINDOW_PARAM_COUNT = 2;
 const MEMBER_GROUP_KINDS_PER_ROW = 2;
 const BLANK_SEARCH = '';
+const MIN_ACTIVE_COUNT_PARAMS = 2;
+const ERROR_TYPE_PAGE_SIZE = 10;
+const ROUTING_PAGE_SIZE = 10;
+const NO_SUCH_ERROR_CODE = 'no-such-error-code';
+const NONEXISTENT_ERROR_TYPE_REASON = 'a nonexistent identity';
+const FACET_ERROR_TYPE_REASON = 'an error type in the oracle facets';
+const FALLBACK_ERROR_TYPE_REASON = 'the marked-invalid fallback identity';
+const TWO_CODES_FIRST_REASON = 'two codes, one message: the first code';
+const TWO_CODES_SECOND_REASON = 'two codes, one message: the second code';
+const SHARED_IDENTITY_REASON = 'one identity under two catalog rows';
+const UPPER_CASED_MESSAGE_REASON = 'a real message in capitals';
+const SWAPPED_CASE_TWIN_REASON = 'the code of one case twin with the message of the other';
+const TEXT_FILTER_FIELDS: readonly ErrorExplorerTextField[] = ['treeTag', 'description', 'measurementDate'];
+const NUMBER_FILTER_FIELDS: readonly ErrorExplorerNumberField[] = ['measuredDBH', 'priorDBH', 'dbhChangePercent', 'stemPlotX'];
+const SORT_SWEEP_FIELDS: readonly ErrorExplorerSortItem['field'][] = ERROR_EXPLORER_COLUMN_FIELDS;
+const MIDDLE_OF_SORTED_VALUES = 0.5;
 /** Every raw-rows statement and the catalog bind these three as the display fallback for a measurement without a log, whatever the filters are. */
 const FALLBACK_DISPLAY_PARAMS: ReadonlySet<unknown> = new Set([NO_LOG_ERROR_SOURCE, NO_LOG_ERROR_CODE, NO_LOG_ERROR_MESSAGE]);
 
@@ -127,6 +167,14 @@ const PLOT_SCOPES: readonly Scope[] = [
   { name: 'plot 2 asked for the first census', plotID: DECOY_PLOT_ID, censusID: FIRST_CENSUS_ID, censusIDs: [FIRST_CENSUS_ID] }
 ];
 const GROUPED_SCOPE = SCOPES[1];
+const SECOND_CENSUS_FIRST_ORDER = 'census 2 first';
+/** Census 2 leads and census 1 closes a list of MANY_CENSUS_IDS.length IDs, so the chunks and the tie order differ from GROUPED_SCOPE. */
+const MANY_CENSUS_SCOPE: Scope = {
+  name: `${MANY_CENSUS_IDS.length} censuses, ${SECOND_CENSUS_FIRST_ORDER}`,
+  plotID: MAIN_PLOT_ID,
+  censusID: FIRST_CENSUS_ID,
+  censusIDs: [SECOND_CENSUS_ID, ...MANY_CENSUS_IDS.filter(censusID => censusID !== FIRST_CENSUS_ID && censusID !== SECOND_CENSUS_ID), FIRST_CENSUS_ID]
+};
 const DEFAULT_FILTERS: ErrorExplorerFilters = oracleFilters({});
 
 function oracleFilters(overrides: Partial<ErrorExplorerFilters>): ErrorExplorerFilters {
@@ -240,6 +288,11 @@ const GRID_COMBINATIONS: ScopedFilters[] = [
   ...SCOPES.flatMap(scope => FILTER_GRID.map(named => ({ scope, named }))),
   ...PLOT_SCOPES.flatMap(scope => SHOW_SET_FILTERS.map(named => ({ scope, named })))
 ];
+const DEFAULT_FILTERS_LABEL = 'default filters';
+const ERROR_TYPE_FILTERS: readonly NamedFilters[] = [
+  { label: DEFAULT_FILTERS_LABEL, filters: DEFAULT_FILTERS, sweepWithSearch: false, axes: [] },
+  ...SHOW_SET_FILTERS
+];
 const SHOW_SET_COMBINATIONS: ScopedFilters[] = [...SCOPES, ...PLOT_SCOPES].flatMap(scope => SHOW_SET_FILTERS.map(named => ({ scope, named })));
 
 /** A statement that only reads: optional leading comments, then WITH or SELECT. Anything else may change data and so empties the oracle's read cache. */
@@ -313,6 +366,81 @@ function findFilterStringInStatement(statement: RecordedStatement, schema: strin
 function pagesFor(totalRows: number, pageSize: number): number[] {
   const lastPage = Math.max(0, Math.ceil(totalRows / pageSize) - 1);
   return [...Array.from({ length: lastPage + 2 }, (_, page) => page), ...IRREGULAR_PAGES];
+}
+
+/** The first page, the second, and the first page past the end: the three offsets where a window bug shows. */
+function boundaryPagesFor(totalRows: number, pageSize: number): number[] {
+  return [...new Set([0, 1, Math.ceil(totalRows / pageSize)])];
+}
+
+interface QueryRequestExtras {
+  errorType?: ErrorTypeIdentity;
+  sortModel?: ErrorExplorerSortItem[];
+  columnFilters?: ErrorExplorerColumnFilter[];
+}
+
+function toErrorTypeIdentity({ source, code, message }: ErrorTypeIdentity): ErrorTypeIdentity {
+  return { source, code, message };
+}
+
+function fixtureErrorTypeIdentity(errorTypes: readonly FixtureErrorType[], errorID: number): ErrorTypeIdentity {
+  const entry = errorTypes.find(errorType => errorType.errorID === errorID);
+  if (entry === undefined) throw new Error(`The fixture has no catalog entry with ErrorID ${errorID}`);
+  return { source: entry.source, code: entry.code ?? FALLBACK_ERROR_CODE, message: entry.message };
+}
+
+interface NamedErrorType {
+  identity: ErrorTypeIdentity;
+  reasons: string[];
+}
+
+function addErrorTypeCase(cases: Map<string, NamedErrorType>, reason: string, identity: ErrorTypeIdentity): void {
+  const key = buildErrorTypeKey(identity);
+  const existing = cases.get(key);
+  if (existing) existing.reasons.push(reason);
+  else cases.set(key, { identity, reasons: [reason] });
+}
+
+function middleOf<Value>(sortedValues: readonly Value[]): Value {
+  return sortedValues[Math.floor(sortedValues.length * MIDDLE_OF_SORTED_VALUES)];
+}
+
+class ColumnFilterSampleMissingError extends Error {
+  constructor(field: string, rowCount: number) {
+    super(`No row of the ${rowCount}-row error set has a value in ${field}, so no column filter on it can select anything`);
+    this.name = 'ColumnFilterSampleMissingError';
+  }
+}
+
+function textFilterCasesFor(field: ErrorExplorerTextField, rows: readonly ErrorExplorerRow[]): ErrorExplorerColumnFilter[] {
+  const sample = rows.map(row => row[field]).find((value): value is string => typeof value === 'string' && value.trim() !== BLANK_SEARCH);
+  if (sample === undefined) throw new ColumnFilterSampleMissingError(field, rows.length);
+  const half = Math.ceil(sample.length / 2);
+  const valueFor: Record<(typeof ERROR_EXPLORER_TEXT_OPERATORS)[number], string | undefined> = {
+    contains: sample.slice(1, sample.length - 1) || sample,
+    equals: sample,
+    startsWith: sample.slice(0, half),
+    endsWith: sample.slice(sample.length - half),
+    isEmpty: undefined,
+    isNotEmpty: undefined
+  };
+  return ERROR_EXPLORER_TEXT_OPERATORS.map(operator => ({ field, operator, ...(valueFor[operator] === undefined ? {} : { value: valueFor[operator] }) }));
+}
+
+function numberFilterCasesFor(field: ErrorExplorerNumberField, rows: readonly ErrorExplorerRow[]): ErrorExplorerColumnFilter[] {
+  const values = rows
+    .map(row => row[field])
+    .filter(value => value !== null && value !== undefined && String(value).trim() !== BLANK_SEARCH)
+    .map(Number)
+    .filter(Number.isFinite);
+  if (values.length === 0) throw new ColumnFilterSampleMissingError(field, rows.length);
+  const middle = middleOf([...values].sort((a, b) => a - b));
+  const valuelessOperators: readonly ErrorExplorerFilterOperator[] = ['isEmpty', 'isNotEmpty'];
+  return ERROR_EXPLORER_NUMBER_OPERATORS.map(operator => ({ field, operator, ...(valuelessOperators.includes(operator) ? {} : { value: middle }) }));
+}
+
+function buildColumnFilterCases(rows: readonly ErrorExplorerRow[]): ErrorExplorerColumnFilter[] {
+  return [...TEXT_FILTER_FIELDS.flatMap(field => textFilterCasesFor(field, rows)), ...NUMBER_FILTER_FIELDS.flatMap(field => numberFilterCasesFor(field, rows))];
 }
 
 function sliceOracleWholeList(whole: ErrorExplorerQueryResponse, page: number, pageSize: number): ErrorExplorerQueryResponse {
@@ -656,6 +784,15 @@ describe('errors explorer: frozen oracle against production on generated data', 
     });
     const productionExecutor = (): ProductionExecutor => countingExecutor() as unknown as ProductionExecutor;
     const witnessIDs = () => new Set(fixture.witnessRowIDs);
+    const activeCountTexts = new Set<string>();
+
+    /** The one statement without a label: dev's active-measurement count, allowed only when its text is the one frozen at 02292176 for the same scope. */
+    const isFrozenActiveCountStatement = (statement: RecordedStatement): boolean => {
+      if (statement.label !== null || statement.params.length < MIN_ACTIVE_COUNT_PARAMS) return false;
+      const [plotID, ...censusIDs] = statement.params.map(Number);
+      const frozen = buildFrozenActiveMeasurementCountQuery(database(), plotID, censusIDs);
+      return statement.sql === frozen.sql && isDeepStrictEqual(statement.params.map(Number), frozen.params);
+    };
 
     const recordProduction = async <Result>(run: (executor: ProductionExecutor) => Promise<Result>) => {
       const recorder = createRecordingExecutor(explorerConnection(), { measureJsonBytes: false });
@@ -683,6 +820,10 @@ describe('errors explorer: frozen oracle against production on generated data', 
     ): void => {
       const filterStrings = filterStringsOf(filters);
       for (const statement of statements) {
+        if (isFrozenActiveCountStatement(statement)) {
+          activeCountTexts.add(statement.sql);
+          continue;
+        }
         if (statement.label === null || !allowedLabels.has(statement.label))
           failStatementCheck(context, statement, `the label ${statement.label} is not allowed here`);
         productionStatementLabelByText.set(statement.sql, statement.label);
@@ -735,6 +876,17 @@ describe('errors explorer: frozen oracle against production on generated data', 
       }
     };
 
+    const observeNodePathQuery = (
+      context: Record<string, unknown>,
+      statements: readonly RecordedStatement[],
+      filters: ErrorExplorerFilters,
+      requestKind: string
+    ): void => {
+      observeProduction(context, statements, filters);
+      const pageStatement = statements.find(statement => statement.label === LABELS.page || statement.label === LABELS.catalog);
+      if (pageStatement) failStatementCheck(context, pageStatement, `${requestKind} must stay on the Node path`);
+    };
+
     const observeSearchQuery = (
       context: Record<string, unknown>,
       statements: readonly RecordedStatement[],
@@ -744,19 +896,24 @@ describe('errors explorer: frozen oracle against production on generated data', 
     ): void => {
       const searchesInNode = filters.quickSearch.trim() !== BLANK_SEARCH;
       if (!searchesInNode) return observeSqlPathQuery(context, statements, filters, response, request);
-      observeProduction(context, statements, filters);
-      const pageStatement = statements.find(statement => statement.label === LABELS.page || statement.label === LABELS.catalog);
-      if (pageStatement) failStatementCheck(context, pageStatement, 'a quick search must stay on the Node path');
+      observeNodePathQuery(context, statements, filters, 'a quick search');
     };
 
-    const queryRequest = (scope: Scope, filters: ErrorExplorerFilters, page: number, pageSize: number): ErrorExplorerQueryRequest => ({
+    const queryRequest = (
+      scope: Scope,
+      filters: ErrorExplorerFilters,
+      page: number,
+      pageSize: number,
+      extras: QueryRequestExtras = {}
+    ): ErrorExplorerQueryRequest => ({
       schema: database(),
       plotID: scope.plotID,
       censusID: scope.censusID,
       censusIDs: scope.censusIDs,
       page,
       pageSize,
-      filters
+      filters,
+      ...extras
     });
     const facetRequest = (scope: Scope, filters: ErrorExplorerFilters) => ({
       schema: database(),
@@ -766,15 +923,38 @@ describe('errors explorer: frozen oracle against production on generated data', 
       filters
     });
 
-    const oracleWholeList = (scope: Scope, filters: ErrorExplorerFilters): Promise<ErrorExplorerQueryResponse> => {
+    const oracleWholeList = (scope: Scope, filters: ErrorExplorerFilters, extras: QueryRequestExtras = {}): Promise<ErrorExplorerQueryResponse> => {
       const isReusable = filters.quickSearch === '';
-      const cacheKey = JSON.stringify([scope.name, filters]);
+      const cacheKey = JSON.stringify([scope.name, filters, extras]);
       const cached = isReusable ? wholeListCache.get(cacheKey) : undefined;
       if (cached) return cached;
       apiCalls++;
-      const pending = oracle.queryErrorExplorer(oracleExecutor(), queryRequest(scope, filters, 0, WHOLE_LIST_PAGE_SIZE));
+      const pending = oracle.queryErrorExplorer(oracleExecutor(), queryRequest(scope, filters, 0, WHOLE_LIST_PAGE_SIZE, extras));
       if (isReusable) wholeListCache.set(cacheKey, pending);
       return pending;
+    };
+
+    const oracleErrorTypes = async (scope: Scope, filters: ErrorExplorerFilters): Promise<ErrorTypeIdentity[]> =>
+      (await oracle.buildErrorExplorerFacets(oracleExecutor(), facetRequest(scope, filters))).errorTypes.map(toErrorTypeIdentity);
+
+    const errorTypeCasesFor = async (scope: Scope, filters: ErrorExplorerFilters): Promise<NamedErrorType[]> => {
+      const cases = new Map<string, NamedErrorType>();
+      (await oracleErrorTypes(scope, filters)).forEach(identity => addErrorTypeCase(cases, FACET_ERROR_TYPE_REASON, identity));
+      const identityOf = (errorID: number) => fixtureErrorTypeIdentity(fixture.errorTypes, errorID);
+      const tagMismatch = identityOf(FIXTURE_ERROR_TYPE_IDS.tagMismatch);
+      const tagMismatchCaseTwin = identityOf(FIXTURE_ERROR_TYPE_IDS.tagMismatchLowerCase);
+      addErrorTypeCase(cases, NONEXISTENT_ERROR_TYPE_REASON, {
+        source: ERROR_SOURCE.validation,
+        code: NO_SUCH_ERROR_CODE,
+        message: FIXTURE_MESSAGES.matchesNothing
+      });
+      addErrorTypeCase(cases, FALLBACK_ERROR_TYPE_REASON, { source: ERROR_SOURCE.ingestion, code: FALLBACK_ERROR_CODE, message: FALLBACK_ERROR_MESSAGE });
+      addErrorTypeCase(cases, UPPER_CASED_MESSAGE_REASON, { ...tagMismatch, message: tagMismatch.message.toUpperCase() });
+      addErrorTypeCase(cases, SWAPPED_CASE_TWIN_REASON, { ...tagMismatch, message: tagMismatchCaseTwin.message });
+      addErrorTypeCase(cases, TWO_CODES_FIRST_REASON, identityOf(FIXTURE_ERROR_TYPE_IDS.sharedMessageFirst));
+      addErrorTypeCase(cases, TWO_CODES_SECOND_REASON, identityOf(FIXTURE_ERROR_TYPE_IDS.sharedMessageSecond));
+      addErrorTypeCase(cases, SHARED_IDENTITY_REASON, identityOf(SHARED_IDENTITY_ERROR_IDS.first));
+      return [...cases.values()];
     };
 
     const noteAxisTotals = (axes: readonly string[], totalRows: number) =>
@@ -964,14 +1144,59 @@ describe('errors explorer: frozen oracle against production on generated data', 
         )
       };
 
-      const mutations: Array<{ name: string; mutated: unknown; expectedPath: string }> = [
-        { name: 'a changed field', mutated: changedField, expectedPath: '$.rows[1].errorCount' },
-        { name: 'a dropped row', mutated: droppedRow, expectedPath: '$.rows.length' },
-        { name: 'a changed total', mutated: changedTotalRows, expectedPath: '$.totalRows' },
-        { name: 'a changed group key outside the witness rows', mutated: changedGroupKeyOutsideWitness, expectedPath: 'contradictionGroupKey' }
+      const [restrictingErrorType] = (
+        await Promise.all(
+          (await oracleErrorTypes(GROUPED_SCOPE, DEFAULT_FILTERS)).map(async errorType => ({
+            errorType,
+            restricted: await oracleWholeList(GROUPED_SCOPE, DEFAULT_FILTERS, { errorType })
+          }))
+        )
+      ).filter(({ restricted }) => restricted.totalRows > 0 && restricted.totalRows < whole.totalRows);
+      expect(restrictingErrorType, 'an error type must select some but not all rows for the ignored-error-type mutant').toBeDefined();
+      const restrictedByErrorType = restrictingErrorType.restricted;
+
+      const priorRoundedID = fixture.plantedCases.dbhChange.priorRounded;
+      expect(whole.rows.find(row => Number(row.coreMeasurementID) === priorRoundedID)?.dbhChangePercent).toBe(PRIOR_DBH_ROUNDED_PERCENT);
+      const droppedDbhChangePercent = {
+        ...whole,
+        rows: whole.rows.map(row => (Number(row.coreMeasurementID) === priorRoundedID ? { ...row, dbhChangePercent: null } : row))
+      };
+
+      const sortModel: ErrorExplorerSortItem[] = [{ field: 'measuredDBH', sort: 'desc' }];
+      const sortedByDbh = await oracleWholeList(GROUPED_SCOPE, DEFAULT_FILTERS, { sortModel });
+
+      const { errorMember } = fixture.plantedCases.outsidePartner;
+      const detailsExpected = await Promise.all(
+        [FIRST_CENSUS_ID, SECOND_CENSUS_ID].map(censusID =>
+          oracle.buildErrorExplorerDetails(oracleExecutor(), { schema: database(), plotID: MAIN_PLOT_ID, censusID }, errorMember, DUPLICATE)
+        )
+      );
+      const detailsWithPartners = detailsExpected.find(details => details.relatedRows.length > 0);
+      expect(detailsWithPartners, `details of row ${errorMember} must list related rows`).toBeDefined();
+      const flippedInErrorSet = {
+        ...detailsWithPartners,
+        relatedRows: (detailsWithPartners as (typeof detailsExpected)[number]).relatedRows.map((related, index) =>
+          index === 0 ? { ...related, inErrorSet: !related.inErrorSet } : related
+        )
+      };
+
+      const mutations: Array<{ name: string; mutated: unknown; expected: unknown; expectedPath: string }> = [
+        { name: 'a changed field', mutated: changedField, expected: whole, expectedPath: '$.rows[1].errorCount' },
+        { name: 'a dropped row', mutated: droppedRow, expected: whole, expectedPath: '$.rows.length' },
+        { name: 'a changed total', mutated: changedTotalRows, expected: whole, expectedPath: '$.totalRows' },
+        {
+          name: 'a changed group key outside the witness rows',
+          mutated: changedGroupKeyOutsideWitness,
+          expected: whole,
+          expectedPath: 'contradictionGroupKey'
+        },
+        { name: 'an error type ignored', mutated: whole, expected: restrictedByErrorType, expectedPath: '.length' },
+        { name: 'a dropped dbhChangePercent', mutated: droppedDbhChangePercent, expected: whole, expectedPath: 'dbhChangePercent' },
+        { name: 'a sort ignored', mutated: whole, expected: sortedByDbh, expectedPath: '$.rows[' },
+        { name: 'an inErrorSet flag flipped', mutated: flippedInErrorSet, expected: detailsWithPartners, expectedPath: 'inErrorSet' }
       ];
-      for (const { name, mutated, expectedPath } of mutations) {
-        const error = await expectExplorerEqual(explorerConnection(), { seed, scenario: name }, mutated, whole, witnessIDs()).then(
+      for (const { name, mutated, expected, expectedPath } of mutations) {
+        const error = await expectExplorerEqual(explorerConnection(), { seed, scenario: name }, mutated, expected, witnessIDs()).then(
           () => null,
           (caught: Error) => caught
         );
@@ -1071,6 +1296,149 @@ describe('errors explorer: frozen oracle against production on generated data', 
     );
 
     it(
+      'queryErrorExplorer with an error type: every identity, Show set and scope, at the first, second and past-the-end pages',
+      async () =>
+        runTimed('queryErrorExplorer error type', async () => {
+          const maxTotalByReason = new Map<string, number>();
+          let partialSelections = 0;
+          for (const scope of [...SCOPES, MANY_CENSUS_SCOPE]) {
+            for (const named of ERROR_TYPE_FILTERS) {
+              const unrestricted = await oracleWholeList(scope, named.filters);
+              for (const { identity, reasons } of await errorTypeCasesFor(scope, named.filters)) {
+                const whole = await oracleWholeList(scope, named.filters, { errorType: identity });
+                reasons.forEach(reason => maxTotalByReason.set(reason, Math.max(maxTotalByReason.get(reason) ?? 0, whole.totalRows)));
+                if (whole.totalRows > 0 && whole.totalRows < unrestricted.totalRows) partialSelections++;
+                const pages =
+                  scope === MANY_CENSUS_SCOPE ? pagesFor(whole.totalRows, ERROR_TYPE_PAGE_SIZE) : boundaryPagesFor(whole.totalRows, ERROR_TYPE_PAGE_SIZE);
+                for (const page of pages) {
+                  apiCalls++;
+                  const request = queryRequest(scope, named.filters, page, ERROR_TYPE_PAGE_SIZE, { errorType: identity });
+                  const { result: actual, statements } = await recordProduction(executor => production.queryErrorExplorer(executor, request));
+                  const context = {
+                    scenario: 'queryErrorExplorer with an error type',
+                    scope: scope.name,
+                    filters: named.label,
+                    errorType: identity,
+                    reasons,
+                    oracleTotalRows: whole.totalRows,
+                    page,
+                    pageSize: ERROR_TYPE_PAGE_SIZE
+                  };
+                  await compare(context, actual, sliceOracleWholeList(whole, page, ERROR_TYPE_PAGE_SIZE));
+                  if (scope === MANY_CENSUS_SCOPE) observeProduction(context, statements, named.filters);
+                  else observeSqlPathQuery(context, statements, named.filters, actual, request);
+                }
+              }
+            }
+          }
+          console.log(
+            `[error type] seed=${seed} maxOracleTotalByReason=${JSON.stringify(Object.fromEntries(maxTotalByReason))} partialSelections=${partialSelections}`
+          );
+          expect(maxTotalByReason.get(FACET_ERROR_TYPE_REASON), 'an identity from the oracle facets must select rows').toBeGreaterThan(0);
+          expect(maxTotalByReason.get(NONEXISTENT_ERROR_TYPE_REASON), 'a nonexistent identity selects nothing').toBe(0);
+          expect(maxTotalByReason.get(UPPER_CASED_MESSAGE_REASON), 'a message in capitals is not the stored message').toBe(0);
+          expect(maxTotalByReason.get(SWAPPED_CASE_TWIN_REASON), 'one code with the message of its case twin is no stored identity').toBe(0);
+          expect(maxTotalByReason.get(TWO_CODES_FIRST_REASON), 'the first code of the shared message must select rows').toBeGreaterThan(0);
+          expect(maxTotalByReason.get(TWO_CODES_SECOND_REASON), 'the second code of the shared message must select rows').toBeGreaterThan(0);
+          expect(maxTotalByReason.get(SHARED_IDENTITY_REASON), 'the identity behind two catalog rows must select rows').toBeGreaterThan(0);
+          expect(partialSelections, 'some identity must select fewer rows than the unrestricted list').toBeGreaterThan(0);
+        }),
+      SEED_TEST_TIMEOUT_MS
+    );
+
+    it(
+      'queryErrorExplorer sort and column filter: every field, direction and operator, with and without the top error type, on the Node path',
+      async () =>
+        runTimed('queryErrorExplorer sort and column filter', async () => {
+          const scope = GROUPED_SCOPE;
+          const [topErrorType] = await oracleErrorTypes(scope, DEFAULT_FILTERS);
+          expect(topErrorType, 'the oracle facets must list an error type to restrict by').toBeDefined();
+          const maxTotalByOperator = new Map<string, number>();
+          const wholeErrorSet = await oracleWholeList(scope, DEFAULT_FILTERS);
+          const columnFilters = buildColumnFilterCases(wholeErrorSet.rows);
+          for (const errorType of [undefined, topErrorType]) {
+            const restriction: QueryRequestExtras = errorType ? { errorType } : {};
+            const unrouted = await oracleWholeList(scope, DEFAULT_FILTERS, restriction);
+            const sortCases = SORT_SWEEP_FIELDS.flatMap(field =>
+              ERROR_EXPLORER_SORT_DIRECTIONS.map(sort => ({ label: `sort ${field} ${sort}`, extras: { ...restriction, sortModel: [{ field, sort }] } }))
+            );
+            const filterCases = columnFilters.map(columnFilter => ({
+              label: `filter ${columnFilter.field} ${columnFilter.operator} ${JSON.stringify(columnFilter.value ?? null)}`,
+              operator: columnFilter.operator,
+              extras: { ...restriction, columnFilters: [columnFilter] }
+            }));
+            const idsByLabel = new Map<string, number[]>();
+            for (const routed of [...sortCases, ...filterCases]) {
+              const whole = await oracleWholeList(scope, DEFAULT_FILTERS, routed.extras);
+              idsByLabel.set(
+                routed.label,
+                whole.rows.map(row => Number(row.coreMeasurementID))
+              );
+              if ('operator' in routed) maxTotalByOperator.set(routed.operator, Math.max(maxTotalByOperator.get(routed.operator) ?? 0, whole.totalRows));
+              for (const page of boundaryPagesFor(whole.totalRows, ROUTING_PAGE_SIZE)) {
+                apiCalls++;
+                const request = queryRequest(scope, DEFAULT_FILTERS, page, ROUTING_PAGE_SIZE, routed.extras);
+                const { result: actual, statements } = await recordProduction(executor => production.queryErrorExplorer(executor, request));
+                const context = {
+                  scenario: 'queryErrorExplorer sort or column filter',
+                  scope: scope.name,
+                  errorType: errorType ?? null,
+                  routed: routed.label,
+                  oracleTotalRows: whole.totalRows,
+                  page,
+                  pageSize: ROUTING_PAGE_SIZE
+                };
+                await compare(context, actual, sliceOracleWholeList(whole, page, ROUTING_PAGE_SIZE));
+                observeNodePathQuery(context, statements, DEFAULT_FILTERS, routed.label);
+              }
+            }
+            for (const field of SORT_SWEEP_FIELDS) {
+              const hasSeveralValues = new Set(unrouted.rows.map(row => row[field])).size > 1;
+              const ascending = idsByLabel.get(`sort ${field} asc`);
+              const descending = idsByLabel.get(`sort ${field} desc`);
+              console.log(
+                `[sort] seed=${seed} errorType=${errorType ? JSON.stringify(errorType) : null} field=${field} severalValues=${hasSeveralValues} ascFirst=${ascending?.[0]} descFirst=${descending?.[0]}`
+              );
+              if (hasSeveralValues) expect(ascending, `sorting ${field} ascending and descending must order the rows differently`).not.toEqual(descending);
+            }
+          }
+          console.log(`[column filter] seed=${seed} maxOracleTotalByOperator=${JSON.stringify(Object.fromEntries(maxTotalByOperator))}`);
+          for (const operator of new Set<string>([...ERROR_EXPLORER_TEXT_OPERATORS, ...ERROR_EXPLORER_NUMBER_OPERATORS])) {
+            expect(maxTotalByOperator.get(operator), `the ${operator} operator must select rows for some field`).toBeGreaterThan(0);
+          }
+        }),
+      SEED_TEST_TIMEOUT_MS
+    );
+
+    it('rows that tie on contradiction, error count and date in two censuses are ordered by measurement ID whichever census is listed first', async () => {
+      const censusOneFirst = await oracleWholeList(GROUPED_SCOPE, DEFAULT_FILTERS);
+      const censusTwoFirst = await oracleWholeList(MANY_CENSUS_SCOPE, DEFAULT_FILTERS);
+      const idsOf = (response: ErrorExplorerQueryResponse) => response.rows.map(row => Number(row.coreMeasurementID));
+      const tieKeyOf = (row: ErrorExplorerRow) => JSON.stringify([row.hasContradiction, row.errorCount, row.measurementDate]);
+      const censusTwoRowsByTieKey = new Map<string, ErrorExplorerRow>();
+      censusOneFirst.rows.filter(row => row.censusID === SECOND_CENSUS_ID).forEach(row => censusTwoRowsByTieKey.set(tieKeyOf(row), row));
+      const tiedCensusOneRow = censusOneFirst.rows.find(row => row.censusID === FIRST_CENSUS_ID && censusTwoRowsByTieKey.has(tieKeyOf(row)));
+      expect(tiedCensusOneRow, 'the seed must hold a census 1 row and a census 2 row that tie on contradiction, error count and date').toBeDefined();
+      const censusOneID = Number((tiedCensusOneRow as ErrorExplorerRow).coreMeasurementID);
+      const censusTwoID = Number(censusTwoRowsByTieKey.get(tieKeyOf(tiedCensusOneRow as ErrorExplorerRow))?.coreMeasurementID);
+      const [lowerID, higherID] = [Math.min(censusOneID, censusTwoID), Math.max(censusOneID, censusTwoID)];
+      const positionsOf = (response: ErrorExplorerQueryResponse) => ({ lower: idsOf(response).indexOf(lowerID), higher: idsOf(response).indexOf(higherID) });
+      console.log(
+        `[census tie] seed=${seed} census1Row=${censusOneID} census2Row=${censusTwoID} positions census 1 first=${JSON.stringify(positionsOf(censusOneFirst))} ` +
+          `census 2 first=${JSON.stringify(positionsOf(censusTwoFirst))}`
+      );
+      expect(positionsOf(censusOneFirst).lower, 'census 1 listed first: the lower ID comes first').toBeLessThan(positionsOf(censusOneFirst).higher);
+      expect(positionsOf(censusTwoFirst).lower, 'census 2 listed first: the lower ID still comes first').toBeLessThan(positionsOf(censusTwoFirst).higher);
+      for (const [scope, expected] of [
+        [GROUPED_SCOPE, censusOneFirst],
+        [MANY_CENSUS_SCOPE, censusTwoFirst]
+      ] as const) {
+        const actual = await production.queryErrorExplorer(productionExecutor(), queryRequest(scope, DEFAULT_FILTERS, 0, WHOLE_LIST_PAGE_SIZE));
+        await compare({ scenario: 'default order with rows tied across censuses', scope: scope.name }, actual, expected);
+      }
+    });
+
+    it(
       'buildErrorExplorerFacets: every filter, scope and search value',
       async () =>
         runTimed('buildErrorExplorerFacets', async () => {
@@ -1138,6 +1506,9 @@ describe('errors explorer: frozen oracle against production on generated data', 
           console.log(`[details] seed=${seed} errorSetIDs=${errorSetIDs.length} nonErrorIDs=${nonErrorIDs.length} otherPlotID=${otherPlotID}`);
           expect(nonErrorIDs).toHaveLength(NON_ERROR_ID_COUNT);
 
+          const partnerCounts = { inErrorSet: 0, outsideErrorSet: 0, requestedTypeShown: 0 };
+          let outsidePartnerShown = false;
+          const { errorMember, outsidePartner } = fixture.plantedCases.outsidePartner;
           for (const censusID of [FIRST_CENSUS_ID, SECOND_CENSUS_ID]) {
             const request = { schema: database(), plotID: MAIN_PLOT_ID, censusID };
             for (const measurementID of measurementIDs) {
@@ -1150,49 +1521,87 @@ describe('errors explorer: frozen oracle against production on generated data', 
                 const context = { scenario: 'buildErrorExplorerDetails', censusID, measurementID, activeContradictionType: activeType ?? null };
                 await compare(context, actual, expected);
                 observeProduction(context, statements, DEFAULT_FILTERS, DETAILS_STATEMENT_LABELS);
+                partnerCounts.inErrorSet += expected.relatedRows.filter(related => related.inErrorSet).length;
+                partnerCounts.outsideErrorSet += expected.relatedRows.filter(related => !related.inErrorSet).length;
+                if (activeType !== undefined && expected.row?.contradictionType === activeType) partnerCounts.requestedTypeShown++;
+                if (
+                  measurementID === errorMember &&
+                  expected.relatedRows.some(related => related.coreMeasurementID === outsidePartner && !related.inErrorSet)
+                ) {
+                  outsidePartnerShown = true;
+                }
               }
             }
           }
+          console.log(`[details] seed=${seed} partners=${JSON.stringify(partnerCounts)} plantedOutsidePartnerShown=${outsidePartnerShown}`);
+          expect(partnerCounts.inErrorSet, 'the sweep must reach a related row that is in the error set').toBeGreaterThan(0);
+          expect(partnerCounts.outsideErrorSet, 'the sweep must reach a related row outside the error set').toBeGreaterThan(0);
+          expect(partnerCounts.requestedTypeShown, 'the sweep must reach a row that shows the requested contradiction type').toBeGreaterThan(0);
+          expect(outsidePartnerShown, `row ${errorMember} must list its outside partner ${outsidePartner} with inErrorSet false`).toBe(true);
         }),
       SEED_TEST_TIMEOUT_MS
     );
 
     it(
-      'buildErrorExportRows: the Show sets and the semicolon message filter',
+      'buildErrorExportRows: the Show sets and the semicolon message filter, then every error type',
       async () =>
         runTimed('buildErrorExportRows', async () => {
           const exportFilters: NamedFilters[] = [
             ...SHOW_SET_FILTERS,
             { label: 'semicolon message', filters: oracleFilters({ exactMessages: [FIXTURE_MESSAGES.semicolonMessage] }), sweepWithSearch: false, axes: [] }
           ];
+          let identityExports = 0;
+          let identityExportsWithRows = 0;
           for (const scope of [...SCOPES, ...PLOT_SCOPES]) {
             const censusArgument = scopeCensusArgument(scope);
             for (const { label, filters } of exportFilters) {
               apiCalls += 2;
-              const expected = oracle.buildErrorExportRows(
-                await oracle.fetchGroupedErrorRows(oracleExecutor(), database(), scope.plotID, censusArgument),
-                filters
+              const oracleGrouped = await oracle.fetchGroupedErrorRows(oracleExecutor(), database(), scope.plotID, censusArgument);
+              const productionGrouped = await production.fetchGroupedErrorRows(productionExecutor(), database(), scope.plotID, censusArgument);
+              await compare(
+                { scenario: 'buildErrorExportRows', scope: scope.name, filters: label },
+                production.buildErrorExportRows(productionGrouped, filters),
+                oracle.buildErrorExportRows(oracleGrouped, filters)
               );
-              const actual = production.buildErrorExportRows(
-                await production.fetchGroupedErrorRows(productionExecutor(), database(), scope.plotID, censusArgument),
-                filters
-              );
-              await compare({ scenario: 'buildErrorExportRows', scope: scope.name, filters: label }, actual, expected);
+              for (const { identity, reasons } of await errorTypeCasesFor(scope, filters)) {
+                const expected = oracle.buildErrorExportRows(oracleGrouped, filters, identity);
+                identityExports++;
+                if (expected.length > 0) identityExportsWithRows++;
+                await compare(
+                  {
+                    scenario: 'buildErrorExportRows with an error type',
+                    scope: scope.name,
+                    filters: label,
+                    errorType: identity,
+                    reasons,
+                    oracleRowCount: expected.length
+                  },
+                  production.buildErrorExportRows(productionGrouped, filters, identity),
+                  expected
+                );
+              }
             }
           }
+          console.log(`[export] seed=${seed} identityExports=${identityExports} withRows=${identityExportsWithRows}`);
+          expect(identityExportsWithRows, 'some error-type export must hold rows').toBeGreaterThan(0);
+          expect(identityExportsWithRows, 'some error-type export must be empty (the nonexistent identity)').toBeLessThan(identityExports);
         }),
       SEED_TEST_TIMEOUT_MS
     );
 
-    it('every production statement was one of the nine shapes, and the SQL query path stayed within one page row per slot and two member-group rows per page row', () => {
+    it('every production statement was one of the ten labelled shapes or the frozen active-count text, and the SQL query path stayed within one page row per slot and two member-group rows per page row', () => {
       const textsByLabel = new Map<string | null, number>();
       productionStatementLabelByText.forEach(label => textsByLabel.set(label, (textsByLabel.get(label) ?? 0) + 1));
       console.log(
         `[statements] seed=${seed} distinctTexts=${productionStatementLabelByText.size} textsByLabel=${JSON.stringify(Object.fromEntries(textsByLabel))} ` +
-          `oracleCacheHits=${oracleReadCache.hits} oracleCacheMisses=${oracleReadCache.misses} sqlPathQueries=${sqlPathQueryCount} maxPageStatementRowsPerSlot=${maxPageStatementRowsPerSlot} maxMemberGroupRowsPerPageRow=${maxMemberGroupRowsPerPageRow}`
+          `activeCountTexts=${activeCountTexts.size} oracleCacheHits=${oracleReadCache.hits} oracleCacheMisses=${oracleReadCache.misses} sqlPathQueries=${sqlPathQueryCount} maxPageStatementRowsPerSlot=${maxPageStatementRowsPerSlot} maxMemberGroupRowsPerPageRow=${maxMemberGroupRowsPerPageRow}`
       );
       expect(sqlPathQueryCount, 'the query test must have run before this one').toBeGreaterThan(0);
-      expect(productionStatementLabelByText.size, 'distinct statement texts over the whole run').toBeLessThanOrEqual(STATEMENT_SHAPE_COUNT);
+      expect(STATEMENT_SHAPE_COUNT, 'the labelled shapes: nine fixed shapes of the spec plus the related-rows statement (D-B)').toBe(
+        EXPECTED_STATEMENT_SHAPE_COUNT
+      );
+      expect(productionStatementLabelByText.size, 'distinct labelled statement texts over the whole run').toBeLessThanOrEqual(STATEMENT_SHAPE_COUNT);
+      expect(activeCountTexts.size, 'the facets tests must have sent the active-count statement').toBeGreaterThan(0);
       textsByLabel.forEach((count, label) => expect(count, `distinct texts for the label ${label}`).toBe(1));
       expect(maxPageStatementRowsPerSlot).toBeLessThanOrEqual(1);
       expect(maxMemberGroupRowsPerPageRow).toBeLessThanOrEqual(MEMBER_GROUP_KINDS_PER_ROW);
