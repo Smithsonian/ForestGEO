@@ -15,13 +15,9 @@ import { useErrorsExplorerRowEdit } from '@/app/hooks/useerrorsexplorerrowedit';
 import ErrorRowDetailsPanel from '@/components/errors/errorrowdetailspanel';
 import ErrorsExplorerGrid, { type ErrorsExplorerGridHandle, type ErrorsExplorerGridModels } from '@/components/errors/errorsexplorergrid';
 import { buildGroupColumnVisibility } from '@/components/errors/errorsexplorercolumns';
-import CssBaseline from '@mui/joy/CssBaseline';
-import { CssVarsProvider as JoyCssVarsProvider } from '@mui/joy/styles';
-import { THEME_ID as MATERIAL_THEME_ID, ThemeProvider as MaterialCssVarsProvider } from '@mui/material/styles';
-import { materialDarkTheme } from '@/components/themeregistry/themeregistry';
-import appTheme from '@/components/themeregistry/theme';
 import ErrorTypeGroup, { type ErrorTypeGroupProps } from '@/components/errors/errortypegroup';
 import ErrorTypeGroupList from '@/components/errors/errortypegrouplist';
+import { mountInAppTheme } from './support';
 
 const PHONE_VIEWPORT = { width: 375, height: 667 };
 const DESKTOP_VIEWPORT = { width: 1440, height: 1020 };
@@ -179,17 +175,6 @@ function GroupHarness() {
       exporting={false}
       gridProps={gridProps}
     />
-  );
-}
-
-function mountInAppTheme(node: React.ReactNode) {
-  cy.mount(
-    <MaterialCssVarsProvider theme={{ [MATERIAL_THEME_ID]: materialDarkTheme }}>
-      <JoyCssVarsProvider theme={appTheme} defaultMode="dark" defaultColorScheme="dark">
-        <CssBaseline />
-        {node}
-      </JoyCssVarsProvider>
-    </MaterialCssVarsProvider>
   );
 }
 
