@@ -323,4 +323,18 @@ describe('CensusesOverview census card menu: Edit census dates', () => {
     expect(deleteItem).toHaveAttribute('aria-disabled', 'true');
     expect(deleteItem).toHaveTextContent(CENSUS_DELETE_ADMIN_ONLY_REASON);
   });
+
+  it.each([
+    ['pending', false],
+    ['field crew', true],
+    ['global', true]
+  ] as const)('offers Edit census dates to a %s member: %s', async (userRole, offered) => {
+    const user = userEvent.setup();
+    renderOverviewWithEditDates([EARLIER_ACTIVE, LATEST_ACTIVE], userRole);
+    await user.click(menuTrigger(LATEST_ACTIVE.plotCensusNumber));
+    const items = await screen.findAllByRole('menuitem');
+    const editItem = screen.queryByRole('menuitem', { name: EDIT_DATES_ITEM_NAME });
+    console.log(`[census card menu] role=${userRole} items: ${items.map(item => `"${item.textContent}"`).join(', ')}`);
+    expect(editItem !== null).toBe(offered);
+  });
 });

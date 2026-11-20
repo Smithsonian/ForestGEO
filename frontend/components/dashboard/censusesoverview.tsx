@@ -50,6 +50,8 @@ import {
   getMeasurementBounds
 } from '@/config/censuswindow';
 
+const PENDING_USER_ROLE: UserAuthRoles = 'pending';
+
 // Gradient colors for census cards - time-based progression colors
 const CENSUS_GRADIENTS = [
   'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', // Blue - newest
@@ -200,6 +202,7 @@ interface CensusCardProps {
 }
 
 function CensusCard({ census, index, censusList, userRole, onEditDates, onDelete, onSelect }: CensusCardProps) {
+  const offeredEditDates = userRole === PENDING_USER_ROLE ? undefined : onEditDates;
   const gradient = CENSUS_GRADIENTS[index % CENSUS_GRADIENTS.length];
   const status = getCensusStatus(census.dateRanges);
   const duration = calculateDuration(census.dateRanges);
@@ -289,11 +292,11 @@ function CensusCard({ census, index, censusList, userRole, onEditDates, onDelete
             >
               {statusConfig[status].label}
             </Chip>
-            {(onEditDates || onDelete) && (
+            {(offeredEditDates || onDelete) && (
               <CensusActionsMenu
                 census={census}
                 deleteBlockReason={getCensusDeleteBlockReason(census, censusList, userRole)}
-                onEditDates={onEditDates}
+                onEditDates={offeredEditDates}
                 onDelete={onDelete}
               />
             )}

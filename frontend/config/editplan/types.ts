@@ -74,6 +74,9 @@ export interface TreeStemResolutionPreviewError {
   // tree-wide species correction and one or more brand-new measurement rows.
   // The two cannot be applied atomically together, so they must be
   // submitted as separate uploads.
+  // 'species_conflict' (#427): a TreeTag-only edit would move the measurement
+  // to a tag that an active tree already holds under a different species in the
+  // same census, splitting one tag across two species.
   reason:
     | 'missing'
     | 'inactive'
@@ -81,6 +84,7 @@ export interface TreeStemResolutionPreviewError {
     | 'cannot_create'
     | 'mixed_identity'
     | 'destination_exists'
+    | 'species_conflict'
     | 'inconsistent_scope'
     | 'group_species_conflict'
     | 'group_identity_overlap'

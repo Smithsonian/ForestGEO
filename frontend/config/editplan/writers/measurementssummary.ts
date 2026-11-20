@@ -53,6 +53,19 @@ export interface SpeciesCorrectionGroupMemberWriteContext {
   targetCoreMeasurementID: number;
 }
 
+export class UncorrectedSpeciesChangeError extends Error {
+  constructor(
+    public readonly coreMeasurementID: number,
+    public readonly fromSpeciesID: number | null,
+    public readonly toSpeciesID: number
+  ) {
+    super(
+      `measurementssummary writer: measurement ${coreMeasurementID} changes species ${fromSpeciesID} -> ${toSpeciesID} without a tree-wide species correction; refusing to re-point it at a different tree`
+    );
+    this.name = 'UncorrectedSpeciesChangeError';
+  }
+}
+
 export class SpeciesCorrectionGroupMemberContextError extends Error {
   constructor(message: string) {
     super(message);
@@ -581,6 +594,9 @@ export async function writeMeasurementsSummary(
       throw new Error('Species not found');
     }
     merged.SpeciesID = speciesSearchResults[0].SpeciesID;
+    if (!correctionWritePolicyActive && toPositiveNumber(merged.SpeciesID) !== toPositiveNumber(current.SpeciesID)) {
+      throw new UncorrectedSpeciesChangeError(coreMeasurementID, toPositiveNumber(current.SpeciesID), Number(merged.SpeciesID));
+    }
   }
 
   if (changedFields.has('TreeTag')) {

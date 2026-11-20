@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { applyTreeStemRules } from './treestem';
-import { CONFLICT_REASON_INACTIVE_TREE, CONFLICT_REASON_INACTIVE_STEM, CONFLICT_REASON_DIFFERENT_QUADRAT } from '../resolvers';
+import {
+  CONFLICT_REASON_INACTIVE_TREE,
+  CONFLICT_REASON_SPECIES_CONFLICT,
+  CONFLICT_REASON_INACTIVE_STEM,
+  CONFLICT_REASON_DIFFERENT_QUADRAT
+} from '../resolvers';
 
 vi.mock('../resolvers', () => ({
   resolveSpeciesByCode: vi.fn(async () => ({ speciesID: 1 })),
@@ -8,6 +13,7 @@ vi.mock('../resolvers', () => ({
   planStemResolution: vi.fn(),
   planQuadratResolution: vi.fn(async () => ({ quadratID: 9 })),
   CONFLICT_REASON_INACTIVE_TREE: 'matching tree is inactive',
+  CONFLICT_REASON_SPECIES_CONFLICT: 'tree tag is already recorded under a different species in this census',
   CONFLICT_REASON_INACTIVE_STEM: 'matching stem is inactive',
   CONFLICT_REASON_DIFFERENT_QUADRAT: 'stem exists in a different quadrat'
 }));
@@ -92,6 +98,29 @@ describe('applyTreeStemRules', () => {
     expect(result.errors).toContainEqual(
       expect.objectContaining({ kind: 'TreeStemResolution', subject: 'tree', reason: 'inactive', field: 'TreeTag', blocking: true })
     );
+    expect(result.effects).toEqual([]);
+  });
+
+  it('blocks a TreeTag-only edit onto a tag held by another species, naming the destination tag, both species codes and the tree to correct first', async () => {
+    (resolvers.resolveSpeciesByCode as any).mockResolvedValue({ speciesID: 1 });
+    (resolvers.planTreeResolution as any).mockResolvedValue({
+      existingTreeID: null,
+      wouldCreate: false,
+      sourceTreeID: 10,
+      sourceTreeRemainingStems: 1,
+      conflictReason: CONFLICT_REASON_SPECIES_CONFLICT,
+      conflictingTreeID: 55,
+      conflictingSpeciesCode: 'BB'
+    });
+    const result = await applyTreeStemRules(makeCtx({ newRow: { TreeTag: 'T124' }, changedFields: new Set(['TreeTag']) }));
+
+    const speciesConflicts = result.errors.filter(e => e.kind === 'TreeStemResolution' && e.reason === 'species_conflict');
+    expect(speciesConflicts, `errors were: ${JSON.stringify(result.errors)}`).toHaveLength(1);
+    expect(speciesConflicts[0]).toMatchObject({ subject: 'tree', field: 'TreeTag', blocking: true, severity: 'destructive' });
+    expect(speciesConflicts[0].message).toContain('T124');
+    expect(speciesConflicts[0].message).toContain('BB');
+    expect(speciesConflicts[0].message).toContain('AA');
+    expect(speciesConflicts[0].message).toContain('Correct the species');
     expect(result.effects).toEqual([]);
   });
 

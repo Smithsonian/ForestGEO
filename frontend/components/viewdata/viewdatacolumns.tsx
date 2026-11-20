@@ -50,6 +50,13 @@ const ALWAYS_SHOWN_FIELDS: ReadonlySet<string> = new Set([VIEW_DATA_FIELDS.actio
 const HIDE_EMPTY_VALUE_KEYS: Readonly<Record<string, string>> = { stemState: 'userDefinedFields', stemStatus: 'stemStatuses' };
 const CODES_SEPARATOR = /\s*;\s*/;
 
+/** Narrow columns cut their titles off, so each header shows its title on hover; the sort arrows live only in the column menu. */
+const withTitleTooltipAndMenuOnlySort = (column: GridColDef): GridColDef => ({
+  ...column,
+  description: column.description ?? column.headerName,
+  hideSortIcons: true
+});
+
 const isOnlyOperators = () => getGridSingleSelectOperators().filter(operator => operator.value === IS_OPERATOR);
 
 function defaultFilterOperatorsFor(type: GridColDef['type']): GridFilterOperator[] {
@@ -263,7 +270,7 @@ export function buildViewDataColumns({
     if (placed.has(column.field)) continue;
     ordered.push({ ...column, flex: undefined, width: column.width ?? VIEW_DATA_DEFAULT_COLUMN_WIDTH, sortable: false, filterable: false, editable: false });
   }
-  return ordered;
+  return ordered.map(withTitleTooltipAndMenuOnlySort);
 }
 
 function isBlankCellValue(value: unknown): boolean {

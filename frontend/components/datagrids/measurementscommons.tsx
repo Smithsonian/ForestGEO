@@ -141,6 +141,11 @@ const SEARCH_WORD_SEPARATOR = ' ';
 
 const NEGATIVE_DBH_INPUT_MESSAGE = 'DBH must be non-negative';
 
+/** View Data sorts from the column menu alone, so a header click no longer toggles MUI's sort. */
+const preventHeaderClickSort: GridEventListener<'columnHeaderClick'> = (_params, event) => {
+  event.defaultMuiPrevented = true;
+};
+
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
   const [value, setValue] = useState(initialValue);
@@ -1660,6 +1665,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
                 pageSizeOptions={DEFAULT_PAGE_SIZE_OPTIONS}
                 sortModel={sortModel}
                 onSortModelChange={handleSortModelChange}
+                onColumnHeaderClick={preventHeaderClickSort}
                 filterModel={gridFilterModel}
                 onFilterModelChange={handleFilterModelChange}
                 ignoreDiacritics

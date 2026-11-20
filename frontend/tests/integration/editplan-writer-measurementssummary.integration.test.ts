@@ -70,7 +70,7 @@ vi.mock('@/ailogger', () => ({
 
 // Imports must follow vi.mock so the mocked ConnectionManager is wired in.
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { writeMeasurementsSummary } from '@/config/editplan/writers/measurementssummary';
+import { UncorrectedSpeciesChangeError, writeMeasurementsSummary } from '@/config/editplan/writers/measurementssummary';
 import type { EditPlan, FieldChange } from '@/config/editplan/types';
 import type { ApplyInTransactionInput } from '@/config/editplan/apply';
 
@@ -592,27 +592,35 @@ describe('writeMeasurementsSummary (integration)', () => {
     });
   });
 
-  describe('SpeciesCode re-link', () => {
-    it('updates coremeasurements.SpeciesID (via tree rewire) but does NOT mutate the species row', async () => {
+  describe('SpeciesCode change without a tree-wide correction (#427)', () => {
+    it('refuses to re-point the measurement at another tree, writes nothing, and leaves the species row untouched (safety net for a bypassed analyzer)', async () => {
+      const acerSpeciesID = fixture.speciesIDs[SPECIES_CODE_ACERRU];
       const querSpeciesID = fixture.speciesIDs[SPECIES_CODE_QUERCO];
       const querRowBefore = await loadSpecies(connection, querSpeciesID);
+      const cmRowBefore = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      const stemBefore = await loadStem(connection, Number(cmRowBefore.StemGUID));
+      const treeCountBefore = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM trees'))[0] as RowDataPacket[])[0].cnt);
 
       const plan = buildPlan([{ field: 'SpeciesCode', from: SPECIES_CODE_ACERRU, to: SPECIES_CODE_QUERCO }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { SpeciesCode: SPECIES_CODE_QUERCO });
 
       const txID = await cm.beginTransaction();
-      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
-      await cm.commitTransaction(txID);
+      const writeError = await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID).then(
+        () => null,
+        (error: unknown) => error
+      );
+      await cm.rollbackTransaction(txID);
 
-      // The measurement should now be linked (via stems -> trees) to the QUERCO species.
-      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
-      const stemRow = await loadStem(connection, Number(cmRow.StemGUID));
-      const [treeRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM trees WHERE TreeID = ?', [stemRow?.TreeID]);
-      expect(treeRows[0].SpeciesID).toBe(querSpeciesID);
-
-      // Regression: the species row itself must not have been updated.
-      const querRowAfter = await loadSpecies(connection, querSpeciesID);
-      expect(querRowAfter).toEqual(querRowBefore);
+      expect(writeError, 'a species change without a correction plan must be refused, not applied as a tree re-link').toBeInstanceOf(
+        UncorrectedSpeciesChangeError
+      );
+      const cmRowAfter = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRowAfter.StemGUID, 'the measurement stays on its stem').toBe(cmRowBefore.StemGUID);
+      const [treeRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM trees WHERE TreeID = ?', [stemBefore?.TreeID]);
+      expect(treeRows[0].SpeciesID, 'the tree keeps its species').toBe(acerSpeciesID);
+      const treeCountAfter = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM trees'))[0] as RowDataPacket[])[0].cnt);
+      expect(treeCountAfter, 'no tree row is forked').toBe(treeCountBefore);
+      expect(await loadSpecies(connection, querSpeciesID)).toEqual(querRowBefore);
     });
   });
 
@@ -637,7 +645,7 @@ describe('writeMeasurementsSummary (integration)', () => {
   });
 
   describe('all editable fields together', () => {
-    it('applies species/tree/stem/quadrat/coordinate/measurement/comment/attribute changes in one transaction', async () => {
+    it('applies tree/stem/quadrat/coordinate/measurement/comment/attribute changes in one transaction (a species change is a separate tree-wide correction, #427)', async () => {
       const allFieldStemTag = 'WSA';
       const newDate = '2024-09-10';
       const newDescription = 'all field edit';
@@ -650,7 +658,6 @@ describe('writeMeasurementsSummary (integration)', () => {
 
       const plan = buildPlan(
         [
-          { field: 'SpeciesCode', from: SPECIES_CODE_ACERRU, to: SPECIES_CODE_QUERCO },
           { field: 'TreeTag', from: TREE_TAG_T1, to: TREE_TAG_NEW },
           { field: 'StemTag', from: STEM_TAG_S1, to: allFieldStemTag },
           { field: 'QuadratName', from: QUADRAT_NAME_A, to: QUADRAT_NAME_B },
@@ -665,7 +672,6 @@ describe('writeMeasurementsSummary (integration)', () => {
         fixture.coreMeasurementID
       );
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, {
-        SpeciesCode: SPECIES_CODE_QUERCO,
         TreeTag: TREE_TAG_NEW,
         StemTag: allFieldStemTag,
         QuadratName: QUADRAT_NAME_B,
@@ -688,7 +694,6 @@ describe('writeMeasurementsSummary (integration)', () => {
       expect(Number(cmRow.MeasuredHOM)).toBeCloseTo(newHOM, 2);
       expect(cmRow.RawTreeTag).toBe(TREE_TAG_NEW);
       expect(cmRow.RawStemTag).toBe(allFieldStemTag);
-      expect(cmRow.RawSpCode).toBe(SPECIES_CODE_QUERCO);
       expect(cmRow.RawQuadrat).toBe(QUADRAT_NAME_B);
       expect(Number(cmRow.RawX)).toBeCloseTo(newX, 2);
       expect(Number(cmRow.RawY)).toBeCloseTo(newY, 2);
@@ -705,7 +710,7 @@ describe('writeMeasurementsSummary (integration)', () => {
 
       const [treeRows] = await connection.query<RowDataPacket[]>('SELECT TreeTag, SpeciesID FROM trees WHERE TreeID = ?', [newStem?.TreeID]);
       expect(treeRows[0].TreeTag).toBe(TREE_TAG_NEW);
-      expect(treeRows[0].SpeciesID).toBe(fixture.speciesIDs[SPECIES_CODE_QUERCO]);
+      expect(treeRows[0].SpeciesID, "the new tree takes the measurement's unchanged species").toBe(fixture.speciesIDs[SPECIES_CODE_ACERRU]);
 
       const [attrRows] = await connection.query<RowDataPacket[]>('SELECT Code FROM cmattributes WHERE CoreMeasurementID = ?', [fixture.coreMeasurementID]);
       expect(attrRows.map(r => r.Code)).toEqual([ATTR_CODE_BROKEN]);
