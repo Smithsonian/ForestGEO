@@ -155,7 +155,8 @@ describe('resolveMeasurementSummaryTree', () => {
 
   it('inserts a new tree row and returns insertId when no match exists', async () => {
     const cm = makeConnectionManager([
-      [], // SELECT returns empty
+      [], // exact (tag, species, census) SELECT returns empty
+      [], // no active tree with the same tag under another species
       { insertId: 123 } as unknown as never[] // INSERT result
     ]);
     const result = await resolveMeasurementSummaryTree(cm as unknown as ConnectionManager, TEST_SCHEMA, {
@@ -164,7 +165,28 @@ describe('resolveMeasurementSummaryTree', () => {
       CensusID: 10
     });
     expect(result).toBe(123);
-    expect(cm.executeQuery).toHaveBeenCalledTimes(2);
+    expect(cm.executeQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws MeasurementResolutionError(tree, species_conflict) and never INSERTs when an active tree holds the tag under another species in the census', async () => {
+    const cm = makeConnectionManager([
+      [], // no exact (tag, species, census) match
+      [{ TreeID: 88 }] // active tree with the same tag but a different species
+    ]);
+    const call = resolveMeasurementSummaryTree(cm as unknown as ConnectionManager, TEST_SCHEMA, {
+      TreeTag: 'T124',
+      SpeciesID: 5,
+      CensusID: 10
+    });
+    const err = await expectMeasurementResolutionError(call);
+    expect(err.subject).toBe('tree');
+    expect(err.reason).toBe('species_conflict');
+    expect(err.message).toContain('T124');
+    const issuedSql = (cm.executeQuery as ReturnType<typeof vi.fn>).mock.calls.map(callArgs => String(callArgs[0]));
+    expect(
+      issuedSql.filter(sql => /INSERT\s+INTO/i.test(sql)),
+      `SQL issued:\n${issuedSql.join('\n')}`
+    ).toHaveLength(0);
   });
 });
 

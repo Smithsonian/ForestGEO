@@ -28,7 +28,7 @@ import { NextRequest, type NextResponse } from 'next/server';
 import type { Session } from 'next-auth';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
 import type { EditAuthorizationScope } from '@/config/editplan/authorization';
-import type { AppliedSpeciesCorrectionBatchSummary } from '@/config/editplan/types';
+import type { AppliedSpeciesCorrectionBatchSummary, TreeStemResolutionPreviewError } from '@/config/editplan/types';
 import type { FileRow } from '@/config/macros/formdetails';
 
 import { setupTestDatabase, teardownTestDatabase, createAdditionalCensus, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
@@ -359,6 +359,7 @@ const QUADRAT_NAME_B = 'SCB';
 const TREE_TAG_SCT1 = 'SCT1'; // multi-stem, multi-measurement correction target
 const TREE_TAG_SCT2 = 'SCT2'; // single-stem tree, separate correction target
 const TREE_TAG_COLLIDE = 'SCCOL'; // destination-collision fixture tree
+const TREE_TAG_HELD_BY_OTHER_SPECIES = 'SCOTH'; // active tree of another species, the TreeTag-edit destination in the species_conflict case
 
 const STEM_TAG_S1 = 'SS1';
 const STEM_TAG_S2 = 'SS2';
@@ -2518,6 +2519,59 @@ describe('tree-wide species correction (#427, integration)', () => {
       const error = plan.errors!.find(e => e.kind === 'TreeStemResolution') as any;
       expect(error.reason).toBe('mixed_identity');
       expect(error.message).toContain('TreeTag');
+    });
+
+    it('blocks a TreeTag-only edit onto a tag an active tree already holds under another species in the same census (species_conflict), and applying it writes no tree or stem', async () => {
+      await connection.query(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`, [
+        TREE_TAG_HELD_BY_OTHER_SPECIES,
+        fixture.speciesIDs[SPECIES_CODE_QUERCO],
+        fixture.censusID
+      ]);
+      const treeCountBefore = await countRows(connection, 'trees');
+      const stemCountBefore = await countRows(connection, 'stems');
+
+      const plan = await analyzeEdit(
+        cm,
+        config.database,
+        'measurementssummary',
+        fixture.plotID,
+        fixture.censusID,
+        fixture.coreMeasurementIDs.cm1,
+        { TreeTag: TREE_TAG_HELD_BY_OTHER_SPECIES },
+        undefined,
+        { role: ADMIN_ROLE }
+      );
+      expect(plan.canApply, `plan errors: ${JSON.stringify(plan.errors)}`).toBe(false);
+      expect(plan.speciesCorrection).toBeUndefined();
+      const error = plan.errors!.find(e => e.kind === 'TreeStemResolution' && e.reason === 'species_conflict') as TreeStemResolutionPreviewError | undefined;
+      expect(error, `plan errors: ${JSON.stringify(plan.errors)}`).toBeDefined();
+      expect(error!.subject).toBe('tree');
+      expect(error!.field).toBe('TreeTag');
+      expect(error!.message).toContain(TREE_TAG_HELD_BY_OTHER_SPECIES);
+      expect(error!.message).toContain(SPECIES_CODE_QUERCO);
+      expect(error!.message).toContain(SPECIES_CODE_ACERRU);
+
+      await expect(
+        applyEdit(cm, {
+          dataType: 'measurementssummary',
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          targetID: fixture.coreMeasurementIDs.cm1,
+          newRow: { TreeTag: TREE_TAG_HELD_BY_OTHER_SPECIES },
+          expectedPlanHash: plan.planHash,
+          createdBy: CREATED_BY_APPLY,
+          role: ADMIN_ROLE
+        })
+      ).rejects.toBeInstanceOf(EditPlanUnapplicableError);
+
+      expect(await countRows(connection, 'trees'), 'a tree was created for the conflicting tag').toBe(treeCountBefore);
+      expect(await countRows(connection, 'stems')).toBe(stemCountBefore);
+      const [tagRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM trees WHERE TreeTag = ? AND CensusID = ?', [
+        TREE_TAG_HELD_BY_OTHER_SPECIES,
+        fixture.censusID
+      ]);
+      expect(tagRows.map(row => Number(row.SpeciesID))).toEqual([fixture.speciesIDs[SPECIES_CODE_QUERCO]]);
     });
 
     it('allows a species correction to coexist with DBH/coordinate/comment/attribute changes on the same row, writing each accompanying field sparsely and leaving everything else — including the shared stem and every sibling — untouched', async () => {
