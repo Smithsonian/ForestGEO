@@ -976,8 +976,8 @@ function plantedRows(): PlantedRows {
     linkedToFirstOnly: plant({ treeTag: 'SI2', stemTag: '1' }, [SHARED_IDENTITY_ERROR_IDS.first])
   };
   const censusTie: CensusTieRowIDs = {
-    firstCensusRow: plant({ treeTag: CENSUS_TIE_TREE_TAGS[0], stemTag: '1' }, [ET.invalidSpecies]),
-    secondCensusRow: plant({ treeTag: CENSUS_TIE_TREE_TAGS[1], stemTag: '1', censusID: SECOND_CENSUS_ID }, [ET.invalidSpecies])
+    secondCensusRow: plant({ treeTag: CENSUS_TIE_TREE_TAGS[1], stemTag: '1', censusID: SECOND_CENSUS_ID }, [ET.invalidSpecies]),
+    firstCensusRow: plant({ treeTag: CENSUS_TIE_TREE_TAGS[0], stemTag: '1' }, [ET.invalidSpecies])
   };
   const outsidePartner: OutsidePartnerRowIDs = {
     outsidePartner: plant({ coreMeasurementID: OUTSIDE_PARTNER_ID, treeTag: OUTSIDE_PARTNER_TREE_TAG, stemTag: OUTSIDE_PARTNER_STEM_TAG }),

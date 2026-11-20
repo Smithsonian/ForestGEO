@@ -589,6 +589,7 @@ describe('generateEquivalenceFixture', () => {
     const unresolvedLogCount = (id: number) => fixture.logs.filter(log => log.measurementID === id && !log.isResolved).length;
 
     expect([first.censusID, second.censusID]).toEqual([FIRST_CENSUS_ID, SECOND_CENSUS_ID]);
+    expect(secondCensusRow, 'the census 2 row is planted first, so it takes the lower measurement ID').toBeLessThan(firstCensusRow);
     expect(first.measurementDate).toBe(second.measurementDate);
     expect(unresolvedLogCount(firstCensusRow)).toBe(1);
     expect(unresolvedLogCount(secondCensusRow)).toBe(1);
