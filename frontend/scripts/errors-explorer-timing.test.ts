@@ -3,6 +3,8 @@ import { AZURE_HOST } from './lib/schema-cli';
 import { cleanupTimingConnections } from '@/tests/setup/stricttestdatabasecleanup';
 import { everyErrorSetStatement } from '@/tests/setup/errorsetstatements';
 import * as oracle from '@/tests/oracles/errors-explorer-legacy';
+import { buildActiveMeasurementCountQuery } from '@/lib/activemeasurementcount';
+import { ACTIVE_COUNT_STATEMENT } from '@/tests/setup/errorsetstatements';
 import { buildF1MembershipProbe, buildF2MembershipProbe, MEMBERSHIP_PROBE_LABELS, runMembershipProbeRepetition } from '@/tests/benchmarks/lib/membershipprobe';
 import { CENSUS_LIST_SIZE, chunkCensusIDs, ERROR_EXPLORER_STATEMENT_LABELS, readStatementLabel } from '@/app/api/errors/explorer/errorsetsql';
 import {
@@ -18,8 +20,8 @@ import {
   diffFieldPaths,
   groupKeysEqual,
   textBudget,
-  pageLoadEstimate,
-  summarizePageLoad,
+  summarizePageLoadSerial,
+  STATEMENT_SHAPE_LIMIT,
   redactExplainPlan,
   armOrder,
   compareResponses,
@@ -343,20 +345,18 @@ describe('timing calculations', () => {
     expect(groupKeysEqual('duplicate:2:Ab1:1', 'duplicate:2:áb1:1')).toBe(true);
     expect(groupKeysEqual('duplicate:2:Ab1:1', 'duplicate:2:Ab2:1')).toBe(false);
   });
-  it('checks the text budget', () => {
-    expect(textBudget(Array.from({ length: 9 }, (_, i) => String(i)))).toEqual({ count: 9, status: 'PASS' });
-    expect(textBudget(Array.from({ length: 10 }, (_, i) => String(i)))).toEqual({ count: 10, status: 'FAIL' });
+  it('allows the ten labelled statement shapes and fails the eleventh text', () => {
+    const texts = (count: number) => Array.from({ length: count }, (_, i) => `SELECT ${i}`);
+    expect(STATEMENT_SHAPE_LIMIT).toBe(Object.keys(ERROR_EXPLORER_STATEMENT_LABELS).length);
+    expect(STATEMENT_SHAPE_LIMIT).toBe(10);
+    expect(textBudget(texts(10))).toEqual({ count: 10, status: 'PASS' });
+    expect(textBudget(texts(11))).toEqual({ count: 11, status: 'FAIL' });
   });
-  it('computes page load from separate operations', () => {
-    const query = [
-      { issuedAt: 0, startedAt: 0, endedAt: 5 },
-      { issuedAt: 5, startedAt: 5, endedAt: 6 }
-    ];
-    const facets = [
-      { issuedAt: 0, startedAt: 0, endedAt: 1 },
-      { issuedAt: 1, startedAt: 1, endedAt: 11 }
-    ];
-    expect(pageLoadEstimate(query, facets, 0, 0)).toBe(11);
+  it('leaves the allowed active-count text out of the budget but counts every other text', () => {
+    const activeCountText = 'SELECT COUNT(*) AS n active';
+    const ten = Array.from({ length: 10 }, (_, i) => `SELECT ${i}`);
+    expect(textBudget([...ten, activeCountText], new Set([activeCountText]))).toEqual({ count: 10, status: 'PASS' });
+    expect(textBudget([...ten, 'SELECT COUNT(*) AS n other'], new Set([activeCountText]))).toEqual({ count: 11, status: 'FAIL' });
   });
 });
 
@@ -513,7 +513,7 @@ it('compares dates by their serialized value', () => {
   expect(comparison.identical).toBe(false);
 });
 
-it('summarizes page load using matching successful run indices', () => {
+it('summarizes the serial page load as facets then the top group page, using matching successful run indices', () => {
   const query = [
     { run: 1, criticalMs: 5 },
     { run: 3, criticalMs: 20 }
@@ -523,10 +523,12 @@ it('summarizes page load using matching successful run indices', () => {
     { run: 2, criticalMs: 100 },
     { run: 3, criticalMs: 12 }
   ];
-  expect(summarizePageLoad(query, facets, 3)).toEqual({
-    median: 15,
-    min: 10,
-    max: 20,
+  const summary = summarizePageLoadSerial(facets, query, 3);
+  console.log(`serial page load ${JSON.stringify(summary)}`);
+  expect(summary).toEqual({
+    median: 23.5,
+    min: 15,
+    max: 32,
     queryMedian: 12.5,
     facetsMedian: 11,
     includedRuns: [1, 3],
@@ -534,6 +536,10 @@ it('summarizes page load using matching successful run indices', () => {
     includedCount: 2,
     missingCount: 1
   });
+});
+
+it('reports a serial page load with no included runs as null rather than zero', () => {
+  expect(summarizePageLoadSerial([{ run: 1, criticalMs: 10 }], [], 1)).toMatchObject({ median: null, includedCount: 0, missingRuns: [1] });
 });
 
 it('propagates a non-timeout sibling failure after draining a timed-out operation', async () => {
@@ -604,6 +610,12 @@ describe('statement classification', () => {
     const classes = recorded.map(classifyStatement);
     console.log(`oracle statements: ${recorded.length}; classes: ${classes.join(', ')}`);
     expect([...classes].sort()).toEqual([...ORACLE_STATEMENT_CLASSES].sort());
+  });
+
+  it('names the shared active-count statement, so the statement log never shows it as unlabelled', () => {
+    const { sql } = buildActiveMeasurementCountQuery(BUILDER_SCHEMA, 1, [2, 3]);
+    console.log(`active-count text classified as ${classifyStatement(sql)}`);
+    expect(classifyStatement(sql)).toBe(ACTIVE_COUNT_STATEMENT);
   });
 
   it('classifies a statement with no label and no legacy shape as unlabelled', () => {
@@ -768,11 +780,11 @@ describe('a full measurement run over a 26-census scope (fake database)', () => 
     console.log(
       `exit=${result.exitCode} stderr=${JSON.stringify(f.stderr)}\n${output
         .split('\n')
-        .filter(line => /scope|queryPastTheEnd run|queryLastPage run/.test(line))
+        .filter(line => /scope|queryPastTheEnd run|queryFlatPage0 run/.test(line))
         .join('\n')}`
     );
     expect(result.exitCode).toBe(0);
-    expect(output).toContain('queryLastPage scope: 26 censuses, 4 census chunks');
+    expect(output).toContain('queryFlatPage0 scope: 26 censuses, 4 census chunks');
     expect(output).toContain('queryPastTheEnd scope: 26 censuses, 4 census chunks');
     expect(summary.scope).toEqual({ censuses: 26, censusChunks: 4 });
   });
@@ -876,7 +888,7 @@ describe('a full measurement run over a 26-census scope (fake database)', () => 
     expect(result.exitCode).toBe(0);
     expect(output).toContain('distinct signatures: timed out after');
     expect(summary.distinctSignatures).toEqual({ withFlags: null, withoutFlags: null });
-    expect(output).toContain('queryPage0 run 1: identical');
+    expect(output).toContain('queryFlatPage0 run 1: identical');
   });
 
   it('propagates a probe error that is not a timeout, naming only the probe label', async () => {
@@ -895,6 +907,22 @@ describe('a full measurement run over a 26-census scope (fake database)', () => 
     expect(stderr).toContain(`m1Probe/${MEMBERSHIP_PROBE_LABELS.f2}`);
     expect(stderr).not.toContain("'u'@'h'");
     expect(f.stdout.join('\n')).not.toContain("'u'@'h'");
+  });
+
+  it('names the serial page load pageLoadSerial, drops the old pageLoad field, and reports the scenarios a scope without errors cannot run', async () => {
+    const { output, summary } = await runScope();
+    console.log(
+      output
+        .split('\n')
+        .filter(line => /unavailable|pageLoad/.test(line))
+        .join('\n')
+    );
+    expect(summary.pageLoadSerial).toBeDefined();
+    expect(Object.keys(summary)).not.toContain('pageLoad');
+    expect(output).toContain('queryTopGroupPage0: unavailable for this scope');
+    expect(output).toContain('detailsWithOutsidePartner: unavailable for this scope');
+    expect(Object.keys(summary.scenarios).sort()).toEqual(['facetsDefault', 'messageCounts', 'queryFlatPage0', 'queryPastTheEnd']);
+    expect(summary.reportOnly).toEqual(expect.arrayContaining(['queryPastTheEnd', 'queryTopGroupSorted']));
   });
 
   it('merges the histogram chunks into the distinct signature count', async () => {

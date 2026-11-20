@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { DEFAULT_ERROR_EXPLORER_FILTERS, ERROR_EXPLORER_PRESETS, type ErrorExplorerFilters } from '@/config/errorsexplorer';
 import { fileURLToPath } from 'node:url';
 import mysql, { type Connection, type ConnectionOptions } from 'mysql2/promise';
 import { normalizeStatementParams, usesTextProtocol } from '@/lib/db/statementprotocol';
@@ -16,7 +15,15 @@ import {
   ERROR_EXPLORER_STATEMENT_LABELS,
   type ErrorSignatureRow
 } from '@/app/api/errors/explorer/errorsetsql';
-import { classifyStatement, describeCensusScope, lastPageNumber, pastTheEndPageNumber, UNLABELLED_STATEMENT } from '@/tests/setup/errorsetstatements';
+import { buildActiveMeasurementCountQuery } from '@/lib/activemeasurementcount';
+import {
+  ACTIVE_COUNT_STATEMENT,
+  classifyStatement,
+  describeCensusScope,
+  lastPageNumber,
+  pastTheEndPageNumber,
+  UNLABELLED_STATEMENT
+} from '@/tests/setup/errorsetstatements';
 import {
   M1_INCONCLUSIVE_DIAGNOSTICS,
   M1_STATUS,
@@ -27,6 +34,14 @@ import {
   type MembershipProbeRow,
   type ProbeExecutor
 } from '../tests/benchmarks/lib/membershipprobe';
+import {
+  discoverScenarioInputs,
+  PAGE_LOAD_SERIAL,
+  planScenarios,
+  REPORT_ONLY_SCENARIOS,
+  SCENARIO_NAMES,
+  type ExplorerCalls
+} from '../tests/benchmarks/lib/errorsexplorerscenarios';
 
 export { classifyStatement, describeCensusScope, lastPageNumber, m1Summary, pastTheEndPageNumber };
 
@@ -73,19 +88,8 @@ const SAFE_CONTEXT = new Set([
   'raw-rows',
   'duplicate-groups',
   'same-batch-groups',
-  'queryPage0',
-  'queryLastPage',
-  'queryPastTheEnd',
-  'queryValidationOnly',
-  'queryContradictions',
-  'queryMostCommonMessage',
-  'queryQuickSearch',
-  'facetsDefault',
-  'facetsContradictions',
-  'detailsFirstRow',
-  'detailsFirstContradictionRow',
-  'messageCounts',
-  'exportDefault',
+  ...Object.values(SCENARIO_NAMES),
+  ACTIVE_COUNT_STATEMENT,
   M1_PROBE_SCENARIO,
   ...Object.values(ERROR_EXPLORER_STATEMENT_LABELS),
   ...Object.values(MEMBERSHIP_PROBE_LABELS)
@@ -110,7 +114,7 @@ type TimingRecord = {
 };
 
 type WaveStatement = { issuedAt: number; startedAt: number; endedAt: number };
-const STATEMENT_TEXT_LIMIT = 9;
+export const STATEMENT_SHAPE_LIMIT = Object.keys(ERROR_EXPLORER_STATEMENT_LABELS).length;
 const FREE_FORM_JSON_FIELDS: ReadonlySet<string> = new Set(['userDefinedFields']);
 const CONTRADICTION_GROUP_KEY_FIELD = 'contradictionGroupKey';
 const EXPLORER_ROW_LIST_FIELD = 'rows';
@@ -127,15 +131,12 @@ export function groupIntoWaves<T extends WaveStatement>(statements: readonly T[]
 export function criticalPathEstimate(statements: readonly WaveStatement[], nodeMs: number): number {
   return groupIntoWaves(statements).reduce((sum, wave) => sum + Math.max(...wave.map(s => s.endedAt - s.startedAt)), nodeMs);
 }
-export function pageLoadEstimate(query: readonly WaveStatement[], facets: readonly WaveStatement[], queryNodeMs: number, facetsNodeMs: number): number {
-  return Math.max(criticalPathEstimate(query, queryNodeMs), criticalPathEstimate(facets, facetsNodeMs));
-}
 export function groupKeysEqual(a: string, b: string): boolean {
   return a.localeCompare(b, undefined, { sensitivity: 'base' }) === 0;
 }
-export function textBudget(texts: Iterable<string>): { count: number; status: 'PASS' | 'FAIL' } {
-  const count = new Set(texts).size;
-  return { count, status: count <= STATEMENT_TEXT_LIMIT ? 'PASS' : 'FAIL' };
+export function textBudget(texts: Iterable<string>, allowedTexts: ReadonlySet<string> = new Set()): { count: number; status: 'PASS' | 'FAIL' } {
+  const count = [...new Set(texts)].filter(text => !allowedTexts.has(text)).length;
+  return { count, status: count <= STATEMENT_SHAPE_LIMIT ? 'PASS' : 'FAIL' };
 }
 export function diffFieldPaths(a: unknown, b: unknown, path = '$'): string[] {
   if (Object.is(a, b)) return [];
@@ -417,8 +418,7 @@ async function listGroupSizes(executor: Executor, schema: string, censuses: Reco
 }
 
 const DEFAULT_RUNS = 3;
-const PAGE_SIZE = 25;
-const SCOPE_REPORTING_SCENARIOS: readonly string[] = ['queryLastPage', 'queryPastTheEnd'];
+const SCOPE_REPORTING_SCENARIOS: readonly string[] = [SCENARIO_NAMES.queryFlatPage0, SCENARIO_NAMES.queryPastTheEnd, SCENARIO_NAMES.queryTopGroupPage0];
 const SHOW_PREPARE = "SHOW SESSION STATUS LIKE 'Com_stmt_prepare'";
 const SHOW_REPREPARE = "SHOW SESSION STATUS LIKE 'Com_stmt_reprepare'";
 const SHOW_GLOBAL_PREPARED = "SHOW GLOBAL STATUS LIKE 'Prepared_stmt_count'";
@@ -430,9 +430,18 @@ type ExplorerModule = Pick<
   typeof oracle,
   'queryErrorExplorer' | 'buildErrorExplorerFacets' | 'buildErrorExplorerDetails' | 'buildErrorMessageCounts' | 'fetchGroupedErrorRows' | 'buildErrorExportRows'
 >;
-type TimingScenario = { name: string; run: (arm: ExplorerModule, executor: Executor) => Promise<unknown> };
 type CallResult = { run: number; response: unknown; records: TimingRecord[]; statementMs: number; nodeMs: number; criticalMs: number };
 
+function explorerCallsOf(arm: ExplorerModule): ExplorerCalls<Executor> {
+  return {
+    queryErrorExplorer: (executor, request) => arm.queryErrorExplorer(executor, request),
+    buildErrorExplorerFacets: (executor, request) => arm.buildErrorExplorerFacets(executor, request),
+    buildErrorExplorerDetails: (executor, request, measurementID) => arm.buildErrorExplorerDetails(executor, request, measurementID),
+    buildErrorMessageCounts: (executor, request) => arm.buildErrorMessageCounts(executor, request),
+    exportRows: async (executor, { schema, plotID, censusIDs }, filters, errorType) =>
+      arm.buildErrorExportRows(await arm.fetchGroupedErrorRows(executor, schema, plotID, censusIDs), filters, errorType)
+  };
+}
 function hashResponse(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -475,11 +484,16 @@ function summarize(values: number[]) {
   const middle = Math.floor(sorted.length / 2);
   return { median: sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2, min: sorted[0], max: sorted[sorted.length - 1] };
 }
-export function summarizePageLoad(query: readonly { run: number; criticalMs: number }[], facets: readonly { run: number; criticalMs: number }[], runs: number) {
-  const pairs = query
-    .flatMap(q => {
-      const facet = facets.find(f => f.run === q.run);
-      return facet ? [{ run: q.run, query: q.criticalMs, facets: facet.criticalMs }] : [];
+/** The page loads facets, then the top group's first page, one after the other, so the load is the sum of the two critical paths of the same run. */
+export function summarizePageLoadSerial(
+  facets: readonly { run: number; criticalMs: number }[],
+  query: readonly { run: number; criticalMs: number }[],
+  runs: number
+) {
+  const pairs = facets
+    .flatMap(facet => {
+      const queryCall = query.find(call => call.run === facet.run);
+      return queryCall ? [{ run: facet.run, facets: facet.criticalMs, query: queryCall.criticalMs }] : [];
     })
     .sort((a, b) => a.run - b.run);
   const includedRuns = pairs.map(pair => pair.run);
@@ -487,7 +501,7 @@ export function summarizePageLoad(query: readonly { run: number; criticalMs: num
   const counts = { includedRuns, missingRuns, includedCount: includedRuns.length, missingCount: missingRuns.length };
   if (!pairs.length) return { median: null, min: null, max: null, queryMedian: null, facetsMedian: null, ...counts };
   return {
-    ...summarize(pairs.map(pair => Math.max(pair.query, pair.facets))),
+    ...summarize(pairs.map(pair => pair.facets + pair.query)),
     queryMedian: summarize(pairs.map(pair => pair.query)).median,
     facetsMedian: summarize(pairs.map(pair => pair.facets)).median,
     ...counts
@@ -652,59 +666,18 @@ async function runMeasurements(
   if (!censusArg) throw new Error('Missing census');
   const censusIDs = [...new Set(censusArg.split(',').map(parsePositive))];
   const runs = argument(argv, '--runs') === undefined ? DEFAULT_RUNS : parsePositive(argument(argv, '--runs'));
-  const request = { schema, plotID, censusID: censusIDs[0], censusIDs, page: 0, pageSize: PAGE_SIZE, filters: DEFAULT_ERROR_EXPLORER_FILTERS };
+  const scope = { schema, plotID, censusIDs };
+  const activeCountTexts: ReadonlySet<string> = new Set([buildActiveMeasurementCountQuery(schema, plotID, censusIDs).sql]);
   const distinctSignatures = await reportShape(executor, connection, schema, plotID, censusIDs, maxMs, out);
   const censusScope = describeCensusScope(censusIDs);
-  const page = await oracle.queryErrorExplorer(executor, request);
-  const facets = await oracle.buildErrorExplorerFacets(executor, request);
   const grouped = await oracle.fetchGroupedErrorRows(executor, schema, plotID, censusIDs, { withContradictions: false });
   const rawRecords = executor.statements.filter(record => /measurement_error_log\s+mel/i.test(record.sql));
   out(`error-set measurements: ${grouped.size}; occurrences: ${rawRecords.slice(-censusIDs.length).reduce((sum, record) => sum + record.rows, 0)}`);
-  const first = page.rows[0];
-  const message = facets.messages[0];
-  const preset = (id: string): ErrorExplorerFilters => {
-    const found = ERROR_EXPLORER_PRESETS.find(item => item.id === id);
-    if (!found) throw new Error('Missing preset');
-    return found.filters;
-  };
-  const contradictionPage = await oracle.queryErrorExplorer(executor, { ...request, filters: preset('contradictions') });
-  const contradiction = contradictionPage.rows[0];
-  const firstID = first?.coreMeasurementID;
-  const contradictionID = contradiction?.coreMeasurementID;
-  const scenarios: TimingScenario[] = [
-    { name: 'queryPage0', run: (arm, e) => arm.queryErrorExplorer(e, request) },
-    { name: 'queryLastPage', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, page: lastPageNumber(page.totalRows, PAGE_SIZE) }) },
-    { name: 'queryPastTheEnd', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, page: pastTheEndPageNumber(page.totalRows, PAGE_SIZE) }) },
-    { name: 'queryValidationOnly', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, filters: preset('validation_only') }) },
-    { name: 'queryContradictions', run: (arm, e) => arm.queryErrorExplorer(e, { ...request, filters: preset('contradictions') }) },
-    ...(message
-      ? [
-          {
-            name: 'queryMostCommonMessage',
-            run: (arm, e) => arm.queryErrorExplorer(e, { ...request, filters: { ...request.filters, exactMessages: [message.value] } })
-          } satisfies TimingScenario
-        ]
-      : []),
-    ...(first?.treeTag
-      ? [
-          {
-            name: 'queryQuickSearch',
-            run: (arm, e) => arm.queryErrorExplorer(e, { ...request, filters: { ...request.filters, quickSearch: first.treeTag!.slice(0, 3) } })
-          } satisfies TimingScenario
-        ]
-      : []),
-    { name: 'facetsDefault', run: (arm, e) => arm.buildErrorExplorerFacets(e, request) },
-    { name: 'facetsContradictions', run: (arm, e) => arm.buildErrorExplorerFacets(e, { ...request, filters: preset('contradictions') }) },
-    ...(firstID != null ? [{ name: 'detailsFirstRow', run: (arm, e) => arm.buildErrorExplorerDetails(e, request, firstID) } satisfies TimingScenario] : []),
-    ...(contradictionID != null
-      ? [{ name: 'detailsFirstContradictionRow', run: (arm, e) => arm.buildErrorExplorerDetails(e, request, contradictionID) } satisfies TimingScenario]
-      : []),
-    { name: 'messageCounts', run: (arm, e) => arm.buildErrorMessageCounts(e, request) },
-    { name: 'exportDefault', run: async (arm, e) => arm.buildErrorExportRows(await arm.fetchGroupedErrorRows(e, schema, plotID, censusIDs), request.filters) }
-  ];
-  for (const name of ['queryMostCommonMessage', 'queryQuickSearch', 'detailsFirstRow', 'detailsFirstContradictionRow'])
-    if (!scenarios.some(item => item.name === name)) out(`${name}: unavailable for this scope`);
-  const arms: Record<ArmName, ExplorerModule> = { oracle, current: current as unknown as ExplorerModule };
+  const discovered = await discoverScenarioInputs(explorerCallsOf(oracle), executor, scope);
+  const { scenarios, unavailable } = planScenarios<Executor>(scope, discovered);
+  for (const name of unavailable) out(`${name}: unavailable for this scope`);
+  out(`report-only scenarios: ${REPORT_ONLY_SCENARIOS.join(', ')}`);
+  const arms: Record<ArmName, ExplorerCalls<Executor>> = { oracle: explorerCallsOf(oracle), current: explorerCallsOf(current as unknown as ExplorerModule) };
   const results: Record<string, Record<ArmName, CallResult[]>> = {};
   const currentAttempts: Array<{ sql: string; params: readonly unknown[]; operation: string }> = [];
   await executor.calibrateBytes();
@@ -775,14 +748,16 @@ async function runMeasurements(
   executor.setOperation(M1_PROBE_SCENARIO);
   const m1 = await runM1Probe(executor, { schema, plotID, censusIDs }, runs, maxMs, out);
   out(table.join('\n'));
-  const pageLoad: Partial<Record<ArmName, unknown>> = {};
+  const pageLoadSerial: Partial<Record<ArmName, unknown>> = {};
   for (const arm of ['oracle', 'current'] as const) {
-    const query = results.queryPage0[arm];
-    const facetsCalls = results.facetsDefault[arm];
-    pageLoad[arm] = summarizePageLoad(query, facetsCalls, runs);
-    out(`pageLoad ${arm}: ${JSON.stringify(pageLoad[arm])}`);
+    const topGroupPage = results[SCENARIO_NAMES.queryTopGroupPage0]?.[arm] ?? [];
+    pageLoadSerial[arm] = summarizePageLoadSerial(results[SCENARIO_NAMES.facetsDefault][arm], topGroupPage, runs);
+    out(`${PAGE_LOAD_SERIAL} ${arm}: ${JSON.stringify(pageLoadSerial[arm])}`);
   }
-  const budget = textBudget(currentAttempts.map(record => record.sql));
+  const budget = textBudget(
+    currentAttempts.map(record => record.sql),
+    activeCountTexts
+  );
   const unlabelledStatements = executor.statements.filter(record => record.label === UNLABELLED_STATEMENT).length;
   out(`unlabelled statements: ${unlabelledStatements}`);
   out(`distinct-text budget: ${budget.status} (${budget.count})`);
@@ -806,7 +781,7 @@ async function runMeasurements(
     ])
   );
   out(
-    `ERRORS_EXPLORER_TIMING_SUMMARY ${JSON.stringify({ scenarios: summary, comparisons, pageLoad, budget, scope: censusScope, distinctSignatures, unlabelledStatements, m1 })}`
+    `ERRORS_EXPLORER_TIMING_SUMMARY ${JSON.stringify({ scenarios: summary, comparisons, pageLoadSerial, reportOnly: REPORT_ONLY_SCENARIOS, unavailable, budget, scope: censusScope, distinctSignatures, unlabelledStatements, m1 })}`
   );
 }
 

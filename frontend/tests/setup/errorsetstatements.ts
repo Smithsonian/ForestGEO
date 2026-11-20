@@ -37,6 +37,10 @@ export interface ErrorSetStatementVariant {
 export const DEFAULT_STATEMENT_VARIANT: ErrorSetStatementVariant = { plotID: STATEMENT_PLOT_ID, keyFilter: KEY_FILTER, flags: ALL_FLAGS, window: WINDOW };
 
 export const UNLABELLED_STATEMENT = 'unlabelled';
+/** Dev's shared active-measurement count (plan D-C): both arms send it, and it is allowed beside the ten explorer shapes. */
+export const ACTIVE_COUNT_STATEMENT = 'active-count';
+const ACTIVE_COUNT_TEXT =
+  /SELECT COUNT\(\*\) AS n\s+FROM\s+\S+\.coremeasurements cm\s+JOIN\s+\S+\.census c ON c\.CensusID = cm\.CensusID\s+WHERE c\.PlotID = \? AND cm\.IsActive = 1/;
 const ORACLE_RAW_ROWS = /measurement_error_log\s+mel/i;
 const ORACLE_DUPLICATE_GROUPS = /GROUP_CONCAT\s*\(DISTINCT\s+ms\./i;
 const ORACLE_SAME_BATCH_GROUPS = /GROUP_CONCAT\s*\(DISTINCT\s+cm\./i;
@@ -45,6 +49,7 @@ export function legacyStatementClass(sql: string): string {
   if (ORACLE_RAW_ROWS.test(sql)) return 'raw-rows';
   if (ORACLE_DUPLICATE_GROUPS.test(sql)) return 'duplicate-groups';
   if (ORACLE_SAME_BATCH_GROUPS.test(sql)) return 'same-batch-groups';
+  if (ACTIVE_COUNT_TEXT.test(sql)) return ACTIVE_COUNT_STATEMENT;
   return UNLABELLED_STATEMENT;
 }
 

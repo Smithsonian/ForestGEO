@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import mysql, { type Connection, type Pool, type RowDataPacket } from 'mysql2/promise';
-import { DEFAULT_ERROR_EXPLORER_FILTERS, ERROR_EXPLORER_PRESETS, type ErrorExplorerFilters } from '@/config/errorsexplorer';
+import { buildActiveMeasurementCountQuery } from '@/lib/activemeasurementcount';
 import * as current from '@/app/api/errors/explorer/_shared';
 import { mergeSignatureRows } from '@/app/api/errors/explorer/errorsetcounts';
 import { ERROR_EXPLORER_STATEMENT_LABELS, type ErrorSignatureRow } from '@/app/api/errors/explorer/errorsetsql';
 import * as oracle from '../oracles/errors-explorer-legacy';
-import { classifyStatement, describeCensusScope, lastPageNumber, pastTheEndPageNumber, UNLABELLED_STATEMENT } from '../setup/errorsetstatements';
+import { classifyStatement, describeCensusScope, UNLABELLED_STATEMENT } from '../setup/errorsetstatements';
 import { EQUIVALENCE_GROUP_CONCAT_MAX_LEN } from '../integration/helpers/errorsexplorerfixtures';
 import { DEFAULT_TEST_CONFIG, loadSchema } from '../setup/local-db-setup';
 import { runQueryDispatch } from '../setup/runquerydispatch';
@@ -25,6 +25,15 @@ import {
   waitForSettledInnoDb
 } from './lib/benchmarkharness';
 import { runMembershipProbe, type MembershipProbeRow } from './lib/membershipprobe';
+import {
+  discoverScenarioInputs,
+  PAGE_LOAD_SERIAL,
+  planScenarios,
+  REPORT_ONLY_SCENARIOS,
+  SCENARIO_NAMES,
+  type ExplorerCalls,
+  type ScenarioScope
+} from './lib/errorsexplorerscenarios';
 
 vi.mock('@/auth', () => ({ auth: vi.fn() }));
 vi.mock('@/ailogger', () => ({ default: { info: () => undefined, warn: () => undefined, error: () => undefined } }));
@@ -42,10 +51,9 @@ const DEFAULT_ROWS = 466_500;
 const MIN_ROWS = 10_000;
 const ROW_MULTIPLE = 500;
 const POOL_SIZE = 4;
-const PAGE_SIZE = 25;
 const WARM_UP_CALLS = 1;
 const MEASURED_CALLS = 5;
-const STATEMENT_TEXT_LIMIT = 9;
+const STATEMENT_SHAPE_LIMIT = Object.keys(ERROR_EXPLORER_STATEMENT_LABELS).length;
 const HISTOGRAM_WITH_FLAGS_LABEL = ERROR_EXPLORER_STATEMENT_LABELS.histogramWithFlags;
 const HISTOGRAM_WITHOUT_FLAGS_LABEL = ERROR_EXPLORER_STATEMENT_LABELS.histogramWithoutFlags;
 const ORACLE_DUPLICATE_GROUPS_CLASS = 'duplicate-groups';
@@ -59,12 +67,12 @@ const PREDICTIONS = `At typical/settled, from #557's 500k numbers and the plans 
 
 | Scenario | Today (predicted) | New (predicted) | Falsified if new is |
 |---|---|---|---|
-| \`details\` | 2–4 s (full rebuild) | ≤ 0.1 s | > 0.25 s |
-| \`query\` page 0 | 2–4 s | 0.3–1.0 s | > 0.5 × today |
-| \`facets\` | 2–4 s | 0.3–1.0 s | > 0.5 × today |
-| page load (query ∥ facets) | 3–6 s | 0.5–1.5 s | > 0.5 × today |
+| \`detailsWithOutsidePartner\` | 2–4 s (full rebuild) | ≤ 0.1 s | > 0.25 s |
+| \`queryTopGroupPage0\` / \`queryTopGroupPage1\` / \`queryFlatPage0\` | 2–4 s | 0.3–1.0 s | > 0.5 × today |
+| \`facetsDefault\` | 2–4 s | 0.3–1.0 s | > 0.5 × today |
+| \`pageLoadSerial\` (facets, then the top group's page 0) | 4–8 s | 0.6–2.0 s | > 0.5 × today |
 | \`messageCounts\` | 1.3–2.3 s | 0.2–0.8 s | > 0.8 × today |
-| \`query\` with quick search | 2–4 s | 1.5–3.5 s | > today |
+| \`queryTopGroupSorted\` (Node path, report-only) | 2–4 s | about today | report only |
 | rows into Node per \`query\` | ≈ 42,000 occurrences, ≈ 10 MB | ≤ 2,000 rows, ≤ 1 MB | above either bound |
 
 At dense, new is predicted at 0.6–1.0 × today: the flags work grows with the error set.`;
@@ -138,13 +146,8 @@ function createBenchExecutor(pool: Pool) {
   };
 }
 type BenchExecutor = ReturnType<typeof createBenchExecutor>;
-interface ExplorerArm {
+interface ExplorerArm extends ExplorerCalls<BenchExecutor> {
   name: 'oracle' | 'current';
-  queryErrorExplorer: typeof oracle.queryErrorExplorer;
-  buildErrorExplorerFacets: typeof oracle.buildErrorExplorerFacets;
-  buildErrorExplorerDetails: typeof oracle.buildErrorExplorerDetails;
-  buildErrorMessageCounts: typeof oracle.buildErrorMessageCounts;
-  exportRows: (executor: BenchExecutor, schema: string, plotID: number, censusIDs: number[], filters: ErrorExplorerFilters) => Promise<oracle.ErrorExportRow[]>;
 }
 const ORACLE_ARM: ExplorerArm = {
   name: 'oracle',
@@ -152,22 +155,23 @@ const ORACLE_ARM: ExplorerArm = {
   buildErrorExplorerFacets: oracle.buildErrorExplorerFacets,
   buildErrorExplorerDetails: oracle.buildErrorExplorerDetails,
   buildErrorMessageCounts: oracle.buildErrorMessageCounts,
-  exportRows: async (executor, schema, plotID, censusIDs, filters) =>
-    oracle.buildErrorExportRows(await oracle.fetchGroupedErrorRows(executor, schema, plotID, censusIDs), filters)
+  exportRows: async (executor, { schema, plotID, censusIDs }, filters, errorType) =>
+    oracle.buildErrorExportRows(await oracle.fetchGroupedErrorRows(executor, schema, plotID, censusIDs), filters, errorType)
 };
 const CURRENT_ARM: ExplorerArm = {
   name: 'current',
   queryErrorExplorer: (executor, request) => current.queryErrorExplorer(executor as unknown as Parameters<typeof current.queryErrorExplorer>[0], request),
   buildErrorExplorerFacets: (executor, request) =>
     current.buildErrorExplorerFacets(executor as unknown as Parameters<typeof current.buildErrorExplorerFacets>[0], request),
-  buildErrorExplorerDetails: (executor, request, id, type) =>
-    current.buildErrorExplorerDetails(executor as unknown as Parameters<typeof current.buildErrorExplorerDetails>[0], request, id, type),
-  buildErrorMessageCounts: (executor, request) =>
-    current.buildErrorMessageCounts(executor as unknown as Parameters<typeof current.buildErrorMessageCounts>[0], request),
-  exportRows: async (executor, schema, plotID, censusIDs, filters) =>
+  buildErrorExplorerDetails: (executor, request, id) =>
+    current.buildErrorExplorerDetails(executor as unknown as Parameters<typeof current.buildErrorExplorerDetails>[0], request, id),
+  buildErrorMessageCounts: (executor, scope) =>
+    current.buildErrorMessageCounts(executor as unknown as Parameters<typeof current.buildErrorMessageCounts>[0], scope),
+  exportRows: async (executor, { schema, plotID, censusIDs }, filters, errorType) =>
     current.buildErrorExportRows(
       await current.fetchGroupedErrorRows(executor as unknown as Parameters<typeof current.fetchGroupedErrorRows>[0], schema, plotID, censusIDs),
-      filters
+      filters,
+      errorType
     )
 };
 
@@ -309,52 +313,19 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
       await seed(work, options);
       await assertNoOtherActiveSession(session, session.setupConnection as Connection);
       const [[server]] = await work.query<RowDataPacket[]>('SELECT VERSION() AS version, @@innodb_buffer_pool_size AS bufferPoolBytes');
-      const request = {
-        schema: SCHEMA,
-        plotID: MEASURED_PLOT_ID,
-        censusID: MEASURED_CENSUS_IDS[0],
-        censusIDs: MEASURED_CENSUS_IDS,
-        page: 0,
-        pageSize: PAGE_SIZE,
-        filters: DEFAULT_ERROR_EXPLORER_FILTERS
-      };
+      const scope: ScenarioScope = { schema: SCHEMA, plotID: MEASURED_PLOT_ID, censusIDs: MEASURED_CENSUS_IDS };
       const censusScope = describeCensusScope(MEASURED_CENSUS_IDS);
       console.log(`${LOG_PREFIX} scope: ${censusScope.censuses} censuses, ${censusScope.censusChunks} census chunks`);
-      const setupExecutor = createBenchExecutor(benchPool);
-      const [page, facets] = await Promise.all([
-        ORACLE_ARM.queryErrorExplorer(setupExecutor, request),
-        ORACLE_ARM.buildErrorExplorerFacets(setupExecutor, request)
-      ]);
-      const first = page.rows[0];
-      const contradiction = page.rows.find(row => row.hasContradiction);
-      const message = facets.messages[0];
-      if (!first?.treeTag || first.coreMeasurementID == null || !contradiction || contradiction.coreMeasurementID == null || !message)
-        throw new Error('Benchmark seed did not produce the required first row, contradiction, and message');
-      const firstID = first.coreMeasurementID;
-      const contradictionID = contradiction.coreMeasurementID;
-      const preset = (id: string): ErrorExplorerFilters => {
-        const found = ERROR_EXPLORER_PRESETS.find(item => item.id === id);
-        if (!found) throw new Error(`Missing benchmark preset ${id}`);
-        return found.filters;
-      };
-      const contradictionFilters = preset('contradictions');
+      const discovered = await discoverScenarioInputs(ORACLE_ARM, createBenchExecutor(benchPool), scope);
+      if (!discovered.topGroup) throw new Error('Benchmark seed did not produce an error type to open as the top group');
+      const { scenarios: planned, unavailable } = planScenarios<BenchExecutor>(scope, discovered);
+      console.log(`${LOG_PREFIX} unavailable scenarios: ${unavailable.join(', ') || 'none'}; report-only: ${REPORT_ONLY_SCENARIOS.join(', ')}`);
+      const topGroupPage0 = planned.find(item => item.name === SCENARIO_NAMES.queryTopGroupPage0);
+      const facetsDefault = planned.find(item => item.name === SCENARIO_NAMES.facetsDefault);
+      if (!topGroupPage0 || !facetsDefault) throw new Error('The page load needs facetsDefault and queryTopGroupPage0');
       const scenarios: Record<string, (arm: ExplorerArm, executor: BenchExecutor) => Promise<unknown>> = {
-        pageLoad: (arm, executor) => Promise.all([arm.queryErrorExplorer(executor, request), arm.buildErrorExplorerFacets(executor, request)]),
-        queryPage0: (arm, executor) => arm.queryErrorExplorer(executor, request),
-        queryLastPage: (arm, executor) => arm.queryErrorExplorer(executor, { ...request, page: lastPageNumber(page.totalRows, PAGE_SIZE) }),
-        queryPastTheEnd: (arm, executor) => arm.queryErrorExplorer(executor, { ...request, page: pastTheEndPageNumber(page.totalRows, PAGE_SIZE) }),
-        queryValidationOnly: (arm, executor) => arm.queryErrorExplorer(executor, { ...request, filters: preset('validation_only') }),
-        queryContradictions: (arm, executor) => arm.queryErrorExplorer(executor, { ...request, filters: contradictionFilters }),
-        queryMostCommonMessage: (arm, executor) =>
-          arm.queryErrorExplorer(executor, { ...request, filters: { ...request.filters, exactMessages: [message.value] } }),
-        queryQuickSearch: (arm, executor) =>
-          arm.queryErrorExplorer(executor, { ...request, filters: { ...request.filters, quickSearch: first.treeTag!.slice(0, 3) } }),
-        facetsDefault: (arm, executor) => arm.buildErrorExplorerFacets(executor, request),
-        facetsContradictions: (arm, executor) => arm.buildErrorExplorerFacets(executor, { ...request, filters: contradictionFilters }),
-        detailsFirstRow: (arm, executor) => arm.buildErrorExplorerDetails(executor, request, firstID),
-        detailsFirstContradictionRow: (arm, executor) => arm.buildErrorExplorerDetails(executor, request, contradictionID),
-        messageCounts: (arm, executor) => arm.buildErrorMessageCounts(executor, request),
-        exportDefault: (arm, executor) => arm.exportRows(executor, SCHEMA, MEASURED_PLOT_ID, MEASURED_CENSUS_IDS, request.filters)
+        [PAGE_LOAD_SERIAL]: async (arm, executor) => [await facetsDefault.run(arm, executor), await topGroupPage0.run(arm, executor)],
+        ...Object.fromEntries(planned.map(item => [item.name, item.run]))
       };
       const arms = [ORACLE_ARM, options.arms === 'oracle-oracle' ? ORACLE_ARM : CURRENT_ARM];
       const explained = new Set<string>();
@@ -409,17 +380,22 @@ describe('errors explorer benchmark (opt-in, local MySQL)', () => {
         resultRows.push(`| ${name} | ${formatArm(armResults[0])} | ${formatArm(armResults[1])} | ${ratio.toFixed(2)} |`);
       }
       const allStatements = Object.values(callsByScenario).flatMap(groups => groups.flatMap(group => group.flatMap(call => call.statements)));
+      const activeCountText = buildActiveMeasurementCountQuery(SCHEMA, MEASURED_PLOT_ID, MEASURED_CENSUS_IDS).sql;
       const unlabelledStatements = allStatements.filter(statement => statement.classification === UNLABELLED_STATEMENT).length;
       const currentStatementTexts = new Set(
-        Object.values(callsByScenario).flatMap(groups => groups[1].flatMap(call => call.statements.map(statement => statement.sql)))
+        Object.values(callsByScenario)
+          .flatMap(groups => groups[1].flatMap(call => call.statements.map(statement => statement.sql)))
+          .filter(sql => sql !== activeCountText)
       ).size;
       console.log(`${LOG_PREFIX} unlabelled statements: ${unlabelledStatements}; second-arm distinct statement texts: ${currentStatementTexts}`);
-      expect(unlabelledStatements, 'every recorded statement carries an explorer label or matches an oracle shape').toBe(0);
+      expect(unlabelledStatements, 'every recorded statement carries an explorer label, matches an oracle shape or is the active count').toBe(0);
       if (options.arms === 'oracle-current')
-        expect(currentStatementTexts, 'the new implementation sends at most nine distinct texts').toBeLessThanOrEqual(STATEMENT_TEXT_LIMIT);
+        expect(currentStatementTexts, 'the new implementation sends at most ten distinct explorer texts besides the active count').toBeLessThanOrEqual(
+          STATEMENT_SHAPE_LIMIT
+        );
 
-      const facetsDefaultCalls = callsByScenario.facetsDefault;
-      const messageCountsCalls = callsByScenario.messageCounts;
+      const facetsDefaultCalls = callsByScenario[SCENARIO_NAMES.facetsDefault];
+      const messageCountsCalls = callsByScenario[SCENARIO_NAMES.messageCounts];
       const histogramWithFlagsP50Ms = statementP50Ms(facetsDefaultCalls[1], HISTOGRAM_WITH_FLAGS_LABEL);
       const histogramWithoutFlagsP50Ms = statementP50Ms(messageCountsCalls[1], HISTOGRAM_WITHOUT_FLAGS_LABEL);
       const oracleDuplicateGroupsP50Ms = statementP50Ms(facetsDefaultCalls[0], ORACLE_DUPLICATE_GROUPS_CLASS);

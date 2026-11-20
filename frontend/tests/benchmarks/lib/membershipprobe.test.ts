@@ -266,8 +266,8 @@ describe('membership probe scenario', () => {
 
 describe('signature merging across census chunks', () => {
   it('counts one signature once and sums its MeasurementCount over four chunks', () => {
-    const signature = { ErrorTypeKeys: '3,7', SignatureComplete: 1, HasDuplicate: 0, HasSameBatch: 1 };
-    const otherSignature = { ErrorTypeKeys: '3', SignatureComplete: 1, HasDuplicate: 0, HasSameBatch: 0 };
+    const signature = { ErrorTypeKeys: '3,7', SignatureComplete: 1, HasDuplicate: 0, HasSameBatch: 1, IsFailedRow: 0 };
+    const otherSignature = { ErrorTypeKeys: '3', SignatureComplete: 1, HasDuplicate: 0, HasSameBatch: 0, IsFailedRow: 0 };
     const chunks = [1, 2, 3, 4].map(count => [{ ...signature, MeasurementCount: count }]);
     chunks[2].push({ ...otherSignature, MeasurementCount: 5 });
     const merged = mergeSignatureRows(chunks);
