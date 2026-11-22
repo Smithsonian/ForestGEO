@@ -14,7 +14,7 @@ import { assertSchemaAccess } from '@/lib/authz';
 import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
 import { recordCommittedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
-import { BULKCRUD_REJECTION_MESSAGES, findMissingBulkcrudContext } from '@/lib/bulkcrud/required-context';
+import { BULKCRUD_REJECTION_MESSAGES, findMissingBulkcrudContext, isMeasurementGridType } from '@/lib/bulkcrud/required-context';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -40,10 +40,10 @@ export async function POST(request: NextRequest) {
   // Scope required by recordCommittedCoreMeasurementsAudit (#507) — validated here, BEFORE
   // beginTransaction, so a missing plotID/censusID returns 400 without ever opening a
   // transaction that this early return would then leave uncommitted and un-rolled-back.
-  const isMeasurementSummaryUpload = ['measurementssummary', 'measurementssummaryview'].includes(dataType);
+  const isMeasurementUpload = isMeasurementGridType(dataType);
   const measurementPlotID = plot?.plotID;
   const measurementCensusID = census?.dateRanges?.[0]?.censusID;
-  if (isMeasurementSummaryUpload && (measurementPlotID === undefined || measurementCensusID === undefined)) {
+  if (isMeasurementUpload && (measurementPlotID === undefined || measurementCensusID === undefined)) {
     return NextResponse.json(
       { error: 'plot.plotID and census.dateRanges[0].censusID are required for measurement bulk inserts', code: 'MEASUREMENT_SCOPE_REQUIRED' },
       { status: HTTPResponses.INVALID_REQUEST }
@@ -88,9 +88,9 @@ export async function POST(request: NextRequest) {
   try {
     const activeTransactionID = await connectionManager.beginTransaction();
     transactionID = activeTransactionID;
-    if (isMeasurementSummaryUpload) {
+    if (isMeasurementUpload) {
       const batchID = generateShortBatchID();
-      // Narrowed by the isMeasurementSummaryUpload guard above, which ran before beginTransaction.
+      // Narrowed by the isMeasurementUpload guard above, which ran before beginTransaction.
       const plotID = measurementPlotID as number;
       const censusID = measurementCensusID as number;
       const values = Object.values(rows).map(row => [

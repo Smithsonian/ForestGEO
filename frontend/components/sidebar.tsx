@@ -265,9 +265,11 @@ export default function Sidebar(props: SidebarProps) {
       <>
         {selectedPlot ? (
           <Stack direction="column" alignItems="start" aria-label={'plot value render stack'} sx={{ maxWidth: '100%', minWidth: 0 }}>
-            <Typography level="body-md" className="sidebar-item" data-testid={'selected-plot-name'}>{`Plot: ${selectedPlot?.plotName}`}</Typography>
+            <Typography level="body-md" className="sidebar-item" data-testid={'selected-plot-name'} sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+              {`Plot: ${selectedPlot?.plotName}`}
+            </Typography>
             <Box aria-label={'selected plot information'} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
-              <Typography level="body-sm" color={'primary'} data-testid={'selected-plot-quadrats'}>
+              <Typography level="body-sm" color={'primary'} data-testid={'selected-plot-quadrats'} sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
                 {' — '}
                 {selectedPlot.numQuadrats || selectedPlot.numQuadrats === 0 ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
               </Typography>
