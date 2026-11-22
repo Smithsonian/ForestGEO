@@ -10,6 +10,12 @@ const BULKCRUD_REQUIRED_CONTEXT: Readonly<Record<string, readonly BulkcrudContex
   measurementssummaryview: ['plot', 'census']
 };
 
+const MEASUREMENT_GRID_TYPES: ReadonlySet<string> = new Set(['measurements', 'measurementssummary', 'measurementssummaryview']);
+
+export function isMeasurementGridType(gridType: string): boolean {
+  return MEASUREMENT_GRID_TYPES.has(gridType);
+}
+
 export const BULKCRUD_REJECTION_MESSAGES = {
   missingGridType: 'No grid type provided',
   missingPlot: 'Select a plot before submitting these rows.',

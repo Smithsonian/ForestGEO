@@ -436,7 +436,7 @@ describe('bulkcrud POST route', () => {
     };
 
     const req = makeRequest({
-      gridType: 'quadrats', // anything not in ['measurementssummary','measurementssummaryview']
+      gridType: 'quadrats', // any grid type isMeasurementGridType rejects
       schema: 'forestgeo_testing',
       plot: { plotID: 99 },
       census: { dateRanges: [{ censusID: 5 }] },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BULKCRUD_REJECTION_MESSAGES, findMissingBulkcrudContext } from './required-context';
+import { BULKCRUD_REJECTION_MESSAGES, findMissingBulkcrudContext, isMeasurementGridType } from './required-context';
 
 const PLOT = { plotID: 1 };
 const CENSUS = { dateRanges: [{ censusID: 2 }] };
@@ -30,5 +30,15 @@ describe('findMissingBulkcrudContext', () => {
 
   it('rejects a missing grid type', () => {
     expect(findMissingBulkcrudContext(undefined, PLOT, CENSUS)).toBe(BULKCRUD_REJECTION_MESSAGES.missingGridType);
+  });
+});
+
+describe('isMeasurementGridType', () => {
+  it.each(['measurements', 'measurementssummary', 'measurementssummaryview'])('%s is staged and ingested as measurements', gridType => {
+    expect(isMeasurementGridType(gridType)).toBe(true);
+  });
+
+  it.each(['attributes', 'species', 'personnel', 'quadrats', 'trees', 'constructor', ''])('%s is not a measurement grid', gridType => {
+    expect(isMeasurementGridType(gridType)).toBe(false);
   });
 });
