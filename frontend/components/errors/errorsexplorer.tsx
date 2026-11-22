@@ -258,23 +258,32 @@ export default function ErrorsExplorer() {
   const deepLinkRef = useRef<{ filters: ErrorExplorerFilters | null; appliedStorageKey: string | null } | null>(null);
   if (deepLinkRef.current === null) deepLinkRef.current = { filters: resolveErrorsExplorerDeepLinkFilters(searchParams), appliedStorageKey: null };
 
+  const [restoredStorageKey, setRestoredStorageKey] = useState<string | null>(null);
+  const filtersRestored = storageKey !== null && restoredStorageKey === storageKey;
+
   useEffect(() => {
-    if (!storageKey) return;
     const deepLink = deepLinkRef.current;
+    if (!storageKey) {
+      if (deepLink && deepLink.appliedStorageKey !== null) deepLink.filters = null;
+      setRestoredStorageKey(null);
+      return;
+    }
     if (deepLink?.filters) {
       if (deepLink.appliedStorageKey === null || deepLink.appliedStorageKey === storageKey) {
         deepLink.appliedStorageKey = storageKey;
         setFilters(deepLink.filters);
+        setRestoredStorageKey(storageKey);
         return;
       }
       deepLink.filters = null;
     }
     setFilters(parseStoredErrorExplorerFilters(readStoredFilters(storageKey)));
+    setRestoredStorageKey(storageKey);
   }, [storageKey]);
 
   useEffect(() => {
-    if (storageKey) writeStoredFilters(storageKey, serializeStoredErrorExplorerFilters(filters));
-  }, [filters, storageKey]);
+    if (storageKey && filtersRestored) writeStoredFilters(storageKey, serializeStoredErrorExplorerFilters(filters));
+  }, [filters, filtersRestored, storageKey]);
 
   useEffect(() => {
     if (!currentSite?.schemaName) return;
@@ -284,7 +293,7 @@ export default function ErrorsExplorer() {
   }, [currentSite, currentPlot, currentCensus]);
 
   const facets = useErrorsExplorerRequest<ErrorExplorerFacetsResponse>({
-    requestKey: readScope ? `facets|${readScopeKey}|${JSON.stringify(filters)}` : null,
+    requestKey: readScope && filtersRestored ? `facets|${readScopeKey}|${JSON.stringify(filters)}` : null,
     load: signal => {
       if (!readScope) throw new Error(VIEW_ERRORS_TEXT.totalsLoadFailed);
       return postErrorsExplorerFacets(readScope, filters, signal);
@@ -460,9 +469,10 @@ export default function ErrorsExplorer() {
   const sheetStatus: ErrorRowDetailsStatus = details.isStale ? 'stale' : details.status === 'error' ? 'error' : details.data ? 'ready' : 'loading';
   const panelRow = details.data?.row ? toDetailsPanelRow(details.data.row) : (sheet?.row ?? null);
   const censusHasNoErrors = totals !== null && totals.affectedMeasurements === 0;
-  const groupsUnavailable = groupMode === 'byType' && facets.status === 'error' && !facets.data;
+  const facetsStatus = readScope && !filtersRestored ? 'loading' : facets.status;
+  const groupsUnavailable = groupMode === 'byType' && facetsStatus === 'error' && !facets.data;
   const effectiveGroupMode: ErrorsExplorerGroupMode = groupsUnavailable ? 'none' : groupMode;
-  const showsGroupEmptyState = effectiveGroupMode === 'byType' && facets.status === 'ready' && errorTypes.length === 0;
+  const showsGroupEmptyState = effectiveGroupMode === 'byType' && facetsStatus === 'ready' && errorTypes.length === 0;
   const showsFlatEmptyState = effectiveGroupMode === 'none' && view.flatTotalRows === 0;
 
   const factsLine = totals ? formatViewErrorsFactsLine(totals.affectedMeasurements, totals.activeMeasurements, totals.errorTypeCount) : null;
@@ -546,7 +556,7 @@ export default function ErrorsExplorer() {
 
       <ErrorsTotalsTiles
         totals={totals}
-        status={facets.status}
+        status={facetsStatus}
         isStale={facets.isStale}
         onRetry={() => (gated ? void rowEdit.retryRefresh() : void facets.reload())}
       />
@@ -555,7 +565,7 @@ export default function ErrorsExplorer() {
         showValue={resolveShowValue(filters)}
         onShowChange={value => setFilters(previous => applyShowValue(previous, value))}
         totals={totals}
-        totalsLoading={facets.status === 'loading'}
+        totalsLoading={facetsStatus === 'loading'}
         quickSearch={filters.quickSearch}
         onQuickSearchChange={quickSearch => setFilters(previous => ({ ...previous, quickSearch }))}
         groupMode={groupMode}
@@ -624,7 +634,7 @@ export default function ErrorsExplorer() {
         <FilteredToChip exactMessages={filters.exactMessages} onClear={clearExactMessages} clearDisabledReason={pageLockReason} />
       )}
 
-      {effectiveGroupMode === 'none' && (
+      {effectiveGroupMode === 'none' && filtersRestored && (
         <ErrorsExplorerGrid
           key={`${readScopeKey}::${FLAT_GRID_KEY}`}
           {...gridProps}
