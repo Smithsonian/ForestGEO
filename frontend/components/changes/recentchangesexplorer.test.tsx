@@ -39,6 +39,10 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+function totalChangesCount(): string {
+  return screen.getByText('Total Changes').nextElementSibling?.textContent ?? '';
+}
+
 function jsonResponse(data: unknown) {
   return {
     ok: true,
@@ -775,10 +779,6 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
       return { listRequests };
     }
 
-    function totalChangesCount(): string {
-      return screen.getByText('Total Changes').nextElementSibling?.textContent ?? '';
-    }
-
     async function loadPlotOneThenInvertRange() {
       const { listRequests } = servePlotOneFeed();
       const rendered = render(<RecentChangesExplorer />);
@@ -936,6 +936,7 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     };
     const { container } = render(<RecentChangesExplorer />);
     await waitFor(() => expect(inFlightResponses).toHaveLength(1));
+    const totalBeforeLateResponse = totalChangesCount();
 
     fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-06' } });
     await waitFor(() => expect(inFlightResponses).toHaveLength(2));
@@ -950,6 +951,7 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
 
     expect(inFlightResponses, 'no request for the inverted range').toHaveLength(2);
     expect(screen.queryByText('late_table'), 'the response sent before the range was inverted must not render').not.toBeInTheDocument();
+    expect(totalChangesCount(), 'the late response must not update Total Changes either').toBe(totalBeforeLateResponse);
     expect(container.querySelectorAll('.MuiSkeleton-root'), 'loading clears once the request is aborted').toHaveLength(0);
   });
 
@@ -975,6 +977,7 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     };
     render(<RecentChangesExplorer />);
     await waitFor(() => expect(inFlightResponses).toHaveLength(1));
+    const totalBeforeLateResponse = totalChangesCount();
     fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-06' } });
     await waitFor(() => expect(inFlightResponses).toHaveLength(2));
 
@@ -987,6 +990,7 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     });
 
     expect(screen.queryByText('late_table'), 'a response to an aborted request must not render, whether or not the transport rejected').not.toBeInTheDocument();
+    expect(totalChangesCount(), 'the late response must not update Total Changes either').toBe(totalBeforeLateResponse);
   });
 
   it('keeps both dates and resets the other filters when a preset is clicked', async () => {
@@ -1136,8 +1140,7 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     });
 
     await waitFor(() => expect(downloadedFilenames).toEqual([SERVER_FILENAME]));
-    expect(downloadedHrefs, 'the clicked link points at the blob built from the response').toHaveLength(1);
-    expect(downloadedHrefs[0]).toContain(OBJECT_URL);
+    expect(downloadedHrefs, 'the one clicked link points at exactly the blob built from the response').toEqual([OBJECT_URL]);
     await waitFor(() => expect(exportButton, 'the loading state clears').toBeEnabled());
     expect(URL.revokeObjectURL, 'the object URL is released').toHaveBeenCalledWith(OBJECT_URL);
     expect(screen.queryByTestId('recent-changes-export-alert')).not.toBeInTheDocument();

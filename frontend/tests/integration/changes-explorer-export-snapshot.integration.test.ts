@@ -602,8 +602,8 @@ describe('readChangeExportSnapshot', () => {
       ]);
     });
 
-    it('keeps upload summaries of people whose names differ only by accent or case apart', async () => {
-      const ACCENT_CASE_NAMES = ['José', 'Jose', 'JOSE'];
+    it('keeps upload summaries of people whose names differ only by accent, case or a trailing space apart', async () => {
+      const ACCENT_CASE_NAMES = ['José', 'Jose', 'JOSE', 'Jose '];
       const SUMMARY_BATCH = 'accentbatch__sub001';
       for (const [index] of ACCENT_CASE_NAMES.entries()) await seed.insertMeasurement(UPLOAD_FILE, SUMMARY_BATCH, `EXPORT-ACCENT-${index}`, 61 + index);
       const changeIDs = await seed.auditCommittedUpload(UPLOAD_FILE, SUMMARY_BATCH, plotID, TIME_SHARED);
@@ -616,7 +616,7 @@ describe('readChangeExportSnapshot', () => {
 
       expect(
         rows.map(row => [row.LogID, row.ChangedBy, row.Description]),
-        'the accent- and case-insensitive column collation must not merge three people into one summary'
+        'the accent-, case- and trailing-space-insensitive column collation must not merge four people into one summary'
       ).toEqual(
         changeIDs.map((changeID, index) => [changeID, ACCENT_CASE_NAMES[index], `Upload ${UPLOAD_FILE}: added 1 measurement rows (batch accentbatch)`])
       );
