@@ -325,10 +325,11 @@ function expandRecord(operation: ChangeOperationName, scope: DraftScope, record:
 }
 
 /**
- * Turns one source change into its CSV rows (spec §6.2, first matching rule wins). An empty
- * result means the change is suppressed: every record was a paired update with no visible difference.
+ * Turns one source change into its CSV rows (spec §6.2, first matching rule wins), one record at a
+ * time, so a caller with a row ceiling can stop before the rest of a large change is expanded. Yields
+ * nothing when the change is suppressed: every record was a paired update with no visible difference.
  */
-export function expandChange(change: ExportSourceChange): ChangeExportDraft[] {
+export function* iterateChangeRows(change: ExportSourceChange): Generator<ChangeExportDraft> {
   const { records, undecodable } = decodeChangelogRow(change);
   const { editOperationID } = splitEditOperationRecordID(change.recordID);
   const soleNewState = records.length === 1 ? records[0].newState : null;
@@ -343,21 +344,25 @@ export function expandChange(change: ExportSourceChange): ChangeExportDraft[] {
   };
 
   if (soleNewState !== null && soleNewState[STATE_KEYS.summaryKind] === BULK_REVISION_SUMMARY_KIND) {
-    return [summaryDraft(scope, records[0].primaryKey, { kind: 'bulk-revision', summary: soleNewState, editOperationID })];
+    yield summaryDraft(scope, records[0].primaryKey, { kind: 'bulk-revision', summary: soleNewState, editOperationID });
+    return;
   }
   if (change.tableName === FILE_UPLOAD_CHANGELOG_TABLE) {
-    return [summaryDraft(scope, change.recordID, { kind: 'file-upload', recordID: change.recordID, state: soleNewState })];
+    yield summaryDraft(scope, change.recordID, { kind: 'file-upload', recordID: change.recordID, state: soleNewState });
+    return;
   }
   if (change.tableName === QUADRAT_OVERLAP_ACKNOWLEDGMENT_CHANGELOG_TABLE) {
-    return [summaryDraft(scope, change.recordID, { kind: 'quadrat-overlap-acknowledgment', recordID: change.recordID, state: soleNewState })];
+    yield summaryDraft(scope, change.recordID, { kind: 'quadrat-overlap-acknowledgment', recordID: change.recordID, state: soleNewState });
+    return;
   }
   if (undecodable || records.length === 0) {
-    return [
-      summaryDraft(scope, change.recordID, { kind: 'images-unavailable', operation: change.operation, table: change.tableName, recordID: change.recordID })
-    ];
+    yield summaryDraft(scope, change.recordID, { kind: 'images-unavailable', operation: change.operation, table: change.tableName, recordID: change.recordID });
+    return;
   }
-  return records.flatMap(record => expandRecord(change.operation, scope, record, editOperationID));
+  for (const record of records) yield* expandRecord(change.operation, scope, record, editOperationID);
 }
+
+export const expandChange = (change: ExportSourceChange): ChangeExportDraft[] => [...iterateChangeRows(change)];
 
 export function buildUploadRollupDraft(group: UploadRollupGroup): ChangeExportDraft {
   return {

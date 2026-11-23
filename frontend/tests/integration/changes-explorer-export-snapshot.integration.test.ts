@@ -18,7 +18,7 @@ import { setupTestDatabase, teardownTestDatabase, type TestDatabaseConfig } from
 import { classifyChanges, toExportedRows, type ExportedRow } from './helpers/changeexportprobe';
 import { createChangeExportSeeder, SEED_CHANGED_BY, type ChangeExportSeeder } from './helpers/changeexportseed';
 import { FILTERED_COUNT_SUFFIX, formatExportCell, NO_FILE_RECORDED_KEY, SUMMARY_COLUMN_MARKER, type ExportCell } from '@/config/changelogexport';
-import { recordedFieldNames } from '@/config/changelogdiff';
+import * as changelogDiff from '@/config/changelogdiff';
 import { DEFAULT_RECENT_CHANGES_FILTERS, type RecentChangesServerFilters } from '@/config/recentchangesexplorer';
 import { recordDeletedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
 import { ChangelogOperation } from '@/lib/changelog/record-mutation';
@@ -379,15 +379,17 @@ describe('readChangeExportSnapshot', () => {
       expect(detailPagesRead, 'a page size of 2 must take several detail pages').toBeGreaterThan(FILE_UPLOAD_DETAIL_PAGE);
 
       const manualEntryState = await storedNewState(ledger.manualEntry);
-      const manualEntryRows = recordedFieldNames(manualEntryState).map(field => [
-        ledger.manualEntry,
-        'coremeasurements',
-        String(ledger.manualEntryMeasurementID),
-        field,
-        'I',
-        '',
-        formatExportCell(manualEntryState[field])
-      ]);
+      const manualEntryRows = changelogDiff
+        .recordedFieldNames(manualEntryState)
+        .map(field => [
+          ledger.manualEntry,
+          'coremeasurements',
+          String(ledger.manualEntryMeasurementID),
+          field,
+          'I',
+          '',
+          formatExportCell(manualEntryState[field])
+        ]);
       expect(manualEntryRows.length, 'a manual-entry snapshot has several recorded fields').toBeGreaterThan(5);
 
       const taggedDeleteRow = [ledger.replacementDeletes.tagged, 'coremeasurements', UPLOAD_FILE, SUMMARY_COLUMN_MARKER, 'D', '', ''];
@@ -851,24 +853,30 @@ describe('readChangeExportSnapshot', () => {
       await expectTooLarge(readSnapshot({}, TIGHT_LIMITS), TIGHT_LIMITS.maxRows);
     });
 
-    it('stops inside a single multi-image change at the first excess row', async () => {
+    it('stops inside a single multi-image change at the first excess row, without expanding the images after it', async () => {
+      const IMAGE_COUNT = 4;
+      const DRAFT_THAT_PASSES_THE_CEILING = TIGHT_LIMITS.maxRows + 1;
+      const treeIDs = Array.from({ length: IMAGE_COUNT }, (_, index) => index + 1);
       await seed.insertRawChange({
         tableName: 'trees',
-        recordID: '1|2|3',
+        recordID: treeIDs.join('|'),
         operation: ChangelogOperation.UPDATE,
-        oldRowState: [
-          { TreeID: 1, SpeciesID: 10 },
-          { TreeID: 2, SpeciesID: 10 },
-          { TreeID: 3, SpeciesID: 10 }
-        ],
-        newRowState: [
-          { TreeID: 1, SpeciesID: 11 },
-          { TreeID: 2, SpeciesID: 12 },
-          { TreeID: 3, SpeciesID: 13 }
-        ],
+        oldRowState: treeIDs.map(TreeID => ({ TreeID, SpeciesID: 10 })),
+        newRowState: treeIDs.map(TreeID => ({ TreeID, SpeciesID: 10 + TreeID })),
         changeTime: TIME_SHARED
       });
-      await expectTooLarge(readSnapshot({}, TIGHT_LIMITS), TIGHT_LIMITS.maxRows);
+      const computeDiffSpy = vi.spyOn(changelogDiff, 'computeDiff');
+      try {
+        await expectTooLarge(readSnapshot({}, TIGHT_LIMITS), TIGHT_LIMITS.maxRows);
+
+        expect(
+          computeDiffSpy.mock.calls.length,
+          `each image yields one draft, so the ceiling is passed by the draft of image ${DRAFT_THAT_PASSES_THE_CEILING}; ` +
+            `the other ${IMAGE_COUNT - DRAFT_THAT_PASSES_THE_CEILING} image(s) must not be expanded once it has thrown`
+        ).toBe(DRAFT_THAT_PASSES_THE_CEILING);
+      } finally {
+        computeDiffSpy.mockRestore();
+      }
       const rollupQueries = ownedDouble.query.mock.calls.filter(([sql]) => String(sql).includes(ROLLUP_MARKER));
       expect(rollupQueries, 'the reader stopped at the third row; it never went on to the rollup').toHaveLength(0);
     });
