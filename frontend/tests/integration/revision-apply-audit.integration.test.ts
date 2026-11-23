@@ -18,6 +18,9 @@ import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { cleanupTestMeasurements, createAdditionalCensus, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 import type { RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { HTTPResponses } from '@/config/macros';
+import { describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
+import { SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
+import { BULK_REVISION_CHANGELOG_TABLE } from '@/config/changelogdecode';
 
 process.env.AUTH_SECRET ??= 'test_secret';
 
@@ -32,6 +35,9 @@ const INSERT_OPERATION = 'INSERT';
 const UPDATE_OPERATION = 'UPDATE';
 const DELETE_OPERATION = 'DELETE';
 const BULK_REVISION_OPERATION_TYPE = 'bulk-revision-row';
+const ORIGINAL_UPLOAD_FILE = 'original-census.csv';
+const ORIGINAL_UPLOAD_BASE_BATCH = 'originalbatch';
+const ORIGINAL_UPLOAD_BATCH = `${ORIGINAL_UPLOAD_BASE_BATCH}__sub001`;
 
 vi.mock('@/auth', () => ({
   auth: vi.fn(async () => ({
@@ -463,9 +469,9 @@ describe('revision apply — #507 audit integration (real routes)', () => {
     async function insertSiblingMeasurement(date: string): Promise<number> {
       const [res] = await connection.query<any>(
         `INSERT INTO \`${config.database}\`.coremeasurements
-           (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate, RawTreeTag, RawStemTag, IsValidated, IsActive)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1)`,
-        [stemGUID, censusID, dbh, hom, date, treeTag, stemTag]
+           (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate, RawTreeTag, RawStemTag, UploadFileID, UploadBatchID, IsValidated, IsActive)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)`,
+        [stemGUID, censusID, dbh, hom, date, treeTag, stemTag, ORIGINAL_UPLOAD_FILE, ORIGINAL_UPLOAD_BATCH]
       );
       return res.insertId;
     }
@@ -521,6 +527,19 @@ describe('revision apply — #507 audit integration (real routes)', () => {
     );
     expect(Number(survivorAfter[0].IsActive)).toBe(1);
     expect(parseFloat(survivorAfter[0].MeasuredDBH)).toBeCloseTo(dbh);
+
+    // #592 D5: a duplicate-resolve delete rolls up under the deleted measurement's ORIGINAL file, not under revision-upload.
+    const duplicateRollups = (await exportedRowsForPlot(connection, config.database, plotID)).filter(
+      row => row.ChangedTable === COREMEASUREMENTS_TABLE_NAME && row.Action === 'D'
+    );
+    console.log(`[revision duplicate export]\n${describeExportedRows(duplicateRollups)}`);
+    expect(duplicateRollups.map(row => [row.PrimaryKey, row.ChangedColumn, row.Description])).toEqual([
+      [
+        ORIGINAL_UPLOAD_FILE,
+        SUMMARY_COLUMN_MARKER,
+        `Upload pipeline removed 1 measurements originally loaded from ${ORIGINAL_UPLOAD_FILE} (original batch ${ORIGINAL_UPLOAD_BASE_BATCH})`
+      ]
+    ]);
   });
 
   // =========================================================================
@@ -605,6 +624,20 @@ describe('revision apply — #507 audit integration (real routes)', () => {
     expect(summaryRow!.failedRowCount).toBe(1);
     expect(summaryRow!.insertedCount).toBe(0);
     expect(summaryRow!.deletedDuplicateCount).toBe(0);
+
+    // #592 rule 1: the apply's own summary is one * row; the rejected row is parked under revision-upload and rolls up.
+    const applyExportRows = await exportedRowsForPlot(connection, config.database, plotID);
+    const bulkSummaryRows = applyExportRows.filter(row => row.ChangedTable === BULK_REVISION_CHANGELOG_TABLE);
+    console.log(`[revision mixed export]\n${describeExportedRows(applyExportRows)}`);
+    expect(bulkSummaryRows.map(row => [row.ChangedColumn, row.Action])).toEqual([[SUMMARY_COLUMN_MARKER, 'U']]);
+    expect(String(bulkSummaryRows[0].Description)).toMatch(/^Applied a bulk revision: 1 updated, .*1 failed \(edit #\d+\)$/);
+    const parkedRevisionRollups = applyExportRows.filter(
+      row => row.ChangedTable === COREMEASUREMENTS_TABLE_NAME && row.ChangedColumn === SUMMARY_COLUMN_MARKER && row.PrimaryKey === REVISION_UPLOAD_FILE_ID_VALUE
+    );
+    expect(
+      parkedRevisionRollups.map(row => row.Action),
+      'the parked rejected row is an I rollup under revision-upload'
+    ).toContain('I');
   });
 
   // =========================================================================

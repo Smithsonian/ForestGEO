@@ -40,6 +40,8 @@ vi.mock('@/ailogger', () => ({
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { recordAuditedIngestionFailureRows, buildIngestionFailureBatchLockName } from '@/lib/changelog/ingestion-failure-audit';
 import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
+import { classifyChangesAfter, describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
+import { SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -48,6 +50,7 @@ import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 const FILE_NAME = 'ingestion-failure-audit-fixture.csv';
 const BATCH_ID = 'failure-audit-batch-0001';
 const CHANGED_BY = 'failure-audit-test@forestgeo.test';
+const NO_EARLIER_CHANGE = 0;
 
 function buildFailureRow(
   overrides: Partial<IngestionFailureRowInput> & { sourceRowIndex: number; plotID: number; censusID: number }
@@ -207,6 +210,19 @@ describe('recordAuditedIngestionFailureRows — integration', () => {
     const newState = typeof auditRows[1].NewRowState === 'string' ? JSON.parse(auditRows[1].NewRowState) : auditRows[1].NewRowState;
     expect(Number(oldState.MeasuredDBH)).toBeCloseTo(10.5, 1);
     expect(Number(newState.MeasuredDBH)).toBeCloseTo(99.9, 1);
+
+    // #592 D5: parked failure rows are upload-pipeline rows; the INSERT and the retry UPDATE roll up separately.
+    const classified = await classifyChangesAfter(connection, schema, NO_EARLIER_CHANGE);
+    expect(classified.map(change => [change.operation, change.isUploadPipelineRow, change.isDetailRow])).toEqual([
+      ['INSERT', true, false],
+      ['UPDATE', true, false]
+    ]);
+    const failureRollups = (await exportedRowsForPlot(connection, schema, plotID)).filter(row => row.PrimaryKey === FILE_NAME);
+    console.log(`[failure-audit export]\n${describeExportedRows(failureRollups)}`);
+    expect(failureRollups.map(row => [row.ChangedTable, row.ChangedColumn, row.Action, row.Description])).toEqual([
+      ['coremeasurements', SUMMARY_COLUMN_MARKER, 'I', `Upload ${FILE_NAME}: added 1 measurement rows (batch ${BATCH_ID})`],
+      ['coremeasurements', SUMMARY_COLUMN_MARKER, 'U', `Upload ${FILE_NAME}: updated 1 measurement rows (batch ${BATCH_ID})`]
+    ]);
   });
 
   it('is bounded to its own keys: persisting one chunk of rows never touches or audits a different chunk sharing the same batchID', async () => {

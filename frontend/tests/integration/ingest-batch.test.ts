@@ -138,7 +138,9 @@ import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { startFreshUploadSession } from '../setup/upload-session-fixtures';
 import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
-import { BatchFamilyScopeError } from '@/lib/uploads/batch-family';
+import { BatchFamilyScopeError, familyRootOf } from '@/lib/uploads/batch-family';
+import { classifyChangesAfter, describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
+import { SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
 import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { auditCoreMeasurementsScopeDiff, snapshotCoreMeasurementsScope } from '@/lib/changelog/ingestion-audit';
 import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
@@ -163,6 +165,7 @@ import {
 
 const FILE_NAME = 'ingest-batch-fixture.csv';
 const BATCH_ID = 'ingest-batch-0001';
+const NO_EARLIER_CHANGE = 0;
 const UPLOAD_SESSION_ID = 'ingest-batch-int-test-session';
 const CHANGED_BY = 'ingest-batch-test@forestgeo.test';
 const CSV_DELIMITER = ',';
@@ -1105,6 +1108,25 @@ describe('ingestBatch — integration', () => {
         [newRowID]
       );
       expect(newRowAuditRows.map(row => row.Operation)).toEqual(['INSERT']);
+
+      // #592 D5: the scope diff stores the ingestion snapshot, so the export folds it into its upload.
+      const [scopeDiffChange] = (await classifyChangesAfter(connection, schema, NO_EARLIER_CHANGE)).filter(
+        change => change.tableName === 'coremeasurements' && change.recordID === String(newRowID) && change.operation === 'INSERT'
+      );
+      expect(scopeDiffChange, 'the W5 audit row').toMatchObject({ isUploadPipelineRow: true, isDetailRow: false });
+      const scopeExportRows = await exportedRowsForPlot(connection, schema, plotID);
+      expect(
+        scopeExportRows.filter(row => row.ChangedTable === 'coremeasurements' && row.PrimaryKey === String(newRowID)),
+        'an upload-pipeline row is never expanded field by field'
+      ).toEqual([]);
+      const uploadRollups = scopeExportRows.filter(
+        row => row.ChangedTable === 'coremeasurements' && row.ChangedColumn === SUMMARY_COLUMN_MARKER && row.Action === 'I' && row.PrimaryKey === FILE_NAME
+      );
+      console.log(`[partial-commit-accounting] export rollups:\n${describeExportedRows(uploadRollups)}`);
+      expect(
+        uploadRollups.some(row => String(row.Description).includes(`(batch ${familyRootOf(BATCH_ID)})`)),
+        'rolled up under its file and base batch'
+      ).toBe(true);
     } catch (error) {
       await connectionManager.rollbackTransaction(transactionID);
       throw error;

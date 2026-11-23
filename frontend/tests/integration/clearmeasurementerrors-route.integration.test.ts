@@ -97,6 +97,7 @@ import { queryErrorExplorer } from '@/app/api/errors/explorer/_shared';
 import { queryRecentChanges } from '@/app/api/changes/explorer/_shared';
 import { DEFAULT_RECENT_CHANGES_FILTERS } from '@/config/recentchangesexplorer';
 import { computeDiff } from '@/config/changelogdiff';
+import { describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
 
 const HTTP_OK = 200;
 const HTTP_CONFLICT = 409;
@@ -453,6 +454,19 @@ describe('POST /api/validations/clearmeasurementerrors against real MySQL', () =
     expect(shown?.oldRowState, 'the reader parses the stored object').toEqual(stored.OldRowState);
     expect(shown?.newRowState).toEqual({ IsValidated: null });
     expect(computeDiff(shown!.oldRowState, shown!.newRowState).map(difference => difference.field)).toEqual(['IsValidated', 'ValidationErrors']);
+
+    // #592: a Clear is a field-level change with a partial state on each side.
+    const clearRows = (await exportedRowsForPlot(connection, schema, plotID)).filter(
+      row => row.ChangedTable === 'coremeasurements' && row.PrimaryKey === String(auditedRow)
+    );
+    console.log(`[view-errors clear export]\n${describeExportedRows(clearRows)}`);
+    expect(clearRows.map(row => [row.ChangedColumn, row.Action, row.New])).toEqual([
+      ['IsValidated', 'U', ''],
+      ['ValidationErrors', 'U', '']
+    ]);
+    expect(clearRows[0].Old).toBe(IS_VALIDATED_FAILED);
+    expect(JSON.parse(String(clearRows[1].Old))).toEqual(stored.OldRowState.ValidationErrors);
+    expect(clearRows[0].Description).toBe(`Changed IsValidated on coremeasurements ${auditedRow}`);
   });
 
   it('leaves no audit row, no deletion and the old flag when the audit insert fails', async () => {

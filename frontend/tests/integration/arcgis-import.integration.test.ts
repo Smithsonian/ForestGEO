@@ -161,6 +161,9 @@ import { buildFileUploadChangelogRecordID, MAX_MEASUREMENT_FILE_ID_LENGTH } from
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { UploadMode } from '@/config/uploadmodes';
 import { HTTPResponses } from '@/config/macros';
+import { describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
+import { SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
+import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadSessionOwnershipError } from '@/config/uploadsessiontracker';
 import { buildSubBatchID, buildSubBatchPattern, LIKE_ESCAPE_CLAUSE, MAX_ORIGINAL_BATCH_ID_LENGTH } from '@/lib/uploads/batch-family';
 
@@ -802,6 +805,20 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
       const newState = typeof auditRows[0].NewRowState === 'string' ? JSON.parse(auditRows[0].NewRowState) : auditRows[0].NewRowState;
       expect(newState.RawTreeTag).toBe(DROPPED_TREE_TAG);
       expect(newState.StemGUID).toBeNull();
+
+      // #592: the ArcGIS commit's file_upload row is one summary row in the measurement shape; its parked row rolls up.
+      const arcgisExportRows = await exportedRowsForPlot(connection, seeded.schema, seeded.plotID);
+      const arcgisFileRows = arcgisExportRows.filter(row => row.ChangedTable === 'file_upload' && String(row.PrimaryKey).startsWith(seeded.fileName));
+      console.log(`[arcgis-dropped] exported file rows:\n${describeExportedRows(arcgisFileRows)}`);
+      expect(arcgisFileRows.map(row => [row.ChangedColumn, row.Action])).toEqual([[SUMMARY_COLUMN_MARKER, 'I']]);
+      expect(
+        String(arcgisFileRows[0].Description).startsWith(`Uploaded ${seeded.fileName} (measurements, ${SourceFormat.arcgis_xlsx}): `),
+        String(arcgisFileRows[0].Description)
+      ).toBe(true);
+      const parkedRollups = arcgisExportRows.filter(row => row.ChangedTable === 'coremeasurements' && row.PrimaryKey === seeded.fileName);
+      expect(parkedRollups.map(row => [row.ChangedColumn, row.Action, row.Description])).toEqual([
+        [SUMMARY_COLUMN_MARKER, 'I', `Upload ${seeded.fileName}: added 1 measurement rows (batch ${batchID})`]
+      ]);
     } finally {
       executeQuerySpy.mockRestore();
     }

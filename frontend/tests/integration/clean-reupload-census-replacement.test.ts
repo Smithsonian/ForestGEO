@@ -94,6 +94,10 @@ import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { CENSUS_REPLACEMENT_STATEMENT } from '../setup/census-replacement-statement-patterns';
 import { startFreshUploadSession } from '../setup/upload-session-fixtures';
+import { classifyChangesAfter, describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
+import { NO_FILE_RECORDED_KEY, SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
+import { familyRootOf } from '@/lib/uploads/batch-family';
+import { BULK_CRUD_FILE_ID } from '@/lib/uploads/file-names';
 
 // ---------------------------------------------------------------------------
 // Fixture vocabulary
@@ -125,6 +129,7 @@ const CONTROL_FILE = 'control.csv';
 
 /** Attributes every DELETE-audit row this suite's cleanup runs write (#507). */
 const TEST_CHANGED_BY = 'clean-reupload-integration-test';
+const NO_EARLIER_CHANGE = 0;
 
 /** NULL-UploadBatchID legacy rows seeded into each CONTROL census. */
 const CONTROL_NULL_BATCH_ROW_COUNT = 2;
@@ -933,6 +938,68 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
       // into the audit trail — the parked-row shape, not just the ingested shape.
       const parkedAudit = auditRows.find(row => rowState(row.OldRowState).RawTreeTag !== null);
       expect(parkedAudit).toBeDefined();
+    }, 120000);
+
+    it('exports replacement deletes as rollups per original file, a no-file bucket, and field-level rows for manual entry (#592 D5)', async () => {
+      const MANUAL_ENTRY_SOURCE_ROW = 901;
+      const UNTAGGED_SOURCE_ROW = 902;
+      await seedFixture();
+      const [manualEntryInsert]: any = await connection.query(
+        `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+           UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, IsActive)
+         VALUES (?, NULL, FALSE, '2024-03-15', 3.0, 1.3, ?, 'manual-entry-batch', 'EXPORT-MANUAL', ?, 1)`,
+        [targetCensusID, BULK_CRUD_FILE_ID, MANUAL_ENTRY_SOURCE_ROW]
+      );
+      await connection.query(
+        `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+           UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, IsActive)
+         VALUES (?, NULL, FALSE, '2024-03-15', 4.0, 1.3, NULL, NULL, 'EXPORT-UNTAGGED', ?, 1)`,
+        [targetCensusID, UNTAGGED_SOURCE_ROW]
+      );
+      const manualEntryMeasurementID = String(manualEntryInsert.insertId);
+      const before = await countRows(targetCensusID, 'all');
+
+      await run();
+
+      const auditRows = await deleteAuditRows(targetCensusID);
+      expect(auditRows, 'one DELETE audit per replaced row, the two added rows included').toHaveLength(before);
+
+      const classified = (await classifyChangesAfter(connection, schema, NO_EARLIER_CHANGE)).filter(
+        change => change.tableName === 'coremeasurements' && change.operation === 'DELETE'
+      );
+      expect(classified).toHaveLength(before);
+      for (const change of classified) {
+        const isManualEntry = change.recordID === manualEntryMeasurementID;
+        expect(change, `delete of measurement ${change.recordID}`).toMatchObject({ isUploadPipelineRow: !isManualEntry, isDetailRow: isManualEntry });
+      }
+
+      // Expected groups, listed from the stored states and not from the queries under test.
+      const expectedGroups = new Map<string, number>();
+      for (const row of auditRows) {
+        const state = rowState(row.OldRowState);
+        if (state.UploadFileID === BULK_CRUD_FILE_ID) continue;
+        const fileKey = typeof state.UploadFileID === 'string' && state.UploadFileID !== '' ? state.UploadFileID : NO_FILE_RECORDED_KEY;
+        const batchKey = typeof state.UploadBatchID === 'string' && state.UploadBatchID !== '' ? familyRootOf(state.UploadBatchID) : '';
+        const groupKey = `${fileKey}|${batchKey}`;
+        expectedGroups.set(groupKey, (expectedGroups.get(groupKey) ?? 0) + 1);
+      }
+
+      const exportedRows = await exportedRowsForPlot(connection, schema, plotID);
+      const deleteRollups = exportedRows.filter(
+        row => row.ChangedTable === 'coremeasurements' && row.Action === 'D' && row.ChangedColumn === SUMMARY_COLUMN_MARKER
+      );
+      console.log(`[replacement export] expected groups ${JSON.stringify([...expectedGroups])}\n${describeExportedRows(deleteRollups)}`);
+      expect(deleteRollups, 'one D rollup per original file and base batch').toHaveLength(expectedGroups.size);
+      const removedByRollups = deleteRollups.reduce((total, row) => total + Number(/removed (\d+) measurements/.exec(String(row.Description))?.[1]), 0);
+      expect(removedByRollups, 'the rollups account for every upload-pipeline delete').toBe(before - 1);
+      expect(
+        deleteRollups.some(row => row.PrimaryKey === NO_FILE_RECORDED_KEY),
+        'the untagged row is in the no-file bucket'
+      ).toBe(true);
+
+      const manualEntryRows = exportedRows.filter(row => row.ChangedTable === 'coremeasurements' && row.PrimaryKey === manualEntryMeasurementID);
+      expect(manualEntryRows.length, 'a manually entered measurement removed by a replacement stays field-level').toBeGreaterThan(1);
+      expect(manualEntryRows.every(row => row.Action === 'D' && row.ChangedColumn !== SUMMARY_COLUMN_MARKER && row.New === '')).toBe(true);
     }, 120000);
 
     it('writes NO DELETE-audit rows for censuses this cleanup did not touch (#507 isolation)', async () => {
