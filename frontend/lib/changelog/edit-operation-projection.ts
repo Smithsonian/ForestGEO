@@ -21,9 +21,12 @@ export interface ProjectedChangelogRow {
   newRowState: ChangelogRowState | null;
 }
 
+/** Separates a row's primary key from the edit operation that changed it in `unifiedchangelog.RecordID`. */
+export const EDIT_OPERATION_RECORD_ID_MARKER = '::edit-op-';
+
 /** The edit-operation suffix keeps separate edits distinct and lets the backfill skip dual-written events. */
 function buildRecordID(primaryKeyValue: string | number, editOperationID: number): string {
-  return `${primaryKeyValue}::edit-op-${editOperationID}`;
+  return `${primaryKeyValue}${EDIT_OPERATION_RECORD_ID_MARKER}${editOperationID}`;
 }
 
 function stateRowKey(row: EditOperationStateRow): string {
