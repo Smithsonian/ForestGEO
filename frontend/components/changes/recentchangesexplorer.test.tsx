@@ -6,6 +6,7 @@ import RecentChangesExplorer, { summarizeChange } from './recentchangesexplorer'
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
 import { CHANGE_DATE_ZONE_LABEL, type ChangelogEntry } from '@/config/recentchangesexplorer';
 import { decodeChangelogRow } from '@/config/changelogdecode';
+import { CHANGE_EXPORT_FAILURE_MESSAGES } from '@/lib/changes/explorertransport';
 import { CHANGE_QUICK_SEARCH_MAX_LENGTH, EARLIEST_FILTER_DATE_YEAR, LATEST_FILTER_DATE_YEAR } from '@/lib/changes/explorerrequest';
 
 const FIRST_PLOT_ID = 1;
@@ -904,6 +905,227 @@ describe('RecentChangesExplorer: Quick Search length (#592 C4)', () => {
 
     expect(quickSearch.value, 'pasting one character too many keeps the first 500').toHaveLength(CHANGE_QUICK_SEARCH_MAX_LENGTH);
     await waitFor(() => expect(listRequests[listRequests.length - 1].filters.quickSearch).toHaveLength(CHANGE_QUICK_SEARCH_MAX_LENGTH));
+  });
+});
+
+describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
+  const OBJECT_URL = 'blob:recent-changes-test';
+  const EXPORT_URL = '/api/changes/explorer/export';
+  const SERVER_FILENAME = 'changelog-forestgeo_testing-plot1-2026-11-22.csv';
+  const SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN = 'server text that must not be shown';
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  let downloadedFilenames: string[];
+
+  // jsdom's URL has neither method, so they are assigned for the test and put back after it.
+  beforeEach(() => {
+    selection.plotID = FIRST_PLOT_ID;
+    downloadedFilenames = [];
+    URL.createObjectURL = vi.fn(() => OBJECT_URL);
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloadedFilenames.push(this.download);
+    });
+  });
+
+  afterEach(() => {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+    vi.restoreAllMocks();
+  });
+
+  function csvResponse(): Response {
+    return new Response('LogID\r\n1', { status: 200, headers: { 'Content-Disposition': `attachment; filename="${SERVER_FILENAME}"` } });
+  }
+
+  /** Serves an empty feed and answers every export request with `answerExport`, recording the export bodies and signals. */
+  function serveExport(answerExport: () => Promise<Response>) {
+    const exportBodies: Array<Record<string, unknown>> = [];
+    const exportSignals: Array<AbortSignal | null | undefined> = [];
+    const listRequests: ListRequestBody[] = [];
+    global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
+      if (url === '/api/changes/explorer/query') {
+        listRequests.push(JSON.parse(String(init?.body ?? '{}')));
+        return Promise.resolve(jsonResponse({ items: [], totalItems: 0, summary: { total: 0, updates: 0, inserts: 0, deletes: 0 }, hasMore: false }));
+      }
+      if (url === EXPORT_URL) {
+        exportBodies.push(JSON.parse(String(init?.body ?? '{}')));
+        exportSignals.push(init?.signal);
+        return answerExport();
+      }
+      return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+    }) as any;
+    return { exportBodies, exportSignals, listRequests };
+  }
+
+  async function renderAndWaitForFeed(listRequests: ListRequestBody[]) {
+    const view = render(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests.length).toBeGreaterThanOrEqual(1));
+    return view;
+  }
+
+  it('posts the current filters, dates included, shows a loading state, and downloads under the server’s filename', async () => {
+    const pendingExport = deferred<Response>();
+    const { exportBodies, listRequests } = serveExport(() => pendingExport.promise);
+    const user = userEvent.setup();
+    await renderAndWaitForFeed(listRequests);
+
+    fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-01' } });
+    fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
+    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: 'TREE-7' } });
+    const exportButton = screen.getByRole('button', { name: 'Export CSV' });
+    await user.click(exportButton);
+
+    await waitFor(() => expect(exportBodies).toHaveLength(1));
+    expect(exportBodies[0]).toMatchObject({
+      schema: 'forestgeo_testing',
+      plotID: FIRST_PLOT_ID,
+      filters: { operation: 'all', changedBy: '', tableName: '', quickSearch: 'TREE-7', changedFrom: '2026-11-01', changedTo: '2026-11-05' }
+    });
+    expect(exportButton, 'the button is busy while the export runs').toBeDisabled();
+    expect(downloadedFilenames, 'nothing downloads before the response arrives').toEqual([]);
+
+    await act(async () => {
+      pendingExport.resolve(csvResponse());
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(downloadedFilenames).toEqual([SERVER_FILENAME]));
+    await waitFor(() => expect(exportButton, 'the loading state clears').toBeEnabled());
+    expect(URL.revokeObjectURL, 'the object URL is released').toHaveBeenCalledWith(OBJECT_URL);
+    expect(screen.queryByTestId('recent-changes-export-alert')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      label: 'EXPORT_TOO_LARGE',
+      response: () => Response.json({ error: SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN, code: 'EXPORT_TOO_LARGE' }, { status: 413 }),
+      expected: CHANGE_EXPORT_FAILURE_MESSAGES.tooLarge
+    },
+    {
+      label: 'a 403 with no code',
+      response: () => Response.json({ error: SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN }, { status: 403 }),
+      expected: CHANGE_EXPORT_FAILURE_MESSAGES.forbidden
+    },
+    {
+      label: 'a 503 with no code',
+      response: () => Response.json({ error: SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN }, { status: 503 }),
+      expected: CHANGE_EXPORT_FAILURE_MESSAGES.unavailable
+    },
+    {
+      label: 'a 500 that is not JSON',
+      response: () => new Response('<html>Bad Gateway</html>', { status: 500 }),
+      expected: CHANGE_EXPORT_FAILURE_MESSAGES.generic
+    }
+  ])('shows its own alert for $label and no server text', async ({ response, expected }) => {
+    const { listRequests } = serveExport(async () => response());
+    const user = userEvent.setup();
+    await renderAndWaitForFeed(listRequests);
+
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+
+    const alert = await screen.findByTestId('recent-changes-export-alert');
+    expect(alert).toHaveTextContent(expected);
+    expect(alert).not.toHaveTextContent(SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN);
+    expect(downloadedFilenames, 'a failed export downloads nothing').toEqual([]);
+    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeEnabled();
+  });
+
+  it('keeps the export alert when the list refreshes', async () => {
+    const { listRequests } = serveExport(async () => Response.json({ code: 'EXPORT_TOO_LARGE' }, { status: 413 }));
+    const user = userEvent.setup();
+    await renderAndWaitForFeed(listRequests);
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    await screen.findByTestId('recent-changes-export-alert');
+    const listRequestsBefore = listRequests.length;
+
+    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: 'narrower' } });
+    await waitFor(() => expect(listRequests.length).toBeGreaterThan(listRequestsBefore));
+
+    expect(screen.getByTestId('recent-changes-export-alert'), 'a list refresh clears the list error only').toHaveTextContent(
+      CHANGE_EXPORT_FAILURE_MESSAGES.tooLarge
+    );
+  });
+
+  it('downloads nothing when the response arrives after the plot changed', async () => {
+    const pendingExport = deferred<Response>();
+    const { exportBodies, exportSignals, listRequests } = serveExport(() => pendingExport.promise);
+    const user = userEvent.setup();
+    const { rerender } = await renderAndWaitForFeed(listRequests);
+
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    await waitFor(() => expect(exportBodies).toHaveLength(1));
+
+    selection.plotID = SECOND_PLOT_ID;
+    rerender(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests[listRequests.length - 1].plotID).toBe(SECOND_PLOT_ID));
+    expect(exportSignals[0]?.aborted, 'the export request is aborted when the plot changes').toBe(true);
+
+    await act(async () => {
+      pendingExport.resolve(csvResponse());
+      await Promise.resolve();
+    });
+
+    expect(downloadedFilenames, 'plot 1’s CSV must not download on plot 2').toEqual([]);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Export CSV' }), 'the new plot starts with an idle button').toBeEnabled();
+  });
+
+  it('aborts the export and downloads nothing when the explorer unmounts', async () => {
+    const pendingExport = deferred<Response>();
+    const { exportBodies, exportSignals, listRequests } = serveExport(() => pendingExport.promise);
+    const user = userEvent.setup();
+    const { unmount } = await renderAndWaitForFeed(listRequests);
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    await waitFor(() => expect(exportBodies).toHaveLength(1));
+
+    unmount();
+    expect(exportSignals[0]?.aborted, 'leaving the page aborts the export request').toBe(true);
+
+    await act(async () => {
+      pendingExport.resolve(csvResponse());
+      await Promise.resolve();
+    });
+
+    expect(downloadedFilenames, 'an unmounted explorer must not download').toEqual([]);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('does not export while From is after To', async () => {
+    const { exportBodies, listRequests } = serveExport(async () => csvResponse());
+    await renderAndWaitForFeed(listRequests);
+
+    fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
+    fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-06' } });
+
+    expect(await screen.findByText('From must be on or before To.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled();
+    expect(exportBodies).toEqual([]);
+  });
+
+  it.each([
+    { label: 'From', controlLabel: FROM_LABEL },
+    { label: 'To', controlLabel: TO_LABEL }
+  ])('does not export while $label holds a date the request contract rejects, and exports once it is corrected', async ({ controlLabel }) => {
+    const { exportBodies, listRequests } = serveExport(async () => csvResponse());
+    const user = userEvent.setup();
+    await renderAndWaitForFeed(listRequests);
+    const dateInput = screen.getByLabelText(controlLabel);
+
+    fireEvent.change(dateInput, { target: { value: FIVE_DIGIT_YEAR_DATE } });
+
+    expect(await screen.findByText(UNFILTERABLE_DATE_MESSAGE)).toBeInTheDocument();
+    const exportButton = screen.getByRole('button', { name: 'Export CSV' });
+    expect(exportButton, `Export stays off while ${controlLabel} is ${FIVE_DIGIT_YEAR_DATE}`).toBeDisabled();
+    fireEvent.click(exportButton);
+    expect(exportBodies, 'a disabled button posts nothing').toEqual([]);
+
+    fireEvent.change(dateInput, { target: { value: '2026-11-06' } });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    await user.click(exportButton);
+    await waitFor(() => expect(exportBodies).toHaveLength(1));
   });
 });
 

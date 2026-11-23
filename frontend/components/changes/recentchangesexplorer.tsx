@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, Card, Chip, FormControl, FormHelperText, FormLabel, Input, Option, Select, Sheet, Skeleton, Stack, Typography } from '@mui/joy';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
@@ -31,6 +32,7 @@ import {
 } from '@/config/changelogdecode';
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
 import { CHANGE_QUICK_SEARCH_MAX_LENGTH, EARLIEST_FILTER_DATE_YEAR, LATEST_FILTER_DATE_YEAR, isFilterableDate } from '@/lib/changes/explorerrequest';
+import { changeExportFailureMessage, CHANGE_EXPORT_FAILURE_MESSAGES, ChangeExportRequestError, postRecentChangesExport } from '@/lib/changes/explorertransport';
 import moment from 'moment';
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -416,6 +418,7 @@ const CHANGED_FROM_HELPER_TEXT_ID = `${CHANGED_FROM_CONTROL_ID}-helper-text`;
 const DATE_RANGE_HELPER_TEXT_ID = `${CHANGED_TO_CONTROL_ID}-helper-text`;
 const CHANGED_FROM_LABEL = `From (${CHANGE_DATE_ZONE_LABEL})`;
 const CHANGED_TO_LABEL = `To (${CHANGE_DATE_ZONE_LABEL})`;
+const EXPORT_BUTTON_LABEL = 'Export CSV';
 
 function scopeKey(schemaName: string, plotID: number): string {
   return `${schemaName}:${plotID}`;
@@ -432,6 +435,8 @@ export default function RecentChangesExplorer() {
   const itemsAbortRef = useRef<AbortController | null>(null);
   const facetsRequestRef = useRef(0);
   const itemsRequestRef = useRef(0);
+  const exportAbortRef = useRef<AbortController | null>(null);
+  const exportRequestRef = useRef(0);
   const loadedScopeRef = useRef<string | null>(null);
 
   const [filters, setFilters] = useState<RecentChangesFilters>(DEFAULT_RECENT_CHANGES_FILTERS);
@@ -444,6 +449,9 @@ export default function RecentChangesExplorer() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [_loadingFacets, setLoadingFacets] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  // Kept apart from errorMessage: a list refresh clears that one, and must not wipe an export failure.
+  const [exportErrorMessage, setExportErrorMessage] = useState<string | null>(null);
 
   const updateFilters = useCallback((updater: (prev: RecentChangesFilters) => RecentChangesFilters) => {
     setFilters(prev => updater(prev));
@@ -564,6 +572,53 @@ export default function RecentChangesExplorer() {
     [currentSite?.schemaName, currentPlot?.plotID, filters, dateFiltersUnsendable]
   );
 
+  const handleExport = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || dateFiltersUnsendable) return;
+    exportAbortRef.current?.abort();
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    const requestID = ++exportRequestRef.current;
+    setExporting(true);
+    setExportErrorMessage(null);
+    let objectUrl: string | null = null;
+    let anchor: HTMLAnchorElement | null = null;
+
+    try {
+      const { blob, filename } = await postRecentChangesExport({ schema: currentSite.schemaName, plotID: currentPlot.plotID }, filters, controller.signal);
+      if (exportRequestRef.current !== requestID || controller.signal.aborted) return;
+      objectUrl = URL.createObjectURL(blob);
+      anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+    } catch (error: unknown) {
+      if (isAbortError(error) || exportRequestRef.current !== requestID) return;
+      setExportErrorMessage(error instanceof ChangeExportRequestError ? changeExportFailureMessage(error) : CHANGE_EXPORT_FAILURE_MESSAGES.generic);
+    } finally {
+      anchor?.remove();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (exportRequestRef.current === requestID) {
+        setExporting(false);
+        if (exportAbortRef.current === controller) {
+          exportAbortRef.current = null;
+        }
+      }
+    }
+  }, [currentSite?.schemaName, currentPlot?.plotID, filters, dateFiltersUnsendable]);
+
+  // An export belongs to the site and plot it was started for: leaving them, or the page, discards it.
+  // The abort only drops the client's result; the server finishes its read.
+  useEffect(() => {
+    return () => {
+      exportAbortRef.current?.abort();
+      exportAbortRef.current = null;
+      exportRequestRef.current += 1;
+      setExporting(false);
+      setExportErrorMessage(null);
+    };
+  }, [currentSite?.schemaName, currentPlot?.plotID]);
+
   useEffect(() => {
     return () => {
       facetsAbortRef.current?.abort();
@@ -604,6 +659,12 @@ export default function RecentChangesExplorer() {
       {errorMessage && (
         <Alert color="danger" startDecorator={<ReportProblemOutlinedIcon />}>
           {errorMessage}
+        </Alert>
+      )}
+
+      {exportErrorMessage && (
+        <Alert color="danger" startDecorator={<ReportProblemOutlinedIcon />} data-testid="recent-changes-export-alert">
+          {exportErrorMessage}
         </Alert>
       )}
 
@@ -735,6 +796,18 @@ export default function RecentChangesExplorer() {
               {changedToUnfilterable && <FormHelperText>{UNFILTERABLE_DATE_MESSAGE}</FormHelperText>}
               {dateRangeInverted && <FormHelperText>{DATE_RANGE_INVERTED_MESSAGE}</FormHelperText>}
             </FormControl>
+
+            <Button
+              variant="outlined"
+              color="neutral"
+              startDecorator={<FileDownloadOutlinedIcon />}
+              onClick={handleExport}
+              loading={exporting}
+              disabled={dateFiltersUnsendable}
+              sx={{ alignSelf: { xs: 'flex-start', md: 'flex-end' } }}
+            >
+              {EXPORT_BUTTON_LABEL}
+            </Button>
           </Stack>
         </Stack>
       </Sheet>
