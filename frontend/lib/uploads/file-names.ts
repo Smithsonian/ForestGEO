@@ -8,6 +8,12 @@ import path from 'path';
  */
 export const MAX_MEASUREMENT_FILE_ID_LENGTH = 50;
 
+/**
+ * The UploadFileID every View Data manual-entry submit (/api/bulkcrud) stages its rows under.
+ * The change-log export reads it to keep manually entered measurements field-level (#592 D5).
+ */
+export const BULK_CRUD_FILE_ID = 'sample_bulk_insert.csv';
+
 /** MySQL VARCHAR length is measured in characters, not UTF-16 code units. */
 export function measurementFileIDLength(fileName: string): number {
   return Array.from(fileName).length;

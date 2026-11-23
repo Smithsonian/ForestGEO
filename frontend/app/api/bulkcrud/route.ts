@@ -14,13 +14,12 @@ import { assertSchemaAccess } from '@/lib/authz';
 import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
 import { recordCommittedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { BULK_CRUD_FILE_ID } from '@/lib/uploads/file-names';
 import { BULKCRUD_REJECTION_MESSAGES, findMissingBulkcrudContext, isMeasurementGridType } from '@/lib/bulkcrud/required-context';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
-
-const BULK_CRUD_FILE_ID = 'sample_bulk_insert.csv';
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
