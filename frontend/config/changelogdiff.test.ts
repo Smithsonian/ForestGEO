@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeDiff, DiffEntry } from './changelogdiff';
+import { computeDiff, DiffEntry, EXCLUDED_FIELDS, recordedFieldNames } from './changelogdiff';
 
 describe('computeDiff', () => {
   it('returns empty array when both states are null', () => {
@@ -30,12 +30,16 @@ describe('computeDiff', () => {
     ]);
   });
 
-  it('excludes internal metadata fields', () => {
-    const oldState = { id: 1, changeID: 100, plotID: 5, censusID: 2, MeasuredDBH: 12.5 };
-    const newState = { id: 2, changeID: 101, plotID: 5, censusID: 3, MeasuredDBH: 14.2 };
+  it('excludes record ids and still reports a real plot or census change (#592 D8)', () => {
+    const oldState = { id: 1, changeID: 100, ChangeID: 100, plotID: 5, PlotID: 5, censusID: 2, CensusID: 2, MeasuredDBH: 12.5 };
+    const newState = { id: 2, changeID: 101, ChangeID: 101, plotID: 5, PlotID: 6, censusID: 3, CensusID: 2, MeasuredDBH: 14.2 };
     const result = computeDiff(oldState, newState);
 
-    expect(result).toEqual([{ field: 'MeasuredDBH', oldValue: 12.5, newValue: 14.2 }]);
+    expect(result, 'id and ChangeID stay hidden; an unchanged plotID or CensusID is no difference').toEqual([
+      { field: 'censusID', oldValue: 2, newValue: 3 },
+      { field: 'MeasuredDBH', oldValue: 12.5, newValue: 14.2 },
+      { field: 'PlotID', oldValue: 5, newValue: 6 }
+    ]);
   });
 
   it('detects field added in new state', () => {
@@ -77,5 +81,28 @@ describe('computeDiff', () => {
     const result = computeDiff(oldState, newState);
 
     expect(result).toEqual([{ field: 'MeasuredDBH', oldValue: 12.5, newValue: 14.2 }]);
+  });
+});
+
+describe('EXCLUDED_FIELDS', () => {
+  it('hides record ids and row timestamps, and nothing else', () => {
+    expect([...EXCLUDED_FIELDS].sort()).toEqual(['ChangeID', 'CreatedAt', 'UpdatedAt', 'changeID', 'createdAt', 'id', 'updatedAt']);
+  });
+});
+
+describe('recordedFieldNames', () => {
+  it('lists the fields that hold a value, alphabetically, without excluded or empty ones', () => {
+    const image = { TreeTag: 'T1', SpeciesID: 4, CensusID: 2, Note: null, Missing: undefined, id: 9, UpdatedAt: '2026-01-01', IsActive: 0, Comment: '' };
+    expect(recordedFieldNames(image), 'zero and the empty string are values; null and undefined are not').toEqual([
+      'CensusID',
+      'Comment',
+      'IsActive',
+      'SpeciesID',
+      'TreeTag'
+    ]);
+  });
+
+  it('returns nothing for an image holding only excluded or empty fields', () => {
+    expect(recordedFieldNames({ id: 1, CreatedAt: 'x', Note: null })).toEqual([]);
   });
 });
