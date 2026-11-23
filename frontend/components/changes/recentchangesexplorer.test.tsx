@@ -4,7 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RecentChangesExplorer, { summarizeChange } from './recentchangesexplorer';
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
-import { CHANGE_DATE_ZONE_LABEL, type ChangelogEntry } from '@/config/recentchangesexplorer';
+import { CHANGE_DATE_ZONE_LABEL, CHANGE_EXPORT_ERROR_CODES, type ChangelogEntry } from '@/config/recentchangesexplorer';
+import { HTTPResponses } from '@/config/macros';
 import { decodeChangelogRow } from '@/config/changelogdecode';
 import { CHANGE_EXPORT_FAILURE_MESSAGES } from '@/lib/changes/explorertransport';
 import { CHANGE_QUICK_SEARCH_MAX_LENGTH, EARLIEST_FILTER_DATE_YEAR, LATEST_FILTER_DATE_YEAR } from '@/lib/changes/explorerrequest';
@@ -1049,6 +1050,59 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     expect(screen.getByTestId('recent-changes-export-alert'), 'a list refresh clears the list error only').toHaveTextContent(
       CHANGE_EXPORT_FAILURE_MESSAGES.tooLarge
     );
+  });
+
+  it('shows the generic alert when the request itself fails, with no HTTP status to read', async () => {
+    const { listRequests } = serveExport(() => Promise.reject(new TypeError('Failed to fetch')));
+    const user = userEvent.setup();
+    await renderAndWaitForFeed(listRequests);
+
+    await user.click(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }));
+
+    const alert = await screen.findByTestId('recent-changes-export-alert');
+    expect(alert).toHaveTextContent(CHANGE_EXPORT_FAILURE_MESSAGES.generic);
+    expect(alert, 'the browser’s own error text is not shown either').not.toHaveTextContent('Failed to fetch');
+    expect(downloadedFilenames).toEqual([]);
+    expect(screen.getByRole('button', { name: EXPORT_BUTTON_NAME })).toBeEnabled();
+  });
+
+  it('clears the previous export alert as soon as a new export starts', async () => {
+    const pendingSecondExport = deferred<Response>();
+    let exportRequestCount = 0;
+    const { exportBodies, listRequests } = serveExport(async () => {
+      exportRequestCount += 1;
+      if (exportRequestCount === 1) return Response.json({ code: CHANGE_EXPORT_ERROR_CODES.tooLarge }, { status: HTTPResponses.PAYLOAD_TOO_LARGE });
+      return pendingSecondExport.promise;
+    });
+    const user = userEvent.setup();
+    await renderAndWaitForFeed(listRequests);
+    await user.click(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }));
+    await screen.findByTestId('recent-changes-export-alert');
+
+    await user.click(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }));
+    await waitFor(() => expect(exportBodies).toHaveLength(2));
+
+    expect(screen.queryByTestId('recent-changes-export-alert'), 'the old failure is gone while the new export is still running').not.toBeInTheDocument();
+    await act(async () => {
+      pendingSecondExport.resolve(csvResponse());
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(downloadedFilenames).toEqual([SERVER_FILENAME]));
+    expect(screen.queryByTestId('recent-changes-export-alert')).not.toBeInTheDocument();
+  });
+
+  it('clears the export alert when the plot changes', async () => {
+    const { listRequests } = serveExport(async () => Response.json({ code: CHANGE_EXPORT_ERROR_CODES.tooLarge }, { status: HTTPResponses.PAYLOAD_TOO_LARGE }));
+    const user = userEvent.setup();
+    const { rerender } = await renderAndWaitForFeed(listRequests);
+    await user.click(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }));
+    await screen.findByTestId('recent-changes-export-alert');
+
+    selection.plotID = SECOND_PLOT_ID;
+    rerender(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests[listRequests.length - 1].plotID).toBe(SECOND_PLOT_ID));
+
+    expect(screen.queryByTestId('recent-changes-export-alert'), 'plot 1’s failure must not stay on plot 2').not.toBeInTheDocument();
   });
 
   it('downloads nothing when the response arrives after the plot changed', async () => {
