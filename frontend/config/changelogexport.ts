@@ -286,34 +286,25 @@ function summaryDraft(scope: DraftScope, primaryKey: string, descriptor: ChangeD
   return { ...scope, primaryKey, changedColumn: SUMMARY_COLUMN_MARKER, oldValue: null, newValue: null, descriptor };
 }
 
-function* expandRecord(
-  operation: ChangeOperationName,
-  scope: DraftScope,
-  record: ChangelogRecord,
-  editOperationID: string | null
-): Generator<ChangeExportDraft> {
+function expandRecord(operation: ChangeOperationName, scope: DraftScope, record: ChangelogRecord, editOperationID: string | null): ChangeExportDraft[] {
   const identity: RecordIdentity = { table: scope.changedTable, primaryKey: record.primaryKey, editOperationID };
 
   if (operation === 'UPDATE' && record.oldState !== null && record.newState !== null) {
-    for (const diff of computeDiff(record.oldState, record.newState)) {
-      yield {
-        ...scope,
-        primaryKey: record.primaryKey,
-        changedColumn: diff.field,
-        oldValue: diff.oldValue,
-        newValue: diff.newValue,
-        descriptor: { kind: 'field-update', column: diff.field, oldValue: diff.oldValue, newValue: diff.newValue, ...identity }
-      };
-    }
-    return;
+    return computeDiff(record.oldState, record.newState).map(diff => ({
+      ...scope,
+      primaryKey: record.primaryKey,
+      changedColumn: diff.field,
+      oldValue: diff.oldValue,
+      newValue: diff.newValue,
+      descriptor: { kind: 'field-update', column: diff.field, oldValue: diff.oldValue, newValue: diff.newValue, ...identity }
+    }));
   }
 
   const valuesAreNew = operation === 'INSERT' || (operation === 'UPDATE' && record.oldState === null);
   const image = valuesAreNew ? record.newState : record.oldState;
   const fields = image === null ? [] : recordedFieldNames(image);
   if (image === null || fields.length === 0) {
-    yield summaryDraft(scope, record.primaryKey, { kind: 'no-field-values', operation, ...identity });
-    return;
+    return [summaryDraft(scope, record.primaryKey, { kind: 'no-field-values', operation, ...identity })];
   }
 
   const descriptor: ChangeDescriptor =
@@ -323,24 +314,21 @@ function* expandRecord(
         ? { kind: 'record-deleted', ...identity }
         : { kind: valuesAreNew ? 'prior-state-missing' : 'new-state-missing', ...identity };
 
-  for (const field of fields) {
-    yield {
-      ...scope,
-      primaryKey: record.primaryKey,
-      changedColumn: field,
-      oldValue: valuesAreNew ? null : image[field],
-      newValue: valuesAreNew ? image[field] : null,
-      descriptor
-    };
-  }
+  return fields.map(field => ({
+    ...scope,
+    primaryKey: record.primaryKey,
+    changedColumn: field,
+    oldValue: valuesAreNew ? null : image[field],
+    newValue: valuesAreNew ? image[field] : null,
+    descriptor
+  }));
 }
 
 /**
- * Turns one source change into its CSV rows (spec §6.2, first matching rule wins), one field at a
- * time, so a caller with a row ceiling can stop before the rest of a large change is expanded. Yields
- * nothing when the change is suppressed: every record was a paired update with no visible difference.
+ * Turns one source change into its CSV rows (spec §6.2, first matching rule wins). An empty
+ * result means the change is suppressed: every record was a paired update with no visible difference.
  */
-export function* iterateChangeRows(change: ExportSourceChange): Generator<ChangeExportDraft> {
+export function expandChange(change: ExportSourceChange): ChangeExportDraft[] {
   const { records, undecodable } = decodeChangelogRow(change);
   const { editOperationID } = splitEditOperationRecordID(change.recordID);
   const soleNewState = records.length === 1 ? records[0].newState : null;
@@ -355,25 +343,21 @@ export function* iterateChangeRows(change: ExportSourceChange): Generator<Change
   };
 
   if (soleNewState !== null && soleNewState[STATE_KEYS.summaryKind] === BULK_REVISION_SUMMARY_KIND) {
-    yield summaryDraft(scope, records[0].primaryKey, { kind: 'bulk-revision', summary: soleNewState, editOperationID });
-    return;
+    return [summaryDraft(scope, records[0].primaryKey, { kind: 'bulk-revision', summary: soleNewState, editOperationID })];
   }
   if (change.tableName === FILE_UPLOAD_CHANGELOG_TABLE) {
-    yield summaryDraft(scope, change.recordID, { kind: 'file-upload', recordID: change.recordID, state: soleNewState });
-    return;
+    return [summaryDraft(scope, change.recordID, { kind: 'file-upload', recordID: change.recordID, state: soleNewState })];
   }
   if (change.tableName === QUADRAT_OVERLAP_ACKNOWLEDGMENT_CHANGELOG_TABLE) {
-    yield summaryDraft(scope, change.recordID, { kind: 'quadrat-overlap-acknowledgment', recordID: change.recordID, state: soleNewState });
-    return;
+    return [summaryDraft(scope, change.recordID, { kind: 'quadrat-overlap-acknowledgment', recordID: change.recordID, state: soleNewState })];
   }
   if (undecodable || records.length === 0) {
-    yield summaryDraft(scope, change.recordID, { kind: 'images-unavailable', operation: change.operation, table: change.tableName, recordID: change.recordID });
-    return;
+    return [
+      summaryDraft(scope, change.recordID, { kind: 'images-unavailable', operation: change.operation, table: change.tableName, recordID: change.recordID })
+    ];
   }
-  for (const record of records) yield* expandRecord(change.operation, scope, record, editOperationID);
+  return records.flatMap(record => expandRecord(change.operation, scope, record, editOperationID));
 }
-
-export const expandChange = (change: ExportSourceChange): ChangeExportDraft[] => [...iterateChangeRows(change)];
 
 export function buildUploadRollupDraft(group: UploadRollupGroup): ChangeExportDraft {
   return {

@@ -1,5 +1,5 @@
 import Papa from 'papaparse';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   buildChangeExportFilename,
   buildUploadRollupDraft,
@@ -7,7 +7,6 @@ import {
   compareExportDrafts,
   describeChange,
   expandChange,
-  iterateChangeRows,
   EXPORT_COLUMNS,
   FILTERED_COUNT_SUFFIX,
   NO_FILE_RECORDED_KEY,
@@ -21,8 +20,6 @@ import {
   type ForeignKeyLabelMap,
   type UploadRollupGroup
 } from '@/config/changelogexport';
-import * as changelogDiff from '@/config/changelogdiff';
-import type { DiffEntry } from '@/config/changelogdiff';
 import { BULK_REVISION_SUMMARY_KIND, EDIT_OPERATION_RECORD_ID_MARKER } from '@/lib/changelog/edit-operation-projection';
 
 const EXPORT_COLUMN_COUNT = 13;
@@ -289,86 +286,6 @@ describe('expandChange: rule precedence (spec §6.2)', () => {
         [100, '2', 10, 30]
       ]
     );
-  });
-});
-
-describe('iterateChangeRows: drafts are built one field at a time', () => {
-  const FIELD_NAMES = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
-  const FIRST_FIELD = FIELD_NAMES[0];
-  const LAST_FIELD = FIELD_NAMES[FIELD_NAMES.length - 1];
-
-  /** An image whose every field counts how often its value is read, so draft construction is observable. */
-  function countingImage(): { image: Record<string, unknown>; readsOf: (field: string) => number } {
-    const reads = new Map<string, number>(FIELD_NAMES.map(field => [field, 0]));
-    const image: Record<string, unknown> = {};
-    for (const field of FIELD_NAMES) {
-      Object.defineProperty(image, field, {
-        enumerable: true,
-        get: () => {
-          reads.set(field, (reads.get(field) ?? 0) + 1);
-          return `${field}-value`;
-        }
-      });
-    }
-    return { image, readsOf: field => reads.get(field) ?? 0 };
-  }
-
-  /** Reads of one field that happen before any draft is built: the visibility filter reads each value. */
-  function readsWhileListingFieldNames(field: string): number {
-    const probe = countingImage();
-    changelogDiff.recordedFieldNames(probe.image);
-    return probe.readsOf(field);
-  }
-
-  it.each([
-    ['INSERT', 'newRowState'],
-    ['DELETE', 'oldRowState']
-  ] as const)('a %s of a multi-field record builds only the draft the caller asked for', (operation, imageKey) => {
-    const { image, readsOf } = countingImage();
-    const rows = iterateChangeRows(change({ operation, tableName: 'trees', recordID: '41', [imageKey]: image }));
-
-    const first = rows.next();
-
-    expect(first.done).toBe(false);
-    expect((first.value as ChangeExportDraft).changedColumn).toBe(FIRST_FIELD);
-    expect(
-      readsOf(FIRST_FIELD),
-      `the first draft reads the first field's value once on top of the ${readsWhileListingFieldNames(FIRST_FIELD)} reads that list the field names`
-    ).toBe(readsWhileListingFieldNames(FIRST_FIELD) + 1);
-    expect(
-      readsOf(LAST_FIELD),
-      `after one draft the last field must only have been read while listing field names (${readsWhileListingFieldNames(LAST_FIELD)}); a further read means its draft was already built`
-    ).toBe(readsWhileListingFieldNames(LAST_FIELD));
-  });
-
-  it('a paired UPDATE builds only the draft the caller asked for', () => {
-    const draftReads = new Map<string, number>(FIELD_NAMES.map(field => [field, 0]));
-    const countedDiffs: DiffEntry[] = FIELD_NAMES.map(field => ({
-      field,
-      get oldValue() {
-        draftReads.set(field, (draftReads.get(field) ?? 0) + 1);
-        return 'before';
-      },
-      newValue: 'after'
-    }));
-    const computeDiffSpy = vi.spyOn(changelogDiff, 'computeDiff').mockReturnValue(countedDiffs);
-    try {
-      const rows = iterateChangeRows(change({ operation: 'UPDATE', recordID: '41', oldRowState: { a: 1 }, newRowState: { a: 2 } }));
-
-      const first = rows.next();
-
-      expect((first.value as ChangeExportDraft).changedColumn).toBe(FIRST_FIELD);
-      expect(draftReads.get(FIRST_FIELD), 'the first field has a draft').toBeGreaterThan(0);
-      expect(draftReads.get(LAST_FIELD), 'the last field has had no draft built after one row was asked for').toBe(0);
-    } finally {
-      computeDiffSpy.mockRestore();
-    }
-  });
-
-  it('expandChange still returns every field of the record', () => {
-    const { image } = countingImage();
-    const drafts = expandChange(change({ operation: 'INSERT', recordID: '41', newRowState: image }));
-    expect(drafts.map(draft => draft.changedColumn)).toEqual(FIELD_NAMES);
   });
 });
 

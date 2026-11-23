@@ -12,7 +12,7 @@ import {
   buildUploadRollupDraft,
   collectForeignKeyReferences,
   compareExportDrafts,
-  iterateChangeRows,
+  expandChange,
   FOREIGN_KEY_COLUMNS,
   FOREIGN_KEY_LABELS,
   toExportCells,
@@ -326,12 +326,9 @@ export async function collectChangeExport(
     const page: ExportSourceChange[] = await runStage('detail', readDetailPage(conn, scope.schema, filter, cursor, limits.pageSize));
     for (const change of page) {
       detailChangeCount += 1;
-      let producedRow = false;
-      for (const draft of iterateChangeRows(change)) {
-        producedRow = true;
-        appendRow(draft);
-      }
-      if (!producedRow) suppressedChangeCount += 1;
+      const expanded = expandChange(change);
+      if (expanded.length === 0) suppressedChangeCount += 1;
+      expanded.forEach(appendRow);
     }
     moreDetailPages = page.length === limits.pageSize;
     if (moreDetailPages) {
