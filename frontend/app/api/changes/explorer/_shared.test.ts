@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildChangeFilter as sharedBuildChangeFilter, queryRecentChanges } from './_shared';
-import { buildChangeFilter } from '@/lib/changes/changefilter';
+import { queryRecentChanges } from './_shared';
 import { DEFAULT_RECENT_CHANGES_FILTERS, type FeedItem } from '@/config/recentchangesexplorer';
 
 const PLOT_ID = 1;
@@ -181,10 +180,6 @@ describe('queryRecentChanges: whole-row decoding', () => {
 });
 
 describe('queryRecentChanges: one filter for every list query', () => {
-  it('re-exports the shared builder, so the route module and the export use the same function', () => {
-    expect(sharedBuildChangeFilter).toBe(buildChangeFilter);
-  });
-
   it('applies the date bounds and the ChangeID search to the rows, the count and the summary alike', async () => {
     const connection = buildConnection([]);
     const filters = { ...DEFAULT_RECENT_CHANGES_FILTERS, quickSearch: '#4821', changedFrom: '2026-11-01', changedTo: '2026-11-05' };

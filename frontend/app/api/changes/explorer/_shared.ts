@@ -13,8 +13,6 @@ import {
   RecentChangesQueryResponse
 } from '@/config/recentchangesexplorer';
 
-export { buildChangeFilter, type ChangeFilter } from '@/lib/changes/changefilter';
-
 type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
 
 const CHANGELOG_ORDER_BY = 'ORDER BY uc.ChangeTimestamp DESC, uc.ChangeID DESC';
