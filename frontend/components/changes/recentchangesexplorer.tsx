@@ -532,7 +532,7 @@ export default function RecentChangesExplorer() {
       itemsAbortRef.current?.abort();
       const requestedScope = scopeKey(currentSite.schemaName, currentPlot.plotID);
       if (dateFiltersUnsendable) {
-        if (loadedScopeRef.current !== null && loadedScopeRef.current !== requestedScope) {
+        if (loadedScopeRef.current !== requestedScope) {
           loadedScopeRef.current = null;
           setItems([]);
           setSummary(DEFAULT_SUMMARY);

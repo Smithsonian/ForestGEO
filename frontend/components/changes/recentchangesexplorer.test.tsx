@@ -752,6 +752,7 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     const PLOT_ONE_TOTAL = 7;
     const INVERTED_FROM = '2026-11-06';
     const INVERTED_TO = '2026-11-05';
+    const PLOT_ONE_QUERY_ERROR = `Query request failed: ${HTTPResponses.INTERNAL_SERVER_ERROR}`;
 
     function servePlotOneFeed(): { listRequests: ListRequestBody[] } {
       const listRequests: ListRequestBody[] = [];
@@ -816,6 +817,32 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
       await waitFor(() => expect(screen.queryByText(PLOT_ONE_TABLE)).not.toBeInTheDocument());
       expect(totalChangesCount()).toBe('0');
       expect(listRequests).toHaveLength(1);
+    });
+
+    it('clears the error of a plot whose list never loaded when the plot changes under an inverted range, and sends no request', async () => {
+      const listRequests: ListRequestBody[] = [];
+      global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
+        if (url === '/api/changes/explorer/query') {
+          listRequests.push(JSON.parse(String(init?.body ?? '{}')));
+          return Promise.resolve({ ok: false, status: HTTPResponses.INTERNAL_SERVER_ERROR, json: async () => ({}) });
+        }
+        return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+      }) as unknown as typeof fetch;
+      const { rerender } = render(<RecentChangesExplorer />);
+      await screen.findByText(PLOT_ONE_QUERY_ERROR);
+      fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: INVERTED_TO } });
+      await waitFor(() => expect(listRequests).toHaveLength(2));
+      fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: INVERTED_FROM } });
+      await screen.findByText('From must be on or before To.');
+      const requestsBeforeSwitch = listRequests.length;
+
+      selection.plotID = SECOND_PLOT_ID;
+      rerender(<RecentChangesExplorer />);
+
+      await waitFor(() => expect(screen.queryByText(PLOT_ONE_QUERY_ERROR), 'plot 1 error must not stay under plot 2').not.toBeInTheDocument());
+      expect(listRequests, `list requests sent while the range is inverted: ${JSON.stringify(listRequests)}`).toHaveLength(requestsBeforeSwitch);
     });
 
     it('keeps the list on screen when the range is inverted on the same plot', async () => {
