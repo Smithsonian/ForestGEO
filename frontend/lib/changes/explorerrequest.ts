@@ -15,6 +15,9 @@ export const INVALID_RECENT_CHANGES_REQUEST_RESPONSE = { error: 'Invalid recent 
 
 const CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const NO_DATE_BOUND = '';
+/** MySQL's DATE_ADD(day, INTERVAL 1 DAY) is NULL past 9999-12-31, which would make a To of that day match nothing. */
+export const LATEST_FILTER_DATE_YEAR = 9998;
+const YEAR_PREFIX_LENGTH = 4;
 
 /** True for a day that exists: `2026-02-30` has the right shape and is not a date. */
 export function isCalendarDate(value: string): boolean {
@@ -23,9 +26,13 @@ export function isCalendarDate(value: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value);
 }
 
+function isFilterableDate(value: string): boolean {
+  return isCalendarDate(value) && Number(value.slice(0, YEAR_PREFIX_LENGTH)) <= LATEST_FILTER_DATE_YEAR;
+}
+
 const dateBound = z
   .string()
-  .refine(value => value === NO_DATE_BOUND || isCalendarDate(value), 'Expected a calendar date YYYY-MM-DD')
+  .refine(value => value === NO_DATE_BOUND || isFilterableDate(value), 'Expected a calendar date YYYY-MM-DD')
   .optional()
   .default(DEFAULT_RECENT_CHANGES_FILTERS.changedFrom);
 

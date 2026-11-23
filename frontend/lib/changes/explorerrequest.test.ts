@@ -5,6 +5,7 @@ import { DEFAULT_RECENT_CHANGES_FILTERS, type RecentChangesServerFilters } from 
 import {
   CHANGE_QUICK_SEARCH_MAX_LENGTH,
   CHANGE_TABLE_NAME_MAX_LENGTH,
+  LATEST_FILTER_DATE_YEAR,
   isCalendarDate,
   recentChangesQueryRequestSchema,
   RECENT_CHANGES_DEFAULT_PAGE_SIZE,
@@ -154,6 +155,14 @@ describe('recent changes request contract: date bounds', () => {
   it('accepts a one-day range and rejects from after to', () => {
     expect(parsedFilters({ changedFrom: '2026-11-05', changedTo: '2026-11-05' })).toMatchObject({ changedFrom: '2026-11-05', changedTo: '2026-11-05' });
     expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedFrom: '2026-11-06', changedTo: '2026-11-05' } }, 'filters.changedTo');
+  });
+
+  it('accepts the last year whose next day MySQL can add, and rejects the year after it', () => {
+    const lastDay = `${LATEST_FILTER_DATE_YEAR}-12-31`;
+    const firstRejectedDay = `${LATEST_FILTER_DATE_YEAR + 1}-01-01`;
+    expect(parsedFilters({ changedTo: lastDay })).toMatchObject({ changedTo: lastDay });
+    expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedTo: firstRejectedDay } }, 'filters.changedTo');
+    expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedFrom: firstRejectedDay } }, 'filters.changedFrom');
   });
 
   it('isCalendarDate agrees with the calendar', () => {
