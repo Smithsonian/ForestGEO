@@ -399,6 +399,8 @@ function FeedItemCard({ item }: { item: FeedItem }) {
 }
 
 const DATE_RANGE_INVERTED_MESSAGE = 'From must be on or before To.';
+const CHANGED_TO_CONTROL_ID = 'changes-explorer-changed-to';
+const DATE_RANGE_HELPER_TEXT_ID = `${CHANGED_TO_CONTROL_ID}-helper-text`;
 const CHANGED_FROM_LABEL = `From (${CHANGE_DATE_ZONE_LABEL})`;
 const CHANGED_TO_LABEL = `To (${CHANGE_DATE_ZONE_LABEL})`;
 
@@ -668,17 +670,19 @@ export default function RecentChangesExplorer() {
                 type="date"
                 aria-label={CHANGED_FROM_LABEL}
                 value={filters.changedFrom}
+                slotProps={{ input: { 'aria-invalid': dateRangeInverted, 'aria-describedby': dateRangeInverted ? DATE_RANGE_HELPER_TEXT_ID : undefined } }}
                 onChange={event => updateFilters(prev => ({ ...prev, changedFrom: event.target.value }))}
               />
             </FormControl>
 
-            <FormControl sx={{ minWidth: 190 }} error={dateRangeInverted}>
-              <FormLabel htmlFor="changes-explorer-changed-to">{CHANGED_TO_LABEL}</FormLabel>
+            <FormControl id={CHANGED_TO_CONTROL_ID} sx={{ minWidth: 190 }} error={dateRangeInverted}>
+              <FormLabel htmlFor={CHANGED_TO_CONTROL_ID}>{CHANGED_TO_LABEL}</FormLabel>
               <Input
-                id="changes-explorer-changed-to"
+                id={CHANGED_TO_CONTROL_ID}
                 type="date"
                 aria-label={CHANGED_TO_LABEL}
                 value={filters.changedTo}
+                slotProps={{ input: { 'aria-invalid': dateRangeInverted } }}
                 onChange={event => updateFilters(prev => ({ ...prev, changedTo: event.target.value }))}
               />
               {dateRangeInverted && <FormHelperText>{DATE_RANGE_INVERTED_MESSAGE}</FormHelperText>}

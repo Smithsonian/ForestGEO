@@ -653,6 +653,30 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     expect(listRequests[2].filters).toMatchObject({ changedFrom: '2026-11-04', changedTo: '2026-11-05' });
   });
 
+  it('marks both date inputs invalid and described by the message while the range is inverted', async () => {
+    const listRequests = serveFeed([]);
+    render(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests).toHaveLength(1));
+    const fromInput = screen.getByLabelText(FROM_LABEL);
+    const toInput = screen.getByLabelText(TO_LABEL);
+    expect(fromInput).toHaveAttribute('aria-invalid', 'false');
+    expect(toInput).toHaveAttribute('aria-invalid', 'false');
+
+    fireEvent.change(toInput, { target: { value: '2026-11-05' } });
+    fireEvent.change(fromInput, { target: { value: '2026-11-06' } });
+    await screen.findByText('From must be on or before To.');
+
+    expect(fromInput).toHaveAttribute('aria-invalid', 'true');
+    expect(toInput).toHaveAttribute('aria-invalid', 'true');
+    expect(fromInput).toHaveAccessibleDescription('From must be on or before To.');
+    expect(toInput).toHaveAccessibleDescription('From must be on or before To.');
+
+    fireEvent.change(fromInput, { target: { value: '2026-11-04' } });
+    await waitFor(() => expect(fromInput).toHaveAttribute('aria-invalid', 'false'));
+    expect(toInput).toHaveAttribute('aria-invalid', 'false');
+    expect(fromInput).not.toHaveAttribute('aria-describedby');
+  });
+
   it('keeps both dates and resets the other filters when a preset is clicked', async () => {
     const listRequests = serveFeed([]);
     render(<RecentChangesExplorer />);
