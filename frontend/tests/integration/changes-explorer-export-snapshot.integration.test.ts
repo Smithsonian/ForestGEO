@@ -907,6 +907,48 @@ describe('readChangeExportSnapshot', () => {
       expect(ownedDouble.release).toHaveBeenCalledTimes(1);
     });
 
+    describe('when cleanup itself throws', () => {
+      const CLEANUP_FAILURE_MESSAGE = 'cleanup step threw';
+
+      function throwFromCleanup(): never {
+        throw new Error(CLEANUP_FAILURE_MESSAGE);
+      }
+
+      it('still returns the rows and releases when the logger throws while a failed rollback is reported', async () => {
+        await seedThreeChanges();
+        failRollback();
+        mocks.logError.mockImplementation(throwFromCleanup);
+
+        const snapshot = await readSnapshot();
+
+        expect(snapshot.rows, 'the logger’s failure never replaces a result already decided').toHaveLength(3);
+        expect(ownedDouble.destroy, 'the connection is destroyed even though the log line could not be written').toHaveBeenCalledTimes(1);
+        expect(ownedDouble.release).toHaveBeenCalledTimes(1);
+      });
+
+      it('still throws the read error and releases when destroy throws after a failed rollback', async () => {
+        await seedThreeChanges();
+        failSecondDetailPage();
+        failRollback();
+        ownedDouble.destroy.mockImplementation(throwFromCleanup);
+
+        const failure = await readFailure();
+
+        expect([failure.stage, failure.driverCode], 'the read failure survives a throwing destroy').toEqual(['detail', DRIVER_CODE]);
+        expect(ownedDouble.release, 'the connection is still released').toHaveBeenCalledTimes(1);
+      });
+
+      it('still returns the rows when release throws', async () => {
+        await seedThreeChanges();
+        ownedDouble.release.mockImplementation(throwFromCleanup);
+
+        const snapshot = await readSnapshot();
+
+        expect(snapshot.rows, 'a release failure never replaces a result already decided').toHaveLength(3);
+        expect(ownedDouble.release).toHaveBeenCalledTimes(1);
+      });
+    });
+
     it('fails at stage begin when the isolation level cannot be set, and releases without a rollback', async () => {
       ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
         if (REPEATABLE_READ_STATEMENT.test(sql)) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });

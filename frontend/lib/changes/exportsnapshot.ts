@@ -355,6 +355,27 @@ async function acquireConnection(): Promise<PoolConnection> {
   }
 }
 
+/** Cleanup runs after the outcome is decided, so a cleanup step that throws must not replace that outcome. */
+function ignoreCleanupFailure(cleanupStep: () => void): void {
+  try {
+    cleanupStep();
+  } catch {
+    // Nothing left to report to: this is the last line of defence for the outcome already decided.
+  }
+}
+
+async function rollbackOrDestroy(conn: PoolConnection, scope: ChangeExportReadScope): Promise<void> {
+  try {
+    await conn.rollback();
+  } catch (rollbackError: unknown) {
+    const driverCode = driverCodeOf(rollbackError);
+    ignoreCleanupFailure(() =>
+      ailogger.error(ROLLBACK_FAILED_MESSAGE, new Error(ROLLBACK_FAILED_MESSAGE), { schema: scope.schema, plotID: scope.plotID, driverCode })
+    );
+    ignoreCleanupFailure(() => conn.destroy());
+  }
+}
+
 /**
  * The whole export in ONE REPEATABLE READ snapshot on an owned connection, so the detail pages and
  * the rollup agree and a file_upload row moved by a running upload cannot appear twice. Read-only:
@@ -372,15 +393,7 @@ export async function readChangeExportSnapshot(
     transactionActive = true;
     return await collectChangeExport(conn, scope, limits);
   } finally {
-    if (transactionActive) {
-      try {
-        await conn.rollback();
-      } catch (rollbackError: unknown) {
-        const driverCode = driverCodeOf(rollbackError);
-        ailogger.error(ROLLBACK_FAILED_MESSAGE, new Error(ROLLBACK_FAILED_MESSAGE), { schema: scope.schema, plotID: scope.plotID, driverCode });
-        conn.destroy();
-      }
-    }
-    conn.release();
+    if (transactionActive) await rollbackOrDestroy(conn, scope);
+    ignoreCleanupFailure(() => conn.release());
   }
 }
