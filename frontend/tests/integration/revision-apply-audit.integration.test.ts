@@ -20,6 +20,7 @@ import type { RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { HTTPResponses } from '@/config/macros';
 import { describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
 import { SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
+import { familyRootOf } from '@/lib/uploads/batch-family';
 import { BULK_REVISION_CHANGELOG_TABLE } from '@/config/changelogdecode';
 
 process.env.AUTH_SECRET ??= 'test_secret';
@@ -630,14 +631,27 @@ describe('revision apply — #507 audit integration (real routes)', () => {
     const bulkSummaryRows = applyExportRows.filter(row => row.ChangedTable === BULK_REVISION_CHANGELOG_TABLE);
     console.log(`[revision mixed export]\n${describeExportedRows(applyExportRows)}`);
     expect(bulkSummaryRows.map(row => [row.ChangedColumn, row.Action])).toEqual([[SUMMARY_COLUMN_MARKER, 'U']]);
-    expect(String(bulkSummaryRows[0].Description)).toMatch(/^Applied a bulk revision: 1 updated, .*1 failed \(edit #\d+\)$/);
+    const [latestBulkOperation] = await connection.query<RowDataPacket[]>(
+      `SELECT EditOperationID FROM \`${config.database}\`.edit_operations WHERE OperationType = ? ORDER BY EditOperationID DESC LIMIT 1`,
+      [BULK_REVISION_OPERATION_TYPE]
+    );
+    const bulkEditOperationID = latestBulkOperation[0].EditOperationID;
+    expect(bulkSummaryRows[0].Description).toBe(
+      `Applied a bulk revision: ${summaryRow!.updatedCount} updated, ${summaryRow!.skippedCount} skipped, ${summaryRow!.insertedCount} inserted, ` +
+        `${summaryRow!.deletedDuplicateCount} duplicate(s) removed, ${summaryRow!.failedRowCount} failed (edit #${bulkEditOperationID})`
+    );
     const parkedRevisionRollups = applyExportRows.filter(
       row => row.ChangedTable === COREMEASUREMENTS_TABLE_NAME && row.ChangedColumn === SUMMARY_COLUMN_MARKER && row.PrimaryKey === REVISION_UPLOAD_FILE_ID_VALUE
     );
+    const [parkedRevisionRows] = await connection.query<RowDataPacket[]>(
+      `SELECT UploadBatchID FROM \`${config.database}\`.coremeasurements WHERE UploadFileID = ? AND StemGUID IS NULL`,
+      [REVISION_UPLOAD_FILE_ID_VALUE]
+    );
+    expect(parkedRevisionRows, 'setup: exactly one rejected row is parked under revision-upload').toHaveLength(1);
     expect(
-      parkedRevisionRollups.map(row => row.Action),
-      'the parked rejected row is an I rollup under revision-upload'
-    ).toContain('I');
+      parkedRevisionRollups.map(row => [row.Action, row.Description]),
+      'the parked rejected row is one I rollup under revision-upload'
+    ).toEqual([['I', `Upload ${REVISION_UPLOAD_FILE_ID_VALUE}: added 1 measurement rows (batch ${familyRootOf(parkedRevisionRows[0].UploadBatchID)})`]]);
   });
 
   // =========================================================================

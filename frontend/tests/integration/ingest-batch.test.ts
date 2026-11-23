@@ -1124,9 +1124,9 @@ describe('ingestBatch — integration', () => {
       );
       console.log(`[partial-commit-accounting] export rollups:\n${describeExportedRows(uploadRollups)}`);
       expect(
-        uploadRollups.some(row => String(row.Description).includes(`(batch ${familyRootOf(BATCH_ID)})`)),
+        uploadRollups.map(row => row.Description),
         'rolled up under its file and base batch'
-      ).toBe(true);
+      ).toEqual([`Upload ${FILE_NAME}: added 1 measurement rows (batch ${familyRootOf(BATCH_ID)})`]);
     } catch (error) {
       await connectionManager.rollbackTransaction(transactionID);
       throw error;

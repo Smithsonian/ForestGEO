@@ -990,6 +990,9 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
       );
       console.log(`[replacement export] expected groups ${JSON.stringify([...expectedGroups])}\n${describeExportedRows(deleteRollups)}`);
       expect(deleteRollups, 'one D rollup per original file and base batch').toHaveLength(expectedGroups.size);
+      expect(deleteRollups.map(row => String(row.PrimaryKey)).sort(), 'the rollups are keyed by exactly the original files of the deleted rows').toEqual(
+        [...expectedGroups.keys()].map(groupKey => groupKey.split('|')[0]).sort()
+      );
       const removedByRollups = deleteRollups.reduce((total, row) => total + Number(/removed (\d+) measurements/.exec(String(row.Description))?.[1]), 0);
       expect(removedByRollups, 'the rollups account for every upload-pipeline delete').toBe(before - 1);
       expect(

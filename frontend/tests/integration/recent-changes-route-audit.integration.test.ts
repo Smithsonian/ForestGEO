@@ -476,6 +476,7 @@ describe('Recent Changes audit atomicity (#507): POST /api/sqlpacketload fixed-d
     const attributeRows = exportedRows.filter(row => row.ChangedTable === 'attributes' && row.PrimaryKey === code);
     const storedAttributeState = typeof auditRows[0].NewRowState === 'string' ? JSON.parse(auditRows[0].NewRowState) : auditRows[0].NewRowState;
     console.log(`[sqlpacketload export] attribute rows:\n${describeExportedRows(attributeRows)}`);
+    expect(attributeRows.length, 'the attribute insert must export at least one field row').toBeGreaterThan(0);
     expect(
       attributeRows.map(row => row.ChangedColumn),
       'one row per recorded field of the stored attribute'
