@@ -451,6 +451,7 @@ export default function RecentChangesExplorer() {
   }, [fetchFacets]);
 
   useEffect(() => {
+    setPage(0);
     fetchItems(0, false);
   }, [fetchItems]);
 

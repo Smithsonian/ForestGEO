@@ -5,9 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RecentChangesExplorer, { summarizeChange } from './recentchangesexplorer';
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
 
+const FIRST_PLOT_ID = 1;
+const SECOND_PLOT_ID = 2;
+const PLOT_CHANGE_ID_BLOCK = 100;
+
+const selection = vi.hoisted(() => ({ plotID: 1, schemaName: 'forestgeo_testing' }));
+
 vi.mock('@/app/contexts/compat-hooks', () => ({
-  usePlotContext: () => ({ plotID: 1 }),
-  useSiteContext: () => ({ schemaName: 'forestgeo_testing' })
+  usePlotContext: () => ({ plotID: selection.plotID }),
+  useSiteContext: () => ({ schemaName: selection.schemaName })
 }));
 
 interface Deferred<T> {
@@ -120,6 +126,7 @@ async function renderBulkRevisionSummaryCard(newRowStateOverrides: Record<string
 describe('RecentChangesExplorer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    selection.plotID = FIRST_PLOT_ID;
   });
 
   afterEach(() => {
@@ -185,6 +192,52 @@ describe('RecentChangesExplorer', () => {
 
     expect(screen.getByText('fresh_table')).toBeInTheDocument();
     expect(screen.queryByText('stale_table')).not.toBeInTheDocument();
+  });
+
+  it('requests page 1, not page 2, on the first "Load more" after switching plots (#592 D13)', async () => {
+    const EXPECTED_LIST_REQUESTS = 4;
+    const queryRequests: Array<{ plotID: number; page: number }> = [];
+    global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/changes/explorer/facets') {
+        return Promise.resolve(jsonResponse({ users: [], tables: [], operationCounts: { INSERT: 0, UPDATE: 0, DELETE: 0 } }));
+      }
+      if (url === '/api/changes/explorer/query') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        queryRequests.push({ plotID: body.plotID, page: body.page });
+        const changeID = body.plotID * PLOT_CHANGE_ID_BLOCK + body.page;
+        return Promise.resolve(
+          jsonResponse({
+            items: [{ type: 'single', entry: makeEntry(changeID, `plot${body.plotID}_page${body.page}`) }],
+            totalItems: 3,
+            summary: { total: 3, updates: 3, inserts: 0, deletes: 0 },
+            hasMore: true
+          })
+        );
+      }
+      return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+    }) as any;
+
+    const user = userEvent.setup();
+    const { rerender } = render(<RecentChangesExplorer />);
+    await screen.findByText('plot1_page0');
+
+    await user.click(screen.getByRole('button', { name: 'Load more changes' }));
+    await screen.findByText('plot1_page1');
+
+    selection.plotID = SECOND_PLOT_ID;
+    rerender(<RecentChangesExplorer />);
+    await screen.findByText('plot2_page0');
+
+    await user.click(screen.getByRole('button', { name: 'Load more changes' }));
+    await waitFor(() => expect(queryRequests).toHaveLength(EXPECTED_LIST_REQUESTS));
+
+    expect(queryRequests, `every list request in order: ${JSON.stringify(queryRequests)}`).toEqual([
+      { plotID: FIRST_PLOT_ID, page: 0 },
+      { plotID: FIRST_PLOT_ID, page: 1 },
+      { plotID: SECOND_PLOT_ID, page: 0 },
+      { plotID: SECOND_PLOT_ID, page: 1 }
+    ]);
   });
 
   it('renders a bulk-revision-apply summary card from the real counts, with no fabricated field diff', async () => {
