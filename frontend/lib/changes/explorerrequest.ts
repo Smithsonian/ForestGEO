@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
-import { CHANGE_OPERATIONS, DEFAULT_RECENT_CHANGES_FILTERS, isDateRangeInverted } from '@/config/recentchangesexplorer';
+import { CHANGE_EXPORT_ERROR_CODES, CHANGE_OPERATIONS, DEFAULT_RECENT_CHANGES_FILTERS, isDateRangeInverted } from '@/config/recentchangesexplorer';
 
 /** unifiedchangelog.TableName is varchar(64). */
 export const CHANGE_TABLE_NAME_MAX_LENGTH = 64;
@@ -12,6 +12,7 @@ export const RECENT_CHANGES_MAX_PAGE_SIZE = 100;
 export const RECENT_CHANGES_DEFAULT_PAGE_SIZE = 25;
 
 export const INVALID_RECENT_CHANGES_REQUEST_RESPONSE = { error: 'Invalid recent changes request', code: 'INVALID_RECENT_CHANGES_REQUEST' } as const;
+export const INVALID_CHANGE_EXPORT_REQUEST_RESPONSE = { error: 'Invalid export request', code: CHANGE_EXPORT_ERROR_CODES.invalidRequest } as const;
 
 const CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const NO_DATE_BOUND = '';
@@ -84,4 +85,7 @@ export const recentChangesQueryRequestSchema = z.object({
     .transform(pageSize => clampPageSize(pageSize ?? RECENT_CHANGES_DEFAULT_PAGE_SIZE))
 });
 
+export const changeExportRequestSchema = z.object(scopeShape);
+
 export type ParsedRecentChangesQueryRequest = z.output<typeof recentChangesQueryRequestSchema>;
+export type ParsedChangeExportRequest = z.output<typeof changeExportRequestSchema>;

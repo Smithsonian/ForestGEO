@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { parseExplorerRequest } from '@/lib/errorsexplorer/explorerrequest';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
-import { DEFAULT_RECENT_CHANGES_FILTERS, type RecentChangesServerFilters } from '@/config/recentchangesexplorer';
+import { CHANGE_EXPORT_ERROR_CODES, DEFAULT_RECENT_CHANGES_FILTERS, type RecentChangesServerFilters } from '@/config/recentchangesexplorer';
 import {
   CHANGE_QUICK_SEARCH_MAX_LENGTH,
   CHANGE_TABLE_NAME_MAX_LENGTH,
+  INVALID_CHANGE_EXPORT_REQUEST_RESPONSE,
   LATEST_FILTER_DATE_YEAR,
+  changeExportRequestSchema,
   isCalendarDate,
   recentChangesQueryRequestSchema,
   RECENT_CHANGES_DEFAULT_PAGE_SIZE,
@@ -169,5 +171,54 @@ describe('recent changes request contract: date bounds', () => {
     expect(isCalendarDate('2026-11-30')).toBe(true);
     expect(isCalendarDate('2026-11-31')).toBe(false);
     expect(isCalendarDate('2025-02-29')).toBe(false);
+  });
+});
+
+describe('change export request contract', () => {
+  function parseExport(body: unknown) {
+    return parseExplorerRequest(changeExportRequestSchema, body);
+  }
+
+  it('shares the scope and filter defaults with the list route and carries no paging', () => {
+    expect(parseExport({ schema: SCHEMA, plotID: PLOT_ID, page: 3, pageSize: 50 })).toEqual({
+      ok: true,
+      data: { schema: SCHEMA, plotID: PLOT_ID, filters: DEFAULT_SERVER_FILTERS }
+    });
+  });
+
+  it('keeps the filters it is sent, dates included', () => {
+    const result = parseExport({ schema: SCHEMA, plotID: PLOT_ID, filters: { tableName: 'trees', changedFrom: '2026-11-01', changedTo: '2026-11-05' } });
+    expect(result.ok && result.data.filters).toEqual({ ...DEFAULT_SERVER_FILTERS, tableName: 'trees', changedFrom: '2026-11-01', changedTo: '2026-11-05' });
+  });
+
+  it.each([
+    { label: 'a non-positive plotID', body: { schema: SCHEMA, plotID: 0 }, issuePath: 'plotID' },
+    { label: 'a schema that is not a site schema', body: { schema: 'information_schema', plotID: PLOT_ID }, issuePath: 'schema' },
+    {
+      label: 'an object where a filter string belongs',
+      body: { schema: SCHEMA, plotID: PLOT_ID, filters: { quickSearch: { $ne: '' } } },
+      issuePath: 'filters.quickSearch'
+    },
+    { label: 'an impossible date', body: { schema: SCHEMA, plotID: PLOT_ID, filters: { changedTo: '2026-02-30' } }, issuePath: 'filters.changedTo' },
+    {
+      label: 'a date past the latest year MySQL can add a day to',
+      body: { schema: SCHEMA, plotID: PLOT_ID, filters: { changedTo: `${LATEST_FILTER_DATE_YEAR + 1}-01-01` } },
+      issuePath: 'filters.changedTo'
+    },
+    {
+      label: 'from after to',
+      body: { schema: SCHEMA, plotID: PLOT_ID, filters: { changedFrom: '2026-11-06', changedTo: '2026-11-05' } },
+      issuePath: 'filters.changedTo'
+    }
+  ])('rejects $label exactly as the list route does', ({ body, issuePath }) => {
+    const result = parseExport(body);
+    expect(result.ok, `the export contract must reject ${JSON.stringify(body)}`).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.map(issue => issue.path)).toContain(issuePath);
+    expectRejected(body, issuePath);
+  });
+
+  it('uses the shared export error code in its rejection body', () => {
+    expect(INVALID_CHANGE_EXPORT_REQUEST_RESPONSE).toEqual({ error: 'Invalid export request', code: CHANGE_EXPORT_ERROR_CODES.invalidRequest });
   });
 });

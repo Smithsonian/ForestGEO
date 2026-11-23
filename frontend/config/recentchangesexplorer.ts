@@ -27,6 +27,16 @@ export function isDateRangeInverted(changedFrom: string, changedTo: string): boo
   return changedFrom !== '' && changedTo !== '' && changedFrom > changedTo;
 }
 
+/** Most rows one export may hold; the largest field-level row count in any production schema is 450 (checked 2026-11-23; #592 O2). The export route and the too-large message both read it. */
+export const MAX_EXPORT_ROWS = 50_000;
+
+/** `code` values of the export route's JSON error bodies; the client picks its message by them. */
+export const CHANGE_EXPORT_ERROR_CODES = {
+  invalidRequest: 'INVALID_EXPORT_REQUEST',
+  tooLarge: 'EXPORT_TOO_LARGE',
+  failed: 'CHANGE_EXPORT_FAILED'
+} as const;
+
 export interface ChangelogEntry {
   changeID: number;
   tableName: string;
