@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ailogger from '@/ailogger';
 import { HTTPResponses } from '@/config/macros';
-import { serializeChangeExportCsv } from '@/config/changelogexport';
+import { buildChangeExportFilename, serializeChangeExportCsv } from '@/config/changelogexport';
 import { CHANGE_EXPORT_ERROR_CODES } from '@/config/recentchangesexplorer';
 import { parseExplorerRequest, readExplorerRequestJson } from '@/lib/errorsexplorer/explorerrequest';
 import { changeExportRequestSchema, INVALID_CHANGE_EXPORT_REQUEST_RESPONSE } from '@/lib/changes/explorerrequest';
@@ -12,7 +12,6 @@ const EXPORT_SUCCEEDED_EVENT = 'RecentChangesCsvExported';
 const EXPORT_FAILED_LOG_MESSAGE = 'Change log export failed';
 /** A failure outside the reader: serializing, building the response, or telemetry. */
 const HANDLER_STAGE = 'handler';
-const ISO_DATE_LENGTH = 'YYYY-MM-DD'.length;
 const CSV_CONTENT_TYPE = 'text/csv; charset=utf-8';
 
 const EXPORT_TOO_LARGE_RESPONSE = { error: 'The export is larger than the row limit', code: CHANGE_EXPORT_ERROR_CODES.tooLarge } as const;
@@ -40,9 +39,7 @@ export function createChangeExportHandler(limits: ChangeExportLimits) {
     try {
       const snapshot = await readChangeExportSnapshot({ schema, plotID, filters }, limits);
       const csv = serializeChangeExportCsv(snapshot.rows);
-      const exportDate = new Date().toISOString().slice(0, ISO_DATE_LENGTH);
-      // Every part is validated or generated: the schema pattern, a positive integer, a date.
-      const filename = `changelog-${schema}-plot${plotID}-${exportDate}.csv`;
+      const filename = buildChangeExportFilename(schema, plotID, new Date());
 
       ailogger.event(EXPORT_SUCCEEDED_EVENT, {
         schema,

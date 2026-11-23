@@ -1,6 +1,7 @@
 import Papa from 'papaparse';
 import { describe, expect, it } from 'vitest';
 import {
+  buildChangeExportFilename,
   buildUploadRollupDraft,
   collectForeignKeyReferences,
   compareExportDrafts,
@@ -643,5 +644,23 @@ describe('formula escaping in every user-controlled column (spec §5)', () => {
         .map(cells => [cells[COLUMN_INDEX.ChangedColumn], cells[COLUMN_INDEX.New]])
     );
     expect(newCells, `raw CSV:\n${JSON.stringify(csv)}`).toEqual({ RawX: '-5', RawY: "'-5" });
+  });
+});
+
+describe('buildChangeExportFilename', () => {
+  const SCHEMA = 'forestgeo_mpala';
+  const JUST_BEFORE_UTC_MIDNIGHT = new Date('2026-11-20T23:59:59.000Z');
+
+  it('names the file by schema, plot and the UTC calendar day', () => {
+    expect(buildChangeExportFilename(SCHEMA, PLOT_ID, JUST_BEFORE_UTC_MIDNIGHT)).toBe(`changelog-${SCHEMA}-plot${PLOT_ID}-2026-11-20.csv`);
+  });
+
+  it('uses the UTC day even where the local calendar day differs', () => {
+    const tokyoDate = JUST_BEFORE_UTC_MIDNIGHT.toLocaleDateString('en-CA', { timeZone: 'Asia/Tokyo' });
+    const losAngelesDate = JUST_BEFORE_UTC_MIDNIGHT.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    expect(tokyoDate, 'Tokyo is already on the next day, so a local-date implementation would differ').toBe('2026-11-21');
+    expect(losAngelesDate).toBe('2026-11-20');
+
+    expect(buildChangeExportFilename(SCHEMA, PLOT_ID, JUST_BEFORE_UTC_MIDNIGHT)).toContain('-2026-11-20.csv');
   });
 });

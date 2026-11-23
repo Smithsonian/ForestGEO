@@ -432,3 +432,11 @@ export function toExportCells(draft: ChangeExportDraft, context: DescribeChangeC
 export function serializeChangeExportCsv(rows: readonly ExportCell[][]): string {
   return Papa.unparse([[...EXPORT_COLUMNS], ...rows], { escapeFormulae: FORMULA_LEADING_CELL });
 }
+
+const ISO_DATE_LENGTH = 'YYYY-MM-DD'.length;
+
+/** The download name; `schema` and `plotID` are validated upstream and the date is the UTC calendar day of `exportedAt`. */
+export function buildChangeExportFilename(schema: string, plotID: number, exportedAt: Date): string {
+  const utcDate = exportedAt.toISOString().slice(0, ISO_DATE_LENGTH);
+  return ['changelog', schema, `plot${plotID}`, utcDate].join('-') + '.csv';
+}
