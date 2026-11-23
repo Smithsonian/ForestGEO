@@ -247,8 +247,7 @@ function UpdateRecordBlock({ record, showPrimaryKey }: { record: ChangelogRecord
     return recordedFieldNames(recordedImage).map(field => ({ field, oldValue: record.oldState?.[field], newValue: record.newState?.[field] }));
   }, [record.oldState, record.newState]);
   const missingSideCaption = record.oldState === null ? PRIOR_VALUES_NOT_RECORDED_CAPTION : record.newState === null ? NEW_VALUES_NOT_RECORDED_CAPTION : null;
-  const recordedImage = record.oldState === null ? record.newState : record.oldState;
-  const hasNoRecordedField = missingSideCaption !== null && (recordedImage === null || recordedFieldNames(recordedImage).length === 0);
+  const hasNoRecordedField = missingSideCaption !== null && diffs.length === 0;
 
   return (
     <Stack spacing={0.5}>
