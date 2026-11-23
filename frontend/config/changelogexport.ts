@@ -39,6 +39,8 @@ const BLANK_CELL = '';
 const NO_FILE_RECORDED_PHRASE = 'no file recorded';
 const NO_BATCH_RECORDED_PHRASE = 'no batch recorded';
 const NO_VALUE_LABEL = 'none';
+/** ASCII: a spreadsheet that opens the CSV without a byte-order mark shows `→` as mojibake. */
+const LABEL_CHANGE_ARROW = '->';
 /** Keys of the stored file_upload, quadrat-acknowledgment and bulk-revision states that Descriptions read. */
 const STATE_KEYS = {
   fileName: 'fileName',
@@ -249,7 +251,7 @@ export function describeChange(change: ChangeDescriptor, context: DescribeChange
   switch (change.kind) {
     case 'field-update': {
       const labels = isForeignKeyColumn(change.column)
-        ? ` (${foreignKeyLabel(change.column, change.oldValue, context.labels)} → ${foreignKeyLabel(change.column, change.newValue, context.labels)})`
+        ? ` (${foreignKeyLabel(change.column, change.oldValue, context.labels)} ${LABEL_CHANGE_ARROW} ${foreignKeyLabel(change.column, change.newValue, context.labels)})`
         : '';
       return `Changed ${change.column} on ${change.table} ${change.primaryKey}${labels}${editOperationSuffix(change.editOperationID)}`;
     }

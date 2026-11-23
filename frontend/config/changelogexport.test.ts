@@ -432,7 +432,7 @@ describe('describeChange: labels and edit operations (spec §6.4)', () => {
     const drafts = expandChange(
       change({ recordID: `41${EDIT_OPERATION_RECORD_ID_MARKER}7`, oldRowState: { TreeID: 41, SpeciesID: 1 }, newRowState: { TreeID: 41, SpeciesID: 2 } })
     );
-    expect(descriptions(drafts, { labels, countsAreFiltered: false })).toEqual(['Changed SpeciesID on trees 41 (abcdsp → abcdef) (edit #7)']);
+    expect(descriptions(drafts, { labels, countsAreFiltered: false })).toEqual(['Changed SpeciesID on trees 41 (abcdsp -> abcdef) (edit #7)']);
     expect(fieldRows(drafts), 'Old and New stay the raw stored IDs').toEqual([['SpeciesID', 'U', 1, 2]]);
   });
 
@@ -440,7 +440,7 @@ describe('describeChange: labels and edit operations (spec §6.4)', () => {
     const drafts = expandChange(
       change({ tableName: 'stems', recordID: '300', oldRowState: { StemGUID: 300, QuadratID: null }, newRowState: { StemGUID: 300, QuadratID: 99 } })
     );
-    expect(descriptions(drafts, { labels, countsAreFiltered: false })).toEqual(['Changed QuadratID on stems 300 (none → 99)']);
+    expect(descriptions(drafts, { labels, countsAreFiltered: false })).toEqual(['Changed QuadratID on stems 300 (none -> 99)']);
   });
 
   it('reports the distinct positive-integer IDs that field updates reference, and nothing else', () => {

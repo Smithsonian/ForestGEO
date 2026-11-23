@@ -428,7 +428,7 @@ describe('readChangeExportSnapshot', () => {
 
       const [speciesEditRow] = byLogID(ledger.speciesEdit);
       expect(speciesEditRow.Description, 'current species codes for both IDs').toBe(
-        `Changed SpeciesID on trees 7001 (${speciesBefore.speciesCode} → ${speciesAfter.speciesCode})`
+        `Changed SpeciesID on trees 7001 (${speciesBefore.speciesCode} -> ${speciesAfter.speciesCode})`
       );
       expect([speciesEditRow.ChangeDate, speciesEditRow.ChangeTime, speciesEditRow.PlotID]).toEqual([
         TIME_SHARED.slice(0, CHANGE_DATE_LENGTH),
