@@ -1,3 +1,5 @@
+import { FILE_UPLOAD_CHANGELOG_TABLE, type ChangelogRecord } from '@/config/changelogdecode';
+
 export type ChangeOperation = 'all' | 'INSERT' | 'UPDATE' | 'DELETE';
 
 export interface RecentChangesFilters {
@@ -21,16 +23,18 @@ export interface ChangelogEntry {
   tableName: string;
   recordID: string;
   operation: 'INSERT' | 'UPDATE' | 'DELETE';
+  /** Populated only when the change holds exactly one record; `records` is the full picture. */
   oldRowState: Record<string, unknown> | null;
   newRowState: Record<string, unknown> | null;
+  records: ChangelogRecord[];
   changeTimestamp: string;
-  changedBy: string;
+  changedBy: string | null;
 }
 
 export interface BatchInsertGroup {
   type: 'batch';
   tableName: string;
-  changedBy: string;
+  changedBy: string | null;
   timestamp: string;
   count: number;
   entries: ChangelogEntry[];
@@ -101,7 +105,7 @@ export const RECENT_CHANGES_PRESETS = [
 const BATCH_WINDOW_MS = 60_000;
 
 // file_upload rows are already per-file aggregates; batching them would hide which file is which behind a row count.
-const TABLES_EXCLUDED_FROM_BATCHING = new Set(['file_upload']);
+const TABLES_EXCLUDED_FROM_BATCHING = new Set([FILE_UPLOAD_CHANGELOG_TABLE]);
 
 export function groupIntoBatches(entries: ChangelogEntry[]): FeedItem[] {
   if (entries.length === 0) return [];

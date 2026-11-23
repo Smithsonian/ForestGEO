@@ -11,6 +11,7 @@ function makeEntry(overrides: Partial<ChangelogEntry> = {}): ChangelogEntry {
     operation: 'INSERT',
     oldRowState: null,
     newRowState: { TreeTag: '1042', StemTag: '1' },
+    records: [{ primaryKey: '100', oldState: null, newState: { TreeTag: '1042', StemTag: '1' } }],
     changeTimestamp: '2026-04-09T14:30:00.000Z',
     changedBy: 'mason@si.edu',
     ...overrides

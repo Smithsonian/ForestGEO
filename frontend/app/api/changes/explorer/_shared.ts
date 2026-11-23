@@ -1,5 +1,6 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
+import { decodeChangelogRow } from '@/config/changelogdecode';
 import {
   ChangelogEntry,
   RecentChangesFilters,
@@ -21,37 +22,23 @@ interface RawChangelogRow {
   TableName: string;
   RecordID: string;
   Operation: 'INSERT' | 'UPDATE' | 'DELETE';
-  OldRowState: string | Record<string, unknown> | null;
-  NewRowState: string | Record<string, unknown> | null;
+  OldRowState: unknown;
+  NewRowState: unknown;
   ChangeTimestamp: string | Date;
-  ChangedBy: string;
-}
-
-function unwrapArray(obj: unknown): Record<string, unknown> | null {
-  if (Array.isArray(obj)) {
-    return obj.length === 1 && typeof obj[0] === 'object' && obj[0] !== null ? (obj[0] as Record<string, unknown>) : null;
-  }
-  return typeof obj === 'object' && obj !== null ? (obj as Record<string, unknown>) : null;
-}
-
-function parseJsonField(value: string | Record<string, unknown> | unknown[] | null): Record<string, unknown> | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'object') return unwrapArray(value);
-  try {
-    return unwrapArray(JSON.parse(value));
-  } catch {
-    return null;
-  }
+  ChangedBy: string | null;
 }
 
 function toChangelogEntry(row: RawChangelogRow): ChangelogEntry {
+  const { records } = decodeChangelogRow({ tableName: row.TableName, recordID: row.RecordID, oldRowState: row.OldRowState, newRowState: row.NewRowState });
+  const soleRecord = records.length === 1 ? records[0] : null;
   return {
     changeID: row.ChangeID,
     tableName: row.TableName,
     recordID: row.RecordID,
     operation: row.Operation,
-    oldRowState: parseJsonField(row.OldRowState),
-    newRowState: parseJsonField(row.NewRowState),
+    oldRowState: soleRecord?.oldState ?? null,
+    newRowState: soleRecord?.newState ?? null,
+    records,
     changeTimestamp: row.ChangeTimestamp instanceof Date ? row.ChangeTimestamp.toISOString() : row.ChangeTimestamp,
     changedBy: row.ChangedBy
   };

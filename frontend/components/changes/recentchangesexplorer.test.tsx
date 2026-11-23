@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RecentChangesExplorer, { summarizeChange } from './recentchangesexplorer';
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
+import type { ChangelogEntry } from '@/config/recentchangesexplorer';
 
 const FIRST_PLOT_ID = 1;
 const SECOND_PLOT_ID = 2;
@@ -62,14 +63,15 @@ function installInnerTextShim(): () => void {
   };
 }
 
-function makeEntry(changeID: number, tableName: string) {
+function makeEntry(changeID: number, tableName: string): ChangelogEntry {
   return {
     changeID,
     tableName,
     recordID: String(changeID),
-    operation: 'UPDATE' as const,
+    operation: 'UPDATE',
     oldRowState: { MeasuredDBH: 10 },
     newRowState: { MeasuredDBH: 12 },
+    records: [{ primaryKey: String(changeID), oldState: { MeasuredDBH: 10 }, newState: { MeasuredDBH: 12 } }],
     changeTimestamp: '2026-04-10T12:00:00.000Z',
     changedBy: 'mason@si.edu'
   };
@@ -80,20 +82,22 @@ function makeEntry(changeID: number, tableName: string) {
 // below, merged with per-test overrides (e.g. failedRowCount) so each test can
 // stay focused on the field it's asserting without re-declaring the fetch mock.
 async function renderBulkRevisionSummaryCard(newRowStateOverrides: Record<string, unknown> = {}) {
-  const bulkSummaryEntry = {
+  const summaryState = {
+    updatedCount: 4,
+    skippedCount: 1,
+    insertedCount: 2,
+    deletedDuplicateCount: 0,
+    summaryKind: BULK_REVISION_SUMMARY_KIND,
+    ...newRowStateOverrides
+  };
+  const bulkSummaryEntry: ChangelogEntry = {
     changeID: 10,
     tableName: 'bulk-revision-apply',
     recordID: 'hash-abc::edit-op-7',
-    operation: 'UPDATE' as const,
+    operation: 'UPDATE',
     oldRowState: null,
-    newRowState: {
-      updatedCount: 4,
-      skippedCount: 1,
-      insertedCount: 2,
-      deletedDuplicateCount: 0,
-      summaryKind: BULK_REVISION_SUMMARY_KIND,
-      ...newRowStateOverrides
-    },
+    newRowState: summaryState,
+    records: [{ primaryKey: 'hash-abc', oldState: null, newState: summaryState }],
     changeTimestamp: '2026-04-10T12:00:00.000Z',
     changedBy: 'mason@si.edu'
   };
@@ -372,6 +376,51 @@ describe('RecentChangesExplorer', () => {
     } finally {
       restoreInnerText();
     }
+  });
+});
+
+const NO_FACETS = { users: [], tables: [], operationCounts: { INSERT: 0, UPDATE: 0, DELETE: 0 } };
+
+interface ListRequestBody {
+  plotID: number;
+  page: number;
+  filters: { operation: string; changedBy: string; tableName: string; quickSearch: string; changedFrom: string; changedTo: string; presetId?: string };
+}
+
+/** Serves `items` to every list request and records each request body. */
+function serveFeed(items: unknown[]): ListRequestBody[] {
+  const listRequests: ListRequestBody[] = [];
+  global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
+    if (url === '/api/changes/explorer/query') {
+      listRequests.push(JSON.parse(String(init?.body ?? '{}')));
+      return Promise.resolve(
+        jsonResponse({ items, totalItems: items.length, summary: { total: items.length, updates: 0, inserts: 0, deletes: 0 }, hasMore: false })
+      );
+    }
+    return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+  }) as any;
+  return listRequests;
+}
+
+function entryWith(overrides: Partial<ChangelogEntry>): ChangelogEntry {
+  return { ...makeEntry(500, 'trees'), ...overrides };
+}
+
+function single(entry: ChangelogEntry) {
+  return { type: 'single' as const, entry };
+}
+
+describe('RecentChangesExplorer: change identity and attribution (#592 D7)', () => {
+  beforeEach(() => {
+    selection.plotID = FIRST_PLOT_ID;
+  });
+
+  it('renders a change with no recorded user as "unknown" instead of crashing the page', async () => {
+    serveFeed([single(entryWith({ changeID: 77, changedBy: null }))]);
+    render(<RecentChangesExplorer />);
+    expect(await screen.findByText(/^unknown ·/)).toBeInTheDocument();
   });
 });
 

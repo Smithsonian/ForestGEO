@@ -23,6 +23,7 @@ import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-proje
 import moment from 'moment';
 
 const DEFAULT_PAGE_SIZE = 25;
+const UNKNOWN_USER_LABEL = 'unknown';
 
 const OPERATION_COLORS = {
   INSERT: 'success',
@@ -82,7 +83,8 @@ export function summarizeChange(entry: Pick<ChangelogEntry, 'operation' | 'table
   return `Changed ${tableLabel}`;
 }
 
-function displayName(value: string): string {
+function displayName(value: string | null): string {
+  if (value === null) return UNKNOWN_USER_LABEL;
   return value.replace(/\s*\[[^\]]*\]\s*$/, '').trim();
 }
 

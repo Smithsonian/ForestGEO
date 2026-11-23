@@ -1,16 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { queryRecentChanges } from './_shared';
-import { DEFAULT_RECENT_CHANGES_FILTERS } from '@/config/recentchangesexplorer';
+import { DEFAULT_RECENT_CHANGES_FILTERS, type FeedItem } from '@/config/recentchangesexplorer';
+
+const PLOT_ID = 1;
 
 interface MockRawRow {
   ChangeID: number;
   TableName: string;
   RecordID: string;
   Operation: 'INSERT' | 'UPDATE' | 'DELETE';
-  OldRowState: Record<string, unknown> | null;
-  NewRowState: Record<string, unknown> | null;
+  OldRowState: unknown;
+  NewRowState: unknown;
   ChangeTimestamp: string;
-  ChangedBy: string;
+  ChangedBy: string | null;
 }
 
 function makeRawRow(overrides: Partial<MockRawRow> = {}): MockRawRow {
@@ -126,5 +128,53 @@ describe('queryRecentChanges', () => {
       }
     });
     expect(secondPage.hasMore).toBe(false);
+  });
+});
+
+describe('queryRecentChanges: whole-row decoding', () => {
+  it('returns paired records for a legacy multi-row change and leaves the feed shape unchanged', async () => {
+    const legacyRow = makeRawRow({
+      ChangeID: 300,
+      TableName: 'trees',
+      RecordID: '1|2',
+      Operation: 'UPDATE',
+      OldRowState: [
+        { TreeID: 1, SpeciesID: 10 },
+        { TreeID: 2, SpeciesID: 10 }
+      ],
+      NewRowState: [
+        { TreeID: 2, SpeciesID: 30 },
+        { TreeID: 1, SpeciesID: 20 }
+      ]
+    });
+    const objectRow = makeRawRow({ ChangeID: 299, RecordID: '77', Operation: 'UPDATE', OldRowState: { MeasuredDBH: 10 }, NewRowState: { MeasuredDBH: 12 } });
+    const connection = buildConnection([legacyRow, objectRow]);
+
+    const response = await queryRecentChanges(connection as any, 'forestgeo_testing', PLOT_ID, 0, 25, DEFAULT_RECENT_CHANGES_FILTERS);
+
+    expect(
+      response.items.map(item => item.type),
+      'one feed item per audit row, as before'
+    ).toEqual(['single', 'single']);
+    expect(response.totalItems).toBe(2);
+    expect(response.hasMore).toBe(false);
+
+    const [legacyItem, objectItem] = response.items as Array<Extract<FeedItem, { type: 'single' }>>;
+    expect(legacyItem.entry.records, 'paired by TreeID, not by position').toEqual([
+      { primaryKey: '1', oldState: { TreeID: 1, SpeciesID: 10 }, newState: { TreeID: 1, SpeciesID: 20 } },
+      { primaryKey: '2', oldState: { TreeID: 2, SpeciesID: 10 }, newState: { TreeID: 2, SpeciesID: 30 } }
+    ]);
+    expect([legacyItem.entry.oldRowState, legacyItem.entry.newRowState], 'entry-level states are for single-record changes only').toEqual([null, null]);
+
+    expect(objectItem.entry.records).toEqual([{ primaryKey: '77', oldState: { MeasuredDBH: 10 }, newState: { MeasuredDBH: 12 } }]);
+    expect(objectItem.entry.oldRowState).toEqual({ MeasuredDBH: 10 });
+    expect(objectItem.entry.newRowState).toEqual({ MeasuredDBH: 12 });
+  });
+
+  it('passes a NULL ChangedBy through as null instead of a string', async () => {
+    const connection = buildConnection([makeRawRow({ ChangedBy: null })]);
+    const response = await queryRecentChanges(connection as any, 'forestgeo_testing', PLOT_ID, 0, 25, DEFAULT_RECENT_CHANGES_FILTERS);
+    const [item] = response.items as Array<Extract<FeedItem, { type: 'single' }>>;
+    expect(item.entry.changedBy).toBeNull();
   });
 });
