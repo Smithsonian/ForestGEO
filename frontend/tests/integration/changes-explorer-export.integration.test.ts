@@ -116,7 +116,6 @@ describe('POST /api/changes/explorer/export', () => {
     ownedQuery = vi.fn((sql: string, params?: unknown[]) => ownedConnection.query(sql, params));
     mocks.getConn.mockImplementation(async () => ({
       query: ownedQuery,
-      beginTransaction: () => ownedConnection.beginTransaction(),
       rollback: () => ownedConnection.rollback(),
       release: () => undefined,
       destroy: () => undefined
@@ -272,6 +271,9 @@ describe('POST /api/changes/explorer/export', () => {
       expect(response.headers.get('Content-Type'), 'a JSON error, never a partial CSV').toContain('application/json');
       expect(await response.json()).toMatchObject({ code: CHANGE_EXPORT_ERROR_CODES.tooLarge });
       expect(mocks.logEvent, 'a rejected export emits no success event').not.toHaveBeenCalled();
+      expect(mocks.logWarn, 'a ceiling hit is recorded once, with where and which ceiling and no filter or row values').toHaveBeenCalledTimes(1);
+      expect(mocks.logWarn.mock.calls[0]).toEqual(['Change log export passed its row limit', { schema, plotID, maxRows: 2 }]);
+      expect(mocks.logError, 'a ceiling hit is a warning, not an export failure').not.toHaveBeenCalled();
     });
 
     it('answers CHANGE_EXPORT_FAILED when a read fails and logs the stage, the driver code and the error class only', async () => {

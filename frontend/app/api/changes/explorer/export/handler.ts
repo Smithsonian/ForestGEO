@@ -10,6 +10,7 @@ import type { RouteContext } from '@/lib/route-authz';
 
 const EXPORT_SUCCEEDED_EVENT = 'RecentChangesCsvExported';
 const EXPORT_FAILED_LOG_MESSAGE = 'Change log export failed';
+const EXPORT_TOO_LARGE_LOG_MESSAGE = 'Change log export passed its row limit';
 /** A failure outside the reader: serializing, building the response, or telemetry. */
 const HANDLER_STAGE = 'handler';
 const CSV_CONTENT_TYPE = 'text/csv; charset=utf-8';
@@ -59,6 +60,8 @@ export function createChangeExportHandler(limits: ChangeExportLimits) {
       });
     } catch (error: unknown) {
       if (error instanceof ExportTooLargeError) {
+        // Where and which ceiling only: the filters can quote what the researcher searched for.
+        ailogger.warn(EXPORT_TOO_LARGE_LOG_MESSAGE, { schema, plotID, maxRows: error.maxRows });
         return NextResponse.json(EXPORT_TOO_LARGE_RESPONSE, { status: HTTPResponses.PAYLOAD_TOO_LARGE });
       }
       const stage = error instanceof ChangeExportReadError ? error.stage : HANDLER_STAGE;
