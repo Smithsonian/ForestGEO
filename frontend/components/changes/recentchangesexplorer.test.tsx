@@ -732,6 +732,86 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     }
   });
 
+  describe('when the scope moves while the dates keep the list from loading (#592 C3)', () => {
+    const PLOT_ONE_TABLE = 'plot_one_table';
+    const PLOT_ONE_TOTAL = 7;
+    const INVERTED_FROM = '2026-11-06';
+    const INVERTED_TO = '2026-11-05';
+
+    function servePlotOneFeed(): { listRequests: ListRequestBody[] } {
+      const listRequests: ListRequestBody[] = [];
+      global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
+        if (url === '/api/changes/explorer/query') {
+          listRequests.push(JSON.parse(String(init?.body ?? '{}')));
+          return Promise.resolve(
+            jsonResponse({
+              items: [{ type: 'single', entry: makeEntry(1, PLOT_ONE_TABLE) }],
+              totalItems: PLOT_ONE_TOTAL,
+              summary: { total: PLOT_ONE_TOTAL, updates: PLOT_ONE_TOTAL, inserts: 0, deletes: 0 },
+              hasMore: true
+            })
+          );
+        }
+        return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+      }) as any;
+      return { listRequests };
+    }
+
+    function totalChangesCount(): string {
+      return screen.getByText('Total Changes').nextElementSibling?.textContent ?? '';
+    }
+
+    async function loadPlotOneThenInvertRange() {
+      const { listRequests } = servePlotOneFeed();
+      const rendered = render(<RecentChangesExplorer />);
+      await screen.findByText(PLOT_ONE_TABLE);
+      expect(totalChangesCount()).toBe(String(PLOT_ONE_TOTAL));
+      fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: INVERTED_TO } });
+      await waitFor(() => expect(listRequests).toHaveLength(2));
+      fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: INVERTED_FROM } });
+      await screen.findByText('From must be on or before To.');
+      return { ...rendered, listRequests };
+    }
+
+    it('clears the previous plot results when the plot changes under an inverted range, and sends no request', async () => {
+      const { rerender, listRequests } = await loadPlotOneThenInvertRange();
+      const requestsBeforeSwitch = listRequests.length;
+
+      selection.plotID = SECOND_PLOT_ID;
+      rerender(<RecentChangesExplorer />);
+
+      await waitFor(() => expect(screen.queryByText(PLOT_ONE_TABLE), 'plot 1 card must not stay under plot 2').not.toBeInTheDocument());
+      expect(totalChangesCount(), 'plot 1 total must not stay under plot 2').toBe('0');
+      expect(screen.queryByRole('button', { name: 'Load more changes' }), 'Load more would page plot 2 under an inverted range').not.toBeInTheDocument();
+      expect(listRequests, `list requests sent while the range is inverted: ${JSON.stringify(listRequests)}`).toHaveLength(requestsBeforeSwitch);
+    });
+
+    it('clears the previous plot results when the plot changes under an unfilterable date', async () => {
+      const { listRequests } = servePlotOneFeed();
+      const { rerender } = render(<RecentChangesExplorer />);
+      await screen.findByText(PLOT_ONE_TABLE);
+      fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: FIVE_DIGIT_YEAR_DATE } });
+      await screen.findByText(UNFILTERABLE_DATE_MESSAGE);
+
+      selection.plotID = SECOND_PLOT_ID;
+      rerender(<RecentChangesExplorer />);
+
+      await waitFor(() => expect(screen.queryByText(PLOT_ONE_TABLE)).not.toBeInTheDocument());
+      expect(totalChangesCount()).toBe('0');
+      expect(listRequests).toHaveLength(1);
+    });
+
+    it('keeps the list on screen when the range is inverted on the same plot', async () => {
+      await loadPlotOneThenInvertRange();
+
+      expect(screen.getByText(PLOT_ONE_TABLE), 'editing dates on the same plot keeps the list').toBeInTheDocument();
+      expect(totalChangesCount()).toBe(String(PLOT_ONE_TOTAL));
+      expect(screen.getByRole('button', { name: 'Load more changes' })).toBeInTheDocument();
+    });
+  });
+
   it('drops the in-flight response and clears loading when the range becomes inverted', async () => {
     const inFlightResponses: Deferred<ReturnType<typeof jsonResponse>>[] = [];
     global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {

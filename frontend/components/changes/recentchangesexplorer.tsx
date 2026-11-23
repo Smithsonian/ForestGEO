@@ -417,6 +417,10 @@ const DATE_RANGE_HELPER_TEXT_ID = `${CHANGED_TO_CONTROL_ID}-helper-text`;
 const CHANGED_FROM_LABEL = `From (${CHANGE_DATE_ZONE_LABEL})`;
 const CHANGED_TO_LABEL = `To (${CHANGE_DATE_ZONE_LABEL})`;
 
+function scopeKey(schemaName: string, plotID: number): string {
+  return `${schemaName}:${plotID}`;
+}
+
 function isUnfilterableDateBound(value: string): boolean {
   return value !== NO_DATE_BOUND && !isFilterableDate(value);
 }
@@ -428,6 +432,7 @@ export default function RecentChangesExplorer() {
   const itemsAbortRef = useRef<AbortController | null>(null);
   const facetsRequestRef = useRef(0);
   const itemsRequestRef = useRef(0);
+  const loadedScopeRef = useRef<string | null>(null);
 
   const [filters, setFilters] = useState<RecentChangesFilters>(DEFAULT_RECENT_CHANGES_FILTERS);
   const [items, setItems] = useState<FeedItem[]>([]);
@@ -494,7 +499,19 @@ export default function RecentChangesExplorer() {
     async (pageNum: number, append: boolean) => {
       if (!currentSite?.schemaName || !currentPlot?.plotID) return;
       itemsAbortRef.current?.abort();
-      if (dateFiltersUnsendable) return;
+      const requestedScope = scopeKey(currentSite.schemaName, currentPlot.plotID);
+      if (dateFiltersUnsendable) {
+        if (loadedScopeRef.current !== null && loadedScopeRef.current !== requestedScope) {
+          loadedScopeRef.current = null;
+          setItems([]);
+          setSummary(DEFAULT_SUMMARY);
+          setHasMore(false);
+          setErrorMessage(null);
+          setLoading(false);
+          setLoadingMore(false);
+        }
+        return;
+      }
       const controller = new AbortController();
       itemsAbortRef.current = controller;
       const requestID = ++itemsRequestRef.current;
@@ -529,6 +546,7 @@ export default function RecentChangesExplorer() {
         }
         setSummary(data.summary);
         setHasMore(data.hasMore);
+        loadedScopeRef.current = requestedScope;
       } catch (error) {
         if (isAbortError(error)) return;
         const msg = error instanceof Error ? error.message : String(error);
