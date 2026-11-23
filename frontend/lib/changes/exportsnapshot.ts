@@ -361,36 +361,14 @@ async function acquireConnection(): Promise<PoolConnection> {
   }
 }
 
-type ConnectionCleanupStep = 'destroy' | 'release';
-
-const CLEANUP_FAILED_MESSAGES: Record<ConnectionCleanupStep, string> = {
-  destroy: 'Change export connection destroy failed',
-  release: 'Change export connection release failed'
-};
-
-function reportCleanupFailure(message: string, scope: ChangeExportReadScope, driverCode: string | undefined): void {
-  try {
-    ailogger.error(message, new Error(message), { schema: scope.schema, plotID: scope.plotID, driverCode });
-  } catch {
-    // The logger is the last resort: when it throws too there is nowhere left to report to.
-  }
-}
-
-/** Cleanup runs after the outcome is decided, so a step that throws is recorded and must not replace that outcome. */
-function attemptConnectionCleanup(step: ConnectionCleanupStep, scope: ChangeExportReadScope, cleanupStep: () => void): void {
-  try {
-    cleanupStep();
-  } catch (error: unknown) {
-    reportCleanupFailure(CLEANUP_FAILED_MESSAGES[step], scope, driverCodeOf(error));
-  }
-}
-
-async function rollbackOrDestroy(conn: PoolConnection, scope: ChangeExportReadScope): Promise<void> {
+async function rolledBackCleanly(conn: PoolConnection, scope: ChangeExportReadScope): Promise<boolean> {
   try {
     await conn.rollback();
+    return true;
   } catch (rollbackError: unknown) {
-    reportCleanupFailure(ROLLBACK_FAILED_MESSAGE, scope, driverCodeOf(rollbackError));
-    attemptConnectionCleanup('destroy', scope, () => conn.destroy());
+    const cause = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+    ailogger.error(ROLLBACK_FAILED_MESSAGE, cause, { schema: scope.schema, plotID: scope.plotID });
+    return false;
   }
 }
 
@@ -405,18 +383,15 @@ export async function readChangeExportSnapshot(
 ): Promise<ChangeExportSnapshot> {
   const conn = await acquireConnection();
   let transactionActive = false;
-  let isolationLevelPending = false;
   try {
     await runStage('begin', conn.query(SNAPSHOT_ISOLATION_STATEMENT));
-    isolationLevelPending = true;
     await runStage('begin', conn.query(SNAPSHOT_BEGIN_STATEMENT));
-    isolationLevelPending = false;
     transactionActive = true;
     return await collectChangeExport(conn, scope, limits);
   } finally {
-    if (transactionActive) await rollbackOrDestroy(conn, scope);
-    // A one-shot isolation level that no transaction consumed would be spent by the next borrower of this connection.
-    if (isolationLevelPending) attemptConnectionCleanup('destroy', scope, () => conn.destroy());
-    attemptConnectionCleanup('release', scope, () => conn.release());
+    // A begin that failed can leave the one-shot isolation level pending, and a failed rollback an open transaction: neither goes back to the pool.
+    const connectionIsReusable = transactionActive && (await rolledBackCleanly(conn, scope));
+    if (!connectionIsReusable) conn.destroy();
+    conn.release();
   }
 }

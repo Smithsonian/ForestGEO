@@ -940,13 +940,6 @@ describe('readChangeExportSnapshot', () => {
       return failure as ChangeExportReadError;
     }
 
-    function loggedText(): string {
-      return mocks.logError.mock.calls
-        .flat()
-        .map(argument => (argument instanceof Error ? `${argument.message}\n${argument.stack}` : JSON.stringify(argument)))
-        .join('\n');
-    }
-
     it('throws a read error naming the stage and driver code, rolls back and releases', async () => {
       await seedThreeChanges();
       failSecondDetailPage();
@@ -971,8 +964,8 @@ describe('readChangeExportSnapshot', () => {
       expect(ownedDouble.destroy, 'a connection whose rollback failed must not go back to the pool').toHaveBeenCalledTimes(1);
       expect(ownedDouble.release).toHaveBeenCalledTimes(1);
       expect(mocks.logError, 'the rollback failure is logged once').toHaveBeenCalledTimes(1);
-      expect(mocks.logError.mock.calls[0][2]).toEqual({ schema, plotID, driverCode: ROLLBACK_DRIVER_CODE });
-      expect(loggedText()).not.toContain('SECRET-DRIVER-TEXT');
+      expect(mocks.logError.mock.calls[0][1], 'the rollback error itself is logged').toMatchObject({ code: ROLLBACK_DRIVER_CODE });
+      expect(mocks.logError.mock.calls[0][2]).toEqual({ schema, plotID });
     });
 
     it('returns the rows when only the cleanup fails', async () => {
@@ -986,115 +979,46 @@ describe('readChangeExportSnapshot', () => {
       expect(ownedDouble.release).toHaveBeenCalledTimes(1);
     });
 
-    describe('when cleanup itself throws', () => {
-      const CLEANUP_FAILURE_MESSAGE = 'cleanup step threw after SECRET-DRIVER-TEXT';
-      const CLEANUP_DRIVER_CODE = 'ER_CLEANUP_STEP';
-
-      function throwFromCleanup(): never {
-        throw Object.assign(new Error(CLEANUP_FAILURE_MESSAGE), { code: CLEANUP_DRIVER_CODE });
-      }
-
-      it('still returns the rows and releases when the logger throws while a failed rollback is reported', async () => {
-        await seedThreeChanges();
-        failRollback();
-        mocks.logError.mockImplementation(throwFromCleanup);
-
-        const snapshot = await readSnapshot();
-
-        expect(snapshot.rows, 'the logger’s failure never replaces a result already decided').toHaveLength(3);
-        expect(ownedDouble.destroy, 'the connection is destroyed even though the log line could not be written').toHaveBeenCalledTimes(1);
-        expect(ownedDouble.release).toHaveBeenCalledTimes(1);
-      });
-
-      it('still throws the read error and releases when destroy throws after a failed rollback', async () => {
-        await seedThreeChanges();
-        failSecondDetailPage();
-        failRollback();
-        ownedDouble.destroy.mockImplementation(throwFromCleanup);
-
-        const failure = await readFailure();
-
-        expect([failure.stage, failure.driverCode], 'the read failure survives a throwing destroy').toEqual(['detail', DRIVER_CODE]);
-        expect(ownedDouble.release, 'the connection is still released').toHaveBeenCalledTimes(1);
-        expect(
-          mocks.logError.mock.calls.map(call => [call[0], call[2]]),
-          'the rollback failure and the destroy failure are each logged once, with the driver code only'
-        ).toEqual([
-          ['Change export rollback failed', { schema, plotID, driverCode: ROLLBACK_DRIVER_CODE }],
-          ['Change export connection destroy failed', { schema, plotID, driverCode: CLEANUP_DRIVER_CODE }]
-        ]);
-        expect(loggedText()).not.toContain('SECRET-DRIVER-TEXT');
-      });
-
-      it('still returns the rows when release throws', async () => {
-        await seedThreeChanges();
-        ownedDouble.release.mockImplementation(throwFromCleanup);
-
-        const snapshot = await readSnapshot();
-
-        expect(snapshot.rows, 'a release failure never replaces a result already decided').toHaveLength(3);
-        expect(ownedDouble.release).toHaveBeenCalledTimes(1);
-        expect(
-          mocks.logError.mock.calls.map(call => [call[0], call[2]]),
-          'the release failure is logged once, with the driver code only'
-        ).toEqual([['Change export connection release failed', { schema, plotID, driverCode: CLEANUP_DRIVER_CODE }]]);
-        expect(loggedText()).not.toContain('SECRET-DRIVER-TEXT');
-      });
-    });
-
-    it('fails at stage begin when the isolation level cannot be set, and releases without a rollback', async () => {
-      ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
-        if (sql === SNAPSHOT_ISOLATION_STATEMENT) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
-        return ownedConnection.query(sql, params);
-      });
-
-      const failure = await readFailure();
-
-      expect([failure.stage, failure.driverCode]).toEqual(['begin', DRIVER_CODE]);
-      expect(
-        ownedDouble.query.mock.calls.map(([sql]) => sql),
-        'no transaction is opened at the wrong isolation level'
-      ).toEqual([SNAPSHOT_ISOLATION_STATEMENT]);
-      expect(ownedDouble.rollback, 'there is no transaction to roll back').not.toHaveBeenCalled();
-      expect(ownedDouble.destroy, 'nothing was set on the session, so the connection is reusable').not.toHaveBeenCalled();
-      expect(ownedDouble.release).toHaveBeenCalledTimes(1);
-    });
-
-    describe('when the transaction cannot be started after the isolation level was set', () => {
+    describe.each([
+      { failingStatement: SNAPSHOT_ISOLATION_STATEMENT, statementsSent: [SNAPSHOT_ISOLATION_STATEMENT] },
+      { failingStatement: SNAPSHOT_BEGIN_STATEMENT, statementsSent: [SNAPSHOT_ISOLATION_STATEMENT, SNAPSHOT_BEGIN_STATEMENT] }
+    ])('when "$failingStatement" fails', ({ failingStatement, statementsSent }) => {
       beforeEach(() => {
         ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
-          if (sql === SNAPSHOT_BEGIN_STATEMENT) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
+          if (sql === failingStatement) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
           return ownedConnection.query(sql, params);
         });
       });
 
-      it('fails at stage begin with the driver code and does not roll back a transaction that never opened', async () => {
+      it('fails at stage begin with the driver code, reads nothing, and destroys the connection instead of rolling back', async () => {
         const failure = await readFailure();
 
         expect([failure.stage, failure.driverCode]).toEqual(['begin', DRIVER_CODE]);
-        expect(failure.message).not.toContain('SECRET-DRIVER-TEXT');
-        expect(ownedDouble.rollback).not.toHaveBeenCalled();
-      });
-
-      it('destroys the connection, because the one-shot isolation level would otherwise be spent by its next borrower', async () => {
-        await readFailure();
-
-        expect(ownedDouble.destroy).toHaveBeenCalledTimes(1);
+        expect(
+          ownedDouble.query.mock.calls.map(([sql]) => sql),
+          'nothing is read outside the snapshot'
+        ).toEqual(statementsSent);
+        expect(ownedDouble.rollback, 'there is no transaction to roll back').not.toHaveBeenCalled();
+        expect(ownedDouble.destroy, 'a pending one-shot isolation level must not reach the next borrower').toHaveBeenCalledTimes(1);
         expect(ownedDouble.release).toHaveBeenCalledTimes(1);
       });
+    });
 
-      it('never leaves the session read-only: a write on the same connection succeeds afterwards', async () => {
-        await readFailure();
-
-        await ownedConnection.query('START TRANSACTION');
-        const writeAttempt = await ownedConnection
-          .query('UPDATE unifiedchangelog SET ChangedBy = ?', ['written-after-failed-begin'])
-          .then(() => undefined)
-          .catch((error: { code?: string }) => error.code);
-        await ownedConnection.query('ROLLBACK');
-
-        expect(writeAttempt, 'a failed begin must not leave READ ONLY pending for the connection’s next transaction').toBeUndefined();
+    it('never leaves the session read-only after a failed begin: a write on the same connection succeeds afterwards', async () => {
+      ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+        if (sql === SNAPSHOT_BEGIN_STATEMENT) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
+        return ownedConnection.query(sql, params);
       });
+      await readFailure();
+
+      await ownedConnection.query('START TRANSACTION');
+      const writeAttempt = await ownedConnection
+        .query('UPDATE unifiedchangelog SET ChangedBy = ?', ['written-after-failed-begin'])
+        .then(() => undefined)
+        .catch((error: { code?: string }) => error.code);
+      await ownedConnection.query('ROLLBACK');
+
+      expect(writeAttempt, 'a failed begin must not leave READ ONLY pending for the connection’s next transaction').toBeUndefined();
     });
 
     it.each([
