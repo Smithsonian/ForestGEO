@@ -69,6 +69,7 @@ const CHANGE_DATE_LENGTH = 'YYYY-MM-DD'.length;
 
 const DETAIL_PAGE_ORDER = 'ORDER BY uc.ChangeTimestamp, uc.ChangeID';
 const ROLLUP_MARKER = 'MIN(uc.ChangeID) AS LogID';
+const LABEL_QUERY_MARKER = 'AS label FROM';
 /** With a page size of 2 the ledger's third change, the file_upload row, is on the second detail page. */
 const FILE_UPLOAD_DETAIL_PAGE = 2;
 
@@ -918,6 +919,34 @@ describe('readChangeExportSnapshot', () => {
       expect(ownedDouble.beginTransaction, 'no transaction is opened at the wrong isolation level').not.toHaveBeenCalled();
       expect(ownedDouble.rollback, 'there is no transaction to roll back').not.toHaveBeenCalled();
       expect(ownedDouble.release).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      { stage: 'rollup', failingSql: ROLLUP_MARKER },
+      { stage: 'labels', failingSql: LABEL_QUERY_MARKER }
+    ] as const)('throws a read error at stage $stage with the driver code, rolls back and releases', async ({ stage, failingSql }) => {
+      const [speciesBefore, speciesAfter] = await twoSeededSpecies();
+      await seed.recordGridChange({
+        tableName: 'trees',
+        recordID: 7101,
+        operation: ChangelogOperation.UPDATE,
+        oldRowState: { TreeID: 7101, SpeciesID: speciesBefore.speciesID },
+        newRowState: { TreeID: 7101, SpeciesID: speciesAfter.speciesID },
+        plotID,
+        changeTime: TIME_SHARED
+      });
+      ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+        if (sql.includes(failingSql)) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
+        return ownedConnection.query(sql, params);
+      });
+
+      const failure = await readFailure();
+
+      expect([failure.stage, failure.driverCode]).toEqual([stage, DRIVER_CODE]);
+      expect(failure.message, 'the driver’s message can quote row data and is not carried').not.toContain('SECRET-DRIVER-TEXT');
+      expect(ownedDouble.rollback).toHaveBeenCalledTimes(1);
+      expect(ownedDouble.release).toHaveBeenCalledTimes(1);
+      expect(ownedDouble.destroy).not.toHaveBeenCalled();
     });
 
     it('fails at stage acquire, with no driver code, when no connection can be had', async () => {
