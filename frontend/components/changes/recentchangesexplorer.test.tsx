@@ -845,6 +845,67 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
       expect(listRequests, `list requests sent while the range is inverted: ${JSON.stringify(listRequests)}`).toHaveLength(requestsBeforeSwitch);
     });
 
+    describe('a failed list query', () => {
+      async function failPlotOneListThenInvertRange() {
+        const listRequests: ListRequestBody[] = [];
+        global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
+          if (url === '/api/changes/explorer/query') {
+            listRequests.push(JSON.parse(String(init?.body ?? '{}')));
+            return Promise.resolve({ ok: false, status: HTTPResponses.INTERNAL_SERVER_ERROR, json: async () => ({}) });
+          }
+          return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+        }) as unknown as typeof fetch;
+        const rendered = render(<RecentChangesExplorer />);
+        await screen.findByText(PLOT_ONE_QUERY_ERROR);
+        fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: INVERTED_TO } });
+        await waitFor(() => expect(listRequests).toHaveLength(2));
+        await screen.findByText(PLOT_ONE_QUERY_ERROR);
+        fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: INVERTED_FROM } });
+        await screen.findByText('From must be on or before To.');
+        return { ...rendered, listRequests };
+      }
+
+      it('keeps its alert when the dates are inverted on the same plot, and does not claim there are no changes', async () => {
+        const { listRequests } = await failPlotOneListThenInvertRange();
+
+        expect(
+          screen.getByText(PLOT_ONE_QUERY_ERROR),
+          'the failure of this plot is still the truth until the plot changes or a query succeeds'
+        ).toBeInTheDocument();
+        expect(screen.queryByText('No changes found'), 'a failed query is not an empty result').not.toBeInTheDocument();
+        expect(listRequests, 'an inverted range sends nothing').toHaveLength(2);
+      });
+
+      it('clears its alert once the plot changes', async () => {
+        const { rerender } = await failPlotOneListThenInvertRange();
+
+        selection.plotID = SECOND_PLOT_ID;
+        rerender(<RecentChangesExplorer />);
+
+        await waitFor(() => expect(screen.queryByText(PLOT_ONE_QUERY_ERROR), 'plot 1 error must not stay under plot 2').not.toBeInTheDocument());
+      });
+
+      it('shows no empty-state message while the alert is on screen', async () => {
+        const listRequests: ListRequestBody[] = [];
+        global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
+          if (url === '/api/changes/explorer/query') {
+            listRequests.push(JSON.parse(String(init?.body ?? '{}')));
+            return Promise.resolve({ ok: false, status: HTTPResponses.INTERNAL_SERVER_ERROR, json: async () => ({}) });
+          }
+          return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+        }) as unknown as typeof fetch;
+        render(<RecentChangesExplorer />);
+
+        await screen.findByText(PLOT_ONE_QUERY_ERROR);
+
+        expect(screen.queryByText('No changes found')).not.toBeInTheDocument();
+      });
+    });
+
     it('keeps the list on screen when the range is inverted on the same plot', async () => {
       await loadPlotOneThenInvertRange();
 

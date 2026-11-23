@@ -461,6 +461,7 @@ export default function RecentChangesExplorer() {
   const exportAbortRef = useRef<AbortController | null>(null);
   const exportRequestRef = useRef(0);
   const loadedScopeRef = useRef<string | null>(null);
+  const failedScopeRef = useRef<string | null>(null);
 
   const [filters, setFilters] = useState<RecentChangesFilters>(DEFAULT_RECENT_CHANGES_FILTERS);
   const [items, setItems] = useState<FeedItem[]>([]);
@@ -532,8 +533,10 @@ export default function RecentChangesExplorer() {
       itemsAbortRef.current?.abort();
       const requestedScope = scopeKey(currentSite.schemaName, currentPlot.plotID);
       if (dateFiltersUnsendable) {
-        if (loadedScopeRef.current !== requestedScope) {
+        const scopeHasNothingOnScreen = loadedScopeRef.current !== requestedScope && failedScopeRef.current !== requestedScope;
+        if (scopeHasNothingOnScreen) {
           loadedScopeRef.current = null;
+          failedScopeRef.current = null;
           setItems([]);
           setSummary(DEFAULT_SUMMARY);
           setHasMore(false);
@@ -546,6 +549,7 @@ export default function RecentChangesExplorer() {
       const controller = new AbortController();
       itemsAbortRef.current = controller;
       const requestID = ++itemsRequestRef.current;
+      failedScopeRef.current = null;
       if (append) {
         setLoadingMore(true);
       } else {
@@ -581,6 +585,7 @@ export default function RecentChangesExplorer() {
       } catch (error) {
         if (isAbortError(error)) return;
         const msg = error instanceof Error ? error.message : String(error);
+        if (itemsRequestRef.current === requestID) failedScopeRef.current = requestedScope;
         setErrorMessage(msg);
       } finally {
         if (itemsRequestRef.current === requestID) {
@@ -846,14 +851,16 @@ export default function RecentChangesExplorer() {
           ))}
         </Stack>
       ) : items.length === 0 ? (
-        <Sheet variant="soft" sx={{ p: 4, borderRadius: 'md', textAlign: 'center' }}>
-          <Typography level="body-lg" sx={{ color: 'neutral.500' }}>
-            No changes found
-          </Typography>
-          <Typography level="body-sm" sx={{ color: 'neutral.400', mt: 1 }}>
-            Try adjusting your filters or selecting a different preset.
-          </Typography>
-        </Sheet>
+        errorMessage === null && (
+          <Sheet variant="soft" sx={{ p: 4, borderRadius: 'md', textAlign: 'center' }}>
+            <Typography level="body-lg" sx={{ color: 'neutral.500' }}>
+              No changes found
+            </Typography>
+            <Typography level="body-sm" sx={{ color: 'neutral.400', mt: 1 }}>
+              Try adjusting your filters or selecting a different preset.
+            </Typography>
+          </Sheet>
+        )
       ) : (
         <Stack spacing={1.5}>
           {items.map(item => (
