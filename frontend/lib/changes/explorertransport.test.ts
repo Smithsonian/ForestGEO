@@ -37,6 +37,7 @@ describe('postRecentChangesExport', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/changes/explorer/export');
     expect(init?.method).toBe('POST');
+    expect(new Headers(init?.headers).get('Content-Type'), 'the body is JSON').toBe('application/json');
     expect(init?.signal, 'the caller’s signal aborts the request').toBe(controller.signal);
     expect(JSON.parse(String(init?.body))).toEqual({ ...SCOPE, filters });
     expect(result.filename).toBe(SERVER_FILENAME);
@@ -89,6 +90,11 @@ describe('changeExportFailureMessage', () => {
     {
       label: '400 INVALID_EXPORT_REQUEST',
       failure: { status: HTTPResponses.INVALID_REQUEST, code: CHANGE_EXPORT_ERROR_CODES.invalidRequest },
+      expected: CHANGE_EXPORT_FAILURE_MESSAGES.invalidRequest
+    },
+    {
+      label: '400 INVALID_SCHEMA from the authz wrapper',
+      failure: { status: HTTPResponses.INVALID_REQUEST, code: 'INVALID_SCHEMA' },
       expected: CHANGE_EXPORT_FAILURE_MESSAGES.invalidRequest
     },
     {
