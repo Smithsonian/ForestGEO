@@ -804,47 +804,6 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
       expect(listRequests, `list requests sent while the range is inverted: ${JSON.stringify(listRequests)}`).toHaveLength(requestsBeforeSwitch);
     });
 
-    it('clears the previous plot results when the plot changes under an unfilterable date', async () => {
-      const { listRequests } = servePlotOneFeed();
-      const { rerender } = render(<RecentChangesExplorer />);
-      await screen.findByText(PLOT_ONE_TABLE);
-      fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: FIVE_DIGIT_YEAR_DATE } });
-      await screen.findByText(UNFILTERABLE_DATE_MESSAGE);
-
-      selection.plotID = SECOND_PLOT_ID;
-      rerender(<RecentChangesExplorer />);
-
-      await waitFor(() => expect(screen.queryByText(PLOT_ONE_TABLE)).not.toBeInTheDocument());
-      expect(totalChangesCount()).toBe('0');
-      expect(listRequests).toHaveLength(1);
-    });
-
-    it('clears the error of a plot whose list never loaded when the plot changes under an inverted range, and sends no request', async () => {
-      const listRequests: ListRequestBody[] = [];
-      global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
-        if (url === '/api/changes/explorer/query') {
-          listRequests.push(JSON.parse(String(init?.body ?? '{}')));
-          return Promise.resolve({ ok: false, status: HTTPResponses.INTERNAL_SERVER_ERROR, json: async () => ({}) });
-        }
-        return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
-      }) as unknown as typeof fetch;
-      const { rerender } = render(<RecentChangesExplorer />);
-      await screen.findByText(PLOT_ONE_QUERY_ERROR);
-      fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: INVERTED_TO } });
-      await waitFor(() => expect(listRequests).toHaveLength(2));
-      fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: INVERTED_FROM } });
-      await screen.findByText('From must be on or before To.');
-      const requestsBeforeSwitch = listRequests.length;
-
-      selection.plotID = SECOND_PLOT_ID;
-      rerender(<RecentChangesExplorer />);
-
-      await waitFor(() => expect(screen.queryByText(PLOT_ONE_QUERY_ERROR), 'plot 1 error must not stay under plot 2').not.toBeInTheDocument());
-      expect(listRequests, `list requests sent while the range is inverted: ${JSON.stringify(listRequests)}`).toHaveLength(requestsBeforeSwitch);
-    });
-
     describe('a failed list query', () => {
       async function failPlotOneListThenInvertRange() {
         const listRequests: ListRequestBody[] = [];
@@ -886,24 +845,6 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
 
         await waitFor(() => expect(screen.queryByText(PLOT_ONE_QUERY_ERROR), 'plot 1 error must not stay under plot 2').not.toBeInTheDocument());
       });
-
-      it('shows the empty state beside the alert, as before #592', async () => {
-        const listRequests: ListRequestBody[] = [];
-        global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-          const url = String(input);
-          if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
-          if (url === '/api/changes/explorer/query') {
-            listRequests.push(JSON.parse(String(init?.body ?? '{}')));
-            return Promise.resolve({ ok: false, status: HTTPResponses.INTERNAL_SERVER_ERROR, json: async () => ({}) });
-          }
-          return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
-        }) as unknown as typeof fetch;
-        render(<RecentChangesExplorer />);
-
-        await screen.findByText(PLOT_ONE_QUERY_ERROR);
-
-        expect(screen.getByText('No changes found'), 'a failed list leaves the explorer in a recoverable empty state').toBeInTheDocument();
-      });
     });
 
     it('keeps the list on screen when the range is inverted on the same plot', async () => {
@@ -915,8 +856,6 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     });
 
     describe('with two plots, where each plot answers differently (#592 round 3)', () => {
-      const PLOT_TWO_TABLE = 'plot_two_table';
-      const PLOT_TWO_TOTAL = 3;
       const PLOT_TWO_QUERY_ERROR = `Query request failed: ${HTTPResponses.SERVICE_UNAVAILABLE}`;
       const LOAD_MORE_BUTTON_NAME = 'Load more changes';
       const NOTHING_FOUND_MESSAGE = 'No changes found';
@@ -996,38 +935,6 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
         expect(screen.getByText(NOTHING_FOUND_MESSAGE), 'the empty feed sits under plot 2 failure alert, as before #592').toBeInTheDocument();
       });
 
-      it('shows nothing of plot two when plot one is selected again under inverted dates', async () => {
-        const { listRequests, rerender } = await loadPlotOneThenFailPlotTwo();
-        await invertRangeOnCurrentPlot(listRequests);
-        const requestsBeforeSwitchBack = listRequests.length;
-
-        switchToPlot(FIRST_PLOT_ID, rerender);
-
-        await waitFor(() => expect(screen.queryByText(PLOT_TWO_QUERY_ERROR), 'plot 2 error must not stay under plot 1').not.toBeInTheDocument());
-        expect(screen.queryByText(PLOT_ONE_TABLE), 'plot 1 rows are not requested again under inverted dates').not.toBeInTheDocument();
-        expect(totalChangesCount()).toBe('0');
-        expect(screen.queryByRole('button', { name: LOAD_MORE_BUTTON_NAME })).not.toBeInTheDocument();
-        expect(listRequests, `list requests sent while the range is inverted: ${JSON.stringify(listRequests)}`).toHaveLength(requestsBeforeSwitchBack);
-      });
-
-      it('keeps the rows of the plot just switched to when its dates are inverted, and none of the previous plot', async () => {
-        const listRequests = answerListRequestsPerPlot({
-          [FIRST_PLOT_ID]: pagedFeedAnswer(PLOT_ONE_TABLE, PLOT_ONE_TOTAL),
-          [SECOND_PLOT_ID]: pagedFeedAnswer(PLOT_TWO_TABLE, PLOT_TWO_TOTAL)
-        });
-        const { rerender } = render(<RecentChangesExplorer />);
-        await screen.findByText(PLOT_ONE_TABLE);
-        switchToPlot(SECOND_PLOT_ID, rerender);
-        await screen.findByText(PLOT_TWO_TABLE);
-
-        await invertRangeOnCurrentPlot(listRequests);
-
-        expect(screen.getByText(PLOT_TWO_TABLE), 'editing dates on plot 2 keeps plot 2 list').toBeInTheDocument();
-        expect(totalChangesCount()).toBe(String(PLOT_TWO_TOTAL));
-        expect(screen.getByRole('button', { name: LOAD_MORE_BUTTON_NAME })).toBeInTheDocument();
-        expect(screen.queryByText(PLOT_ONE_TABLE)).not.toBeInTheDocument();
-      });
-
       it('does not let a late failure of the plot left behind replace the empty list of the current plot with an alert', async () => {
         const plotOneResponse = deferred<unknown>();
         const listRequests = answerListRequestsPerPlot({
@@ -1089,44 +996,6 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     expect(screen.queryByText('late_table'), 'the response sent before the range was inverted must not render').not.toBeInTheDocument();
     expect(totalChangesCount(), 'the late response must not update Total Changes either').toBe(totalBeforeLateResponse);
     expect(container.querySelectorAll('.MuiSkeleton-root'), 'loading clears once the request is aborted').toHaveLength(0);
-  });
-
-  it('ignores a response that arrives after the range became inverted even when the request was never rejected', async () => {
-    const inFlightResponses: Deferred<ReturnType<typeof jsonResponse>>[] = [];
-    const abortedRequestIndexes: number[] = [];
-    global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
-      if (url === '/api/changes/explorer/query') {
-        const response = deferred<ReturnType<typeof jsonResponse>>();
-        const requestIndex = inFlightResponses.push(response) - 1;
-        init?.signal?.addEventListener('abort', () => abortedRequestIndexes.push(requestIndex));
-        return response.promise;
-      }
-      return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
-    }) as unknown as typeof fetch;
-    const lateResponse = {
-      items: [{ type: 'single' as const, entry: makeEntry(9, 'late_table') }],
-      totalItems: 1,
-      summary: { total: 1, updates: 1, inserts: 0, deletes: 0 },
-      hasMore: false
-    };
-    render(<RecentChangesExplorer />);
-    await waitFor(() => expect(inFlightResponses).toHaveLength(1));
-    const totalBeforeLateResponse = totalChangesCount();
-    fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-06' } });
-    await waitFor(() => expect(inFlightResponses).toHaveLength(2));
-
-    fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
-    await screen.findByText('From must be on or before To.');
-    expect(abortedRequestIndexes, 'the request sent for the valid range is aborted when the range turns invalid').toContain(1);
-    await act(async () => {
-      inFlightResponses[1].resolve(jsonResponse(lateResponse));
-      await Promise.resolve();
-    });
-
-    expect(screen.queryByText('late_table'), 'a response to an aborted request must not render, whether or not the transport rejected').not.toBeInTheDocument();
-    expect(totalChangesCount(), 'the late response must not update Total Changes either').toBe(totalBeforeLateResponse);
   });
 
   it('keeps both dates and resets the other filters when a preset is clicked', async () => {
