@@ -356,12 +356,27 @@ async function acquireConnection(): Promise<PoolConnection> {
   }
 }
 
-/** Cleanup runs after the outcome is decided, so a cleanup step that throws must not replace that outcome. */
-function ignoreCleanupFailure(cleanupStep: () => void): void {
+type ConnectionCleanupStep = 'destroy' | 'release';
+
+const CLEANUP_FAILED_MESSAGES: Record<ConnectionCleanupStep, string> = {
+  destroy: 'Change export connection destroy failed',
+  release: 'Change export connection release failed'
+};
+
+function reportCleanupFailure(message: string, scope: ChangeExportReadScope, driverCode: string | undefined): void {
+  try {
+    ailogger.error(message, new Error(message), { schema: scope.schema, plotID: scope.plotID, driverCode });
+  } catch {
+    // The logger is the last resort: when it throws too there is nowhere left to report to.
+  }
+}
+
+/** Cleanup runs after the outcome is decided, so a step that throws is recorded and must not replace that outcome. */
+function attemptConnectionCleanup(step: ConnectionCleanupStep, scope: ChangeExportReadScope, cleanupStep: () => void): void {
   try {
     cleanupStep();
-  } catch {
-    // Nothing left to report to: this is the last line of defence for the outcome already decided.
+  } catch (error: unknown) {
+    reportCleanupFailure(CLEANUP_FAILED_MESSAGES[step], scope, driverCodeOf(error));
   }
 }
 
@@ -369,11 +384,8 @@ async function rollbackOrDestroy(conn: PoolConnection, scope: ChangeExportReadSc
   try {
     await conn.rollback();
   } catch (rollbackError: unknown) {
-    const driverCode = driverCodeOf(rollbackError);
-    ignoreCleanupFailure(() =>
-      ailogger.error(ROLLBACK_FAILED_MESSAGE, new Error(ROLLBACK_FAILED_MESSAGE), { schema: scope.schema, plotID: scope.plotID, driverCode })
-    );
-    ignoreCleanupFailure(() => conn.destroy());
+    reportCleanupFailure(ROLLBACK_FAILED_MESSAGE, scope, driverCodeOf(rollbackError));
+    attemptConnectionCleanup('destroy', scope, () => conn.destroy());
   }
 }
 
@@ -395,6 +407,6 @@ export async function readChangeExportSnapshot(
     return await collectChangeExport(conn, scope, limits);
   } finally {
     if (transactionActive) await rollbackOrDestroy(conn, scope);
-    ignoreCleanupFailure(() => conn.release());
+    attemptConnectionCleanup('release', scope, () => conn.release());
   }
 }

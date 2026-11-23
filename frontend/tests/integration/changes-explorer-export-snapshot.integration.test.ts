@@ -937,10 +937,11 @@ describe('readChangeExportSnapshot', () => {
     });
 
     describe('when cleanup itself throws', () => {
-      const CLEANUP_FAILURE_MESSAGE = 'cleanup step threw';
+      const CLEANUP_FAILURE_MESSAGE = 'cleanup step threw after SECRET-DRIVER-TEXT';
+      const CLEANUP_DRIVER_CODE = 'ER_CLEANUP_STEP';
 
       function throwFromCleanup(): never {
-        throw new Error(CLEANUP_FAILURE_MESSAGE);
+        throw Object.assign(new Error(CLEANUP_FAILURE_MESSAGE), { code: CLEANUP_DRIVER_CODE });
       }
 
       it('still returns the rows and releases when the logger throws while a failed rollback is reported', async () => {
@@ -965,6 +966,14 @@ describe('readChangeExportSnapshot', () => {
 
         expect([failure.stage, failure.driverCode], 'the read failure survives a throwing destroy').toEqual(['detail', DRIVER_CODE]);
         expect(ownedDouble.release, 'the connection is still released').toHaveBeenCalledTimes(1);
+        expect(
+          mocks.logError.mock.calls.map(call => [call[0], call[2]]),
+          'the rollback failure and the destroy failure are each logged once, with the driver code only'
+        ).toEqual([
+          ['Change export rollback failed', { schema, plotID, driverCode: ROLLBACK_DRIVER_CODE }],
+          ['Change export connection destroy failed', { schema, plotID, driverCode: CLEANUP_DRIVER_CODE }]
+        ]);
+        expect(loggedText()).not.toContain('SECRET-DRIVER-TEXT');
       });
 
       it('still returns the rows when release throws', async () => {
@@ -975,6 +984,11 @@ describe('readChangeExportSnapshot', () => {
 
         expect(snapshot.rows, 'a release failure never replaces a result already decided').toHaveLength(3);
         expect(ownedDouble.release).toHaveBeenCalledTimes(1);
+        expect(
+          mocks.logError.mock.calls.map(call => [call[0], call[2]]),
+          'the release failure is logged once, with the driver code only'
+        ).toEqual([['Change export connection release failed', { schema, plotID, driverCode: CLEANUP_DRIVER_CODE }]]);
+        expect(loggedText()).not.toContain('SECRET-DRIVER-TEXT');
       });
     });
 
