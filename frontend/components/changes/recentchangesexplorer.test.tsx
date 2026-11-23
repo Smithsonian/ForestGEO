@@ -10,6 +10,8 @@ import { decodeChangelogRow } from '@/config/changelogdecode';
 const FIRST_PLOT_ID = 1;
 const SECOND_PLOT_ID = 2;
 const PLOT_CHANGE_ID_BLOCK = 100;
+const UNRENDERED_PRIMARY_KEY = 'pk-should-not-render';
+const UNRENDERED_PRIMARY_KEY_PATTERN = new RegExp(UNRENDERED_PRIMARY_KEY);
 
 const selection = vi.hoisted(() => ({ plotID: 1, schemaName: 'forestgeo_testing' }));
 
@@ -437,14 +439,44 @@ describe('RecentChangesExplorer: records inside cards (#592 §8.5)', () => {
   });
 
   it('renders a one-record UPDATE exactly as before: one diff, no key label, no caption', async () => {
-    serveFeed([single(makeEntry(1, 'coremeasurements'))]);
+    const singleRecord = { primaryKey: UNRENDERED_PRIMARY_KEY, oldState: { MeasuredDBH: 10 }, newState: { MeasuredDBH: 12 } };
+    serveFeed([single(entryWith({ tableName: 'coremeasurements', records: [singleRecord] }))]);
     render(<RecentChangesExplorer />);
 
     expect(await screen.findByText('MeasuredDBH')).toBeInTheDocument();
     expect(screen.getByText('10')).toBeInTheDocument();
     expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getAllByText('Details')).toHaveLength(1);
+    expect(screen.queryByText(UNRENDERED_PRIMARY_KEY_PATTERN), 'a one-record change shows no primary-key label').not.toBeInTheDocument();
     expect(screen.queryByText(/were not recorded/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { operation: 'INSERT' as const, sign: '+', imageSide: 'newState' as const },
+    { operation: 'DELETE' as const, sign: '-', imageSide: 'oldState' as const }
+  ])('renders a one-record $operation as its single line with no key label', async ({ operation, sign, imageSide }) => {
+    const image = { SpeciesCode: 'aaaaaa' };
+    const record = { primaryKey: UNRENDERED_PRIMARY_KEY, oldState: null, newState: null, [imageSide]: image };
+    serveFeed([single(entryWith({ tableName: 'species', operation, oldRowState: null, newRowState: null, records: [record] }))]);
+    render(<RecentChangesExplorer />);
+
+    expect(await screen.findByText(`${sign} SpeciesCode: aaaaaa`)).toBeInTheDocument();
+    expect(screen.queryByText(UNRENDERED_PRIMARY_KEY_PATTERN), 'a one-record change shows no primary-key label').not.toBeInTheDocument();
+  });
+
+  it.each([
+    { operation: 'INSERT' as const, sign: '+', imageSide: 'newState' as const },
+    { operation: 'DELETE' as const, sign: '-', imageSide: 'oldState' as const }
+  ])('labels each line of a two-record $operation with its primary key', async ({ operation, sign, imageSide }) => {
+    const records = [
+      { primaryKey: '2', oldState: null, newState: null, [imageSide]: { SpeciesCode: 'bbbbbb' } },
+      { primaryKey: '3', oldState: null, newState: null, [imageSide]: { SpeciesCode: 'cccccc' } }
+    ];
+    serveFeed([single(entryWith({ tableName: 'species', operation, oldRowState: null, newRowState: null, records }))]);
+    render(<RecentChangesExplorer />);
+
+    expect(await screen.findByText(`${sign} 2 · SpeciesCode: bbbbbb`)).toBeInTheDocument();
+    expect(screen.getByText(`${sign} 3 · SpeciesCode: cccccc`)).toBeInTheDocument();
   });
 
   it('renders one labelled block per record of a legacy multi-row change', async () => {
