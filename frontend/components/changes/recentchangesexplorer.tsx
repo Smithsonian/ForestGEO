@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -632,7 +632,8 @@ export default function RecentChangesExplorer() {
 
   // An export belongs to the site and plot it was started for: leaving them, or the page, discards it.
   // The abort only drops the client's result; the server finishes its read.
-  useEffect(() => {
+  // A layout effect, so the cleanup runs inside the commit that changes the scope; a passive one can run after a late blob has downloaded.
+  useLayoutEffect(() => {
     return () => {
       exportAbortRef.current?.abort();
       exportAbortRef.current = null;
