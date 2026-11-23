@@ -7,7 +7,7 @@ import { COREMEASUREMENTS_TABLE_NAME } from '@/lib/changelog/ingestion-audit';
 import { EDIT_OPERATION_RECORD_ID_MARKER } from '@/lib/changelog/edit-operation-projection';
 import { BULK_CRUD_FILE_ID } from '@/lib/uploads/file-names';
 import { SUB_BATCH_SUFFIX_SQL_PATTERN } from '@/lib/uploads/batch-family';
-import { MAX_EXPORT_ROWS, type RecentChangesServerFilters } from '@/config/recentchangesexplorer';
+import { DEFAULT_RECENT_CHANGES_FILTERS, MAX_EXPORT_ROWS, NO_DATE_BOUND, type RecentChangesServerFilters } from '@/config/recentchangesexplorer';
 import {
   buildUploadRollupDraft,
   collectForeignKeyReferences,
@@ -294,7 +294,7 @@ async function readForeignKeyLabels(conn: ChangeExportQueryable, schema: string,
 }
 
 function countsAreFiltered(filters: RecentChangesServerFilters): boolean {
-  return filters.quickSearch !== '' || filters.changedFrom !== '' || filters.changedTo !== '';
+  return filters.quickSearch !== DEFAULT_RECENT_CHANGES_FILTERS.quickSearch || filters.changedFrom !== NO_DATE_BOUND || filters.changedTo !== NO_DATE_BOUND;
 }
 
 /**

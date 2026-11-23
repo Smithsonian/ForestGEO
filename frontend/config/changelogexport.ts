@@ -34,7 +34,7 @@ export const FILTERED_COUNT_SUFFIX = '; entries matching the export filters';
 /** Papa's built-in formula pattern stops at a line break, so a multi-line cell starting with a sigil went out unescaped. */
 export const FORMULA_LEADING_CELL = /^[=+\-@\t\r][\s\S]*$/;
 
-const CHANGE_DATE_LENGTH = 'YYYY-MM-DD'.length;
+const ISO_DATE_LENGTH = 'YYYY-MM-DD'.length;
 const BLANK_CELL = '';
 const NO_FILE_RECORDED_PHRASE = 'no file recorded';
 const NO_BATCH_RECORDED_PHRASE = 'no batch recorded';
@@ -417,7 +417,7 @@ export function toExportCells(draft: ChangeExportDraft, context: DescribeChangeC
     draft.changedTable,
     draft.primaryKey,
     draft.changedColumn,
-    draft.changeTime === null ? BLANK_CELL : draft.changeTime.slice(0, CHANGE_DATE_LENGTH),
+    draft.changeTime === null ? BLANK_CELL : draft.changeTime.slice(0, ISO_DATE_LENGTH),
     formatExportCell(draft.changeTime),
     describeChange(draft.descriptor, context),
     draft.action,
@@ -432,8 +432,6 @@ export function toExportCells(draft: ChangeExportDraft, context: DescribeChangeC
 export function serializeChangeExportCsv(rows: readonly ExportCell[][]): string {
   return Papa.unparse([[...EXPORT_COLUMNS], ...rows], { escapeFormulae: FORMULA_LEADING_CELL });
 }
-
-const ISO_DATE_LENGTH = 'YYYY-MM-DD'.length;
 
 /** The download name; `schema` and `plotID` are validated upstream and the date is the UTC calendar day of `exportedAt`. */
 export function buildChangeExportFilename(schema: string, plotID: number, exportedAt: Date): string {
