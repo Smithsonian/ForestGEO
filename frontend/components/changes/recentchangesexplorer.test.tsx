@@ -540,6 +540,19 @@ describe('RecentChangesExplorer: records inside cards (#592 §8.5)', () => {
     expect(screen.getByText('abcdsp'), 'the one-sided record keeps its NULL → value line').toBeInTheDocument();
   });
 
+  it.each([
+    { recordedSide: 'new', oldState: null, newState: { SpeciesCode: 'AB', Family: null } },
+    { recordedSide: 'old', oldState: { SpeciesCode: 'AB', Family: null }, newState: null }
+  ])('shows only the recorded fields of a one-sided UPDATE whose $recordedSide image holds a null field', async ({ oldState, newState }) => {
+    const records = [{ primaryKey: '9', oldState, newState }];
+    serveFeed([single(entryWith({ changeID: 41, oldRowState: oldState, newRowState: newState, records }))]);
+    render(<RecentChangesExplorer />);
+
+    expect(await screen.findByText('SpeciesCode')).toBeInTheDocument();
+    expect(screen.getByText('AB')).toBeInTheDocument();
+    expect(screen.queryByText('Family'), 'a field the image never held has no line').not.toBeInTheDocument();
+  });
+
   it('says no field values were recorded for a one-sided record with no visible field', async () => {
     const records = [{ primaryKey: '7003', oldState: null, newState: { UpdatedAt: '2026-03-10 14:00:00' } }];
     serveFeed([single(entryWith({ changeID: 31, oldRowState: null, newRowState: records[0].newState, records }))]);

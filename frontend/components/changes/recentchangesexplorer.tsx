@@ -240,7 +240,12 @@ function DeleteSummary({ entry }: { entry: ChangelogEntry }) {
 
 /** One record of an UPDATE. A record with one side missing says which, matching the CSV Description (#592 D12). */
 function UpdateRecordBlock({ record, showPrimaryKey }: { record: ChangelogRecord; showPrimaryKey: boolean }) {
-  const diffs = useMemo(() => computeDiff(record.oldState, record.newState), [record.oldState, record.newState]);
+  const diffs = useMemo(() => {
+    if (record.oldState !== null && record.newState !== null) return computeDiff(record.oldState, record.newState);
+    const recordedImage = record.oldState ?? record.newState;
+    if (recordedImage === null) return [];
+    return recordedFieldNames(recordedImage).map(field => ({ field, oldValue: record.oldState?.[field], newValue: record.newState?.[field] }));
+  }, [record.oldState, record.newState]);
   const missingSideCaption = record.oldState === null ? PRIOR_VALUES_NOT_RECORDED_CAPTION : record.newState === null ? NEW_VALUES_NOT_RECORDED_CAPTION : null;
   const recordedImage = record.oldState === null ? record.newState : record.oldState;
   const hasNoRecordedField = missingSideCaption !== null && (recordedImage === null || recordedFieldNames(recordedImage).length === 0);
