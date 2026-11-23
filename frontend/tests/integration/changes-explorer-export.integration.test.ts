@@ -46,9 +46,8 @@ const TIME_SECOND = '2026-03-10 10:00:00';
 const TIME_THIRD = '2026-03-10 11:00:00';
 const DETAIL_PAGE_ORDER = 'ORDER BY uc.ChangeTimestamp, uc.ChangeID';
 
-const SECRET_FILTER_TERM = 'SECRET-FILTER-TERM';
-const SECRET_CELL_VALUE = 'SECRET-CELL-VALUE';
-const SECRET_DRIVER_TEXT = 'SECRET-DRIVER-TEXT';
+const DRIVER_MESSAGE = 'Deadlock found when trying to get lock';
+const SINK_FAILURE_TEXT = 'telemetry sink rejected the event';
 const DRIVER_CODE = 'ER_LOCK_DEADLOCK';
 
 const shared = vi.hoisted(() => ({ connection: null as Connection | null }));
@@ -134,13 +133,6 @@ describe('POST /api/changes/explorer/export', () => {
 
   function exportBody(filters: Partial<RecentChangesFilters> = {}): Record<string, unknown> {
     return { schema, plotID, filters: { ...DEFAULT_RECENT_CHANGES_FILTERS, ...filters } };
-  }
-
-  function loggedText(): string {
-    return [...mocks.logError.mock.calls, ...mocks.logWarn.mock.calls]
-      .flat()
-      .map(argument => (argument instanceof Error ? `${argument.message}\n${argument.stack}` : JSON.stringify(argument)))
-      .join('\n');
   }
 
   async function seedQuadratInsert(recordID: number, state: Record<string, unknown>, changeTime: string): Promise<number> {
@@ -276,62 +268,46 @@ describe('POST /api/changes/explorer/export', () => {
       expect(mocks.logError, 'a ceiling hit is a warning, not an export failure').not.toHaveBeenCalled();
     });
 
-    it('answers CHANGE_EXPORT_FAILED when a read fails and logs the stage, the driver code and the error class only', async () => {
+    it('answers CHANGE_EXPORT_FAILED when a read fails, and logs the driver’s own error with the stage and driver code', async () => {
       for (const recordID of [711, 712, 713]) {
-        await seedQuadratInsert(recordID, { QuadratName: `${SECRET_FILTER_TERM}-${recordID}`, Note: SECRET_CELL_VALUE }, TIME_FIRST);
+        await seedQuadratInsert(recordID, { QuadratName: `FAILING-Q-${recordID}` }, TIME_FIRST);
       }
+      const driverError = Object.assign(new Error(DRIVER_MESSAGE), { code: DRIVER_CODE });
       let detailPagesRead = 0;
       ownedQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
         if (sql.includes(DETAIL_PAGE_ORDER)) {
           detailPagesRead += 1;
-          if (detailPagesRead === 2) throw Object.assign(new Error(`Deadlock found near ${SECRET_DRIVER_TEXT}`), { code: DRIVER_CODE });
+          if (detailPagesRead === 2) throw driverError;
         }
         return ownedConnection.query(sql, params);
       });
 
-      await expectExportFailed(await postExport(exportBody({ quickSearch: SECRET_FILTER_TERM })));
+      await expectExportFailed(await postExport(exportBody()));
 
       expect(mocks.logError).toHaveBeenCalledTimes(1);
-      expect(mocks.logError.mock.calls[0][2]).toEqual({ schema, plotID, stage: 'detail', driverCode: DRIVER_CODE, errorName: 'ChangeExportReadError' });
-      const logged = loggedText();
-      for (const secret of [SECRET_FILTER_TERM, SECRET_CELL_VALUE, SECRET_DRIVER_TEXT, 'unifiedchangelog']) {
-        expect(logged, `the export’s own logs must not contain ${secret}`).not.toContain(secret);
-      }
+      const [, loggedError, context] = mocks.logError.mock.calls[0];
+      expect(loggedError, 'the log carries the driver’s error, message and stack, so the failure can be diagnosed').toBe(driverError);
+      expect(context).toEqual({ schema, plotID, stage: 'detail', driverCode: DRIVER_CODE });
     });
 
     it('answers CHANGE_EXPORT_FAILED at stage acquire when no connection can be had', async () => {
-      mocks.getConn.mockRejectedValue(new Error('connect ETIMEDOUT 10.0.0.5:3306'));
+      const connectError = new Error('connect ETIMEDOUT 10.0.0.5:3306');
+      mocks.getConn.mockRejectedValue(connectError);
 
       await expectExportFailed(await postExport(exportBody()));
 
-      expect(mocks.logError.mock.calls[0][2]).toEqual({ schema, plotID, stage: 'acquire', driverCode: undefined, errorName: 'ChangeExportReadError' });
-      expect(loggedText()).not.toContain('10.0.0.5');
+      const [, loggedError, context] = mocks.logError.mock.calls[0];
+      expect(loggedError).toBe(connectError);
+      expect(context).toEqual({ schema, plotID, stage: 'acquire', driverCode: undefined });
     });
 
-    it('labels a failure after the read as stage handler and logs its class name, never its message', async () => {
+    it.each([
+      { thrown: 'an Error', sinkFailure: new TypeError(SINK_FAILURE_TEXT) as unknown },
+      { thrown: 'a string', sinkFailure: SINK_FAILURE_TEXT as unknown }
+    ])('answers the fixed 500 and logs stage handler when the telemetry sink throws $thrown after the read', async ({ sinkFailure }) => {
       await seedQuadratInsert(721, { QuadratName: 'HANDLER-Q' }, TIME_FIRST);
       mocks.logEvent.mockImplementation(() => {
-        throw new TypeError(`telemetry sink rejected ${SECRET_CELL_VALUE}`);
-      });
-
-      const response = await postExport(exportBody());
-
-      expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-      expect(await response.json()).toEqual({ error: 'Unable to export the change log', code: CHANGE_EXPORT_ERROR_CODES.failed });
-      expect(mocks.logError.mock.calls[0][2], 'not a read failure, so not a reader stage').toEqual({
-        schema,
-        plotID,
-        stage: 'handler',
-        driverCode: undefined,
-        errorName: 'TypeError'
-      });
-      expect(loggedText()).not.toContain(SECRET_CELL_VALUE);
-    });
-
-    it('maps a non-Error value thrown after the read to the fixed 500 and logs its type as the error name', async () => {
-      await seedQuadratInsert(722, { QuadratName: 'NON-ERROR-Q' }, TIME_FIRST);
-      mocks.logEvent.mockImplementation(() => {
-        throw `telemetry sink rejected ${SECRET_CELL_VALUE}`;
+        throw sinkFailure;
       });
 
       const response = await postExport(exportBody());
@@ -341,16 +317,11 @@ describe('POST /api/changes/explorer/export', () => {
         error: 'Unable to export the change log',
         code: CHANGE_EXPORT_ERROR_CODES.failed
       });
-
       expect(mocks.logError).toHaveBeenCalledTimes(1);
-      expect(mocks.logError.mock.calls[0][2], 'a thrown string is not a reader error and has no name of its own').toEqual({
-        schema,
-        plotID,
-        stage: 'handler',
-        driverCode: undefined,
-        errorName: 'string'
-      });
-      expect(loggedText()).not.toContain(SECRET_CELL_VALUE);
+      const [, loggedError, context] = mocks.logError.mock.calls[0];
+      expect(loggedError, 'what was thrown is logged as an Error').toBeInstanceOf(Error);
+      expect((loggedError as Error).message).toBe(SINK_FAILURE_TEXT);
+      expect(context, 'not a read failure, so not a reader stage').toEqual({ schema, plotID, stage: 'handler', driverCode: undefined });
     });
   });
 

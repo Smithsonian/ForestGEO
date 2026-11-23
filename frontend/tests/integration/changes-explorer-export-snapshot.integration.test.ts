@@ -899,7 +899,7 @@ describe('readChangeExportSnapshot', () => {
   });
 
   describe('failure and cleanup', () => {
-    const SECRET_DRIVER_MESSAGE = 'Deadlock found near SECRET-DRIVER-TEXT';
+    const DRIVER_MESSAGE = 'Deadlock found when trying to get lock';
     const DRIVER_CODE = 'ER_LOCK_DEADLOCK';
     const ROLLBACK_DRIVER_CODE = 'PROTOCOL_CONNECTION_LOST';
 
@@ -921,7 +921,7 @@ describe('readChangeExportSnapshot', () => {
       ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
         if (sql.includes(DETAIL_PAGE_ORDER)) {
           detailPagesRead += 1;
-          if (detailPagesRead === 2) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
+          if (detailPagesRead === 2) throw Object.assign(new Error(DRIVER_MESSAGE), { code: DRIVER_CODE });
         }
         return ownedConnection.query(sql, params);
       });
@@ -930,7 +930,7 @@ describe('readChangeExportSnapshot', () => {
     function failRollback(): void {
       ownedDouble.rollback.mockImplementation(async () => {
         await ownedConnection.rollback();
-        throw Object.assign(new Error('rollback lost the connection near SECRET-DRIVER-TEXT'), { code: ROLLBACK_DRIVER_CODE });
+        throw Object.assign(new Error('rollback lost the connection'), { code: ROLLBACK_DRIVER_CODE });
       });
     }
 
@@ -947,7 +947,7 @@ describe('readChangeExportSnapshot', () => {
       const failure = await readFailure();
 
       expect([failure.stage, failure.driverCode]).toEqual(['detail', DRIVER_CODE]);
-      expect(failure.message, 'the driver’s message can quote row data and is not carried').not.toContain('SECRET-DRIVER-TEXT');
+      expect(failure.cause, 'the driver’s own error is kept for the log').toMatchObject({ message: DRIVER_MESSAGE, code: DRIVER_CODE });
       expect(ownedDouble.rollback).toHaveBeenCalledTimes(1);
       expect(ownedDouble.release).toHaveBeenCalledTimes(1);
       expect(ownedDouble.destroy).not.toHaveBeenCalled();
@@ -985,7 +985,7 @@ describe('readChangeExportSnapshot', () => {
     ])('when "$failingStatement" fails', ({ failingStatement, statementsSent }) => {
       beforeEach(() => {
         ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
-          if (sql === failingStatement) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
+          if (sql === failingStatement) throw Object.assign(new Error(DRIVER_MESSAGE), { code: DRIVER_CODE });
           return ownedConnection.query(sql, params);
         });
       });
@@ -1006,7 +1006,7 @@ describe('readChangeExportSnapshot', () => {
 
     it('never leaves the session read-only after a failed begin: a write on the same connection succeeds afterwards', async () => {
       ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
-        if (sql === SNAPSHOT_BEGIN_STATEMENT) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
+        if (sql === SNAPSHOT_BEGIN_STATEMENT) throw Object.assign(new Error(DRIVER_MESSAGE), { code: DRIVER_CODE });
         return ownedConnection.query(sql, params);
       });
       await readFailure();
@@ -1036,26 +1036,27 @@ describe('readChangeExportSnapshot', () => {
         changeTime: TIME_SHARED
       });
       ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
-        if (sql.includes(failingSql)) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
+        if (sql.includes(failingSql)) throw Object.assign(new Error(DRIVER_MESSAGE), { code: DRIVER_CODE });
         return ownedConnection.query(sql, params);
       });
 
       const failure = await readFailure();
 
       expect([failure.stage, failure.driverCode]).toEqual([stage, DRIVER_CODE]);
-      expect(failure.message, 'the driver’s message can quote row data and is not carried').not.toContain('SECRET-DRIVER-TEXT');
+      expect(failure.cause, 'the driver’s own error is kept for the log').toMatchObject({ message: DRIVER_MESSAGE, code: DRIVER_CODE });
       expect(ownedDouble.rollback).toHaveBeenCalledTimes(1);
       expect(ownedDouble.release).toHaveBeenCalledTimes(1);
       expect(ownedDouble.destroy).not.toHaveBeenCalled();
     });
 
     it('fails at stage acquire, with no driver code, when no connection can be had', async () => {
-      mocks.getConn.mockRejectedValue(new Error('connect ETIMEDOUT 10.0.0.5:3306'));
+      const connectError = new Error('connect ETIMEDOUT 10.0.0.5:3306');
+      mocks.getConn.mockRejectedValue(connectError);
 
       const failure = await readFailure();
 
       expect([failure.stage, failure.driverCode]).toEqual(['acquire', undefined]);
-      expect(failure.message).not.toContain('10.0.0.5');
+      expect(failure.cause).toBe(connectError);
       expect(ownedDouble.release, 'nothing was acquired, so nothing is released').not.toHaveBeenCalled();
     });
   });

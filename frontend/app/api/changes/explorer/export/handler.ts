@@ -64,12 +64,15 @@ export function createChangeExportHandler(limits: ChangeExportLimits) {
         ailogger.warn(EXPORT_TOO_LARGE_LOG_MESSAGE, { schema, plotID, maxRows: error.maxRows });
         return NextResponse.json(EXPORT_TOO_LARGE_RESPONSE, { status: HTTPResponses.PAYLOAD_TOO_LARGE });
       }
-      const stage = error instanceof ChangeExportReadError ? error.stage : HANDLER_STAGE;
-      const driverCode = error instanceof ChangeExportReadError ? error.driverCode : undefined;
-      // `name`, not `constructor.name`: a server build may minify class names, and each error class sets its own name.
-      const errorName = error instanceof Error ? error.name : typeof error;
-      // Stage, driver code and the error's class name only: filter values, cell values, SQL text and error messages can all quote row data.
-      ailogger.error(EXPORT_FAILED_LOG_MESSAGE, new Error(`${EXPORT_FAILED_LOG_MESSAGE} at stage ${stage}`), { schema, plotID, stage, driverCode, errorName });
+      const readFailure = error instanceof ChangeExportReadError ? error : null;
+      const underlyingFailure: unknown = readFailure ? readFailure.cause : error;
+      // The full error goes to the log, as on the list route; the response below stays fixed.
+      ailogger.error(EXPORT_FAILED_LOG_MESSAGE, underlyingFailure instanceof Error ? underlyingFailure : new Error(String(underlyingFailure)), {
+        schema,
+        plotID,
+        stage: readFailure?.stage ?? HANDLER_STAGE,
+        driverCode: readFailure?.driverCode
+      });
       return NextResponse.json(CHANGE_EXPORT_FAILED_RESPONSE, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     }
   };

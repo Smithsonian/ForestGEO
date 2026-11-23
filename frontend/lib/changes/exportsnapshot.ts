@@ -87,16 +87,20 @@ export function buildBaseBatchExpression(): SqlFragment {
 
 export type ChangeExportReadStage = 'acquire' | 'begin' | 'detail' | 'rollup' | 'labels';
 
-/** Carries the stage and the driver's error code only; the driver's message can quote row data. */
+function driverCodeOf(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+}
+
+/** Names the stage that failed and keeps the driver's own error as `cause`, for the log and never for the response. */
 export class ChangeExportReadError extends Error {
   readonly stage: ChangeExportReadStage;
   readonly driverCode: string | undefined;
 
-  constructor(stage: ChangeExportReadStage, driverCode?: string) {
-    super(`Change export read failed at stage ${stage}`);
+  constructor(stage: ChangeExportReadStage, cause: unknown) {
+    super(`Change export read failed at stage ${stage}`, { cause });
     this.name = 'ChangeExportReadError';
     this.stage = stage;
-    this.driverCode = driverCode;
+    this.driverCode = driverCodeOf(cause);
   }
 }
 
@@ -174,15 +178,11 @@ interface DetailCursor {
   changeID: number;
 }
 
-function driverCodeOf(error: unknown): string | undefined {
-  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
-}
-
 async function runStage<T>(stage: ChangeExportReadStage, pendingRead: Promise<T>): Promise<T> {
   try {
     return await pendingRead;
   } catch (error: unknown) {
-    throw new ChangeExportReadError(stage, driverCodeOf(error));
+    throw new ChangeExportReadError(stage, error);
   }
 }
 
@@ -355,9 +355,8 @@ export async function collectChangeExport(
 async function acquireConnection(): Promise<PoolConnection> {
   try {
     return await getConn();
-  } catch {
-    // getConn rethrows a bare message, so there is no driver code to keep.
-    throw new ChangeExportReadError('acquire');
+  } catch (error: unknown) {
+    throw new ChangeExportReadError('acquire', error);
   }
 }
 
