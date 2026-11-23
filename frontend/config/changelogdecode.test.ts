@@ -215,6 +215,14 @@ describe('decodeChangelogRow: legacy array states', () => {
     ]);
   });
 
+  it.each(['constructor', 'toString', '__proto__'])('never pairs images through the inherited property %s used as a table name', inheritedName => {
+    const records = decodedRecords(row({ tableName: inheritedName, recordID: '8', oldRowState: [{ TreeID: 8 }], newRowState: [{ TreeID: 8 }] }));
+    expect(records, 'an inherited Object.prototype member is not a table the interceptor handled').toEqual([
+      { primaryKey: '8', oldState: { TreeID: 8 }, newState: null },
+      { primaryKey: '8', oldState: null, newState: { TreeID: 8 } }
+    ]);
+  });
+
   it('gives no record for empty arrays on both sides', () => {
     expect(decodeChangelogRow(row({ tableName: 'attributes', recordID: '0', oldRowState: '[]', newRowState: '[]' }))).toEqual({
       records: [],

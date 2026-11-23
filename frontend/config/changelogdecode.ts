@@ -91,8 +91,8 @@ function imagesOf(side: StateSide): ChangelogRowImage[] {
 }
 
 function readLegacyKeyValues(tableName: string, image: ChangelogRowImage): string[] | null {
+  if (!Object.hasOwn(LEGACY_ROW_KEY_COLUMNS, tableName)) return null;
   const keyColumns = LEGACY_ROW_KEY_COLUMNS[tableName];
-  if (!keyColumns) return null;
   const values: string[] = [];
   for (const column of keyColumns) {
     const value = image[column];
