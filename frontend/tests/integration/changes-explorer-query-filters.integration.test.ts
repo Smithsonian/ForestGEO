@@ -20,6 +20,9 @@ const CHANGED_BY = 'changes-filter-seed@forestgeo.test';
 const SEED_TRANSACTION_ID = 'changes-filter-seed';
 const ROUTE_CONTEXT = { params: Promise.resolve({}) };
 const PAGE_SIZE = 25;
+const NON_JSON_BODY_GUARD_RESPONSE = { error: 'missing or invalid schema', code: 'INVALID_SCHEMA' };
+/** Seven digits: no seeded tree id, tag or user text can contain a ChangeID drawn from here, so a hit on the digits is a ChangeID hit. */
+const FIRST_UNAMBIGUOUS_CHANGE_ID = 7_340_001;
 
 const TIME_BEFORE_WINDOW = '2026-03-09 23:59:59';
 const TIME_WINDOW_START = '2026-03-10 00:00:00';
@@ -174,13 +177,32 @@ describe('POST /api/changes/explorer/query: request contract and filters', () =>
   });
 
   it('finds one change by its ChangeID, with or without the # sign (D7)', async () => {
+    await connection.query(`ALTER TABLE unifiedchangelog AUTO_INCREMENT = ${FIRST_UNAMBIGUOUS_CHANGE_ID}`);
     const seeded = await seedBoundaryChanges();
+    expect(seeded.windowStart, 'the seed ids start where the test placed them').toBeGreaterThanOrEqual(FIRST_UNAMBIGUOUS_CHANGE_ID);
 
-    const exact = await queryFeed({ quickSearch: `#${seeded.windowStart}` });
-    expect(feedChangeIDs(exact), 'no stored text holds a # sign, so a # term can only match the ChangeID').toEqual([seeded.windowStart]);
+    const hashed = await queryFeed({ quickSearch: `#${seeded.windowStart}` });
+    expect(feedChangeIDs(hashed), 'no stored text holds a # sign, so a # term can only match the ChangeID').toEqual([seeded.windowStart]);
 
     const plainDigits = await queryFeed({ quickSearch: String(seeded.windowStart) });
-    expect(feedChangeIDs(plainDigits), 'plain digits match the ChangeID too, besides any text that contains them').toContain(seeded.windowStart);
+    expect(feedChangeIDs(plainDigits), `only the ChangeID can contain these digits; seeded: ${JSON.stringify(seeded)}`).toEqual([seeded.windowStart]);
+  });
+
+  it('answers a body that is not JSON with the guard’s 400 and runs no SQL', async () => {
+    const { POST } = await import('@/app/api/changes/explorer/query/route');
+    const request = new NextRequest('http://localhost/api/changes/explorer/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"schema": '
+    });
+
+    const response = await POST(request, ROUTE_CONTEXT);
+
+    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(sharedState.executeQueryCalls).toBe(0);
+    expect(await response.json(), 'the route guard cannot read a schema from an unparsable body, so it answers before the handler').toEqual(
+      NON_JSON_BODY_GUARD_RESPONSE
+    );
   });
 
   it('returns paired records for a legacy multi-row change without changing the feed counts', async () => {

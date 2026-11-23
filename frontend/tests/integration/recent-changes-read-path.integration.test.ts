@@ -63,7 +63,7 @@ const NULL_SCOPE_PLAN_HASH = 'readpath-null-scope';
 const SECOND_PLOT_NAME = 'Recent Changes Read-Path Second Plot';
 // No real row needs to exist for this: edit_operations.CensusID carries no FK,
 // and the plot-B assertions below only exercise the explorer search route,
-// which (see _shared.ts buildWhereClause) never filters on CensusID at all.
+// which (see buildChangeFilter in lib/changes/changefilter.ts) never filters on CensusID at all.
 const PLOT_B_ARBITRARY_CENSUS_ID = 909090;
 
 // ---------------------------------------------------------------------------
