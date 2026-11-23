@@ -892,6 +892,42 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     expect(container.querySelectorAll('.MuiSkeleton-root'), 'loading clears once the request is aborted').toHaveLength(0);
   });
 
+  it('ignores a response that arrives after the range became inverted even when the request was never rejected', async () => {
+    const inFlightResponses: Deferred<ReturnType<typeof jsonResponse>>[] = [];
+    const abortedRequestIndexes: number[] = [];
+    global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
+      if (url === '/api/changes/explorer/query') {
+        const response = deferred<ReturnType<typeof jsonResponse>>();
+        const requestIndex = inFlightResponses.push(response) - 1;
+        init?.signal?.addEventListener('abort', () => abortedRequestIndexes.push(requestIndex));
+        return response.promise;
+      }
+      return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+    }) as unknown as typeof fetch;
+    const lateResponse = {
+      items: [{ type: 'single' as const, entry: makeEntry(9, 'late_table') }],
+      totalItems: 1,
+      summary: { total: 1, updates: 1, inserts: 0, deletes: 0 },
+      hasMore: false
+    };
+    render(<RecentChangesExplorer />);
+    await waitFor(() => expect(inFlightResponses).toHaveLength(1));
+    fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-06' } });
+    await waitFor(() => expect(inFlightResponses).toHaveLength(2));
+
+    fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
+    await screen.findByText('From must be on or before To.');
+    expect(abortedRequestIndexes, 'the request sent for the valid range is aborted when the range turns invalid').toContain(1);
+    await act(async () => {
+      inFlightResponses[1].resolve(jsonResponse(lateResponse));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('late_table'), 'a response to an aborted request must not render, whether or not the transport rejected').not.toBeInTheDocument();
+  });
+
   it('keeps both dates and resets the other filters when a preset is clicked', async () => {
     const listRequests = serveFeed([]);
     render(<RecentChangesExplorer />);
@@ -959,15 +995,18 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
   const originalCreateObjectURL = URL.createObjectURL;
   const originalRevokeObjectURL = URL.revokeObjectURL;
   let downloadedFilenames: string[];
+  let downloadedHrefs: string[];
 
   // jsdom's URL has neither method, so they are assigned for the test and put back after it.
   beforeEach(() => {
     selection.plotID = FIRST_PLOT_ID;
     downloadedFilenames = [];
+    downloadedHrefs = [];
     URL.createObjectURL = vi.fn(() => OBJECT_URL);
     URL.revokeObjectURL = vi.fn();
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
       downloadedFilenames.push(this.download);
+      downloadedHrefs.push(this.href);
     });
   });
 
@@ -1036,6 +1075,8 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     });
 
     await waitFor(() => expect(downloadedFilenames).toEqual([SERVER_FILENAME]));
+    expect(downloadedHrefs, 'the clicked link points at the blob built from the response').toHaveLength(1);
+    expect(downloadedHrefs[0]).toContain(OBJECT_URL);
     await waitFor(() => expect(exportButton, 'the loading state clears').toBeEnabled());
     expect(URL.revokeObjectURL, 'the object URL is released').toHaveBeenCalledWith(OBJECT_URL);
     expect(screen.queryByTestId('recent-changes-export-alert')).not.toBeInTheDocument();
@@ -1168,6 +1209,56 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     expect(downloadedFilenames, 'plot 1’s CSV must not download on plot 2').toEqual([]);
     expect(URL.createObjectURL).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }), 'the new plot starts with an idle button').toBeEnabled();
+  });
+
+  it('still downloads the original file, with the filters from the click, when Quick Search changes during the export', async () => {
+    const pendingExport = deferred<Response>();
+    const { exportBodies, exportSignals, listRequests } = serveExport(() => pendingExport.promise);
+    const user = userEvent.setup();
+    await renderAndWaitForFeed(listRequests);
+    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: 'TREE-7' } });
+    await user.click(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }));
+    await waitFor(() => expect(exportBodies).toHaveLength(1));
+
+    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: 'TREE-8' } });
+    await waitFor(() => expect(listRequests[listRequests.length - 1].filters.quickSearch).toBe('TREE-8'));
+    expect(exportSignals[0]?.aborted, 'a filter change does not cancel an export').toBe(false);
+    await act(async () => {
+      pendingExport.resolve(csvResponse());
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(downloadedFilenames).toEqual([SERVER_FILENAME]));
+    expect(exportBodies, 'only the click-time request was sent').toHaveLength(1);
+    expect(exportBodies[0]).toMatchObject({ filters: { quickSearch: 'TREE-7' } });
+  });
+
+  it('aborts the export and downloads nothing when only the site changes and the plot stays the same', async () => {
+    const OTHER_SCHEMA_NAME = 'forestgeo_other';
+    const originalSchemaName = selection.schemaName;
+    const pendingExport = deferred<Response>();
+    const { exportBodies, exportSignals, listRequests } = serveExport(() => pendingExport.promise);
+    const user = userEvent.setup();
+    const { rerender } = await renderAndWaitForFeed(listRequests);
+    await user.click(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }));
+    await waitFor(() => expect(exportBodies).toHaveLength(1));
+
+    try {
+      selection.schemaName = OTHER_SCHEMA_NAME;
+      rerender(<RecentChangesExplorer />);
+      await waitFor(() => expect(listRequests[listRequests.length - 1]).toMatchObject({ schema: OTHER_SCHEMA_NAME, plotID: FIRST_PLOT_ID }));
+      expect(exportSignals[0]?.aborted, 'the export request is aborted when the site changes').toBe(true);
+
+      await act(async () => {
+        pendingExport.resolve(csvResponse());
+        await Promise.resolve();
+      });
+
+      expect(downloadedFilenames, 'the old site’s CSV must not download under the new site').toEqual([]);
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+    } finally {
+      selection.schemaName = originalSchemaName;
+    }
   });
 
   it('aborts the export and downloads nothing when the explorer unmounts', async () => {
