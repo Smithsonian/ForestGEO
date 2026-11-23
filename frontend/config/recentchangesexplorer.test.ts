@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { groupIntoBatches, ChangelogEntry, FeedItem, RECENT_CHANGES_PRESETS, DEFAULT_RECENT_CHANGES_FILTERS } from './recentchangesexplorer';
+import {
+  groupIntoBatches,
+  ChangelogEntry,
+  FeedItem,
+  RECENT_CHANGES_PRESETS,
+  DEFAULT_RECENT_CHANGES_FILTERS,
+  isDateRangeInverted
+} from './recentchangesexplorer';
 
 const BATCH_WINDOW_MS = 60_000;
 
@@ -156,5 +163,30 @@ describe('DEFAULT_RECENT_CHANGES_FILTERS', () => {
     expect(DEFAULT_RECENT_CHANGES_FILTERS.changedBy).toBe('');
     expect(DEFAULT_RECENT_CHANGES_FILTERS.tableName).toBe('');
     expect(DEFAULT_RECENT_CHANGES_FILTERS.quickSearch).toBe('');
+  });
+});
+
+describe('date range filters (#592 D9)', () => {
+  it('start with no bound', () => {
+    expect([DEFAULT_RECENT_CHANGES_FILTERS.changedFrom, DEFAULT_RECENT_CHANGES_FILTERS.changedTo]).toEqual(['', '']);
+  });
+
+  it('are not part of any preset, so a preset click has no date to overwrite', () => {
+    for (const preset of RECENT_CHANGES_PRESETS) {
+      expect(Object.keys(preset.filters).sort(), `preset ${preset.id}`).toEqual(['changedBy', 'operation', 'quickSearch', 'tableName']);
+    }
+  });
+});
+
+describe('isDateRangeInverted', () => {
+  it.each([
+    { from: '2026-11-06', to: '2026-11-05', inverted: true },
+    { from: '2026-11-05', to: '2026-11-05', inverted: false },
+    { from: '2026-11-04', to: '2026-11-05', inverted: false },
+    { from: '2026-11-06', to: '', inverted: false },
+    { from: '', to: '2026-11-05', inverted: false },
+    { from: '', to: '', inverted: false }
+  ])('from "$from" to "$to" → $inverted', ({ from, to, inverted }) => {
+    expect(isDateRangeInverted(from, to)).toBe(inverted);
   });
 });

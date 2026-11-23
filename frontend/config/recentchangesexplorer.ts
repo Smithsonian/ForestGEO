@@ -1,21 +1,27 @@
 import { FILE_UPLOAD_CHANGELOG_TABLE, type ChangelogRecord } from '@/config/changelogdecode';
 
-export type ChangeOperation = 'all' | 'INSERT' | 'UPDATE' | 'DELETE';
+export const CHANGE_OPERATIONS = ['all', 'INSERT', 'UPDATE', 'DELETE'] as const;
+export type ChangeOperation = (typeof CHANGE_OPERATIONS)[number];
 
 export interface RecentChangesFilters {
   operation: ChangeOperation;
   changedBy: string;
   tableName: string;
   quickSearch: string;
+  /** Calendar day `YYYY-MM-DD` of the stored ChangeTimestamp; blank means no bound. */
+  changedFrom: string;
+  changedTo: string;
   presetId?: string;
 }
 
-export interface RecentChangesQueryRequest {
-  schema: string;
-  plotID: number;
-  page: number;
-  pageSize: number;
-  filters: RecentChangesFilters;
+/** What the server filters on; presetId only drives chip highlighting on the client. */
+export type RecentChangesServerFilters = Omit<RecentChangesFilters, 'presetId'>;
+
+/** A preset says nothing about dates, so a preset click keeps the date range (#592 D9). */
+export type RecentChangesPresetFilters = Pick<RecentChangesFilters, 'operation' | 'changedBy' | 'tableName' | 'quickSearch'>;
+
+export function isDateRangeInverted(changedFrom: string, changedTo: string): boolean {
+  return changedFrom !== '' && changedTo !== '' && changedFrom > changedTo;
 }
 
 export interface ChangelogEntry {
@@ -76,6 +82,8 @@ export const DEFAULT_RECENT_CHANGES_FILTERS: RecentChangesFilters = {
   changedBy: '',
   tableName: '',
   quickSearch: '',
+  changedFrom: '',
+  changedTo: '',
   presetId: 'all_changes'
 };
 
@@ -83,22 +91,22 @@ export const RECENT_CHANGES_PRESETS = [
   {
     id: 'all_changes',
     label: 'All Changes',
-    filters: { operation: 'all', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesFilters
+    filters: { operation: 'all', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesPresetFilters
   },
   {
     id: 'measurement_updates',
     label: 'Measurement Updates',
-    filters: { operation: 'UPDATE', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesFilters
+    filters: { operation: 'UPDATE', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesPresetFilters
   },
   {
     id: 'deletions',
     label: 'Deletions',
-    filters: { operation: 'DELETE', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesFilters
+    filters: { operation: 'DELETE', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesPresetFilters
   },
   {
     id: 'uploads',
     label: 'Uploads',
-    filters: { operation: 'INSERT', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesFilters
+    filters: { operation: 'INSERT', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesPresetFilters
   }
 ] as const;
 

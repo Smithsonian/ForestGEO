@@ -423,7 +423,8 @@ export default function RecentChangesExplorer() {
   const handlePresetClick = useCallback((presetId: string) => {
     const preset = RECENT_CHANGES_PRESETS.find(p => p.id === presetId);
     if (!preset) return;
-    setFilters({ ...preset.filters, presetId });
+    // A preset says nothing about dates, so the date range carries over (#592 D9).
+    setFilters(prev => ({ ...preset.filters, changedFrom: prev.changedFrom, changedTo: prev.changedTo, presetId }));
     setPage(0);
   }, []);
 

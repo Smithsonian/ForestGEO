@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { queryRecentChanges } from './_shared';
+import { buildChangeFilter as sharedBuildChangeFilter, queryRecentChanges } from './_shared';
+import { buildChangeFilter } from '@/lib/changes/changefilter';
 import { DEFAULT_RECENT_CHANGES_FILTERS, type FeedItem } from '@/config/recentchangesexplorer';
 
 const PLOT_ID = 1;
@@ -176,5 +177,32 @@ describe('queryRecentChanges: whole-row decoding', () => {
     const response = await queryRecentChanges(connection as any, 'forestgeo_testing', PLOT_ID, 0, 25, DEFAULT_RECENT_CHANGES_FILTERS);
     const [item] = response.items as Array<Extract<FeedItem, { type: 'single' }>>;
     expect(item.entry.changedBy).toBeNull();
+  });
+});
+
+describe('queryRecentChanges: one filter for every list query', () => {
+  it('re-exports the shared builder, so the route module and the export use the same function', () => {
+    expect(sharedBuildChangeFilter).toBe(buildChangeFilter);
+  });
+
+  it('applies the date bounds and the ChangeID search to the rows, the count and the summary alike', async () => {
+    const connection = buildConnection([]);
+    const filters = { ...DEFAULT_RECENT_CHANGES_FILTERS, quickSearch: '#4821', changedFrom: '2026-11-01', changedTo: '2026-11-05' };
+
+    await queryRecentChanges(connection as any, 'forestgeo_testing', PLOT_ID, 0, 25, filters);
+
+    const queries = connection.executeQuery.mock.calls.map(([query]: [string]) => String(query));
+    const listQueries = {
+      rows: queries.find(query => query.includes('SELECT SQL_CALC_FOUND_ROWS uc.*')),
+      count: queries.find(query => query.includes('COUNT(*) AS total')),
+      summary: queries.find(query => query.includes('GROUP BY uc.Operation'))
+    };
+    for (const [name, query] of Object.entries(listQueries)) {
+      expect(query, `the ${name} query must exist`).toBeDefined();
+      expect(query, `the ${name} query carries the lower bound`).toContain("uc.ChangeTimestamp >= '2026-11-01'");
+      expect(query, `the ${name} query carries the upper bound`).toContain("uc.ChangeTimestamp < DATE_ADD('2026-11-05', INTERVAL 1 DAY)");
+      expect(query, `the ${name} query matches the ChangeID`).toContain('uc.ChangeID = 4821');
+      expect(query, `the ${name} query keeps the plot scope first`).toContain('WHERE (uc.PlotID = 1 OR uc.PlotID IS NULL)');
+    }
   });
 });

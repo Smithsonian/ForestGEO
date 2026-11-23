@@ -1,9 +1,10 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
 import { decodeChangelogRow } from '@/config/changelogdecode';
+import { buildChangeFilter, PLOT_SCOPE_CONDITION } from '@/lib/changes/changefilter';
 import {
   ChangelogEntry,
-  RecentChangesFilters,
+  RecentChangesServerFilters,
   RecentChangesFacetsResponse,
   RecentChangesSummary,
   FacetOption,
@@ -11,6 +12,8 @@ import {
   FeedItem,
   RecentChangesQueryResponse
 } from '@/config/recentchangesexplorer';
+
+export { buildChangeFilter, type ChangeFilter } from '@/lib/changes/changefilter';
 
 type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
 
@@ -42,36 +45,6 @@ function toChangelogEntry(row: RawChangelogRow): ChangelogEntry {
     changeTimestamp: row.ChangeTimestamp instanceof Date ? row.ChangeTimestamp.toISOString() : row.ChangeTimestamp,
     changedBy: row.ChangedBy
   };
-}
-
-function buildWhereClause(filters: RecentChangesFilters): { clause: string; params: unknown[] } {
-  const conditions: string[] = ['(uc.PlotID = ? OR uc.PlotID IS NULL)'];
-  const params: unknown[] = [];
-
-  if (filters.operation !== 'all') {
-    conditions.push('uc.Operation = ?');
-    params.push(filters.operation);
-  }
-
-  if (filters.changedBy) {
-    conditions.push('uc.ChangedBy = ?');
-    params.push(filters.changedBy);
-  }
-
-  if (filters.tableName) {
-    conditions.push('uc.TableName = ?');
-    params.push(filters.tableName);
-  }
-
-  if (filters.quickSearch) {
-    const searchPattern = `%${filters.quickSearch}%`;
-    conditions.push(
-      '(uc.RecordID LIKE ? OR uc.TableName LIKE ? OR uc.ChangedBy LIKE ? OR CAST(uc.OldRowState AS CHAR) LIKE ? OR CAST(uc.NewRowState AS CHAR) LIKE ?)'
-    );
-    params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
-  }
-
-  return { clause: conditions.join(' AND '), params };
 }
 
 function buildChangelogQuery(schema: string): string {
@@ -144,11 +117,9 @@ export async function queryRecentChanges(
   plotID: number,
   page: number,
   pageSize: number,
-  filters: RecentChangesFilters
+  filters: RecentChangesServerFilters
 ): Promise<RecentChangesQueryResponse> {
-  const { clause, params } = buildWhereClause(filters);
-  const plotParams = [plotID];
-  const allWhereParams = [...plotParams, ...params];
+  const { sql: clause, params: allWhereParams } = buildChangeFilter(plotID, filters);
 
   const countQuery = `${buildCountQuery(schema)} WHERE ${clause}`;
   const summaryQuery = `${buildSummaryQuery(schema)} WHERE ${clause} GROUP BY uc.Operation`;
@@ -175,7 +146,7 @@ export async function queryRecentChanges(
 }
 
 export async function queryRecentChangesFacets(connectionManager: ExplorerConnection, schema: string, plotID: number): Promise<RecentChangesFacetsResponse> {
-  const plotCondition = '(uc.PlotID = ? OR uc.PlotID IS NULL)';
+  const plotCondition = PLOT_SCOPE_CONDITION;
   const plotParams = [plotID];
 
   const usersQuery = `${buildFacetsUsersQuery(schema)} WHERE ${plotCondition} GROUP BY uc.ChangedBy ORDER BY cnt DESC`;
