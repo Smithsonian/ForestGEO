@@ -145,6 +145,23 @@ describe('recent changes request contract: rejections', () => {
     expect(atBounds?.quickSearch).toHaveLength(CHANGE_QUICK_SEARCH_MAX_LENGTH);
   });
 
+  describe('the Changed By bound counts characters, as the varchar(64) column does', () => {
+    const ASTRAL_CHARACTER = '\u{1F333}';
+    const namePadded = (characterCount: number) => ASTRAL_CHARACTER + 'u'.repeat(characterCount - 1);
+
+    it('accepts a name of exactly the column width even though its UTF-16 length is one over', () => {
+      const atColumnWidth = namePadded(CHANGED_BY_MAX_LENGTH);
+      expect(atColumnWidth.length, 'fixture: one astral character makes the UTF-16 length exceed the column width').toBe(CHANGED_BY_MAX_LENGTH + 1);
+      expect(Array.from(atColumnWidth), 'fixture: and the character count equals it').toHaveLength(CHANGED_BY_MAX_LENGTH);
+
+      expect(parsedFilters({ changedBy: atColumnWidth })?.changedBy).toBe(atColumnWidth);
+    });
+
+    it('rejects a name one character past the column width', () => {
+      expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedBy: namePadded(CHANGED_BY_MAX_LENGTH + 1) } }, 'filters.changedBy');
+    });
+  });
+
   it('reports issue paths and codes only, never the rejected value', () => {
     const secret = 'do-not-log-this-value';
     const result = parseQuery({ schema: SCHEMA, plotID: PLOT_ID, filters: { operation: secret } });

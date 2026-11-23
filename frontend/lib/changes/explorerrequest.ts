@@ -40,6 +40,9 @@ export function isFilterableDate(value: string): boolean {
   return year >= EARLIEST_FILTER_DATE_YEAR && year <= LATEST_FILTER_DATE_YEAR;
 }
 
+/** MySQL measures VARCHAR(n) in characters, so a bound on a stored value counts code points, not UTF-16 units. */
+const characterCountAtMost = (maxCharacters: number) => (value: string) => Array.from(value).length <= maxCharacters;
+
 const dateBound = z
   .string()
   .refine(value => value === NO_DATE_BOUND || isFilterableDate(value), 'Expected a calendar date YYYY-MM-DD')
@@ -49,7 +52,11 @@ const dateBound = z
 export const recentChangesFiltersSchema = z
   .object({
     operation: z.enum(CHANGE_OPERATIONS).optional().default(DEFAULT_RECENT_CHANGES_FILTERS.operation),
-    changedBy: z.string().max(CHANGED_BY_MAX_LENGTH).optional().default(DEFAULT_RECENT_CHANGES_FILTERS.changedBy),
+    changedBy: z
+      .string()
+      .refine(characterCountAtMost(CHANGED_BY_MAX_LENGTH), `Expected at most ${CHANGED_BY_MAX_LENGTH} characters`)
+      .optional()
+      .default(DEFAULT_RECENT_CHANGES_FILTERS.changedBy),
     tableName: z.string().max(CHANGE_TABLE_NAME_MAX_LENGTH).optional().default(DEFAULT_RECENT_CHANGES_FILTERS.tableName),
     quickSearch: z.string().max(CHANGE_QUICK_SEARCH_MAX_LENGTH).optional().default(DEFAULT_RECENT_CHANGES_FILTERS.quickSearch),
     changedFrom: dateBound,
