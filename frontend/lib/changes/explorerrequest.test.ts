@@ -70,8 +70,11 @@ describe('recent changes request contract: defaults', () => {
     expect(Object.keys(filters ?? {}).sort(), 'no server code reads presetId').toEqual(Object.keys(DEFAULT_SERVER_FILTERS).sort());
   });
 
-  it('accepts plotID sent as a numeric string, as the list route always has', () => {
-    const result = parseQuery({ schema: SCHEMA, plotID: String(PLOT_ID) });
+  it.each([
+    { label: 'a numeric string, as the list route always has', sent: String(PLOT_ID) },
+    { label: 'a number', sent: PLOT_ID }
+  ])('accepts plotID sent as $label', ({ sent }) => {
+    const result = parseQuery({ schema: SCHEMA, plotID: sent });
     expect(result.ok && result.data.plotID).toBe(PLOT_ID);
   });
 });
@@ -101,7 +104,12 @@ describe('recent changes request contract: rejections', () => {
     { label: 'a zero plotID', plotID: 0 },
     { label: 'a negative plotID', plotID: -2 },
     { label: 'a missing plotID', plotID: undefined },
-    { label: 'a non-numeric plotID', plotID: 'plot-one' }
+    { label: 'a non-numeric plotID', plotID: 'plot-one' },
+    { label: 'a boolean plotID, which Number() reads as 1', plotID: true },
+    { label: 'a one-element array plotID, which Number() reads as 7', plotID: [PLOT_ID] },
+    { label: 'a one-element array of a numeric string, which Number() reads as 7', plotID: [String(PLOT_ID)] },
+    { label: 'a plotID in exponent notation, which Number() reads as 10', plotID: '1e1' },
+    { label: 'a hexadecimal plotID, which Number() reads as 16', plotID: '0x10' }
   ])('rejects $label', ({ plotID }) => {
     expectRejected({ schema: SCHEMA, plotID }, 'plotID');
   });
@@ -205,6 +213,7 @@ describe('change export request contract', () => {
 
   it.each([
     { label: 'a non-positive plotID', body: { schema: SCHEMA, plotID: 0 }, issuePath: 'plotID' },
+    { label: 'a boolean plotID', body: { schema: SCHEMA, plotID: true }, issuePath: 'plotID' },
     { label: 'a schema that is not a site schema', body: { schema: 'information_schema', plotID: PLOT_ID }, issuePath: 'schema' },
     {
       label: 'an object where a filter string belongs',

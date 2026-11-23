@@ -73,9 +73,13 @@ export const recentChangesFiltersSchema = z
 const clampPage = (page: number) => Math.max(RECENT_CHANGES_FIRST_PAGE, page);
 const clampPageSize = (pageSize: number) => Math.min(RECENT_CHANGES_MAX_PAGE_SIZE, Math.max(RECENT_CHANGES_MIN_PAGE_SIZE, pageSize));
 
+const PLOT_ID_DIGITS_PATTERN = /^\d+$/;
+/** A number or a string of digits, so Number() never reads `true`, `[7]`, `"1e1"` or `"0x10"` as a plot. */
+const plotIDSchema = z.union([z.number(), z.string().regex(PLOT_ID_DIGITS_PATTERN).transform(Number)]).pipe(z.number().int().positive());
+
 const scopeShape = {
   schema: z.string().refine(isValidSchema, 'Invalid schema'),
-  plotID: z.coerce.number().int().positive(),
+  plotID: plotIDSchema,
   // prefault, not default: zod 4 returns a .default() value unparsed, so the filter defaults must be parsed through the schema.
   filters: recentChangesFiltersSchema.prefault({})
 };

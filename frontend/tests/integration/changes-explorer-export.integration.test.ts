@@ -387,6 +387,11 @@ describe('POST /api/changes/explorer/export', () => {
     it.each([
       { label: 'a non-positive plotID', body: () => ({ schema, plotID: 0 }), code: CHANGE_EXPORT_ERROR_CODES.invalidRequest },
       {
+        label: 'a boolean plotID, which Number() would read as plot 1',
+        body: () => ({ schema, plotID: true }),
+        code: CHANGE_EXPORT_ERROR_CODES.invalidRequest
+      },
+      {
         label: 'an object where a filter string belongs',
         body: () => ({ schema, plotID, filters: { changedBy: { $ne: '' } } }),
         code: CHANGE_EXPORT_ERROR_CODES.invalidRequest
