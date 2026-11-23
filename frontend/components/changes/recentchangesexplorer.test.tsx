@@ -1119,6 +1119,36 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 
+  it('lets a second export supersede the first: the first request is aborted and only one file downloads', async () => {
+    const pendingResponses: Array<Deferred<Response>> = [];
+    const { exportBodies, exportSignals, listRequests } = serveExport(() => {
+      const pending = deferred<Response>();
+      pendingResponses.push(pending);
+      return pending.promise;
+    });
+    await renderAndWaitForFeed(listRequests);
+    const exportButton = screen.getByRole('button', { name: EXPORT_BUTTON_NAME });
+
+    act(() => {
+      exportButton.click();
+      exportButton.click();
+    });
+    await waitFor(() => expect(exportBodies, 'both clicks reached the transport').toHaveLength(2));
+
+    expect(exportSignals[0]?.aborted, 'the first request is superseded').toBe(true);
+    expect(exportSignals[1]?.aborted, 'the second request stays live').toBe(false);
+
+    await act(async () => {
+      pendingResponses[1].resolve(csvResponse());
+      pendingResponses[0].resolve(csvResponse());
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(downloadedFilenames).toEqual([SERVER_FILENAME]));
+    expect(URL.createObjectURL, 'the superseded response is never turned into a file').toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(exportButton).toBeEnabled());
+  });
+
   it('does not export while From is after To', async () => {
     const { exportBodies, listRequests } = serveExport(async () => csvResponse());
     await renderAndWaitForFeed(listRequests);
