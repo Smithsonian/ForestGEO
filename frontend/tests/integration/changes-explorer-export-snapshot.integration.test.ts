@@ -27,6 +27,7 @@ import {
   ChangeExportReadError,
   ExportTooLargeError,
   readChangeExportSnapshot,
+  SNAPSHOT_TRANSACTION_STATEMENT,
   type ChangeExportLimits,
   type ChangeExportSnapshot
 } from '@/lib/changes/exportsnapshot';
@@ -37,7 +38,7 @@ const LOCAL_HOSTS = ['127.0.0.1', 'localhost'] as const;
 const OTHER_PLOT_OFFSET = 1000;
 const GENEROUS_LIMITS: ChangeExportLimits = { maxRows: 10_000, pageSize: 2 };
 const READ_COMMITTED_SESSION_DEFAULT = 'SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED';
-const REPEATABLE_READ_STATEMENT = /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ/;
+const READ_ONLY_VIOLATION_CODE = 'ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION';
 
 const UPLOAD_FILE = 'export-census.csv';
 const UPLOAD_BASE_BATCH = 'exportbatch';
@@ -465,7 +466,7 @@ describe('readChangeExportSnapshot', () => {
         'matching changes = distinct LogIDs of non-rollup rows + rollup member counts + suppressed changes (§6.2)'
       ).toBe(detailLogIDs.length + expectedRollupMembers + snapshot.suppressedChangeCount);
 
-      const isolationCall = ownedDouble.query.mock.calls.findIndex(([sql]) => REPEATABLE_READ_STATEMENT.test(String(sql)));
+      const isolationCall = ownedDouble.query.mock.calls.findIndex(([sql]) => sql === SNAPSHOT_TRANSACTION_STATEMENT);
       expect(isolationCall, 'the isolation level is the first statement on the owned connection').toBe(0);
       expect(ownedDouble.query.mock.invocationCallOrder[0], 'and it runs before the transaction begins').toBeLessThan(
         ownedDouble.beginTransaction.mock.invocationCallOrder[0]
@@ -696,6 +697,34 @@ describe('readChangeExportSnapshot', () => {
       const sqlBaseBatches = rows.map(row => String(row.BaseBatchID));
       expect(sqlBaseBatches, 'REGEXP_REPLACE with the \\z anchor must agree with familyRootOf on every id').toEqual(batchIDs.map(familyRootOf));
       expect(sqlBaseBatches[batchIDs.indexOf('run__sub001\n')], 'ICU’s $ would strip the suffix before a final line break').toBe('run__sub001\n');
+    });
+  });
+
+  describe('the snapshot transaction', () => {
+    it('is read-only: a write on the owned connection inside the snapshot is refused by MySQL', async () => {
+      await seed.insertRawChange({
+        tableName: 'trees',
+        recordID: '1401',
+        operation: ChangelogOperation.UPDATE,
+        oldRowState: { TreeID: 1401, TreeTag: 'before' },
+        newRowState: { TreeID: 1401, TreeTag: 'after' },
+        changeTime: TIME_SHARED
+      });
+      let writeAttemptCode: string | undefined;
+      afterOwnedQuery = async sql => {
+        if (!sql.includes(DETAIL_PAGE_ORDER)) return;
+        await ownedConnection.query('UPDATE unifiedchangelog SET ChangedBy = ?', ['written-inside-snapshot']).catch((error: { code?: string }) => {
+          writeAttemptCode = error.code;
+        });
+      };
+
+      await readSnapshot();
+
+      expect(writeAttemptCode, 'the first statement must open the transaction READ ONLY').toBe(READ_ONLY_VIOLATION_CODE);
+      const [rows] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS written FROM unifiedchangelog WHERE ChangedBy = ?', [
+        'written-inside-snapshot'
+      ]);
+      expect(Number(rows[0].written), 'nothing was written').toBe(0);
     });
   });
 
@@ -951,7 +980,7 @@ describe('readChangeExportSnapshot', () => {
 
     it('fails at stage begin when the isolation level cannot be set, and releases without a rollback', async () => {
       ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
-        if (REPEATABLE_READ_STATEMENT.test(sql)) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
+        if (sql === SNAPSHOT_TRANSACTION_STATEMENT) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
         return ownedConnection.query(sql, params);
       });
 

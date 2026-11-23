@@ -28,7 +28,8 @@ import {
 export const EXPORT_PAGE_SIZE = 1000;
 export const FOREIGN_KEY_LABEL_CHUNK_SIZE = 500;
 
-const REPEATABLE_READ_STATEMENT = 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ';
+/** Applies to the next transaction only; READ ONLY makes the snapshot unable to write. */
+export const SNAPSHOT_TRANSACTION_STATEMENT = 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY';
 const CHANGE_TIME_SQL_FORMAT = '%Y-%m-%d %H:%i:%s';
 const UPLOAD_FILE_ID_JSON_PATH = '$.UploadFileID';
 const UPLOAD_BATCH_ID_JSON_PATH = '$.UploadBatchID';
@@ -388,7 +389,7 @@ export async function readChangeExportSnapshot(
   const conn = await acquireConnection();
   let transactionActive = false;
   try {
-    await runStage('begin', conn.query(REPEATABLE_READ_STATEMENT));
+    await runStage('begin', conn.query(SNAPSHOT_TRANSACTION_STATEMENT));
     await runStage('begin', conn.beginTransaction());
     transactionActive = true;
     return await collectChangeExport(conn, scope, limits);
