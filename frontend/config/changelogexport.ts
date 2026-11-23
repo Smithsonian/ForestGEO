@@ -286,25 +286,34 @@ function summaryDraft(scope: DraftScope, primaryKey: string, descriptor: ChangeD
   return { ...scope, primaryKey, changedColumn: SUMMARY_COLUMN_MARKER, oldValue: null, newValue: null, descriptor };
 }
 
-function expandRecord(operation: ChangeOperationName, scope: DraftScope, record: ChangelogRecord, editOperationID: string | null): ChangeExportDraft[] {
+function* expandRecord(
+  operation: ChangeOperationName,
+  scope: DraftScope,
+  record: ChangelogRecord,
+  editOperationID: string | null
+): Generator<ChangeExportDraft> {
   const identity: RecordIdentity = { table: scope.changedTable, primaryKey: record.primaryKey, editOperationID };
 
   if (operation === 'UPDATE' && record.oldState !== null && record.newState !== null) {
-    return computeDiff(record.oldState, record.newState).map(diff => ({
-      ...scope,
-      primaryKey: record.primaryKey,
-      changedColumn: diff.field,
-      oldValue: diff.oldValue,
-      newValue: diff.newValue,
-      descriptor: { kind: 'field-update', column: diff.field, oldValue: diff.oldValue, newValue: diff.newValue, ...identity }
-    }));
+    for (const diff of computeDiff(record.oldState, record.newState)) {
+      yield {
+        ...scope,
+        primaryKey: record.primaryKey,
+        changedColumn: diff.field,
+        oldValue: diff.oldValue,
+        newValue: diff.newValue,
+        descriptor: { kind: 'field-update', column: diff.field, oldValue: diff.oldValue, newValue: diff.newValue, ...identity }
+      };
+    }
+    return;
   }
 
   const valuesAreNew = operation === 'INSERT' || (operation === 'UPDATE' && record.oldState === null);
   const image = valuesAreNew ? record.newState : record.oldState;
   const fields = image === null ? [] : recordedFieldNames(image);
   if (image === null || fields.length === 0) {
-    return [summaryDraft(scope, record.primaryKey, { kind: 'no-field-values', operation, ...identity })];
+    yield summaryDraft(scope, record.primaryKey, { kind: 'no-field-values', operation, ...identity });
+    return;
   }
 
   const descriptor: ChangeDescriptor =
@@ -314,18 +323,20 @@ function expandRecord(operation: ChangeOperationName, scope: DraftScope, record:
         ? { kind: 'record-deleted', ...identity }
         : { kind: valuesAreNew ? 'prior-state-missing' : 'new-state-missing', ...identity };
 
-  return fields.map(field => ({
-    ...scope,
-    primaryKey: record.primaryKey,
-    changedColumn: field,
-    oldValue: valuesAreNew ? null : image[field],
-    newValue: valuesAreNew ? image[field] : null,
-    descriptor
-  }));
+  for (const field of fields) {
+    yield {
+      ...scope,
+      primaryKey: record.primaryKey,
+      changedColumn: field,
+      oldValue: valuesAreNew ? null : image[field],
+      newValue: valuesAreNew ? image[field] : null,
+      descriptor
+    };
+  }
 }
 
 /**
- * Turns one source change into its CSV rows (spec §6.2, first matching rule wins), one record at a
+ * Turns one source change into its CSV rows (spec §6.2, first matching rule wins), one field at a
  * time, so a caller with a row ceiling can stop before the rest of a large change is expanded. Yields
  * nothing when the change is suppressed: every record was a paired update with no visible difference.
  */
