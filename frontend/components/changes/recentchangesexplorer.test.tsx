@@ -938,7 +938,7 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
   });
 
   function csvResponse(): Response {
-    return new Response('LogID\r\n1', { status: 200, headers: { 'Content-Disposition': `attachment; filename="${SERVER_FILENAME}"` } });
+    return new Response('LogID\r\n1', { status: HTTPResponses.OK, headers: { 'Content-Disposition': `attachment; filename="${SERVER_FILENAME}"` } });
   }
 
   /** Serves an empty feed and answers every export request with `answerExport`, recording the export bodies and signals. */
@@ -959,7 +959,7 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
         return answerExport();
       }
       return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
-    }) as any;
+    }) as typeof fetch;
     return { exportBodies, exportSignals, listRequests };
   }
 
@@ -978,7 +978,7 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-01' } });
     fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
     fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: 'TREE-7' } });
-    const exportButton = screen.getByRole('button', { name: 'Export CSV' });
+    const exportButton = screen.getByRole('button', { name: EXPORT_BUTTON_NAME });
     await user.click(exportButton);
 
     await waitFor(() => expect(exportBodies).toHaveLength(1));
@@ -1003,23 +1003,24 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
 
   it.each([
     {
-      label: 'EXPORT_TOO_LARGE',
-      response: () => Response.json({ error: SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN, code: 'EXPORT_TOO_LARGE' }, { status: 413 }),
+      label: CHANGE_EXPORT_ERROR_CODES.tooLarge,
+      response: () =>
+        Response.json({ error: SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN, code: CHANGE_EXPORT_ERROR_CODES.tooLarge }, { status: HTTPResponses.PAYLOAD_TOO_LARGE }),
       expected: CHANGE_EXPORT_FAILURE_MESSAGES.tooLarge
     },
     {
       label: 'a 403 with no code',
-      response: () => Response.json({ error: SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN }, { status: 403 }),
+      response: () => Response.json({ error: SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN }, { status: HTTPResponses.FORBIDDEN }),
       expected: CHANGE_EXPORT_FAILURE_MESSAGES.forbidden
     },
     {
       label: 'a 503 with no code',
-      response: () => Response.json({ error: SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN }, { status: 503 }),
+      response: () => Response.json({ error: SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN }, { status: HTTPResponses.SERVICE_UNAVAILABLE }),
       expected: CHANGE_EXPORT_FAILURE_MESSAGES.unavailable
     },
     {
       label: 'a 500 that is not JSON',
-      response: () => new Response('<html>Bad Gateway</html>', { status: 500 }),
+      response: () => new Response('<html>Bad Gateway</html>', { status: HTTPResponses.INTERNAL_SERVER_ERROR }),
       expected: CHANGE_EXPORT_FAILURE_MESSAGES.generic
     }
   ])('shows its own alert for $label and no server text', async ({ response, expected }) => {
@@ -1027,20 +1028,20 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     const user = userEvent.setup();
     await renderAndWaitForFeed(listRequests);
 
-    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    await user.click(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }));
 
     const alert = await screen.findByTestId('recent-changes-export-alert');
     expect(alert).toHaveTextContent(expected);
     expect(alert).not.toHaveTextContent(SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN);
     expect(downloadedFilenames, 'a failed export downloads nothing').toEqual([]);
-    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: EXPORT_BUTTON_NAME })).toBeEnabled();
   });
 
   it('keeps the export alert when the list refreshes', async () => {
-    const { listRequests } = serveExport(async () => Response.json({ code: 'EXPORT_TOO_LARGE' }, { status: 413 }));
+    const { listRequests } = serveExport(async () => Response.json({ code: CHANGE_EXPORT_ERROR_CODES.tooLarge }, { status: HTTPResponses.PAYLOAD_TOO_LARGE }));
     const user = userEvent.setup();
     await renderAndWaitForFeed(listRequests);
-    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    await user.click(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }));
     await screen.findByTestId('recent-changes-export-alert');
     const listRequestsBefore = listRequests.length;
 
@@ -1111,7 +1112,7 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     const user = userEvent.setup();
     const { rerender } = await renderAndWaitForFeed(listRequests);
 
-    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    await user.click(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }));
     await waitFor(() => expect(exportBodies).toHaveLength(1));
 
     selection.plotID = SECOND_PLOT_ID;
@@ -1126,7 +1127,7 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
 
     expect(downloadedFilenames, 'plot 1’s CSV must not download on plot 2').toEqual([]);
     expect(URL.createObjectURL).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Export CSV' }), 'the new plot starts with an idle button').toBeEnabled();
+    expect(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }), 'the new plot starts with an idle button').toBeEnabled();
   });
 
   it('aborts the export and downloads nothing when the explorer unmounts', async () => {
@@ -1134,7 +1135,7 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     const { exportBodies, exportSignals, listRequests } = serveExport(() => pendingExport.promise);
     const user = userEvent.setup();
     const { unmount } = await renderAndWaitForFeed(listRequests);
-    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    await user.click(screen.getByRole('button', { name: EXPORT_BUTTON_NAME }));
     await waitFor(() => expect(exportBodies).toHaveLength(1));
 
     unmount();
@@ -1211,7 +1212,7 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-06' } });
 
     expect(await screen.findByText('From must be on or before To.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: EXPORT_BUTTON_NAME })).toBeDisabled();
     expect(exportBodies).toEqual([]);
   });
 
@@ -1227,7 +1228,7 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
     fireEvent.change(dateInput, { target: { value: FIVE_DIGIT_YEAR_DATE } });
 
     expect(await screen.findByText(UNFILTERABLE_DATE_MESSAGE)).toBeInTheDocument();
-    const exportButton = screen.getByRole('button', { name: 'Export CSV' });
+    const exportButton = screen.getByRole('button', { name: EXPORT_BUTTON_NAME });
     expect(exportButton, `Export stays off while ${controlLabel} is ${FIVE_DIGIT_YEAR_DATE}`).toBeDisabled();
     fireEvent.click(exportButton);
     expect(exportBodies, 'a disabled button posts nothing').toEqual([]);
