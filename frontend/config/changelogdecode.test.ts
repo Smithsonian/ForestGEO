@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   decodeChangelogRow,
@@ -9,6 +11,42 @@ import {
 import { BULK_REVISION_SUMMARY_KIND, EDIT_OPERATION_RECORD_ID_MARKER } from '@/lib/changelog/edit-operation-projection';
 
 const LEGACY_TABLE_COUNT = 14;
+const TABLE_STRUCTURES_PATH = path.join(process.cwd(), 'db/sql/tablestructures.sql');
+const TABLE_DEFINITION_END = '\n);';
+const COMPOSITE_PRIMARY_KEY_DEFINITION = /^primary key\s*\(([^)]+)\)/i;
+const INLINE_PRIMARY_KEY_DEFINITION = /^(\w+)\s[^]*\bprimary key\b/i;
+
+function splitTopLevelDefinitions(tableBody: string): string[] {
+  const definitions: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const character of tableBody) {
+    if (character === '(') depth++;
+    if (character === ')') depth--;
+    if (character === ',' && depth === 0) {
+      definitions.push(current.trim());
+      current = '';
+    } else {
+      current += character;
+    }
+  }
+  definitions.push(current.trim());
+  return definitions;
+}
+
+function readPrimaryKeyColumns(tableStructuresSql: string, tableName: string): string[] {
+  const tableStart = new RegExp(`create table if not exists ${tableName}\\s*\\(`, 'i').exec(tableStructuresSql);
+  if (!tableStart) return [];
+  const afterStart = tableStructuresSql.slice(tableStart.index + tableStart[0].length);
+  const tableBody = afterStart.slice(0, afterStart.indexOf(TABLE_DEFINITION_END));
+  for (const definition of splitTopLevelDefinitions(tableBody).map(text => text.replace(/\s+/g, ' '))) {
+    const composite = COMPOSITE_PRIMARY_KEY_DEFINITION.exec(definition);
+    if (composite) return composite[1].split(',').map(column => column.trim());
+    const inline = INLINE_PRIMARY_KEY_DEFINITION.exec(definition);
+    if (inline) return [inline[1]];
+  }
+  return [];
+}
 
 function row(overrides: Partial<DecodableChangelogRow>): DecodableChangelogRow {
   return { tableName: 'trees', recordID: '1', oldRowState: null, newRowState: null, ...overrides };
@@ -114,9 +152,14 @@ describe('decodeChangelogRow: object states (every current writer)', () => {
 describe('decodeChangelogRow: legacy array states', () => {
   it('lists the fourteen interceptor tables with their schema primary keys', () => {
     expect(Object.keys(LEGACY_ROW_KEY_COLUMNS)).toHaveLength(LEGACY_TABLE_COUNT);
-    expect(LEGACY_ROW_KEY_COLUMNS.attributes).toEqual(['Code', 'IsActive']);
-    expect(LEGACY_ROW_KEY_COLUMNS.measurement_error_log).toEqual(['MeasurementID', 'ErrorID']);
-    expect(LEGACY_ROW_KEY_COLUMNS.stems).toEqual(['StemGUID']);
+    const tableStructuresSql = readFileSync(TABLE_STRUCTURES_PATH, 'utf8');
+    for (const [tableName, keyColumns] of Object.entries(LEGACY_ROW_KEY_COLUMNS)) {
+      const schemaKeyColumns = readPrimaryKeyColumns(tableStructuresSql, tableName);
+      expect(
+        keyColumns,
+        `${tableName}: LEGACY_ROW_KEY_COLUMNS lists [${keyColumns.join(', ')}] but ${TABLE_STRUCTURES_PATH} declares primary key [${schemaKeyColumns.join(', ')}]`
+      ).toEqual(schemaKeyColumns);
+    }
   });
 
   it('reads an INSERT with an empty old array as one record with no old state', () => {
