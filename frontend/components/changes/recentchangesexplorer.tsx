@@ -850,16 +850,14 @@ export default function RecentChangesExplorer() {
           ))}
         </Stack>
       ) : items.length === 0 ? (
-        errorMessage === null && (
-          <Sheet variant="soft" sx={{ p: 4, borderRadius: 'md', textAlign: 'center' }}>
-            <Typography level="body-lg" sx={{ color: 'neutral.500' }}>
-              No changes found
-            </Typography>
-            <Typography level="body-sm" sx={{ color: 'neutral.400', mt: 1 }}>
-              Try adjusting your filters or selecting a different preset.
-            </Typography>
-          </Sheet>
-        )
+        <Sheet variant="soft" sx={{ p: 4, borderRadius: 'md', textAlign: 'center' }}>
+          <Typography level="body-lg" sx={{ color: 'neutral.500' }}>
+            No changes found
+          </Typography>
+          <Typography level="body-sm" sx={{ color: 'neutral.400', mt: 1 }}>
+            Try adjusting your filters or selecting a different preset.
+          </Typography>
+        </Sheet>
       ) : (
         <Stack spacing={1.5}>
           {items.map(item => (

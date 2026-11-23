@@ -867,14 +867,14 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
         return { ...rendered, listRequests };
       }
 
-      it('keeps its alert when the dates are inverted on the same plot, and does not claim there are no changes', async () => {
+      it('keeps its alert when the dates are inverted on the same plot, beside the empty state as before', async () => {
         const { listRequests } = await failPlotOneListThenInvertRange();
 
         expect(
           screen.getByText(PLOT_ONE_QUERY_ERROR),
           'the failure of this plot is still the truth until the plot changes or a query succeeds'
         ).toBeInTheDocument();
-        expect(screen.queryByText('No changes found'), 'a failed query is not an empty result').not.toBeInTheDocument();
+        expect(screen.getByText('No changes found'), 'the feed is empty, and the empty state has always sat under the alert').toBeInTheDocument();
         expect(listRequests, 'an inverted range sends nothing').toHaveLength(2);
       });
 
@@ -887,7 +887,7 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
         await waitFor(() => expect(screen.queryByText(PLOT_ONE_QUERY_ERROR), 'plot 1 error must not stay under plot 2').not.toBeInTheDocument());
       });
 
-      it('shows no empty-state message while the alert is on screen', async () => {
+      it('shows the empty state beside the alert, as before #592', async () => {
         const listRequests: ListRequestBody[] = [];
         global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
           const url = String(input);
@@ -902,7 +902,7 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
 
         await screen.findByText(PLOT_ONE_QUERY_ERROR);
 
-        expect(screen.queryByText('No changes found')).not.toBeInTheDocument();
+        expect(screen.getByText('No changes found'), 'a failed list leaves the explorer in a recoverable empty state').toBeInTheDocument();
       });
     });
 
@@ -993,7 +993,7 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
         expect(screen.queryByText(PLOT_ONE_TABLE), 'plot 1 card under plot 2').not.toBeInTheDocument();
         expect(totalChangesCount(), 'plot 1 total under plot 2').toBe('0');
         expect(screen.queryByRole('button', { name: LOAD_MORE_BUTTON_NAME }), 'Load more would page plot 1 results under plot 2').not.toBeInTheDocument();
-        expect(screen.queryByText(NOTHING_FOUND_MESSAGE), 'a failed query is not an empty result').not.toBeInTheDocument();
+        expect(screen.getByText(NOTHING_FOUND_MESSAGE), 'the empty feed sits under plot 2 failure alert, as before #592').toBeInTheDocument();
       });
 
       it('shows nothing of plot two when plot one is selected again under inverted dates', async () => {
