@@ -215,6 +215,48 @@ A quick view of the most recent data modifications, showing:
 
 Click **Recent Changes** in the Census Hub to see the full audit trail.
 
+### Exporting the change log
+
+On the **Recent Changes** page, **Export CSV** downloads the changes you are looking at as a spreadsheet file. The export uses the filters on the page: the preset, **Changed By**, **Table**, **Quick Search** and the **From** / **To** dates. Set **From** to the day of your last export to get everything since then.
+
+The file follows the layout of the CTFSWeb `Log` table. It lists one row for each changed field, oldest change first.
+
+| Column          | What it holds                                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `LogID`         | The number of the change. Every row of one change repeats it, so it identifies the change, not the row.                     |
+| `ChangedBy`     | The account that made the change. Blank when none was recorded.                                                             |
+| `ChangedTable`  | The table that changed, such as `trees`, `stems`, `species` or `coremeasurements` (measurements).                           |
+| `PrimaryKey`    | The key of the changed record. For an upload summary, the file name.                                                        |
+| `ChangedColumn` | The field that changed. `*` marks a summary row that does not name one field.                                               |
+| `ChangeDate`    | The day of the change.                                                                                                      |
+| `ChangeTime`    | The day and time of the change.                                                                                             |
+| `Description`   | A short sentence describing the change, written by the application.                                                         |
+| `Action`        | `I` for an added record, `U` for an update, `D` for a deletion.                                                             |
+| `Old`           | The value before the change. Blank for an added record and for summary rows.                                                |
+| `New`           | The value after the change. Blank for a deleted record and for summary rows.                                                |
+| `PlotID`        | The plot the change was recorded for. Blank means no plot was recorded, as for species and other site-wide data.            |
+| `CensusID`      | The census the change was recorded for, when there is one.                                                                  |
+
+**Finding a change on screen.** Each card on the Recent Changes page shows the change number, for example `#4821`. Type `#4821` or `4821` into **Quick Search** to find the change behind a `LogID`.
+
+**Choosing the dates.** **From** and **To** accept dates from 1000-01-01 to 9998-12-31, and the **To** day is included in full. **Export CSV** stays disabled while the range is not valid, that is, when **From** is after **To** or a date is outside those limits. The page shows a message under the dates.
+
+**Measurement uploads are summarized.** A measurement upload can write many thousands of rows, so the export does not list them one by one. Each upload appears as summary rows: one for the file itself, and one for the measurements it added, updated or removed, with the count in the `Description`. Measurements whose original file was not recorded are grouped under `(no file recorded)`. Measurements you enter or delete by hand in the data grid are listed field by field.
+
+**Other uploads are listed in full.** Rows written by a species, stem code or personnel upload are listed field by field, exactly like edits made by hand, because the application cannot tell the two apart afterwards. A large upload of this kind makes a large export.
+
+**What is not exported.** An update whose recorded before and after values show no visible difference has a card on the page and no row in the file.
+
+**Older changes.** Some edits recorded before March 2026, by the older change log, may show their old and new values as separate entries instead of one side-by-side change. This happens both on screen and in the file.
+
+**Species and quadrat names.** `Old` and `New` hold the stored ID numbers. For species and quadrat changes the `Description` adds the code or name, for example `(abcdsp → abcdef)`. These are the names in use today: if a species was renamed after the change, the description shows the new name.
+
+**Row limit.** One export holds at most 50,000 rows. If yours is larger, the page tells you; narrow the date range or pick one table and export again.
+
+**Time zone.** Dates and times in the file, and the **From** and **To** filters, are in UTC. The times shown on the cards use your computer's time zone, so the two can differ by a few hours.
+
+**While an export runs.** The button shows a spinner until the file downloads. If you switch to another site or plot meanwhile, the export is cancelled and no file is saved.
+
 ---
 
 ## Understanding Data Dependencies
