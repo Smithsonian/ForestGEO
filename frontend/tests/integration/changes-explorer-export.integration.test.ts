@@ -325,6 +325,31 @@ describe('POST /api/changes/explorer/export', () => {
       });
       expect(loggedText()).not.toContain(SECRET_CELL_VALUE);
     });
+
+    it('maps a non-Error value thrown after the read to the fixed 500 and logs its type as the error name', async () => {
+      await seedQuadratInsert(722, { QuadratName: 'NON-ERROR-Q' }, TIME_FIRST);
+      mocks.logEvent.mockImplementation(() => {
+        throw `telemetry sink rejected ${SECRET_CELL_VALUE}`;
+      });
+
+      const response = await postExport(exportBody());
+
+      expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+      expect(await response.json(), 'a fixed body that echoes nothing the sink threw').toEqual({
+        error: 'Unable to export the change log',
+        code: CHANGE_EXPORT_ERROR_CODES.failed
+      });
+
+      expect(mocks.logError).toHaveBeenCalledTimes(1);
+      expect(mocks.logError.mock.calls[0][2], 'a thrown string is not a reader error and has no name of its own').toEqual({
+        schema,
+        plotID,
+        stage: 'handler',
+        driverCode: undefined,
+        errorName: 'string'
+      });
+      expect(loggedText()).not.toContain(SECRET_CELL_VALUE);
+    });
   });
 
   describe('authorization and request validation', () => {
