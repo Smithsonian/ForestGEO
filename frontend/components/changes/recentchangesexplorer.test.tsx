@@ -913,6 +913,142 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
       expect(totalChangesCount()).toBe(String(PLOT_ONE_TOTAL));
       expect(screen.getByRole('button', { name: 'Load more changes' })).toBeInTheDocument();
     });
+
+    describe('with two plots, where each plot answers differently (#592 round 3)', () => {
+      const PLOT_TWO_TABLE = 'plot_two_table';
+      const PLOT_TWO_TOTAL = 3;
+      const PLOT_TWO_QUERY_ERROR = `Query request failed: ${HTTPResponses.SERVICE_UNAVAILABLE}`;
+      const LOAD_MORE_BUTTON_NAME = 'Load more changes';
+      const NOTHING_FOUND_MESSAGE = 'No changes found';
+
+      type PlotAnswer = () => Promise<unknown>;
+
+      function pagedFeedAnswer(tableName: string, total: number): PlotAnswer {
+        return () =>
+          Promise.resolve(
+            jsonResponse({
+              items: [{ type: 'single', entry: makeEntry(PLOT_CHANGE_ID_BLOCK, tableName) }],
+              totalItems: total,
+              summary: { total, updates: total, inserts: 0, deletes: 0 },
+              hasMore: true
+            })
+          );
+      }
+
+      function emptyFeedAnswer(): PlotAnswer {
+        return () => Promise.resolve(jsonResponse({ items: [], totalItems: 0, summary: { total: 0, updates: 0, inserts: 0, deletes: 0 }, hasMore: false }));
+      }
+
+      function failingAnswer(status: HTTPResponses): PlotAnswer {
+        return () => Promise.resolve({ ok: false, status, json: async () => ({}) });
+      }
+
+      function answerListRequestsPerPlot(answers: Record<number, PlotAnswer>): ListRequestBody[] {
+        const listRequests: ListRequestBody[] = [];
+        global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
+          if (url === '/api/changes/explorer/query') {
+            const body: ListRequestBody = JSON.parse(String(init?.body ?? '{}'));
+            listRequests.push(body);
+            return answers[body.plotID]();
+          }
+          return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+        }) as unknown as typeof fetch;
+        return listRequests;
+      }
+
+      function switchToPlot(plotID: number, rerender: (ui: React.ReactElement) => void) {
+        selection.plotID = plotID;
+        rerender(<RecentChangesExplorer />);
+      }
+
+      async function loadPlotOneThenFailPlotTwo() {
+        const listRequests = answerListRequestsPerPlot({
+          [FIRST_PLOT_ID]: pagedFeedAnswer(PLOT_ONE_TABLE, PLOT_ONE_TOTAL),
+          [SECOND_PLOT_ID]: failingAnswer(HTTPResponses.SERVICE_UNAVAILABLE)
+        });
+        const rendered = render(<RecentChangesExplorer />);
+        await screen.findByText(PLOT_ONE_TABLE);
+        expect(totalChangesCount()).toBe(String(PLOT_ONE_TOTAL));
+        switchToPlot(SECOND_PLOT_ID, rendered.rerender);
+        await screen.findByText(PLOT_TWO_QUERY_ERROR);
+        return { ...rendered, listRequests };
+      }
+
+      async function invertRangeOnCurrentPlot(listRequests: ListRequestBody[]) {
+        fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: INVERTED_TO } });
+        await waitFor(() => expect(listRequests[listRequests.length - 1].filters.changedTo).toBe(INVERTED_TO));
+        fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: INVERTED_FROM } });
+        await screen.findByText('From must be on or before To.');
+      }
+
+      it('shows only plot two failure, with none of plot one rows, total or Load more, once the dates are inverted', async () => {
+        const { listRequests } = await loadPlotOneThenFailPlotTwo();
+        expect(screen.queryByText(PLOT_ONE_TABLE), 'plot 1 card must not sit under plot 2 once plot 2 failed').not.toBeInTheDocument();
+
+        await invertRangeOnCurrentPlot(listRequests);
+
+        expect(screen.getByText(PLOT_TWO_QUERY_ERROR), 'plot 2 failure is still the truth on plot 2').toBeInTheDocument();
+        expect(screen.queryByText(PLOT_ONE_TABLE), 'plot 1 card under plot 2').not.toBeInTheDocument();
+        expect(totalChangesCount(), 'plot 1 total under plot 2').toBe('0');
+        expect(screen.queryByRole('button', { name: LOAD_MORE_BUTTON_NAME }), 'Load more would page plot 1 results under plot 2').not.toBeInTheDocument();
+        expect(screen.queryByText(NOTHING_FOUND_MESSAGE), 'a failed query is not an empty result').not.toBeInTheDocument();
+      });
+
+      it('shows nothing of plot two when plot one is selected again under inverted dates', async () => {
+        const { listRequests, rerender } = await loadPlotOneThenFailPlotTwo();
+        await invertRangeOnCurrentPlot(listRequests);
+        const requestsBeforeSwitchBack = listRequests.length;
+
+        switchToPlot(FIRST_PLOT_ID, rerender);
+
+        await waitFor(() => expect(screen.queryByText(PLOT_TWO_QUERY_ERROR), 'plot 2 error must not stay under plot 1').not.toBeInTheDocument());
+        expect(screen.queryByText(PLOT_ONE_TABLE), 'plot 1 rows are not requested again under inverted dates').not.toBeInTheDocument();
+        expect(totalChangesCount()).toBe('0');
+        expect(screen.queryByRole('button', { name: LOAD_MORE_BUTTON_NAME })).not.toBeInTheDocument();
+        expect(listRequests, `list requests sent while the range is inverted: ${JSON.stringify(listRequests)}`).toHaveLength(requestsBeforeSwitchBack);
+      });
+
+      it('keeps the rows of the plot just switched to when its dates are inverted, and none of the previous plot', async () => {
+        const listRequests = answerListRequestsPerPlot({
+          [FIRST_PLOT_ID]: pagedFeedAnswer(PLOT_ONE_TABLE, PLOT_ONE_TOTAL),
+          [SECOND_PLOT_ID]: pagedFeedAnswer(PLOT_TWO_TABLE, PLOT_TWO_TOTAL)
+        });
+        const { rerender } = render(<RecentChangesExplorer />);
+        await screen.findByText(PLOT_ONE_TABLE);
+        switchToPlot(SECOND_PLOT_ID, rerender);
+        await screen.findByText(PLOT_TWO_TABLE);
+
+        await invertRangeOnCurrentPlot(listRequests);
+
+        expect(screen.getByText(PLOT_TWO_TABLE), 'editing dates on plot 2 keeps plot 2 list').toBeInTheDocument();
+        expect(totalChangesCount()).toBe(String(PLOT_TWO_TOTAL));
+        expect(screen.getByRole('button', { name: LOAD_MORE_BUTTON_NAME })).toBeInTheDocument();
+        expect(screen.queryByText(PLOT_ONE_TABLE)).not.toBeInTheDocument();
+      });
+
+      it('does not let a late failure of the plot left behind replace the empty list of the current plot with an alert', async () => {
+        const plotOneResponse = deferred<unknown>();
+        const listRequests = answerListRequestsPerPlot({
+          [FIRST_PLOT_ID]: () => plotOneResponse.promise,
+          [SECOND_PLOT_ID]: emptyFeedAnswer()
+        });
+        const { rerender } = render(<RecentChangesExplorer />);
+        await waitFor(() => expect(listRequests).toHaveLength(1));
+        switchToPlot(SECOND_PLOT_ID, rerender);
+        await screen.findByText(NOTHING_FOUND_MESSAGE);
+
+        await act(async () => {
+          plotOneResponse.resolve({ ok: false, status: HTTPResponses.INTERNAL_SERVER_ERROR, json: async () => ({}) });
+          await Promise.resolve();
+        });
+
+        expect(screen.queryByText(PLOT_ONE_QUERY_ERROR), 'plot 1 failure published under plot 2').not.toBeInTheDocument();
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByText(NOTHING_FOUND_MESSAGE), 'plot 2 answered with an empty list').toBeInTheDocument();
+      });
+    });
   });
 
   it('drops the in-flight response and clears loading when the range becomes inverted', async () => {

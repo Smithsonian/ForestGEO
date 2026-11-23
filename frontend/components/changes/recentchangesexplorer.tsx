@@ -453,14 +453,13 @@ function isUnfilterableDateBound(value: string): boolean {
 export default function RecentChangesExplorer() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
+  const currentScope = currentSite?.schemaName && currentPlot?.plotID ? scopeKey(currentSite.schemaName, currentPlot.plotID) : null;
   const facetsAbortRef = useRef<AbortController | null>(null);
   const itemsAbortRef = useRef<AbortController | null>(null);
   const facetsRequestRef = useRef(0);
   const itemsRequestRef = useRef(0);
   const exportAbortRef = useRef<AbortController | null>(null);
   const exportRequestRef = useRef(0);
-  const loadedScopeRef = useRef<string | null>(null);
-  const failedScopeRef = useRef<string | null>(null);
 
   const [filters, setFilters] = useState<RecentChangesFilters>(DEFAULT_RECENT_CHANGES_FILTERS);
   const [items, setItems] = useState<FeedItem[]>([]);
@@ -475,6 +474,7 @@ export default function RecentChangesExplorer() {
   const [exporting, setExporting] = useState(false);
   // Kept apart from errorMessage: a list refresh clears that one, and must not wipe an export failure.
   const [exportErrorMessage, setExportErrorMessage] = useState<string | null>(null);
+  const [scopeOfResults, setScopeOfResults] = useState(currentScope);
 
   const updateFilters = useCallback((updater: (prev: RecentChangesFilters) => RecentChangesFilters) => {
     setFilters(prev => updater(prev));
@@ -508,7 +508,7 @@ export default function RecentChangesExplorer() {
       if (facetsRequestRef.current !== requestID || controller.signal.aborted) return;
       setFacets(data);
     } catch (error) {
-      if (isAbortError(error)) return;
+      if (isAbortError(error) || facetsRequestRef.current !== requestID || controller.signal.aborted) return;
       const msg = error instanceof Error ? error.message : String(error);
       setErrorMessage(msg);
     } finally {
@@ -526,29 +526,31 @@ export default function RecentChangesExplorer() {
   const dateRangeInverted = !changedFromUnfilterable && !changedToUnfilterable && isDateRangeInverted(filters.changedFrom, filters.changedTo);
   const dateFiltersUnsendable = changedFromUnfilterable || changedToUnfilterable || dateRangeInverted;
 
+  // Results and failures belong to the plot that produced them, so a different plot starts from nothing, whatever the dates say.
+  // Reset while rendering, so the previous plot is never painted under the new one.
+  if (scopeOfResults !== currentScope) {
+    setScopeOfResults(currentScope);
+    setItems([]);
+    setSummary(DEFAULT_SUMMARY);
+    setHasMore(false);
+    setPage(0);
+    setErrorMessage(null);
+    setLoading(currentScope !== null && !dateFiltersUnsendable);
+    setLoadingMore(false);
+  }
+
   const fetchItems = useCallback(
     async (pageNum: number, append: boolean) => {
       if (!currentSite?.schemaName || !currentPlot?.plotID) return;
       itemsAbortRef.current?.abort();
-      const requestedScope = scopeKey(currentSite.schemaName, currentPlot.plotID);
       if (dateFiltersUnsendable) {
-        const scopeHasNothingOnScreen = loadedScopeRef.current !== requestedScope && failedScopeRef.current !== requestedScope;
-        if (scopeHasNothingOnScreen) {
-          loadedScopeRef.current = null;
-          failedScopeRef.current = null;
-          setItems([]);
-          setSummary(DEFAULT_SUMMARY);
-          setHasMore(false);
-          setErrorMessage(null);
-          setLoading(false);
-          setLoadingMore(false);
-        }
+        setLoading(false);
+        setLoadingMore(false);
         return;
       }
       const controller = new AbortController();
       itemsAbortRef.current = controller;
       const requestID = ++itemsRequestRef.current;
-      failedScopeRef.current = null;
       if (append) {
         setLoadingMore(true);
       } else {
@@ -580,11 +582,9 @@ export default function RecentChangesExplorer() {
         }
         setSummary(data.summary);
         setHasMore(data.hasMore);
-        loadedScopeRef.current = requestedScope;
       } catch (error) {
-        if (isAbortError(error)) return;
+        if (isAbortError(error) || itemsRequestRef.current !== requestID || controller.signal.aborted) return;
         const msg = error instanceof Error ? error.message : String(error);
-        if (itemsRequestRef.current === requestID) failedScopeRef.current = requestedScope;
         setErrorMessage(msg);
       } finally {
         if (itemsRequestRef.current === requestID) {
