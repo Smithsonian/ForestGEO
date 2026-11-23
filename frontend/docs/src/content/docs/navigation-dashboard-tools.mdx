@@ -226,7 +226,7 @@ The file follows the layout of the CTFSWeb `Log` table. It lists one row for eac
 | `LogID`         | The number of the change. Every row of one change repeats it, so it identifies the change, not the row.                     |
 | `ChangedBy`     | The account that made the change. Blank when none was recorded.                                                             |
 | `ChangedTable`  | The table that changed, such as `trees`, `stems`, `species` or `coremeasurements` (measurements).                           |
-| `PrimaryKey`    | The key of the changed record. For an upload summary, the file name.                                                        |
+| `PrimaryKey`    | The key of the changed record. For an upload summary, the file name or a reference to it.                                   |
 | `ChangedColumn` | The field that changed. `*` marks a summary row that does not name one field.                                               |
 | `ChangeDate`    | The day of the change.                                                                                                      |
 | `ChangeTime`    | The day and time of the change.                                                                                             |
@@ -249,13 +249,13 @@ The file follows the layout of the CTFSWeb `Log` table. It lists one row for eac
 
 **Older changes.** Some edits recorded before March 2026, by the older change log, may show their old and new values as separate entries instead of one side-by-side change. This happens both on screen and in the file.
 
-**Species and quadrat names.** When a changed field refers to a species or a quadrat, for example a tree's species, `Old` and `New` hold the stored ID numbers and the `Description` adds the code or name, for example `(abcdsp -> abcdef)`. This does not apply to changes of the species or quadrat lists themselves. The names are the ones in use today: if a species was renamed after the change, the description shows the new name. If a name cannot be found, the stored number stays.
+**Species and quadrat names.** When an edit changes a field that refers to a species or a quadrat on an existing record, for example a tree's species, `Old` and `New` hold the stored ID numbers and the `Description` adds the code or name, for example `(abcdsp -> abcdef)`. This does not apply to changes of the species or quadrat lists themselves. The names are the ones in use today: if a species was renamed after the change, the description shows the new name. If a name cannot be found, the stored number stays. Rows for added and deleted records show the stored numbers only, with no code or name.
 
 **Row limit.** One export holds at most 50,000 rows. If yours is larger, the page tells you; narrow the date range or pick one table and export again.
 
 **Time zone.** Dates and times in the file, and the **From (UTC)** and **To (UTC)** filters, are in UTC. Cards show relative times such as "2 hours ago"; hover over one to see the full date and time, which uses your computer's time zone, so the two can differ.
 
-**While an export runs.** The button shows a spinner until the file downloads. If you switch to another site or plot meanwhile, the export is cancelled and no file is saved.
+**While an export runs.** The button shows a spinner until the file downloads. If you switch to another site or plot, or leave the page, before it finishes, the export is cancelled and no file is saved.
 
 ---
 
