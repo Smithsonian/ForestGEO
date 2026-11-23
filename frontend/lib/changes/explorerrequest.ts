@@ -40,8 +40,24 @@ export function isFilterableDate(value: string): boolean {
   return year >= EARLIEST_FILTER_DATE_YEAR && year <= LATEST_FILTER_DATE_YEAR;
 }
 
-/** MySQL measures VARCHAR(n) in characters, so a bound on a stored value counts code points, not UTF-16 units. */
-const characterCountAtMost = (maxCharacters: number) => (value: string) => Array.from(value).length <= maxCharacters;
+const MAX_UTF16_UNITS_PER_CHARACTER = 2;
+
+/**
+ * MySQL measures VARCHAR(n) in characters, so a bound on a stored value counts code points, not UTF-16 units.
+ * A code point is at most two units, so a longer string is rejected without being read, and the count stops
+ * at the first character past the bound: the work is bounded by the limit, not by the request.
+ */
+function characterCountAtMost(maxCharacters: number): (value: string) => boolean {
+  return value => {
+    if (value.length > maxCharacters * MAX_UTF16_UNITS_PER_CHARACTER) return false;
+    let characters = 0;
+    for (const _character of value) {
+      characters += 1;
+      if (characters > maxCharacters) return false;
+    }
+    return true;
+  };
+}
 
 const dateBound = z
   .string()

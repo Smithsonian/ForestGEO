@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseExplorerRequest } from '@/lib/errorsexplorer/explorerrequest';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
 import { CHANGE_EXPORT_ERROR_CODES, DEFAULT_RECENT_CHANGES_FILTERS, type RecentChangesServerFilters } from '@/config/recentchangesexplorer';
@@ -159,6 +159,27 @@ describe('recent changes request contract: rejections', () => {
 
     it('rejects a name one character past the column width', () => {
       expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedBy: namePadded(CHANGED_BY_MAX_LENGTH + 1) } }, 'filters.changedBy');
+    });
+
+    it('rejects a very long name without allocating a copy of it per character', () => {
+      const VERY_LONG_NAME_LENGTH = 5_000_000;
+      const veryLongName = 'u'.repeat(VERY_LONG_NAME_LENGTH);
+      const arrayFromSpy = vi.spyOn(Array, 'from');
+      try {
+        expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedBy: veryLongName } }, 'filters.changedBy');
+
+        const stringsMaterialized = arrayFromSpy.mock.calls.filter(([source]) => typeof source === 'string');
+        expect(stringsMaterialized, 'Array.from(value) allocates in proportion to the input; the check must stop at the limit').toHaveLength(0);
+      } finally {
+        arrayFromSpy.mockRestore();
+      }
+    });
+
+    it('still accepts a name of 64 astral characters, whose UTF-16 length is twice the column width', () => {
+      const allAstral = ASTRAL_CHARACTER.repeat(CHANGED_BY_MAX_LENGTH);
+      expect(allAstral.length, 'fixture: the UTF-16 length is exactly twice the column width').toBe(CHANGED_BY_MAX_LENGTH * 2);
+
+      expect(parsedFilters({ changedBy: allAstral })?.changedBy).toBe(allAstral);
     });
   });
 
