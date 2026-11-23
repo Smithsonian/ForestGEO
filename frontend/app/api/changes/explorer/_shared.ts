@@ -2,7 +2,7 @@ import ailogger from '@/ailogger';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
 import { decodeChangelogRow } from '@/config/changelogdecode';
-import { buildChangeFilter, PLOT_SCOPE_CONDITION } from '@/lib/changes/changefilter';
+import { buildChangeFilter, PLOT_SCOPE_CONDITION, ROW_STATE_TEXT_COLUMNS_SQL } from '@/lib/changes/changefilter';
 import {
   ChangelogEntry,
   RecentChangesServerFilters,
@@ -25,8 +25,8 @@ interface RawChangelogRow {
   TableName: string;
   RecordID: string;
   Operation: 'INSERT' | 'UPDATE' | 'DELETE';
-  OldRowState: unknown;
-  NewRowState: unknown;
+  OldRowState: string | null;
+  NewRowState: string | null;
   ChangeTimestamp: string | Date;
   ChangedBy: string | null;
 }
@@ -63,7 +63,8 @@ function warnAboutUndecodableRows(schema: string, undecodableChangeIDs: number[]
 }
 
 function buildChangelogQuery(schema: string): string {
-  return `SELECT SQL_CALC_FOUND_ROWS uc.* FROM ${schema}.unifiedchangelog uc`;
+  return `SELECT SQL_CALC_FOUND_ROWS uc.ChangeID, uc.TableName, uc.RecordID, uc.Operation, ${ROW_STATE_TEXT_COLUMNS_SQL}, uc.ChangeTimestamp, uc.ChangedBy
+          FROM ${schema}.unifiedchangelog uc`;
 }
 
 function buildCountQuery(schema: string): string {

@@ -31,7 +31,7 @@ const TIME_AFTER_WINDOW = '2026-03-12 00:00:00';
 const WINDOW_FROM = '2026-03-10';
 const WINDOW_TO = '2026-03-11';
 
-const sharedState = vi.hoisted(() => ({ connection: null as Connection | null, executeQueryCalls: 0 }));
+const sharedState = vi.hoisted(() => ({ connection: null as Connection | null, executeQueryCalls: 0, logWarn: vi.fn() }));
 
 vi.mock('@/auth', () => ({
   auth: vi.fn(async () => ({ user: { email: AUTH_USER_EMAIL, userStatus: 'global', sites: [] } }))
@@ -50,7 +50,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
   return { default: { getInstance: () => manager } };
 });
 
-vi.mock('@/ailogger', () => ({ default: { info: () => undefined, warn: () => undefined, error: () => undefined } }));
+vi.mock('@/ailogger', () => ({ default: { info: () => undefined, warn: sharedState.logWarn, error: () => undefined } }));
 
 type SingleItem = Extract<FeedItem, { type: 'single' }>;
 
@@ -85,6 +85,7 @@ describe('POST /api/changes/explorer/query: request contract and filters', () =>
   beforeEach(async () => {
     await connection.query('DELETE FROM unifiedchangelog');
     sharedState.executeQueryCalls = 0;
+    sharedState.logWarn.mockClear();
   });
 
   async function postQuery(body: Record<string, unknown>): Promise<Response> {
@@ -240,5 +241,35 @@ describe('POST /api/changes/explorer/query: request contract and filters', () =>
       { primaryKey: '201', oldState: { TreeID: 201, TreeTag: 'OLD-201' }, newState: { TreeID: 201, TreeTag: 'NEW-201' } }
     ]);
     expect(neighbourItem.entry.oldRowState, 'a single-record entry keeps its entry-level states').toEqual({ TreeID: 201, TreeTag: 'OLD-201' });
+  });
+
+  it('treats a stored JSON string that looks like a row as undecodable and warns, next to a genuine object row', async () => {
+    const OBJECT_LOOKING_TEXT = '{"TreeID":7}';
+    const insertTreeInsert = async (recordID: string, newRowState: unknown, changeTime: string): Promise<number> => {
+      const [result] = await connection.query<ResultSetHeader>(
+        `INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy, PlotID)
+         VALUES ('trees', ?, 'INSERT', NULL, ?, ?, ?, ?)`,
+        [recordID, JSON.stringify(newRowState), changeTime, CHANGED_BY, plotID]
+      );
+      return result.insertId;
+    };
+    const stringScalar = await insertTreeInsert('7', OBJECT_LOOKING_TEXT, TIME_WINDOW_START);
+    const genuineObject = await insertTreeInsert('8', { TreeID: 8 }, TIME_WINDOW_END);
+    const [storedType] = await connection.query<RowDataPacket[]>('SELECT JSON_TYPE(NewRowState) AS storedType FROM unifiedchangelog WHERE ChangeID = ?', [
+      stringScalar
+    ]);
+    expect(storedType[0].storedType, 'the fixture must be a JSON string scalar, not an object').toBe('STRING');
+
+    const feed = await queryFeed();
+
+    const entries = (feed.items as SingleItem[]).map(item => item.entry);
+    const stringEntry = entries.find(entry => entry.changeID === stringScalar);
+    const objectEntry = entries.find(entry => entry.changeID === genuineObject);
+    expect(stringEntry?.records, `a string scalar holds no row image; feed: ${JSON.stringify(feed.items)}`).toEqual([]);
+    expect(objectEntry?.records).toEqual([{ primaryKey: '8', oldState: null, newState: { TreeID: 8 } }]);
+    expect(
+      sharedState.logWarn.mock.calls.map(([, context]) => context),
+      'the undecodable row, and only it, is reported'
+    ).toEqual([{ schema, undecodableCount: 1, changeIDs: [stringScalar] }]);
   });
 });

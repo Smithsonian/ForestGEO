@@ -2,7 +2,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import ailogger from '@/ailogger';
 import { getConn } from '@/lib/db/primitives';
 import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
-import { buildChangeFilter, type ChangeFilter } from '@/lib/changes/changefilter';
+import { buildChangeFilter, ROW_STATE_TEXT_COLUMNS_SQL, type ChangeFilter } from '@/lib/changes/changefilter';
 import { COREMEASUREMENTS_TABLE_NAME } from '@/lib/changelog/ingestion-audit';
 import { EDIT_OPERATION_RECORD_ID_MARKER } from '@/lib/changelog/edit-operation-projection';
 import { BULK_CRUD_FILE_ID } from '@/lib/uploads/file-names';
@@ -142,8 +142,8 @@ interface DetailRow extends RowDataPacket {
   TableName: string;
   RecordID: string;
   Operation: ChangeOperationName;
-  OldRowState: unknown;
-  NewRowState: unknown;
+  OldRowState: string | null;
+  NewRowState: string | null;
   ChangeTime: string | null;
   ChangedBy: string | null;
   PlotID: number | null;
@@ -208,7 +208,7 @@ async function readDetailPage(
   const after = cursorCondition(cursor);
   const sql = safeFormatQuery(
     schema,
-    `SELECT uc.ChangeID, uc.TableName, uc.RecordID, uc.Operation, uc.OldRowState, uc.NewRowState,
+    `SELECT uc.ChangeID, uc.TableName, uc.RecordID, uc.Operation, ${ROW_STATE_TEXT_COLUMNS_SQL},
             DATE_FORMAT(uc.ChangeTimestamp, '${CHANGE_TIME_SQL_FORMAT}') AS ChangeTime,
             uc.ChangedBy, uc.PlotID, uc.CensusID
      FROM ??.unifiedchangelog uc

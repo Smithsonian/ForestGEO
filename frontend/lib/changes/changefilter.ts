@@ -1,5 +1,12 @@
 import type { RecentChangesServerFilters } from '@/config/recentchangesexplorer';
 
+/**
+ * Both row-state columns as JSON text. mysql2 parses a native JSON column itself, which would leave a stored JSON
+ * string scalar looking like a row once the decoder parses it again; text makes the decoder the only parser.
+ */
+export const ROW_STATE_TEXT_COLUMNS_SQL =
+  'CAST(uc.OldRowState AS CHAR CHARACTER SET utf8mb4) AS OldRowState, CAST(uc.NewRowState AS CHAR CHARACTER SET utf8mb4) AS NewRowState';
+
 export const PLOT_SCOPE_CONDITION = '(uc.PlotID = ? OR uc.PlotID IS NULL)';
 const QUICK_SEARCH_TEXT_TERMS = [
   'uc.RecordID LIKE ?',

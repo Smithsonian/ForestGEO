@@ -643,6 +643,36 @@ describe('readChangeExportSnapshot', () => {
       expect(rows[3].Description).toBe('DELETE on stems 78 was recorded; row images are unavailable');
     });
 
+    it('reports a stored JSON string that looks like a row as unavailable images, next to a genuine object row', async () => {
+      const OBJECT_LOOKING_TEXT = '{"TreeID":7}';
+      const stringScalar = await seed.insertRawChange({
+        tableName: 'trees',
+        recordID: '7',
+        operation: ChangelogOperation.INSERT,
+        newRowState: OBJECT_LOOKING_TEXT,
+        changeTime: '2026-03-10 01:00:00'
+      });
+      const genuineObject = await seed.insertRawChange({
+        tableName: 'trees',
+        recordID: '8',
+        operation: ChangelogOperation.INSERT,
+        newRowState: { TreeID: 8 },
+        changeTime: '2026-03-10 02:00:00'
+      });
+      const [storedType] = await connection.query<RowDataPacket[]>('SELECT JSON_TYPE(NewRowState) AS storedType FROM unifiedchangelog WHERE ChangeID = ?', [
+        stringScalar
+      ]);
+      expect(storedType[0].storedType, 'the fixture must be a JSON string scalar, not an object').toBe('STRING');
+
+      const rows = await readRows();
+
+      expect(rows.map(identityOf)).toEqual([
+        [stringScalar, 'trees', '7', SUMMARY_COLUMN_MARKER, 'I', '', ''],
+        [genuineObject, 'trees', '8', 'TreeID', 'I', '', 8]
+      ]);
+      expect(rows[0].Description).toBe('INSERT on trees 7 was recorded; row images are unavailable');
+    });
+
     it('keeps a file named "null" apart from a missing file id', async () => {
       const snapshotWithFileID = (fileID: unknown, measurementID: number) => ({
         CoreMeasurementID: measurementID,

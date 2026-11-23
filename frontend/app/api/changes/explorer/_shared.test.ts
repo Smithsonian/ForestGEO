@@ -34,7 +34,13 @@ function makeRawRow(overrides: Partial<MockRawRow> = {}): MockRawRow {
   };
 }
 
+/** The SQL casts both state columns to JSON text, so the driver delivers text, never a parsed value. */
+function toStoredJsonText(state: unknown): string | null {
+  return state === null ? null : JSON.stringify(state);
+}
+
 function buildConnection(rows: MockRawRow[]) {
+  const deliveredRows = rows.map(row => ({ ...row, OldRowState: toStoredJsonText(row.OldRowState), NewRowState: toStoredJsonText(row.NewRowState) }));
   return {
     executeQuery: vi.fn(async (query: string) => {
       if (query.includes('COUNT(*) AS total')) {
@@ -56,7 +62,7 @@ function buildConnection(rows: MockRawRow[]) {
 
       const offset = Number(limitMatch[1]);
       const limit = Number(limitMatch[2]);
-      return rows.slice(offset, offset + limit);
+      return deliveredRows.slice(offset, offset + limit);
     })
   };
 }
@@ -73,7 +79,7 @@ describe('queryRecentChanges', () => {
 
     const dataQuery = connection.executeQuery.mock.calls
       .map(([query]: [string]) => String(query))
-      .find(query => query.includes('SELECT SQL_CALC_FOUND_ROWS uc.*'));
+      .find(query => query.includes('SELECT SQL_CALC_FOUND_ROWS uc.ChangeID'));
 
     expect(dataQuery).toContain('ORDER BY uc.ChangeTimestamp DESC, uc.ChangeID DESC');
   });
@@ -116,7 +122,7 @@ describe('queryRecentChanges', () => {
 
     const dataCalls = connection.executeQuery.mock.calls
       .map(([query]: [string]) => String(query))
-      .filter(query => query.includes('SELECT SQL_CALC_FOUND_ROWS uc.*'));
+      .filter(query => query.includes('SELECT SQL_CALC_FOUND_ROWS uc.ChangeID'));
     expect(dataCalls).toHaveLength(2);
 
     connection.executeQuery.mockClear();
@@ -133,6 +139,19 @@ describe('queryRecentChanges', () => {
       }
     });
     expect(secondPage.hasMore).toBe(false);
+  });
+});
+
+describe('queryRecentChanges: the row-state columns', () => {
+  it('selects each state as utf8mb4 JSON text so the decoder is the only parser', async () => {
+    const connection = buildConnection([]);
+
+    await queryRecentChanges(connection as any, 'forestgeo_testing', PLOT_ID, 0, 25, DEFAULT_RECENT_CHANGES_FILTERS);
+
+    const dataQuery = connection.executeQuery.mock.calls.map(([query]: [string]) => String(query)).find(query => query.includes('SQL_CALC_FOUND_ROWS'));
+    expect(dataQuery, 'the data query must exist').toBeDefined();
+    expect(dataQuery).toContain('CAST(uc.OldRowState AS CHAR CHARACTER SET utf8mb4) AS OldRowState');
+    expect(dataQuery).toContain('CAST(uc.NewRowState AS CHAR CHARACTER SET utf8mb4) AS NewRowState');
   });
 });
 
@@ -194,7 +213,7 @@ describe('queryRecentChanges: rows whose stored state cannot be decoded (#592 O1
   it('logs one warning per query naming the site and the undecodable ChangeIDs and none of their values', async () => {
     const connection = buildConnection([
       makeRawRow({ ChangeID: 11 }),
-      makeRawRow({ ChangeID: 12, Operation: 'UPDATE', OldRowState: JSON.stringify(CORRUPT_STATE_TEXT), NewRowState: { TreeID: 1 } }),
+      makeRawRow({ ChangeID: 12, Operation: 'UPDATE', OldRowState: CORRUPT_STATE_TEXT, NewRowState: { TreeID: 1 } }),
       makeRawRow({ ChangeID: 13, Operation: 'UPDATE', OldRowState: { TreeID: 1 }, NewRowState: 5 })
     ]);
 
@@ -208,6 +227,17 @@ describe('queryRecentChanges: rows whose stored state cannot be decoded (#592 O1
       changeIDs: [12, 13]
     });
     expect(JSON.stringify(warnCalls)).not.toContain(CORRUPT_STATE_TEXT);
+  });
+
+  it('treats a stored JSON string that looks like a row as undecodable instead of inventing a row image', async () => {
+    const OBJECT_LOOKING_TEXT = '{"TreeID":7}';
+    const connection = buildConnection([makeRawRow({ ChangeID: 31, TableName: 'trees', RecordID: '7', NewRowState: OBJECT_LOOKING_TEXT })]);
+
+    const response = await queryRecentChanges(connection as any, 'forestgeo_testing', PLOT_ID, 0, 25, DEFAULT_RECENT_CHANGES_FILTERS);
+
+    const [item] = response.items as Array<Extract<FeedItem, { type: 'single' }>>;
+    expect(item.entry.records, `a string scalar holds no row image; got ${JSON.stringify(item.entry.records)}`).toEqual([]);
+    expect(vi.mocked(ailogger.warn).mock.calls[0]?.[1], 'the undecodable row is reported').toMatchObject({ changeIDs: [31] });
   });
 
   it('lists only the first ChangeIDs but reports the full count when many rows are undecodable', async () => {
@@ -247,7 +277,7 @@ describe('queryRecentChanges: one filter for every list query', () => {
 
     const queries = connection.executeQuery.mock.calls.map(([query]: [string]) => String(query));
     const listQueries = {
-      rows: queries.find(query => query.includes('SELECT SQL_CALC_FOUND_ROWS uc.*')),
+      rows: queries.find(query => query.includes('SELECT SQL_CALC_FOUND_ROWS uc.ChangeID')),
       count: queries.find(query => query.includes('COUNT(*) AS total')),
       summary: queries.find(query => query.includes('GROUP BY uc.Operation'))
     };
