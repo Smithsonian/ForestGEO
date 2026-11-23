@@ -16,20 +16,21 @@ import {
   RECENT_CHANGES_PRESETS,
   CHANGE_DATE_ZONE_LABEL,
   isDateRangeInverted,
+  NO_DATE_BOUND,
   ChangelogEntry,
   BatchInsertGroup,
   getKeyFields
 } from '@/config/recentchangesexplorer';
 import { computeDiff, DiffEntry, recordedFieldNames } from '@/config/changelogdiff';
-import { BULK_REVISION_CHANGELOG_TABLE, SUMMARY_CHANGELOG_TABLES, type ChangelogRecord, type ChangelogRowImage } from '@/config/changelogdecode';
-import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
 import {
-  CHANGE_QUICK_SEARCH_MAX_LENGTH,
-  EARLIEST_FILTER_DATE_YEAR,
-  LATEST_FILTER_DATE_YEAR,
-  NO_DATE_BOUND,
-  isFilterableDate
-} from '@/lib/changes/explorerrequest';
+  BULK_REVISION_CHANGELOG_TABLE,
+  FILE_UPLOAD_CHANGELOG_TABLE,
+  SUMMARY_CHANGELOG_TABLES,
+  type ChangelogRecord,
+  type ChangelogRowImage
+} from '@/config/changelogdecode';
+import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
+import { CHANGE_QUICK_SEARCH_MAX_LENGTH, EARLIEST_FILTER_DATE_YEAR, LATEST_FILTER_DATE_YEAR, isFilterableDate } from '@/lib/changes/explorerrequest';
 import moment from 'moment';
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -96,7 +97,7 @@ export function summarizeChange(entry: Pick<ChangelogEntry, 'operation' | 'table
   const objectLabel = singularTableLabel[tableLabel] ?? tableLabel;
   // bulk-revision-apply rows are summaries (see projectBulkRevisionRow), not a real table.
   if (entry.tableName === BULK_REVISION_CHANGELOG_TABLE) return 'Applied a bulk revision';
-  if (entry.operation === 'INSERT' && entry.tableName === 'file_upload') return filename ? `Uploaded ${filename}` : 'Uploaded a file';
+  if (entry.operation === 'INSERT' && entry.tableName === FILE_UPLOAD_CHANGELOG_TABLE) return filename ? `Uploaded ${filename}` : 'Uploaded a file';
   if (entry.operation === 'UPDATE' && /measurement/i.test(entry.tableName)) return 'Updated a measurement record';
   if (entry.operation === 'DELETE') return `Deleted a ${objectLabel}`;
   if (entry.operation === 'INSERT') return `Added a ${objectLabel}`;

@@ -23,8 +23,10 @@ export type RecentChangesPresetFilters = Pick<RecentChangesFilters, 'operation' 
 /** The server compares dates against ChangeTimestamp in the database zone, which production runs as UTC (checked 2026-11-23; #592 O1). */
 export const CHANGE_DATE_ZONE_LABEL = 'UTC';
 
+export const NO_DATE_BOUND = '';
+
 export function isDateRangeInverted(changedFrom: string, changedTo: string): boolean {
-  return changedFrom !== '' && changedTo !== '' && changedFrom > changedTo;
+  return changedFrom !== NO_DATE_BOUND && changedTo !== NO_DATE_BOUND && changedFrom > changedTo;
 }
 
 /** Most rows one export may hold; the largest field-level row count in any production schema is 450 (checked 2026-11-23; #592 O2). The export route and the too-large message both read it. */
@@ -95,8 +97,8 @@ export const DEFAULT_RECENT_CHANGES_FILTERS: RecentChangesFilters = {
   changedBy: '',
   tableName: '',
   quickSearch: '',
-  changedFrom: '',
-  changedTo: '',
+  changedFrom: NO_DATE_BOUND,
+  changedTo: NO_DATE_BOUND,
   presetId: 'all_changes'
 };
 
