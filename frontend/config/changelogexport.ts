@@ -39,6 +39,26 @@ const BLANK_CELL = '';
 const NO_FILE_RECORDED_PHRASE = 'no file recorded';
 const NO_BATCH_RECORDED_PHRASE = 'no batch recorded';
 const NO_VALUE_LABEL = 'none';
+/** Keys of the stored file_upload, quadrat-acknowledgment and bulk-revision states that Descriptions read. */
+const STATE_KEYS = {
+  fileName: 'fileName',
+  sourceFormat: 'sourceFormat',
+  formType: 'formType',
+  uploadMode: 'uploadMode',
+  rowCount: 'rowCount',
+  droppedCount: 'droppedCount',
+  batchCount: 'batchCount',
+  chunksByIdentity: 'chunksByIdentity',
+  insertedCount: 'insertedCount',
+  updatedCount: 'updatedCount',
+  skippedCount: 'skippedCount',
+  deletedDuplicateCount: 'deletedDuplicateCount',
+  failedRowCount: 'failedRowCount',
+  summaries: 'summaries',
+  summaryKind: 'summaryKind'
+} as const;
+const MEASUREMENT_SHAPE_KEYS = [STATE_KEYS.sourceFormat, STATE_KEYS.chunksByIdentity, STATE_KEYS.droppedCount, STATE_KEYS.batchCount];
+
 const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/;
 
 export type ChangeOperationName = 'INSERT' | 'UPDATE' | 'DELETE';
@@ -171,27 +191,27 @@ function foreignKeyLabel(column: ForeignKeyColumn, value: unknown, labels: Forei
 }
 
 function describeFileUpload(recordID: string, state: ChangelogRowImage | null): string {
-  const fileName = presentText(state, 'fileName') ?? recordID;
-  const isMeasurementShape = state !== null && ['sourceFormat', 'chunksByIdentity', 'droppedCount', 'batchCount'].some(field => field in state);
+  const fileName = presentText(state, STATE_KEYS.fileName) ?? recordID;
+  const isMeasurementShape = state !== null && MEASUREMENT_SHAPE_KEYS.some(field => field in state);
 
   if (isMeasurementShape) {
-    const sourceFormat = presentText(state, 'sourceFormat');
+    const sourceFormat = presentText(state, STATE_KEYS.sourceFormat);
     const kind = ['measurements', ...(sourceFormat === null ? [] : [sourceFormat])].join(', ');
     const counts = countPhrases(state, [
-      ['rowCount', count => `${count} rows staged`],
-      ['droppedCount', count => `${count} dropped`],
-      ['batchCount', count => `in ${count} chunk(s)`]
+      [STATE_KEYS.rowCount, count => `${count} rows staged`],
+      [STATE_KEYS.droppedCount, count => `${count} dropped`],
+      [STATE_KEYS.batchCount, count => `in ${count} chunk(s)`]
     ]);
     return `Uploaded ${fileName} (${kind})${counts.length > 0 ? `: ${counts.join(', ')}` : ''}`;
   }
 
-  const kindParts = [presentText(state, 'formType'), presentText(state, 'uploadMode')].filter((part): part is string => part !== null);
+  const kindParts = [presentText(state, STATE_KEYS.formType), presentText(state, STATE_KEYS.uploadMode)].filter((part): part is string => part !== null);
   const kind = kindParts.length > 0 ? ` (${kindParts.join(', ')})` : '';
-  const rowCount = presentCount(state, 'rowCount');
+  const rowCount = presentCount(state, STATE_KEYS.rowCount);
   const outcomes = countPhrases(state, [
-    ['insertedCount', count => `${count} inserted`],
-    ['updatedCount', count => `${count} updated`],
-    ['skippedCount', count => `${count} skipped`]
+    [STATE_KEYS.insertedCount, count => `${count} inserted`],
+    [STATE_KEYS.updatedCount, count => `${count} updated`],
+    [STATE_KEYS.skippedCount, count => `${count} skipped`]
   ]);
   const totals = [...(rowCount === null ? [] : [`${rowCount} rows`]), ...(outcomes.length > 0 ? [outcomes.join(', ')] : [])];
   return `Uploaded ${fileName}${kind}${totals.length > 0 ? `: ${totals.join('; ')}` : ''}`;
@@ -199,11 +219,11 @@ function describeFileUpload(recordID: string, state: ChangelogRowImage | null): 
 
 function describeBulkRevision(summary: ChangelogRowImage, editOperationID: string | null): string {
   const counts = countPhrases(summary, [
-    ['updatedCount', count => `${count} updated`],
-    ['skippedCount', count => `${count} skipped`],
-    ['insertedCount', count => `${count} inserted`],
-    ['deletedDuplicateCount', count => `${count} duplicate(s) removed`],
-    ['failedRowCount', count => `${count} failed`]
+    [STATE_KEYS.updatedCount, count => `${count} updated`],
+    [STATE_KEYS.skippedCount, count => `${count} skipped`],
+    [STATE_KEYS.insertedCount, count => `${count} inserted`],
+    [STATE_KEYS.deletedDuplicateCount, count => `${count} duplicate(s) removed`],
+    [STATE_KEYS.failedRowCount, count => `${count} failed`]
   ]);
   return `Applied a bulk revision${counts.length > 0 ? `: ${counts.join(', ')}` : ''}${editOperationSuffix(editOperationID)}`;
 }
@@ -250,8 +270,8 @@ export function describeChange(change: ChangeDescriptor, context: DescribeChange
     case 'file-upload':
       return describeFileUpload(change.recordID, change.state);
     case 'quadrat-overlap-acknowledgment': {
-      const fileName = presentText(change.state, 'fileName') ?? change.recordID;
-      const summaries = change.state?.summaries;
+      const fileName = presentText(change.state, STATE_KEYS.fileName) ?? change.recordID;
+      const summaries = change.state?.[STATE_KEYS.summaries];
       const layouts = Array.isArray(summaries) ? ` (${summaries.length} layout(s))` : '';
       return `Acknowledged overlapping quadrats in upload ${fileName}${layouts}`;
     }
@@ -320,7 +340,7 @@ export function expandChange(change: ExportSourceChange): ChangeExportDraft[] {
     censusID: change.censusID
   };
 
-  if (soleNewState !== null && soleNewState.summaryKind === BULK_REVISION_SUMMARY_KIND) {
+  if (soleNewState !== null && soleNewState[STATE_KEYS.summaryKind] === BULK_REVISION_SUMMARY_KIND) {
     return [summaryDraft(scope, records[0].primaryKey, { kind: 'bulk-revision', summary: soleNewState, editOperationID })];
   }
   if (change.tableName === FILE_UPLOAD_CHANGELOG_TABLE) {
