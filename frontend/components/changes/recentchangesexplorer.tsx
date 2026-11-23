@@ -23,6 +23,13 @@ import {
 import { computeDiff, DiffEntry, recordedFieldNames } from '@/config/changelogdiff';
 import { BULK_REVISION_CHANGELOG_TABLE, SUMMARY_CHANGELOG_TABLES, type ChangelogRecord, type ChangelogRowImage } from '@/config/changelogdecode';
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
+import {
+  CHANGE_QUICK_SEARCH_MAX_LENGTH,
+  EARLIEST_FILTER_DATE_YEAR,
+  LATEST_FILTER_DATE_YEAR,
+  NO_DATE_BOUND,
+  isFilterableDate
+} from '@/lib/changes/explorerrequest';
 import moment from 'moment';
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -399,10 +406,19 @@ function FeedItemCard({ item }: { item: FeedItem }) {
 }
 
 const DATE_RANGE_INVERTED_MESSAGE = 'From must be on or before To.';
+const EARLIEST_FILTER_DATE = `${EARLIEST_FILTER_DATE_YEAR}-01-01`;
+const LATEST_FILTER_DATE = `${LATEST_FILTER_DATE_YEAR}-12-31`;
+const UNFILTERABLE_DATE_MESSAGE = `Enter a date between ${EARLIEST_FILTER_DATE} and ${LATEST_FILTER_DATE}.`;
+const CHANGED_FROM_CONTROL_ID = 'changes-explorer-changed-from';
 const CHANGED_TO_CONTROL_ID = 'changes-explorer-changed-to';
+const CHANGED_FROM_HELPER_TEXT_ID = `${CHANGED_FROM_CONTROL_ID}-helper-text`;
 const DATE_RANGE_HELPER_TEXT_ID = `${CHANGED_TO_CONTROL_ID}-helper-text`;
 const CHANGED_FROM_LABEL = `From (${CHANGE_DATE_ZONE_LABEL})`;
 const CHANGED_TO_LABEL = `To (${CHANGE_DATE_ZONE_LABEL})`;
+
+function isUnfilterableDateBound(value: string): boolean {
+  return value !== NO_DATE_BOUND && !isFilterableDate(value);
+}
 
 export default function RecentChangesExplorer() {
   const currentSite = useSiteContext();
@@ -468,13 +484,16 @@ export default function RecentChangesExplorer() {
     }
   }, [currentSite?.schemaName, currentPlot?.plotID]);
 
-  const dateRangeInverted = isDateRangeInverted(filters.changedFrom, filters.changedTo);
+  const changedFromUnfilterable = isUnfilterableDateBound(filters.changedFrom);
+  const changedToUnfilterable = isUnfilterableDateBound(filters.changedTo);
+  const dateRangeInverted = !changedFromUnfilterable && !changedToUnfilterable && isDateRangeInverted(filters.changedFrom, filters.changedTo);
+  const dateFiltersUnsendable = changedFromUnfilterable || changedToUnfilterable || dateRangeInverted;
 
   const fetchItems = useCallback(
     async (pageNum: number, append: boolean) => {
       if (!currentSite?.schemaName || !currentPlot?.plotID) return;
       itemsAbortRef.current?.abort();
-      if (dateRangeInverted) return;
+      if (dateFiltersUnsendable) return;
       const controller = new AbortController();
       itemsAbortRef.current = controller;
       const requestID = ++itemsRequestRef.current;
@@ -523,7 +542,7 @@ export default function RecentChangesExplorer() {
         }
       }
     },
-    [currentSite?.schemaName, currentPlot?.plotID, filters, dateRangeInverted]
+    [currentSite?.schemaName, currentPlot?.plotID, filters, dateFiltersUnsendable]
   );
 
   useEffect(() => {
@@ -654,6 +673,7 @@ export default function RecentChangesExplorer() {
               <Input
                 id="changes-explorer-quick-search"
                 aria-label="Quick Search"
+                slotProps={{ input: { maxLength: CHANGE_QUICK_SEARCH_MAX_LENGTH } }}
                 value={filters.quickSearch}
                 onChange={event => updateFilters(prev => ({ ...prev, quickSearch: event.target.value, presetId: undefined }))}
                 placeholder="Search records, tags, users..."
@@ -663,28 +683,37 @@ export default function RecentChangesExplorer() {
 
           {/* Date range */}
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ alignItems: { md: 'flex-start' } }}>
-            <FormControl sx={{ minWidth: 190 }} error={dateRangeInverted}>
-              <FormLabel htmlFor="changes-explorer-changed-from">{CHANGED_FROM_LABEL}</FormLabel>
+            <FormControl id={CHANGED_FROM_CONTROL_ID} sx={{ minWidth: 190 }} error={changedFromUnfilterable || dateRangeInverted}>
+              <FormLabel htmlFor={CHANGED_FROM_CONTROL_ID}>{CHANGED_FROM_LABEL}</FormLabel>
               <Input
-                id="changes-explorer-changed-from"
+                id={CHANGED_FROM_CONTROL_ID}
                 type="date"
                 aria-label={CHANGED_FROM_LABEL}
                 value={filters.changedFrom}
-                slotProps={{ input: { 'aria-invalid': dateRangeInverted, 'aria-describedby': dateRangeInverted ? DATE_RANGE_HELPER_TEXT_ID : undefined } }}
+                slotProps={{
+                  input: {
+                    min: EARLIEST_FILTER_DATE,
+                    max: LATEST_FILTER_DATE,
+                    'aria-invalid': changedFromUnfilterable || dateRangeInverted,
+                    'aria-describedby': changedFromUnfilterable ? CHANGED_FROM_HELPER_TEXT_ID : dateRangeInverted ? DATE_RANGE_HELPER_TEXT_ID : undefined
+                  }
+                }}
                 onChange={event => updateFilters(prev => ({ ...prev, changedFrom: event.target.value }))}
               />
+              {changedFromUnfilterable && <FormHelperText>{UNFILTERABLE_DATE_MESSAGE}</FormHelperText>}
             </FormControl>
 
-            <FormControl id={CHANGED_TO_CONTROL_ID} sx={{ minWidth: 190 }} error={dateRangeInverted}>
+            <FormControl id={CHANGED_TO_CONTROL_ID} sx={{ minWidth: 190 }} error={changedToUnfilterable || dateRangeInverted}>
               <FormLabel htmlFor={CHANGED_TO_CONTROL_ID}>{CHANGED_TO_LABEL}</FormLabel>
               <Input
                 id={CHANGED_TO_CONTROL_ID}
                 type="date"
                 aria-label={CHANGED_TO_LABEL}
                 value={filters.changedTo}
-                slotProps={{ input: { 'aria-invalid': dateRangeInverted } }}
+                slotProps={{ input: { min: EARLIEST_FILTER_DATE, max: LATEST_FILTER_DATE, 'aria-invalid': changedToUnfilterable || dateRangeInverted } }}
                 onChange={event => updateFilters(prev => ({ ...prev, changedTo: event.target.value }))}
               />
+              {changedToUnfilterable && <FormHelperText>{UNFILTERABLE_DATE_MESSAGE}</FormHelperText>}
               {dateRangeInverted && <FormHelperText>{DATE_RANGE_INVERTED_MESSAGE}</FormHelperText>}
             </FormControl>
           </Stack>

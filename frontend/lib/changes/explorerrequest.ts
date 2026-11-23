@@ -15,7 +15,7 @@ export const INVALID_RECENT_CHANGES_REQUEST_RESPONSE = { error: 'Invalid recent 
 export const INVALID_CHANGE_EXPORT_REQUEST_RESPONSE = { error: 'Invalid export request', code: CHANGE_EXPORT_ERROR_CODES.invalidRequest } as const;
 
 const CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const NO_DATE_BOUND = '';
+export const NO_DATE_BOUND = '';
 /** MySQL's DATE_ADD(day, INTERVAL 1 DAY) is NULL past 9999-12-31, which would make a To of that day match nothing. */
 export const LATEST_FILTER_DATE_YEAR = 9998;
 /** unifiedchangelog.ChangeTimestamp is a DATETIME, whose documented range starts in year 1000; year 0000 makes DATE_ADD raise ERROR 1525. */
@@ -29,7 +29,7 @@ export function isCalendarDate(value: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value);
 }
 
-function isFilterableDate(value: string): boolean {
+export function isFilterableDate(value: string): boolean {
   if (!isCalendarDate(value)) return false;
   const year = Number(value.slice(0, YEAR_PREFIX_LENGTH));
   return year >= EARLIEST_FILTER_DATE_YEAR && year <= LATEST_FILTER_DATE_YEAR;

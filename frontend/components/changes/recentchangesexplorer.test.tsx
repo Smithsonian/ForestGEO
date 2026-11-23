@@ -6,6 +6,7 @@ import RecentChangesExplorer, { summarizeChange } from './recentchangesexplorer'
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
 import { CHANGE_DATE_ZONE_LABEL, type ChangelogEntry } from '@/config/recentchangesexplorer';
 import { decodeChangelogRow } from '@/config/changelogdecode';
+import { CHANGE_QUICK_SEARCH_MAX_LENGTH, EARLIEST_FILTER_DATE_YEAR, LATEST_FILTER_DATE_YEAR } from '@/lib/changes/explorerrequest';
 
 const FIRST_PLOT_ID = 1;
 const SECOND_PLOT_ID = 2;
@@ -609,6 +610,8 @@ describe('RecentChangesExplorer: records inside cards (#592 §8.5)', () => {
 
 const FROM_LABEL = `From (${CHANGE_DATE_ZONE_LABEL})`;
 const TO_LABEL = `To (${CHANGE_DATE_ZONE_LABEL})`;
+const FIVE_DIGIT_YEAR_DATE = '20261-11-06';
+const UNFILTERABLE_DATE_MESSAGE = `Enter a date between ${EARLIEST_FILTER_DATE_YEAR}-01-01 and ${LATEST_FILTER_DATE_YEAR}-12-31.`;
 
 describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
   beforeEach(() => {
@@ -675,6 +678,58 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     await waitFor(() => expect(fromInput).toHaveAttribute('aria-invalid', 'false'));
     expect(toInput).toHaveAttribute('aria-invalid', 'false');
     expect(fromInput).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('refuses a typed year the request contract rejects, says so on that input, and sends one request once it is corrected', async () => {
+    const listRequests = serveFeed([]);
+    render(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests).toHaveLength(1));
+    const toInput = screen.getByLabelText(TO_LABEL);
+
+    fireEvent.change(toInput, { target: { value: FIVE_DIGIT_YEAR_DATE } });
+
+    expect(await screen.findByText(UNFILTERABLE_DATE_MESSAGE)).toBeInTheDocument();
+    expect(listRequests, `no list request for To = ${FIVE_DIGIT_YEAR_DATE}`).toHaveLength(1);
+    expect(toInput).toHaveAttribute('aria-invalid', 'true');
+    expect(toInput).toHaveAccessibleDescription(UNFILTERABLE_DATE_MESSAGE);
+    expect(screen.getByLabelText(FROM_LABEL), 'only the offending input is flagged').toHaveAttribute('aria-invalid', 'false');
+    expect(screen.queryByRole('alert'), 'no "Query request failed: 400" alert').not.toBeInTheDocument();
+
+    fireEvent.change(toInput, { target: { value: '2026-11-06' } });
+
+    await waitFor(() => expect(listRequests).toHaveLength(2));
+    expect(listRequests[1].filters).toMatchObject({ changedTo: '2026-11-06' });
+    expect(screen.queryByText(UNFILTERABLE_DATE_MESSAGE)).not.toBeInTheDocument();
+    expect(toInput).toHaveAttribute('aria-invalid', 'false');
+  });
+
+  it('flags a From the contract rejects on the From input and does not call it an inverted range', async () => {
+    const listRequests = serveFeed([]);
+    render(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests).toHaveLength(1));
+    const fromInput = screen.getByLabelText(FROM_LABEL);
+    fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
+    await waitFor(() => expect(listRequests).toHaveLength(2));
+
+    fireEvent.change(fromInput, { target: { value: FIVE_DIGIT_YEAR_DATE } });
+
+    expect(await screen.findByText(UNFILTERABLE_DATE_MESSAGE)).toBeInTheDocument();
+    expect(screen.queryByText('From must be on or before To.'), 'a five-digit year sorts before 2026 as a string').not.toBeInTheDocument();
+    expect(listRequests).toHaveLength(2);
+    expect(fromInput).toHaveAttribute('aria-invalid', 'true');
+    expect(fromInput).toHaveAccessibleDescription(UNFILTERABLE_DATE_MESSAGE);
+    expect(screen.getByLabelText(TO_LABEL)).toHaveAttribute('aria-invalid', 'false');
+  });
+
+  it('hints the accepted years on both date inputs', async () => {
+    serveFeed([]);
+    render(<RecentChangesExplorer />);
+
+    for (const label of [FROM_LABEL, TO_LABEL]) {
+      const input = await screen.findByLabelText(label);
+      expect(input, `${label} min`).toHaveAttribute('min', `${EARLIEST_FILTER_DATE_YEAR}-01-01`);
+      expect(input, `${label} max`).toHaveAttribute('max', `${LATEST_FILTER_DATE_YEAR}-12-31`);
+    }
   });
 
   it('drops the in-flight response and clears loading when the range becomes inverted', async () => {
@@ -753,6 +808,22 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     await waitFor(() => expect(listRequests).toHaveLength(2));
 
     expect(allChangesChip.className, 'a preset says nothing about dates').toContain('MuiChip-variantSolid');
+  });
+});
+
+describe('RecentChangesExplorer: Quick Search length (#592 C4)', () => {
+  it('stops accepting text at the length the request contract allows', async () => {
+    const listRequests = serveFeed([]);
+    const user = userEvent.setup();
+    render(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests).toHaveLength(1));
+    const quickSearch = screen.getByLabelText('Quick Search') as HTMLInputElement;
+
+    await user.click(quickSearch);
+    await user.paste('x'.repeat(CHANGE_QUICK_SEARCH_MAX_LENGTH + 1));
+
+    expect(quickSearch.value, 'pasting one character too many keeps the first 500').toHaveLength(CHANGE_QUICK_SEARCH_MAX_LENGTH);
+    await waitFor(() => expect(listRequests[listRequests.length - 1].filters.quickSearch).toHaveLength(CHANGE_QUICK_SEARCH_MAX_LENGTH));
   });
 });
 
