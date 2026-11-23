@@ -18,12 +18,23 @@ import {
   BatchInsertGroup,
   getKeyFields
 } from '@/config/recentchangesexplorer';
-import { computeDiff, DiffEntry } from '@/config/changelogdiff';
+import { computeDiff, DiffEntry, recordedFieldNames } from '@/config/changelogdiff';
+import { BULK_REVISION_CHANGELOG_TABLE, SUMMARY_CHANGELOG_TABLES, type ChangelogRecord, type ChangelogRowImage } from '@/config/changelogdecode';
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
 import moment from 'moment';
 
 const DEFAULT_PAGE_SIZE = 25;
 const UNKNOWN_USER_LABEL = 'unknown';
+const ROW_IMAGES_NOT_RECORDED_TEXT = 'Row images were not recorded for this change';
+const ROW_IMAGES_NOT_RECORDED_LINE = "row added, but the older change log didn't save its values";
+const PRIOR_VALUES_NOT_RECORDED_CAPTION = 'Prior values were not recorded';
+const NEW_VALUES_NOT_RECORDED_CAPTION = 'New values were not recorded';
+const NO_FIELD_VALUES_RECORDED_TEXT = 'No field values were recorded';
+const NEW_ROW_FALLBACK = 'New row';
+const REMOVED_ROW_FALLBACK = 'Removed row';
+const INSERT_LINE_COLOR = '#6ee77a';
+const DELETE_LINE_COLOR = '#f87171';
+const RECORD_PANEL_SX = { backgroundColor: 'neutral.900', borderRadius: '6px', p: 1.5, fontFamily: 'monospace', fontSize: '12px' } as const;
 
 const OPERATION_COLORS = {
   INSERT: 'success',
@@ -75,7 +86,7 @@ export function summarizeChange(entry: Pick<ChangelogEntry, 'operation' | 'table
   };
   const objectLabel = singularTableLabel[tableLabel] ?? tableLabel;
   // bulk-revision-apply rows are summaries (see projectBulkRevisionRow), not a real table.
-  if (entry.tableName === 'bulk-revision-apply') return 'Applied a bulk revision';
+  if (entry.tableName === BULK_REVISION_CHANGELOG_TABLE) return 'Applied a bulk revision';
   if (entry.operation === 'INSERT' && entry.tableName === 'file_upload') return filename ? `Uploaded ${filename}` : 'Uploaded a file';
   if (entry.operation === 'UPDATE' && /measurement/i.test(entry.tableName)) return 'Updated a measurement record';
   if (entry.operation === 'DELETE') return `Deleted a ${objectLabel}`;
@@ -86,6 +97,25 @@ export function summarizeChange(entry: Pick<ChangelogEntry, 'operation' | 'table
 function displayName(value: string | null): string {
   if (value === null) return UNKNOWN_USER_LABEL;
   return value.replace(/\s*\[[^\]]*\]\s*$/, '').trim();
+}
+
+function keyFieldsLine(tableName: string, image: ChangelogRowImage | null): string {
+  if (image === null) return '';
+  return getKeyFields(tableName, image)
+    .map(field => `${field}: ${formatDiffValue(image[field])}`)
+    .join(', ');
+}
+
+function hasNoRowImage(entry: ChangelogEntry): boolean {
+  return entry.records.length === 0 && !SUMMARY_CHANGELOG_TABLES.has(entry.tableName);
+}
+
+function RowImagesNotRecorded() {
+  return (
+    <Typography level="body-sm" sx={{ color: 'neutral.500', fontStyle: 'italic' }}>
+      {ROW_IMAGES_NOT_RECORDED_TEXT}
+    </Typography>
+  );
 }
 
 function DiffBlock({ diffs }: { diffs: DiffEntry[] }) {
@@ -147,25 +177,65 @@ function DiffBlock({ diffs }: { diffs: DiffEntry[] }) {
   );
 }
 
-function InsertSummary({ entry }: { entry: ChangelogEntry }) {
-  const fields = entry.newRowState ? getKeyFields(entry.tableName, entry.newRowState) : [];
-  const display = fields.map(f => `${f}: ${formatDiffValue(entry.newRowState?.[f])}`).join(', ');
+/** One line per record. The primary key labels a line only when the change holds several records. */
+function RecordLines({ entry, side, sign, color, fallback }: { entry: ChangelogEntry; side: 'old' | 'new'; sign: '+' | '-'; color: string; fallback: string }) {
+  const lines =
+    entry.records.length === 0
+      ? [`${sign} ${fallback}`]
+      : entry.records.map(record => {
+          const keyLabel = entry.records.length > 1 ? `${record.primaryKey} · ` : '';
+          const fields = keyFieldsLine(entry.tableName, side === 'new' ? record.newState : record.oldState);
+          return `${sign} ${keyLabel}${fields || fallback}`;
+        });
 
   return (
-    <Box sx={{ backgroundColor: 'neutral.900', borderRadius: '6px', p: 1.5, fontFamily: 'monospace', fontSize: '12px' }}>
-      <Typography sx={{ color: '#6ee77a', fontFamily: 'inherit', fontSize: 'inherit' }}>+ {display || 'New row'}</Typography>
+    <Box sx={RECORD_PANEL_SX}>
+      {lines.map((line, index) => (
+        <Typography key={`${entry.changeID}-${index}`} sx={{ color, fontFamily: 'inherit', fontSize: 'inherit' }}>
+          {line}
+        </Typography>
+      ))}
     </Box>
   );
 }
 
+function InsertSummary({ entry }: { entry: ChangelogEntry }) {
+  if (hasNoRowImage(entry)) return <RowImagesNotRecorded />;
+  return <RecordLines entry={entry} side="new" sign="+" color={INSERT_LINE_COLOR} fallback={NEW_ROW_FALLBACK} />;
+}
+
 function DeleteSummary({ entry }: { entry: ChangelogEntry }) {
-  const fields = entry.oldRowState ? getKeyFields(entry.tableName, entry.oldRowState) : [];
-  const display = fields.map(f => `${f}: ${formatDiffValue(entry.oldRowState?.[f])}`).join(', ');
+  if (hasNoRowImage(entry)) return <RowImagesNotRecorded />;
+  return <RecordLines entry={entry} side="old" sign="-" color={DELETE_LINE_COLOR} fallback={REMOVED_ROW_FALLBACK} />;
+}
+
+/** One record of an UPDATE. A record with one side missing says which, matching the CSV Description (#592 D12). */
+function UpdateRecordBlock({ record, showPrimaryKey }: { record: ChangelogRecord; showPrimaryKey: boolean }) {
+  const diffs = useMemo(() => computeDiff(record.oldState, record.newState), [record.oldState, record.newState]);
+  const missingSideCaption = record.oldState === null ? PRIOR_VALUES_NOT_RECORDED_CAPTION : record.newState === null ? NEW_VALUES_NOT_RECORDED_CAPTION : null;
+  const recordedImage = record.oldState === null ? record.newState : record.oldState;
+  const hasNoRecordedField = missingSideCaption !== null && (recordedImage === null || recordedFieldNames(recordedImage).length === 0);
 
   return (
-    <Box sx={{ backgroundColor: 'neutral.900', borderRadius: '6px', p: 1.5, fontFamily: 'monospace', fontSize: '12px' }}>
-      <Typography sx={{ color: '#f87171', fontFamily: 'inherit', fontSize: 'inherit' }}>- {display || 'Removed row'}</Typography>
-    </Box>
+    <Stack spacing={0.5}>
+      {showPrimaryKey && (
+        <Typography level="body-xs" sx={{ fontFamily: 'monospace', color: 'neutral.400' }}>
+          {record.primaryKey}
+        </Typography>
+      )}
+      {missingSideCaption && (
+        <Typography level="body-xs" sx={{ color: 'warning.300' }}>
+          {missingSideCaption}
+        </Typography>
+      )}
+      {hasNoRecordedField ? (
+        <Typography level="body-sm" sx={{ color: 'neutral.500', fontStyle: 'italic' }}>
+          {NO_FIELD_VALUES_RECORDED_TEXT}
+        </Typography>
+      ) : (
+        <DiffBlock diffs={diffs} />
+      )}
+    </Stack>
   );
 }
 
@@ -181,6 +251,9 @@ function CardHeader({ entry }: { entry: ChangelogEntry }) {
         <Typography level="title-sm">{summarizeChange(entry)}</Typography>
         <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
           {entry.tableName}
+        </Typography>
+        <Typography level="body-xs" sx={{ color: 'neutral.500', fontFamily: 'monospace' }}>
+          #{entry.changeID}
         </Typography>
       </Stack>
       <Typography level="body-xs" sx={{ color: 'neutral.500' }} title={time.full}>
@@ -215,14 +288,8 @@ function BulkRevisionSummaryCard({ entry }: { entry: ChangelogEntry }) {
 }
 
 function UpdateCard({ entry }: { entry: ChangelogEntry }) {
-  const isBulkRevisionSummary = entry.newRowState?.summaryKind === BULK_REVISION_SUMMARY_KIND;
   // computeDiff must never run against a summary object (see BulkRevisionSummaryCard).
-  const diffs = useMemo(
-    () => (isBulkRevisionSummary ? [] : computeDiff(entry.oldRowState, entry.newRowState)),
-    [isBulkRevisionSummary, entry.oldRowState, entry.newRowState]
-  );
-
-  if (isBulkRevisionSummary) {
+  if (entry.newRowState?.summaryKind === BULK_REVISION_SUMMARY_KIND) {
     return <BulkRevisionSummaryCard entry={entry} />;
   }
 
@@ -230,7 +297,11 @@ function UpdateCard({ entry }: { entry: ChangelogEntry }) {
     <Sheet variant="outlined" sx={{ p: 1.75, borderRadius: 'md', borderLeft: '3px solid', borderLeftColor: 'primary.500' }}>
       <Stack spacing={1.25}>
         <CardHeader entry={entry} />
-        <DiffBlock diffs={diffs} />
+        {hasNoRowImage(entry) && <RowImagesNotRecorded />}
+        {entry.records.length === 0 && !hasNoRowImage(entry) && <DiffBlock diffs={[]} />}
+        {entry.records.map((record, index) => (
+          <UpdateRecordBlock key={`${entry.changeID}-${index}`} record={record} showPrimaryKey={entry.records.length > 1} />
+        ))}
       </Stack>
     </Sheet>
   );
@@ -280,15 +351,17 @@ function BatchInsertCard({ batch }: { batch: BatchInsertGroup }) {
         </Button>
 
         {expanded && (
-          <Box sx={{ backgroundColor: 'neutral.900', borderRadius: '6px', p: 1.5, fontFamily: 'monospace', fontSize: '12px' }}>
-            {batch.entries.map(entry => {
-              const fields = entry.newRowState ? getKeyFields(batch.tableName, entry.newRowState) : [];
-              const display = fields.map(f => `${f}: ${formatDiffValue(entry.newRowState?.[f])}`).join(', ');
-              return (
-                <Typography key={entry.changeID} sx={{ color: '#6ee77a', fontFamily: 'inherit', fontSize: 'inherit', mb: 0.5 }}>
-                  + {display || 'New row'}
+          <Box sx={RECORD_PANEL_SX}>
+            {batch.entries.flatMap(entry => {
+              const lines =
+                entry.records.length === 0
+                  ? [`#${entry.changeID} — ${ROW_IMAGES_NOT_RECORDED_LINE}`]
+                  : entry.records.map(record => `#${entry.changeID} + ${keyFieldsLine(batch.tableName, record.newState) || NEW_ROW_FALLBACK}`);
+              return lines.map((line, index) => (
+                <Typography key={`${entry.changeID}-${index}`} sx={{ color: INSERT_LINE_COLOR, fontFamily: 'inherit', fontSize: 'inherit', mb: 0.5 }}>
+                  {line}
                 </Typography>
-              );
+              ));
             })}
           </Box>
         )}
