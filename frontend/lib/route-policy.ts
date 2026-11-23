@@ -118,6 +118,7 @@ export const ROUTE_POLICIES = {
   // Changelog
   'changelog/overview/[changelogType]/[[...options]]': 'site-scoped',
   // Recent changes explorer
+  'changes/explorer/export': 'site-scoped',
   'changes/explorer/facets': 'site-scoped',
   'changes/explorer/query': 'site-scoped',
   // Errors / validation explorer
