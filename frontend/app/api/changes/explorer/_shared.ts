@@ -1,3 +1,4 @@
+import ailogger from '@/ailogger';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
 import { decodeChangelogRow } from '@/config/changelogdecode';
@@ -29,10 +30,15 @@ interface RawChangelogRow {
   ChangedBy: string | null;
 }
 
-function toChangelogEntry(row: RawChangelogRow): ChangelogEntry {
-  const { records } = decodeChangelogRow({ tableName: row.TableName, recordID: row.RecordID, oldRowState: row.OldRowState, newRowState: row.NewRowState });
+function toChangelogEntry(row: RawChangelogRow): { entry: ChangelogEntry; undecodable: boolean } {
+  const { records, undecodable } = decodeChangelogRow({
+    tableName: row.TableName,
+    recordID: row.RecordID,
+    oldRowState: row.OldRowState,
+    newRowState: row.NewRowState
+  });
   const soleRecord = records.length === 1 ? records[0] : null;
-  return {
+  const entry: ChangelogEntry = {
     changeID: row.ChangeID,
     tableName: row.TableName,
     recordID: row.RecordID,
@@ -43,6 +49,14 @@ function toChangelogEntry(row: RawChangelogRow): ChangelogEntry {
     changeTimestamp: row.ChangeTimestamp instanceof Date ? row.ChangeTimestamp.toISOString() : row.ChangeTimestamp,
     changedBy: row.ChangedBy
   };
+  return { entry, undecodable };
+}
+
+function warnAboutUndecodableRows(undecodableChangeIDs: number[]): void {
+  if (undecodableChangeIDs.length === 0) return;
+  ailogger.warn(
+    `Recent changes: ${undecodableChangeIDs.length} change-log row(s) hold a row state that could not be decoded; ChangeIDs ${undecodableChangeIDs.join(', ')}`
+  );
 }
 
 function buildChangelogQuery(schema: string): string {
@@ -81,6 +95,7 @@ async function queryRecentChangesPage(
   const endItemIndexExclusive = startItemIndex + pageSize;
   const chunkSize = Math.max(MIN_RAW_FETCH_CHUNK_SIZE, pageSize * 4);
   const entries: ChangelogEntry[] = [];
+  const undecodableChangeIDs: number[] = [];
   let groupedItems: FeedItem[] = [];
   let offset = 0;
 
@@ -92,7 +107,11 @@ async function queryRecentChangesPage(
       break;
     }
 
-    entries.push(...rawRows.map(toChangelogEntry));
+    for (const row of rawRows) {
+      const { entry, undecodable } = toChangelogEntry(row);
+      entries.push(entry);
+      if (undecodable) undecodableChangeIDs.push(row.ChangeID);
+    }
     groupedItems = groupIntoBatches(entries);
 
     const reachedEndOfRows = rawRows.length < chunkSize;
@@ -102,6 +121,8 @@ async function queryRecentChangesPage(
 
     offset += rawRows.length;
   }
+
+  warnAboutUndecodableRows(undecodableChangeIDs);
 
   return {
     items: groupedItems.slice(startItemIndex, endItemIndexExclusive),

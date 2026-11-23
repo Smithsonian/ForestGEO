@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { queryRecentChanges } from './_shared';
+import ailogger from '@/ailogger';
 import { DEFAULT_RECENT_CHANGES_FILTERS, type FeedItem } from '@/config/recentchangesexplorer';
+
+vi.mock('@/ailogger', () => ({
+  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
+}));
 
 const PLOT_ID = 1;
 
@@ -176,6 +181,43 @@ describe('queryRecentChanges: whole-row decoding', () => {
     const response = await queryRecentChanges(connection as any, 'forestgeo_testing', PLOT_ID, 0, 25, DEFAULT_RECENT_CHANGES_FILTERS);
     const [item] = response.items as Array<Extract<FeedItem, { type: 'single' }>>;
     expect(item.entry.changedBy).toBeNull();
+  });
+});
+
+describe('queryRecentChanges: rows whose stored state cannot be decoded (#592 O1)', () => {
+  const CORRUPT_STATE_TEXT = 'corrupt-state-text-that-must-not-be-logged';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('logs one warning per query naming the undecodable ChangeIDs and none of their values', async () => {
+    const connection = buildConnection([
+      makeRawRow({ ChangeID: 11 }),
+      makeRawRow({ ChangeID: 12, Operation: 'UPDATE', OldRowState: JSON.stringify(CORRUPT_STATE_TEXT), NewRowState: { TreeID: 1 } }),
+      makeRawRow({ ChangeID: 13, Operation: 'UPDATE', OldRowState: { TreeID: 1 }, NewRowState: 5 })
+    ]);
+
+    await queryRecentChanges(connection as any, 'forestgeo_testing', PLOT_ID, 0, 25, DEFAULT_RECENT_CHANGES_FILTERS);
+
+    const warnCalls = vi.mocked(ailogger.warn).mock.calls;
+    expect(warnCalls, `warn calls: ${JSON.stringify(warnCalls)}`).toHaveLength(1);
+    const [message] = warnCalls[0];
+    expect(message).toContain('12');
+    expect(message).toContain('13');
+    expect(message, 'the decodable row must not be named').not.toMatch(/\b11\b/);
+    expect(JSON.stringify(warnCalls)).not.toContain(CORRUPT_STATE_TEXT);
+  });
+
+  it('logs nothing when every row decodes', async () => {
+    const connection = buildConnection([
+      makeRawRow({ ChangeID: 21 }),
+      makeRawRow({ ChangeID: 22, Operation: 'DELETE', OldRowState: { TreeID: 2 }, NewRowState: null })
+    ]);
+
+    await queryRecentChanges(connection as any, 'forestgeo_testing', PLOT_ID, 0, 25, DEFAULT_RECENT_CHANGES_FILTERS);
+
+    expect(vi.mocked(ailogger.warn).mock.calls, 'a clean page must not warn').toHaveLength(0);
   });
 });
 
