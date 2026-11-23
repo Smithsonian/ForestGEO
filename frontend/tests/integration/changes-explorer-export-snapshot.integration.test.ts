@@ -698,6 +698,46 @@ describe('readChangeExportSnapshot', () => {
     });
   });
 
+  describe('keyset paging', () => {
+    const NULL_TIME_COUNT = 3;
+    const TIED_TIME_COUNT = 3;
+    const LATER_TIME_COUNT = 2;
+    const LATER_TIMES = ['2026-03-10 12:00:01', '2026-03-10 12:00:02'];
+
+    async function seedSingleRowChange(recordID: number, changeTime: string | null): Promise<number> {
+      return seed.insertRawChange({
+        tableName: 'trees',
+        recordID: String(recordID),
+        operation: ChangelogOperation.UPDATE,
+        oldRowState: { TreeID: recordID, TreeTag: 'before' },
+        newRowState: { TreeID: recordID, TreeTag: 'after' },
+        changeTime
+      });
+    }
+
+    /** Tied and later rows are inserted first so ChangeID order and time order disagree about where the NULL rows go. */
+    async function seedNullTimesAndTies(): Promise<{ nullTimed: number[]; tied: number[]; later: number[] }> {
+      const tied: number[] = [];
+      for (let index = 0; index < TIED_TIME_COUNT; index += 1) tied.push(await seedSingleRowChange(1100 + index, TIME_SHARED));
+      const later: number[] = [];
+      for (let index = 0; index < LATER_TIME_COUNT; index += 1) later.push(await seedSingleRowChange(1200 + index, LATER_TIMES[index]));
+      const nullTimed: number[] = [];
+      for (let index = 0; index < NULL_TIME_COUNT; index += 1) nullTimed.push(await seedSingleRowChange(1300 + index, null));
+      return { nullTimed, tied, later };
+    }
+
+    it.each([1, 2, 3])('with a page size of %i reads every change once: NULL times first, then by time, ties by ChangeID', async pageSize => {
+      const { nullTimed, tied, later } = await seedNullTimesAndTies();
+
+      const snapshot = await readSnapshot({}, { maxRows: GENEROUS_LIMITS.maxRows, pageSize });
+
+      const logIDs = toExportedRows(snapshot.rows).map(row => row.LogID);
+      console.log(`[change-export] page size ${pageSize} read LogIDs ${JSON.stringify(logIDs)}`);
+      expect(logIDs, 'each ChangeID once, in (ChangeTimestamp, ChangeID) order with NULL first').toEqual([...nullTimed, ...tied, ...later]);
+      expect(snapshot.detailChangeCount).toBe(NULL_TIME_COUNT + TIED_TIME_COUNT + LATER_TIME_COUNT);
+    });
+  });
+
   describe('the row ceiling', () => {
     const TIGHT_LIMITS: ChangeExportLimits = { maxRows: 2, pageSize: 2 };
 
