@@ -27,7 +27,8 @@ import {
   ChangeExportReadError,
   ExportTooLargeError,
   readChangeExportSnapshot,
-  SNAPSHOT_TRANSACTION_STATEMENT,
+  SNAPSHOT_BEGIN_STATEMENT,
+  SNAPSHOT_ISOLATION_STATEMENT,
   type ChangeExportLimits,
   type ChangeExportSnapshot
 } from '@/lib/changes/exportsnapshot';
@@ -82,7 +83,6 @@ vi.mock('@/ailogger', () => ({ default: { info: () => undefined, warn: () => und
 
 interface OwnedConnectionDouble {
   query: ReturnType<typeof vi.fn>;
-  beginTransaction: ReturnType<typeof vi.fn>;
   rollback: ReturnType<typeof vi.fn>;
   release: ReturnType<typeof vi.fn>;
   destroy: ReturnType<typeof vi.fn>;
@@ -144,7 +144,6 @@ describe('readChangeExportSnapshot', () => {
         await afterOwnedQuery(sql);
         return result;
       }),
-      beginTransaction: vi.fn(() => ownedConnection.beginTransaction()),
       rollback: vi.fn(() => ownedConnection.rollback()),
       release: vi.fn(),
       destroy: vi.fn()
@@ -466,11 +465,12 @@ describe('readChangeExportSnapshot', () => {
         'matching changes = distinct LogIDs of non-rollup rows + rollup member counts + suppressed changes (§6.2)'
       ).toBe(detailLogIDs.length + expectedRollupMembers + snapshot.suppressedChangeCount);
 
-      const isolationCall = ownedDouble.query.mock.calls.findIndex(([sql]) => sql === SNAPSHOT_TRANSACTION_STATEMENT);
-      expect(isolationCall, 'the isolation level is the first statement on the owned connection').toBe(0);
-      expect(ownedDouble.query.mock.invocationCallOrder[0], 'and it runs before the transaction begins').toBeLessThan(
-        ownedDouble.beginTransaction.mock.invocationCallOrder[0]
-      );
+      const statements = ownedDouble.query.mock.calls.map(([sql]) => sql);
+      expect(statements.slice(0, 3), 'the isolation level, then the READ ONLY begin, then the first read').toEqual([
+        SNAPSHOT_ISOLATION_STATEMENT,
+        SNAPSHOT_BEGIN_STATEMENT,
+        expect.stringContaining(DETAIL_PAGE_ORDER)
+      ]);
       expect(ownedDouble.rollback, 'the read-only transaction is rolled back').toHaveBeenCalledTimes(1);
       expect(ownedDouble.release).toHaveBeenCalledTimes(1);
       expect(ownedDouble.destroy).not.toHaveBeenCalled();
@@ -994,16 +994,57 @@ describe('readChangeExportSnapshot', () => {
 
     it('fails at stage begin when the isolation level cannot be set, and releases without a rollback', async () => {
       ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
-        if (sql === SNAPSHOT_TRANSACTION_STATEMENT) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
+        if (sql === SNAPSHOT_ISOLATION_STATEMENT) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
         return ownedConnection.query(sql, params);
       });
 
       const failure = await readFailure();
 
       expect([failure.stage, failure.driverCode]).toEqual(['begin', DRIVER_CODE]);
-      expect(ownedDouble.beginTransaction, 'no transaction is opened at the wrong isolation level').not.toHaveBeenCalled();
+      expect(
+        ownedDouble.query.mock.calls.map(([sql]) => sql),
+        'no transaction is opened at the wrong isolation level'
+      ).toEqual([SNAPSHOT_ISOLATION_STATEMENT]);
       expect(ownedDouble.rollback, 'there is no transaction to roll back').not.toHaveBeenCalled();
+      expect(ownedDouble.destroy, 'nothing was set on the session, so the connection is reusable').not.toHaveBeenCalled();
       expect(ownedDouble.release).toHaveBeenCalledTimes(1);
+    });
+
+    describe('when the transaction cannot be started after the isolation level was set', () => {
+      beforeEach(() => {
+        ownedDouble.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+          if (sql === SNAPSHOT_BEGIN_STATEMENT) throw Object.assign(new Error(SECRET_DRIVER_MESSAGE), { code: DRIVER_CODE });
+          return ownedConnection.query(sql, params);
+        });
+      });
+
+      it('fails at stage begin with the driver code and does not roll back a transaction that never opened', async () => {
+        const failure = await readFailure();
+
+        expect([failure.stage, failure.driverCode]).toEqual(['begin', DRIVER_CODE]);
+        expect(failure.message).not.toContain('SECRET-DRIVER-TEXT');
+        expect(ownedDouble.rollback).not.toHaveBeenCalled();
+      });
+
+      it('destroys the connection, because the one-shot isolation level would otherwise be spent by its next borrower', async () => {
+        await readFailure();
+
+        expect(ownedDouble.destroy).toHaveBeenCalledTimes(1);
+        expect(ownedDouble.release).toHaveBeenCalledTimes(1);
+      });
+
+      it('never leaves the session read-only: a write on the same connection succeeds afterwards', async () => {
+        await readFailure();
+
+        await ownedConnection.query('START TRANSACTION');
+        const writeAttempt = await ownedConnection
+          .query('UPDATE unifiedchangelog SET ChangedBy = ?', ['written-after-failed-begin'])
+          .then(() => undefined)
+          .catch((error: { code?: string }) => error.code);
+        await ownedConnection.query('ROLLBACK');
+
+        expect(writeAttempt, 'a failed begin must not leave READ ONLY pending for the connection’s next transaction').toBeUndefined();
+      });
     });
 
     it.each([

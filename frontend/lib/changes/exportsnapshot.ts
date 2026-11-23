@@ -28,8 +28,10 @@ import {
 export const EXPORT_PAGE_SIZE = 1000;
 export const FOREIGN_KEY_LABEL_CHUNK_SIZE = 500;
 
-/** Applies to the next transaction only; READ ONLY makes the snapshot unable to write. */
-export const SNAPSHOT_TRANSACTION_STATEMENT = 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY';
+/** Applies to the next transaction only. READ ONLY is deliberately not set here: see SNAPSHOT_BEGIN_STATEMENT. */
+export const SNAPSHOT_ISOLATION_STATEMENT = 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ';
+/** READ ONLY is set by the statement that opens the transaction, so a failed begin cannot leave it pending on a pooled connection. */
+export const SNAPSHOT_BEGIN_STATEMENT = 'START TRANSACTION READ ONLY';
 const CHANGE_TIME_SQL_FORMAT = '%Y-%m-%d %H:%i:%s';
 const UPLOAD_FILE_ID_JSON_PATH = '$.UploadFileID';
 const UPLOAD_BATCH_ID_JSON_PATH = '$.UploadBatchID';
@@ -400,13 +402,18 @@ export async function readChangeExportSnapshot(
 ): Promise<ChangeExportSnapshot> {
   const conn = await acquireConnection();
   let transactionActive = false;
+  let isolationLevelPending = false;
   try {
-    await runStage('begin', conn.query(SNAPSHOT_TRANSACTION_STATEMENT));
-    await runStage('begin', conn.beginTransaction());
+    await runStage('begin', conn.query(SNAPSHOT_ISOLATION_STATEMENT));
+    isolationLevelPending = true;
+    await runStage('begin', conn.query(SNAPSHOT_BEGIN_STATEMENT));
+    isolationLevelPending = false;
     transactionActive = true;
     return await collectChangeExport(conn, scope, limits);
   } finally {
     if (transactionActive) await rollbackOrDestroy(conn, scope);
+    // A one-shot isolation level that no transaction consumed would be spent by the next borrower of this connection.
+    if (isolationLevelPending) attemptConnectionCleanup('destroy', scope, () => conn.destroy());
     attemptConnectionCleanup('release', scope, () => conn.release());
   }
 }
