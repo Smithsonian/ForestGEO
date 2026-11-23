@@ -40,24 +40,11 @@ export function isFilterableDate(value: string): boolean {
   return year >= EARLIEST_FILTER_DATE_YEAR && year <= LATEST_FILTER_DATE_YEAR;
 }
 
-const MAX_UTF16_UNITS_PER_CHARACTER = 2;
-
 /**
- * MySQL measures VARCHAR(n) in characters, so a bound on a stored value counts code points, not UTF-16 units.
- * A code point is at most two units, so a longer string is rejected without being read, and the count stops
- * at the first character past the bound: the work is bounded by the limit, not by the request.
+ * The column holds CHANGED_BY_MAX_LENGTH characters, and a character is at most two UTF-16 units,
+ * so no stored name is rejected. A longer value could only match nothing.
  */
-function characterCountAtMost(maxCharacters: number): (value: string) => boolean {
-  return value => {
-    if (value.length > maxCharacters * MAX_UTF16_UNITS_PER_CHARACTER) return false;
-    let characters = 0;
-    for (const _character of value) {
-      characters += 1;
-      if (characters > maxCharacters) return false;
-    }
-    return true;
-  };
-}
+export const CHANGED_BY_FILTER_MAX_LENGTH = CHANGED_BY_MAX_LENGTH * 2;
 
 const dateBound = z
   .string()
@@ -68,11 +55,7 @@ const dateBound = z
 export const recentChangesFiltersSchema = z
   .object({
     operation: z.enum(CHANGE_OPERATIONS).optional().default(DEFAULT_RECENT_CHANGES_FILTERS.operation),
-    changedBy: z
-      .string()
-      .refine(characterCountAtMost(CHANGED_BY_MAX_LENGTH), `Expected at most ${CHANGED_BY_MAX_LENGTH} characters`)
-      .optional()
-      .default(DEFAULT_RECENT_CHANGES_FILTERS.changedBy),
+    changedBy: z.string().max(CHANGED_BY_FILTER_MAX_LENGTH).optional().default(DEFAULT_RECENT_CHANGES_FILTERS.changedBy),
     tableName: z.string().max(CHANGE_TABLE_NAME_MAX_LENGTH).optional().default(DEFAULT_RECENT_CHANGES_FILTERS.tableName),
     quickSearch: z.string().max(CHANGE_QUICK_SEARCH_MAX_LENGTH).optional().default(DEFAULT_RECENT_CHANGES_FILTERS.quickSearch),
     changedFrom: dateBound,

@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { parseExplorerRequest } from '@/lib/errorsexplorer/explorerrequest';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
 import { CHANGE_EXPORT_ERROR_CODES, DEFAULT_RECENT_CHANGES_FILTERS, type RecentChangesServerFilters } from '@/config/recentchangesexplorer';
 import {
+  CHANGED_BY_FILTER_MAX_LENGTH,
   CHANGE_QUICK_SEARCH_MAX_LENGTH,
   CHANGE_TABLE_NAME_MAX_LENGTH,
   INVALID_CHANGE_EXPORT_REQUEST_RESPONSE,
@@ -133,54 +134,24 @@ describe('recent changes request contract: rejections', () => {
   });
 
   it('rejects strings past their bounds and accepts strings exactly at them', () => {
-    expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedBy: 'u'.repeat(CHANGED_BY_MAX_LENGTH + 1) } }, 'filters.changedBy');
+    expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedBy: 'u'.repeat(CHANGED_BY_FILTER_MAX_LENGTH + 1) } }, 'filters.changedBy');
     expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { tableName: 't'.repeat(CHANGE_TABLE_NAME_MAX_LENGTH + 1) } }, 'filters.tableName');
     expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { quickSearch: 'q'.repeat(CHANGE_QUICK_SEARCH_MAX_LENGTH + 1) } }, 'filters.quickSearch');
 
     const atBounds = parsedFilters({
-      changedBy: 'u'.repeat(CHANGED_BY_MAX_LENGTH),
+      changedBy: 'u'.repeat(CHANGED_BY_FILTER_MAX_LENGTH),
       tableName: 't'.repeat(CHANGE_TABLE_NAME_MAX_LENGTH),
       quickSearch: 'q'.repeat(CHANGE_QUICK_SEARCH_MAX_LENGTH)
     });
     expect(atBounds?.quickSearch).toHaveLength(CHANGE_QUICK_SEARCH_MAX_LENGTH);
   });
 
-  describe('the Changed By bound counts characters, as the varchar(64) column does', () => {
+  it('accepts a Changed By of as many astral characters as the column holds, whose UTF-16 length is twice the column width', () => {
     const ASTRAL_CHARACTER = '\u{1F333}';
-    const namePadded = (characterCount: number) => ASTRAL_CHARACTER + 'u'.repeat(characterCount - 1);
+    const widestStoredName = ASTRAL_CHARACTER.repeat(CHANGED_BY_MAX_LENGTH);
+    expect(widestStoredName.length, 'fixture: the UTF-16 length is exactly the filter bound').toBe(CHANGED_BY_FILTER_MAX_LENGTH);
 
-    it('accepts a name of exactly the column width even though its UTF-16 length is one over', () => {
-      const atColumnWidth = namePadded(CHANGED_BY_MAX_LENGTH);
-      expect(atColumnWidth.length, 'fixture: one astral character makes the UTF-16 length exceed the column width').toBe(CHANGED_BY_MAX_LENGTH + 1);
-      expect(Array.from(atColumnWidth), 'fixture: and the character count equals it').toHaveLength(CHANGED_BY_MAX_LENGTH);
-
-      expect(parsedFilters({ changedBy: atColumnWidth })?.changedBy).toBe(atColumnWidth);
-    });
-
-    it('rejects a name one character past the column width', () => {
-      expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedBy: namePadded(CHANGED_BY_MAX_LENGTH + 1) } }, 'filters.changedBy');
-    });
-
-    it('rejects a very long name without allocating a copy of it per character', () => {
-      const VERY_LONG_NAME_LENGTH = 5_000_000;
-      const veryLongName = 'u'.repeat(VERY_LONG_NAME_LENGTH);
-      const arrayFromSpy = vi.spyOn(Array, 'from');
-      try {
-        expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedBy: veryLongName } }, 'filters.changedBy');
-
-        const stringsMaterialized = arrayFromSpy.mock.calls.filter(([source]) => typeof source === 'string');
-        expect(stringsMaterialized, 'Array.from(value) allocates in proportion to the input; the check must stop at the limit').toHaveLength(0);
-      } finally {
-        arrayFromSpy.mockRestore();
-      }
-    });
-
-    it('still accepts a name of 64 astral characters, whose UTF-16 length is twice the column width', () => {
-      const allAstral = ASTRAL_CHARACTER.repeat(CHANGED_BY_MAX_LENGTH);
-      expect(allAstral.length, 'fixture: the UTF-16 length is exactly twice the column width').toBe(CHANGED_BY_MAX_LENGTH * 2);
-
-      expect(parsedFilters({ changedBy: allAstral })?.changedBy).toBe(allAstral);
-    });
+    expect(parsedFilters({ changedBy: widestStoredName })?.changedBy).toBe(widestStoredName);
   });
 
   it('reports issue paths and codes only, never the rejected value', () => {
