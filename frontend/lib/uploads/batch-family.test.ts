@@ -16,7 +16,9 @@ import {
   OriginalBatchIDTooLongError,
   selectNewestFamilyPerFile,
   STAGED_BATCH_ID_MAX_LENGTH,
+  SUB_BATCH_ORDINAL_WIDTH,
   SUB_BATCH_SEPARATOR,
+  SUB_BATCH_SUFFIX_SQL_PATTERN,
   SubBatchOrdinalOverflowError,
   subBatchIDForRowOrdinal
 } from './batch-family';
@@ -217,5 +219,26 @@ describe('selectNewestFamilyPerFile', () => {
       { FileID: 'a.csv', BatchID: 'higher', maxRowID: '9007199254740994' }
     ];
     expect(selectNewestFamilyPerFile(rows)[0].batchID).toBe('higher');
+  });
+});
+
+describe('SUB_BATCH_SUFFIX_SQL_PATTERN', () => {
+  const ICU_ABSOLUTE_END = '\\z';
+
+  it('anchors at the absolute end of the value, never with $', () => {
+    expect(SUB_BATCH_SUFFIX_SQL_PATTERN.endsWith(ICU_ABSOLUTE_END), SUB_BATCH_SUFFIX_SQL_PATTERN).toBe(true);
+    expect(SUB_BATCH_SUFFIX_SQL_PATTERN, 'ICU’s $ also matches before a final line break').not.toContain('$');
+    expect(SUB_BATCH_SUFFIX_SQL_PATTERN.startsWith(SUB_BATCH_SEPARATOR), 'built from the separator constant').toBe(true);
+  });
+
+  it('uses the ASCII digit class and the fixed ordinal width', () => {
+    expect(SUB_BATCH_SUFFIX_SQL_PATTERN).toContain(`[0-9]{${SUB_BATCH_ORDINAL_WIDTH}}`);
+    expect(SUB_BATCH_SUFFIX_SQL_PATTERN).not.toContain('\\d');
+  });
+
+  it.each(['run', 'run__sub001', 'run__subset', 'a__sub001__sub002', 'x__sub0012', 'x__sub007'])('strips %s exactly as familyRootOf does', batchID => {
+    const suffixWithoutAnchor = SUB_BATCH_SUFFIX_SQL_PATTERN.slice(0, -ICU_ABSOLUTE_END.length);
+    const javaScriptEquivalent = new RegExp(`${suffixWithoutAnchor}$`);
+    expect(batchID.replace(javaScriptEquivalent, '')).toBe(familyRootOf(batchID));
   });
 });
