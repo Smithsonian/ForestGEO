@@ -6,6 +6,7 @@ import {
   CHANGE_QUICK_SEARCH_MAX_LENGTH,
   CHANGE_TABLE_NAME_MAX_LENGTH,
   INVALID_CHANGE_EXPORT_REQUEST_RESPONSE,
+  EARLIEST_FILTER_DATE_YEAR,
   LATEST_FILTER_DATE_YEAR,
   changeExportRequestSchema,
   isCalendarDate,
@@ -167,6 +168,17 @@ describe('recent changes request contract: date bounds', () => {
     expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedFrom: firstRejectedDay } }, 'filters.changedFrom');
   });
 
+  it('accepts the first year of MySQL DATETIME range, and rejects the days before it', () => {
+    const firstDay = `${EARLIEST_FILTER_DATE_YEAR}-01-01`;
+    expect(parsedFilters({ changedFrom: firstDay })).toMatchObject({ changedFrom: firstDay });
+    expect(parsedFilters({ changedTo: firstDay })).toMatchObject({ changedTo: firstDay });
+    const lastRejectedDay = `${String(EARLIEST_FILTER_DATE_YEAR - 1).padStart(4, '0')}-12-31`;
+    for (const rejectedDay of [lastRejectedDay, '0000-06-15']) {
+      expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedTo: rejectedDay } }, 'filters.changedTo');
+      expectRejected({ schema: SCHEMA, plotID: PLOT_ID, filters: { changedFrom: rejectedDay } }, 'filters.changedFrom');
+    }
+  });
+
   it('isCalendarDate agrees with the calendar', () => {
     expect(isCalendarDate('2026-11-30')).toBe(true);
     expect(isCalendarDate('2026-11-31')).toBe(false);
@@ -203,6 +215,11 @@ describe('change export request contract', () => {
     {
       label: 'a date past the latest year MySQL can add a day to',
       body: { schema: SCHEMA, plotID: PLOT_ID, filters: { changedTo: `${LATEST_FILTER_DATE_YEAR + 1}-01-01` } },
+      issuePath: 'filters.changedTo'
+    },
+    {
+      label: 'a date before the first year of MySQL DATETIME range',
+      body: { schema: SCHEMA, plotID: PLOT_ID, filters: { changedTo: '0000-06-15' } },
       issuePath: 'filters.changedTo'
     },
     {

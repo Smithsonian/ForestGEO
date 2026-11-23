@@ -18,6 +18,8 @@ const CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const NO_DATE_BOUND = '';
 /** MySQL's DATE_ADD(day, INTERVAL 1 DAY) is NULL past 9999-12-31, which would make a To of that day match nothing. */
 export const LATEST_FILTER_DATE_YEAR = 9998;
+/** unifiedchangelog.ChangeTimestamp is a DATETIME, whose documented range starts in year 1000; year 0000 makes DATE_ADD raise ERROR 1525. */
+export const EARLIEST_FILTER_DATE_YEAR = 1000;
 const YEAR_PREFIX_LENGTH = 4;
 
 /** True for a day that exists: `2026-02-30` has the right shape and is not a date. */
@@ -28,7 +30,9 @@ export function isCalendarDate(value: string): boolean {
 }
 
 function isFilterableDate(value: string): boolean {
-  return isCalendarDate(value) && Number(value.slice(0, YEAR_PREFIX_LENGTH)) <= LATEST_FILTER_DATE_YEAR;
+  if (!isCalendarDate(value)) return false;
+  const year = Number(value.slice(0, YEAR_PREFIX_LENGTH));
+  return year >= EARLIEST_FILTER_DATE_YEAR && year <= LATEST_FILTER_DATE_YEAR;
 }
 
 const dateBound = z

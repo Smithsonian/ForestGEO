@@ -145,6 +145,7 @@ describe('POST /api/changes/explorer/query: request contract and filters', () =>
     { label: 'an array where a filter string belongs', filters: { quickSearch: ['a', 'b'] } },
     { label: 'an unknown operation', filters: { operation: 'TRUNCATE' } },
     { label: 'an impossible date', filters: { changedFrom: '2026-02-30' } },
+    { label: 'a date in year 0000, which MySQL cannot add a day to', filters: { changedTo: '0000-06-15' } },
     { label: 'From after To', filters: { changedFrom: WINDOW_TO, changedTo: WINDOW_FROM } }
   ])('rejects $label with a coded 400 and runs no SQL', async ({ filters }) => {
     const response = await postQuery({ schema, plotID, filters });
