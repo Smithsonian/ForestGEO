@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Box, Button, Card, Chip, FormControl, FormLabel, Input, Option, Select, Sheet, Skeleton, Stack, Typography } from '@mui/joy';
+import { Alert, Box, Button, Card, Chip, FormControl, FormHelperText, FormLabel, Input, Option, Select, Sheet, Skeleton, Stack, Typography } from '@mui/joy';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -14,6 +14,8 @@ import {
   RecentChangesQueryResponse,
   RecentChangesSummary,
   RECENT_CHANGES_PRESETS,
+  CHANGE_DATE_ZONE_LABEL,
+  isDateRangeInverted,
   ChangelogEntry,
   BatchInsertGroup,
   getKeyFields
@@ -396,6 +398,10 @@ function FeedItemCard({ item }: { item: FeedItem }) {
   }
 }
 
+const DATE_RANGE_INVERTED_MESSAGE = 'From must be on or before To.';
+const CHANGED_FROM_LABEL = `From (${CHANGE_DATE_ZONE_LABEL})`;
+const CHANGED_TO_LABEL = `To (${CHANGE_DATE_ZONE_LABEL})`;
+
 export default function RecentChangesExplorer() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -460,10 +466,13 @@ export default function RecentChangesExplorer() {
     }
   }, [currentSite?.schemaName, currentPlot?.plotID]);
 
+  const dateRangeInverted = isDateRangeInverted(filters.changedFrom, filters.changedTo);
+
   const fetchItems = useCallback(
     async (pageNum: number, append: boolean) => {
       if (!currentSite?.schemaName || !currentPlot?.plotID) return;
       itemsAbortRef.current?.abort();
+      if (dateRangeInverted) return;
       const controller = new AbortController();
       itemsAbortRef.current = controller;
       const requestID = ++itemsRequestRef.current;
@@ -512,7 +521,7 @@ export default function RecentChangesExplorer() {
         }
       }
     },
-    [currentSite?.schemaName, currentPlot?.plotID, filters]
+    [currentSite?.schemaName, currentPlot?.plotID, filters, dateRangeInverted]
   );
 
   useEffect(() => {
@@ -647,6 +656,32 @@ export default function RecentChangesExplorer() {
                 onChange={event => updateFilters(prev => ({ ...prev, quickSearch: event.target.value, presetId: undefined }))}
                 placeholder="Search records, tags, users..."
               />
+            </FormControl>
+          </Stack>
+
+          {/* Date range */}
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ alignItems: { md: 'flex-start' } }}>
+            <FormControl sx={{ minWidth: 190 }} error={dateRangeInverted}>
+              <FormLabel htmlFor="changes-explorer-changed-from">{CHANGED_FROM_LABEL}</FormLabel>
+              <Input
+                id="changes-explorer-changed-from"
+                type="date"
+                aria-label={CHANGED_FROM_LABEL}
+                value={filters.changedFrom}
+                onChange={event => updateFilters(prev => ({ ...prev, changedFrom: event.target.value }))}
+              />
+            </FormControl>
+
+            <FormControl sx={{ minWidth: 190 }} error={dateRangeInverted}>
+              <FormLabel htmlFor="changes-explorer-changed-to">{CHANGED_TO_LABEL}</FormLabel>
+              <Input
+                id="changes-explorer-changed-to"
+                type="date"
+                aria-label={CHANGED_TO_LABEL}
+                value={filters.changedTo}
+                onChange={event => updateFilters(prev => ({ ...prev, changedTo: event.target.value }))}
+              />
+              {dateRangeInverted && <FormHelperText>{DATE_RANGE_INVERTED_MESSAGE}</FormHelperText>}
             </FormControl>
           </Stack>
         </Stack>

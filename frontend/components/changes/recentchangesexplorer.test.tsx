@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RecentChangesExplorer, { summarizeChange } from './recentchangesexplorer';
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
-import type { ChangelogEntry } from '@/config/recentchangesexplorer';
+import { CHANGE_DATE_ZONE_LABEL, type ChangelogEntry } from '@/config/recentchangesexplorer';
 import { decodeChangelogRow } from '@/config/changelogdecode';
 
 const FIRST_PLOT_ID = 1;
@@ -604,6 +604,93 @@ describe('RecentChangesExplorer: records inside cards (#592 §8.5)', () => {
     expect(screen.getByText('#42 + SpeciesCode: cccccc')).toBeInTheDocument();
     expect(screen.getByText("#43 — row added, but the older change log didn't save its values")).toBeInTheDocument();
     expect(screen.queryByText('+ New row')).not.toBeInTheDocument();
+  });
+});
+
+const FROM_LABEL = `From (${CHANGE_DATE_ZONE_LABEL})`;
+const TO_LABEL = `To (${CHANGE_DATE_ZONE_LABEL})`;
+
+describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
+  beforeEach(() => {
+    selection.plotID = FIRST_PLOT_ID;
+  });
+
+  it('labels the date inputs with the zone the server compares in', async () => {
+    serveFeed([]);
+    render(<RecentChangesExplorer />);
+
+    expect(await screen.findByLabelText('From (UTC)')).toBeInTheDocument();
+    expect(screen.getByLabelText('To (UTC)')).toBeInTheDocument();
+  });
+
+  it('sends both dates with the list query', async () => {
+    const listRequests = serveFeed([]);
+    render(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests).toHaveLength(1));
+
+    fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-01' } });
+    fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
+
+    await waitFor(() => expect(listRequests[listRequests.length - 1].filters).toMatchObject({ changedFrom: '2026-11-01', changedTo: '2026-11-05' }));
+    expect(listRequests[listRequests.length - 1].page, 'a date change returns to the first page').toBe(0);
+  });
+
+  it('does not query while From is after To, and says why', async () => {
+    const listRequests = serveFeed([]);
+    render(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests).toHaveLength(1));
+
+    fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
+    await waitFor(() => expect(listRequests).toHaveLength(2));
+
+    fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-06' } });
+    expect(await screen.findByText('From must be on or before To.')).toBeInTheDocument();
+    expect(listRequests, 'no request for an inverted range').toHaveLength(2);
+
+    fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-04' } });
+    await waitFor(() => expect(listRequests).toHaveLength(3));
+    expect(screen.queryByText('From must be on or before To.')).not.toBeInTheDocument();
+    expect(listRequests[2].filters).toMatchObject({ changedFrom: '2026-11-04', changedTo: '2026-11-05' });
+  });
+
+  it('keeps both dates and resets the other filters when a preset is clicked', async () => {
+    const listRequests = serveFeed([]);
+    render(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests).toHaveLength(1));
+
+    fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-01' } });
+    fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
+    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: 'TREE-7' } });
+    await waitFor(() => expect(listRequests[listRequests.length - 1].filters.quickSearch).toBe('TREE-7'));
+
+    // "Deletions" also labels a summary card, so the chip is found inside the filter panel. Enter activates a preset chip.
+    const filterPanel = screen.getByLabelText('Quick Search').closest('.MuiSheet-root') as HTMLElement;
+    const deletionsChip = within(filterPanel).getByText('Deletions').closest('[role="button"]') as HTMLElement;
+    fireEvent.keyDown(deletionsChip, { key: 'Enter' });
+
+    await waitFor(() => expect(listRequests[listRequests.length - 1].filters.operation).toBe('DELETE'));
+    expect(listRequests[listRequests.length - 1].filters).toEqual({
+      operation: 'DELETE',
+      changedBy: '',
+      tableName: '',
+      quickSearch: '',
+      changedFrom: '2026-11-01',
+      changedTo: '2026-11-05',
+      presetId: 'deletions'
+    });
+  });
+
+  it('leaves the highlighted preset alone when only a date changes', async () => {
+    const listRequests = serveFeed([]);
+    render(<RecentChangesExplorer />);
+    await waitFor(() => expect(listRequests).toHaveLength(1));
+    const allChangesChip = screen.getByText('All Changes').closest('.MuiChip-root') as HTMLElement;
+    expect(allChangesChip.className).toContain('MuiChip-variantSolid');
+
+    fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-01' } });
+    await waitFor(() => expect(listRequests).toHaveLength(2));
+
+    expect(allChangesChip.className, 'a preset says nothing about dates').toContain('MuiChip-variantSolid');
   });
 });
 

@@ -20,6 +20,9 @@ export type RecentChangesServerFilters = Omit<RecentChangesFilters, 'presetId'>;
 /** A preset says nothing about dates, so a preset click keeps the date range (#592 D9). */
 export type RecentChangesPresetFilters = Pick<RecentChangesFilters, 'operation' | 'changedBy' | 'tableName' | 'quickSearch'>;
 
+/** The server compares dates against ChangeTimestamp in the database zone, which production runs as UTC (checked 2026-11-23; #592 O1). */
+export const CHANGE_DATE_ZONE_LABEL = 'UTC';
+
 export function isDateRangeInverted(changedFrom: string, changedTo: string): boolean {
   return changedFrom !== '' && changedTo !== '' && changedFrom > changedTo;
 }
