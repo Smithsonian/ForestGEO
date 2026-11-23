@@ -677,6 +677,44 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     expect(fromInput).not.toHaveAttribute('aria-describedby');
   });
 
+  it('drops the in-flight response and clears loading when the range becomes inverted', async () => {
+    const inFlightResponses: Deferred<ReturnType<typeof jsonResponse>>[] = [];
+    global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
+      if (url === '/api/changes/explorer/query') {
+        const response = deferred<ReturnType<typeof jsonResponse>>();
+        inFlightResponses.push(response);
+        init?.signal?.addEventListener('abort', () => response.reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+        return response.promise;
+      }
+      return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+    }) as unknown as typeof fetch;
+    const lateResponse = {
+      items: [{ type: 'single' as const, entry: makeEntry(9, 'late_table') }],
+      totalItems: 1,
+      summary: { total: 1, updates: 1, inserts: 0, deletes: 0 },
+      hasMore: false
+    };
+    const { container } = render(<RecentChangesExplorer />);
+    await waitFor(() => expect(inFlightResponses).toHaveLength(1));
+
+    fireEvent.change(screen.getByLabelText(FROM_LABEL), { target: { value: '2026-11-06' } });
+    await waitFor(() => expect(inFlightResponses).toHaveLength(2));
+    expect(container.querySelectorAll('.MuiSkeleton-root').length, 'the valid range is loading').toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
+    await screen.findByText('From must be on or before To.');
+    await act(async () => {
+      inFlightResponses[1].resolve(jsonResponse(lateResponse));
+      await Promise.resolve();
+    });
+
+    expect(inFlightResponses, 'no request for the inverted range').toHaveLength(2);
+    expect(screen.queryByText('late_table'), 'the response sent before the range was inverted must not render').not.toBeInTheDocument();
+    expect(container.querySelectorAll('.MuiSkeleton-root'), 'loading clears once the request is aborted').toHaveLength(0);
+  });
+
   it('keeps both dates and resets the other filters when a preset is clicked', async () => {
     const listRequests = serveFeed([]);
     render(<RecentChangesExplorer />);
