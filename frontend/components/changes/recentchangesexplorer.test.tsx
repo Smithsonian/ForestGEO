@@ -912,6 +912,8 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
   const OBJECT_URL = 'blob:recent-changes-test';
   const EXPORT_URL = '/api/changes/explorer/export';
   const SERVER_FILENAME = 'changelog-forestgeo_testing-plot1-2026-11-22.csv';
+  const EXPORT_BUTTON_NAME = 'Export CSV';
+  const EXPORTING_INDICATOR_LABEL = 'Exporting change log';
   const SERVER_TEXT_THAT_MUST_NOT_BE_SHOWN = 'server text that must not be shown';
   const originalCreateObjectURL = URL.createObjectURL;
   const originalRevokeObjectURL = URL.revokeObjectURL;
@@ -1091,6 +1093,30 @@ describe('RecentChangesExplorer: Export CSV (#592 §8.1)', () => {
 
     expect(downloadedFilenames, 'an unmounted explorer must not download').toEqual([]);
     expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('announces the export while it runs: aria-busy true and a labelled progress indicator, both gone afterwards', async () => {
+    const pendingExport = deferred<Response>();
+    const { exportBodies, listRequests } = serveExport(() => pendingExport.promise);
+    const user = userEvent.setup();
+    await renderAndWaitForFeed(listRequests);
+    const exportButton = screen.getByRole('button', { name: EXPORT_BUTTON_NAME });
+    expect(exportButton, 'idle before the export starts').toHaveAttribute('aria-busy', 'false');
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+
+    await user.click(exportButton);
+    await waitFor(() => expect(exportBodies).toHaveLength(1));
+
+    expect(exportButton).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('progressbar', { name: EXPORTING_INDICATOR_LABEL })).toBeInTheDocument();
+
+    await act(async () => {
+      pendingExport.resolve(csvResponse());
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(exportButton).toHaveAttribute('aria-busy', 'false'));
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 
   it('does not export while From is after To', async () => {

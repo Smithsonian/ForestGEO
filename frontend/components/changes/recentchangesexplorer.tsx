@@ -1,7 +1,24 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Box, Button, Card, Chip, FormControl, FormHelperText, FormLabel, Input, Option, Select, Sheet, Skeleton, Stack, Typography } from '@mui/joy';
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  Chip,
+  CircularProgress,
+  FormControl,
+  FormHelperText,
+  FormLabel,
+  Input,
+  Option,
+  Select,
+  Sheet,
+  Skeleton,
+  Stack,
+  Typography
+} from '@mui/joy';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -419,6 +436,7 @@ const DATE_RANGE_HELPER_TEXT_ID = `${CHANGED_TO_CONTROL_ID}-helper-text`;
 const CHANGED_FROM_LABEL = `From (${CHANGE_DATE_ZONE_LABEL})`;
 const CHANGED_TO_LABEL = `To (${CHANGE_DATE_ZONE_LABEL})`;
 const EXPORT_BUTTON_LABEL = 'Export CSV';
+const EXPORTING_INDICATOR_LABEL = 'Exporting change log';
 
 function scopeKey(schemaName: string, plotID: number): string {
   return `${schemaName}:${plotID}`;
@@ -803,6 +821,8 @@ export default function RecentChangesExplorer() {
               startDecorator={<FileDownloadOutlinedIcon />}
               onClick={handleExport}
               loading={exporting}
+              loadingIndicator={<CircularProgress color="neutral" thickness={3} aria-label={EXPORTING_INDICATOR_LABEL} />}
+              aria-busy={exporting}
               disabled={dateFiltersUnsendable}
               sx={{ alignSelf: { xs: 'flex-start', md: 'flex-end' } }}
             >
