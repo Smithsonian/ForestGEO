@@ -560,3 +560,88 @@ describe('compareExportDrafts (spec §5)', () => {
     expect(drafts.sort(compareExportDrafts).map(draft => draft.changedColumn)).toEqual(['Zeta', 'TreeTag', 'SpeciesID', 'Area']);
   });
 });
+
+describe('formula escaping in every user-controlled column (spec §5)', () => {
+  const FORMULA_SIGILS = [
+    { name: 'equals', character: '=' },
+    { name: 'plus', character: '+' },
+    { name: 'minus', character: '-' },
+    { name: 'at sign', character: '@' },
+    { name: 'tab', character: '\t' },
+    { name: 'carriage return', character: '\r' }
+  ] as const;
+  const PAYLOAD = 'payload';
+  const ESCAPE_PREFIX = "'";
+
+  const columnCases: ReadonlyArray<{ column: (typeof EXPORT_COLUMNS)[number]; origin: string; draftsFor: (value: string) => ChangeExportDraft[] }> = [
+    {
+      column: 'ChangedBy',
+      origin: 'a field update',
+      draftsFor: value => expandChange(change({ changedBy: value, oldRowState: { Note: 'a' }, newRowState: { Note: 'b' } }))
+    },
+    {
+      column: 'ChangedTable',
+      origin: 'an INSERT into a table with that name',
+      draftsFor: value => expandChange(change({ tableName: value, operation: 'INSERT', newRowState: { Note: 'a' } }))
+    },
+    {
+      column: 'PrimaryKey',
+      origin: 'a RecordID',
+      draftsFor: value => expandChange(change({ recordID: value, operation: 'INSERT', newRowState: { Note: 'a' } }))
+    },
+    {
+      column: 'ChangedColumn',
+      origin: 'a stored JSON field name',
+      draftsFor: value => expandChange(change({ operation: 'INSERT', newRowState: { [value]: 1 } }))
+    },
+    {
+      column: 'Old',
+      origin: 'the before-image of an UPDATE',
+      draftsFor: value => expandChange(change({ oldRowState: { Note: value }, newRowState: { Note: 'b' } }))
+    },
+    {
+      column: 'New',
+      origin: 'the after-image of an UPDATE',
+      draftsFor: value => expandChange(change({ oldRowState: { Note: 'a' }, newRowState: { Note: value } }))
+    },
+    { column: 'ChangedBy', origin: 'an upload rollup row', draftsFor: value => [buildUploadRollupDraft(rollupGroup({ changedBy: value }))] },
+    { column: 'PrimaryKey', origin: 'an upload rollup row keyed by its file id', draftsFor: value => [buildUploadRollupDraft(rollupGroup({ fileID: value }))] }
+  ];
+
+  const cases = columnCases.flatMap(columnCase => FORMULA_SIGILS.map(sigil => ({ ...columnCase, sigil })));
+
+  it.each(cases)('$sigil.name at the start of $column ($origin) is escaped', ({ column, origin, draftsFor, sigil }) => {
+    const raw = `${sigil.character}${PAYLOAD}`;
+    const csv = serializeChangeExportCsv(cellsOf(draftsFor(raw)));
+    const rows = parseCsv(csv);
+    expect(rows.length, `expected a header and at least one row for ${origin}; raw CSV:\n${JSON.stringify(csv)}`).toBeGreaterThan(1);
+
+    for (const [rowIndex, cells] of rows.slice(1).entries()) {
+      const unescaped = cells
+        .map((cell, columnIndex) => ({ cell, name: EXPORT_COLUMNS[columnIndex] }))
+        .filter(({ cell }) => FORMULA_SIGILS.some(({ character }) => cell.startsWith(character)));
+      expect(
+        unescaped,
+        `sigil ${sigil.name} (${JSON.stringify(sigil.character)}) placed at the start of ${column} left a cell unescaped in row ${rowIndex + 1} of ${origin}; raw CSV:\n${JSON.stringify(csv)}`
+      ).toEqual([]);
+    }
+
+    const writtenCells = rows.slice(1).map(cells => cells[COLUMN_INDEX[column]]);
+    expect(
+      writtenCells,
+      `sigil ${sigil.name} (${JSON.stringify(sigil.character)}) in ${column} of ${origin} must be prefixed with ${ESCAPE_PREFIX}; raw CSV:\n${JSON.stringify(csv)}`
+    ).toContain(`${ESCAPE_PREFIX}${raw}`);
+  });
+
+  it('writes a genuine negative number as -5 and the string "-5" as \'-5', () => {
+    const csv = serializeChangeExportCsv(
+      cellsOf(expandChange(change({ tableName: 'coremeasurements', recordID: '77', operation: 'INSERT', newRowState: { RawX: -5, RawY: '-5' } })))
+    );
+    const newCells = Object.fromEntries(
+      parseCsv(csv)
+        .slice(1)
+        .map(cells => [cells[COLUMN_INDEX.ChangedColumn], cells[COLUMN_INDEX.New]])
+    );
+    expect(newCells, `raw CSV:\n${JSON.stringify(csv)}`).toEqual({ RawX: '-5', RawY: "'-5" });
+  });
+});
