@@ -191,7 +191,7 @@ describe('queryRecentChanges: rows whose stored state cannot be decoded (#592 O1
     vi.clearAllMocks();
   });
 
-  it('logs one warning per query naming the undecodable ChangeIDs and none of their values', async () => {
+  it('logs one warning per query naming the site and the undecodable ChangeIDs and none of their values', async () => {
     const connection = buildConnection([
       makeRawRow({ ChangeID: 11 }),
       makeRawRow({ ChangeID: 12, Operation: 'UPDATE', OldRowState: JSON.stringify(CORRUPT_STATE_TEXT), NewRowState: { TreeID: 1 } }),
@@ -202,11 +202,28 @@ describe('queryRecentChanges: rows whose stored state cannot be decoded (#592 O1
 
     const warnCalls = vi.mocked(ailogger.warn).mock.calls;
     expect(warnCalls, `warn calls: ${JSON.stringify(warnCalls)}`).toHaveLength(1);
-    const [message] = warnCalls[0];
-    expect(message).toContain('12');
-    expect(message).toContain('13');
-    expect(message, 'the decodable row must not be named').not.toMatch(/\b11\b/);
+    expect(warnCalls[0][1], 'ChangeIDs are per schema, so the site must be named; the decodable row must not be').toEqual({
+      schema: 'forestgeo_testing',
+      undecodableCount: 2,
+      changeIDs: [12, 13]
+    });
     expect(JSON.stringify(warnCalls)).not.toContain(CORRUPT_STATE_TEXT);
+  });
+
+  it('lists only the first ChangeIDs but reports the full count when many rows are undecodable', async () => {
+    const UNDECODABLE_ROW_COUNT = 25;
+    const rows = Array.from({ length: UNDECODABLE_ROW_COUNT }, (_, index) =>
+      makeRawRow({ ChangeID: 100 + index, Operation: 'UPDATE', OldRowState: { TreeID: 1 }, NewRowState: 5 })
+    );
+    const connection = buildConnection(rows);
+
+    await queryRecentChanges(connection as any, 'forestgeo_testing', PLOT_ID, 0, 25, DEFAULT_RECENT_CHANGES_FILTERS);
+
+    const warnCalls = vi.mocked(ailogger.warn).mock.calls;
+    expect(warnCalls, `warn calls: ${JSON.stringify(warnCalls)}`).toHaveLength(1);
+    const context = warnCalls[0][1] as { undecodableCount: number; changeIDs: number[] };
+    expect(context.undecodableCount).toBe(UNDECODABLE_ROW_COUNT);
+    expect(context.changeIDs, 'the first twenty, in read order').toEqual(Array.from({ length: 20 }, (_, index) => 100 + index));
   });
 
   it('logs nothing when every row decodes', async () => {

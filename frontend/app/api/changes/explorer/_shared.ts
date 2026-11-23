@@ -18,6 +18,7 @@ type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
 
 const CHANGELOG_ORDER_BY = 'ORDER BY uc.ChangeTimestamp DESC, uc.ChangeID DESC';
 const MIN_RAW_FETCH_CHUNK_SIZE = 100;
+const MAX_LOGGED_UNDECODABLE_CHANGE_IDS = 20;
 
 interface RawChangelogRow {
   ChangeID: number;
@@ -52,11 +53,13 @@ function toChangelogEntry(row: RawChangelogRow): { entry: ChangelogEntry; undeco
   return { entry, undecodable };
 }
 
-function warnAboutUndecodableRows(undecodableChangeIDs: number[]): void {
+function warnAboutUndecodableRows(schema: string, undecodableChangeIDs: number[]): void {
   if (undecodableChangeIDs.length === 0) return;
-  ailogger.warn(
-    `Recent changes: ${undecodableChangeIDs.length} change-log row(s) hold a row state that could not be decoded; ChangeIDs ${undecodableChangeIDs.join(', ')}`
-  );
+  ailogger.warn(`Recent changes: ${undecodableChangeIDs.length} change-log row(s) hold a row state that could not be decoded`, {
+    schema,
+    undecodableCount: undecodableChangeIDs.length,
+    changeIDs: undecodableChangeIDs.slice(0, MAX_LOGGED_UNDECODABLE_CHANGE_IDS)
+  });
 }
 
 function buildChangelogQuery(schema: string): string {
@@ -122,7 +125,7 @@ async function queryRecentChangesPage(
     offset += rawRows.length;
   }
 
-  warnAboutUndecodableRows(undecodableChangeIDs);
+  warnAboutUndecodableRows(schema, undecodableChangeIDs);
 
   return {
     items: groupedItems.slice(startItemIndex, endItemIndexExclusive),
