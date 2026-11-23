@@ -599,6 +599,26 @@ describe('readChangeExportSnapshot', () => {
         [secondAttempt, UPLOAD_FILE, `Upload ${UPLOAD_FILE}: added 1 measurement rows (batch attempttwo)`]
       ]);
     });
+
+    it('keeps upload summaries of people whose names differ only by accent or case apart', async () => {
+      const ACCENT_CASE_NAMES = ['José', 'Jose', 'JOSE'];
+      const SUMMARY_BATCH = 'accentbatch__sub001';
+      for (const [index] of ACCENT_CASE_NAMES.entries()) await seed.insertMeasurement(UPLOAD_FILE, SUMMARY_BATCH, `EXPORT-ACCENT-${index}`, 61 + index);
+      const changeIDs = await seed.auditCommittedUpload(UPLOAD_FILE, SUMMARY_BATCH, plotID, TIME_SHARED);
+      expect(changeIDs, 'one audit row per measurement').toHaveLength(ACCENT_CASE_NAMES.length);
+      for (const [index, changeID] of changeIDs.entries()) {
+        await connection.query('UPDATE unifiedchangelog SET ChangedBy = ? WHERE ChangeID = ?', [ACCENT_CASE_NAMES[index], changeID]);
+      }
+
+      const rows = await readRows();
+
+      expect(
+        rows.map(row => [row.LogID, row.ChangedBy, row.Description]),
+        'the accent- and case-insensitive column collation must not merge three people into one summary'
+      ).toEqual(
+        changeIDs.map((changeID, index) => [changeID, ACCENT_CASE_NAMES[index], `Upload ${UPLOAD_FILE}: added 1 measurement rows (batch accentbatch)`])
+      );
+    });
   });
 
   describe('shapes no current writer produces', () => {

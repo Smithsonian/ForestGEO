@@ -36,6 +36,9 @@ const CHANGE_TIME_SQL_FORMAT = '%Y-%m-%d %H:%i:%s';
 const UPLOAD_FILE_ID_JSON_PATH = '$.UploadFileID';
 const UPLOAD_BATCH_ID_JSON_PATH = '$.UploadBatchID';
 const GRID_ROW_ONLY_JSON_PATHS = ['$.UserDefinedFields', '$.DeletedAt'] as const;
+/** Case- and accent-sensitive with the NO PAD behaviour of the column's own collation; BINARY would break ONLY_FULL_GROUP_BY. */
+const EXACT_ACTOR_COLLATION = 'utf8mb4_0900_bin';
+const EXACT_CHANGED_BY_SQL = `uc.ChangedBy COLLATE ${EXACT_ACTOR_COLLATION}`;
 const ROLLBACK_FAILED_MESSAGE = 'Change export rollback failed';
 
 /** The state an operation carries: the removed row for a DELETE, the written row otherwise. */
@@ -245,11 +248,11 @@ async function readUploadRollup(
     `SELECT g.FileID, g.BaseBatchID, g.Operation, g.ChangedBy, g.CensusID, g.LogID, g.MemberCount,
             DATE_FORMAT(m.ChangeTimestamp, '${CHANGE_TIME_SQL_FORMAT}') AS ChangeTime
      FROM (
-       SELECT ${UPLOAD_FILE_ID_SQL} AS FileID, ${baseBatch.sql} AS BaseBatchID, uc.Operation, uc.ChangedBy, uc.CensusID,
+       SELECT ${UPLOAD_FILE_ID_SQL} AS FileID, ${baseBatch.sql} AS BaseBatchID, uc.Operation, ${EXACT_CHANGED_BY_SQL} AS ChangedBy, uc.CensusID,
               MIN(uc.ChangeID) AS LogID, COUNT(*) AS MemberCount
        FROM ??.unifiedchangelog uc
        WHERE ${filter.sql} AND uc.TableName = ? AND ${predicate.sql} IS TRUE
-       GROUP BY FileID, BaseBatchID, uc.Operation, uc.ChangedBy, uc.CensusID
+       GROUP BY FileID, BaseBatchID, uc.Operation, ${EXACT_CHANGED_BY_SQL}, uc.CensusID
      ) g
      JOIN ??.unifiedchangelog m ON m.ChangeID = g.LogID AND m.TableName = ?
      ORDER BY g.LogID
