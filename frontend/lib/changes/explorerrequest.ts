@@ -56,11 +56,15 @@ export const recentChangesFiltersSchema = z
 const clampPage = (page: number) => Math.max(RECENT_CHANGES_FIRST_PAGE, page);
 const clampPageSize = (pageSize: number) => Math.min(RECENT_CHANGES_MAX_PAGE_SIZE, Math.max(RECENT_CHANGES_MIN_PAGE_SIZE, pageSize));
 
-export const recentChangesQueryRequestSchema = z.object({
+const scopeShape = {
   schema: z.string().refine(isValidSchema, 'Invalid schema'),
   plotID: z.coerce.number().int().positive(),
   // prefault, not default: zod 4 returns a .default() value unparsed, so the filter defaults must be parsed through the schema.
-  filters: recentChangesFiltersSchema.prefault({}),
+  filters: recentChangesFiltersSchema.prefault({})
+};
+
+export const recentChangesQueryRequestSchema = z.object({
+  ...scopeShape,
   page: z.coerce
     .number()
     .int()
