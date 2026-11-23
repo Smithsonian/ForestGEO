@@ -42,6 +42,12 @@ describe('computeDiff', () => {
     ]);
   });
 
+  it.each(['PlotID', 'plotID', 'CensusID', 'censusID'])('reports a real change to %s (#592 D8)', field => {
+    const result = computeDiff({ [field]: 5, MeasuredDBH: 12.5 }, { [field]: 6, MeasuredDBH: 12.5 });
+
+    expect(result, `a changed ${field} must appear as a difference`).toEqual([{ field, oldValue: 5, newValue: 6 }]);
+  });
+
   it('detects field added in new state', () => {
     const oldState = { TreeTag: '1042' };
     const newState = { TreeTag: '1042', MeasuredDBH: 14.2 };
