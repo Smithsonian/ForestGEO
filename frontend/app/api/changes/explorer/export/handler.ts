@@ -13,6 +13,8 @@ const EXPORT_FAILED_LOG_MESSAGE = 'Change log export failed';
 /** A failure outside the reader: serializing, building the response, or telemetry. */
 const HANDLER_STAGE = 'handler';
 const CSV_CONTENT_TYPE = 'text/csv; charset=utf-8';
+/** The CSV names the people who made each change; no cache may keep a copy. */
+const NO_STORE_CACHE_CONTROL = 'no-store';
 
 const EXPORT_TOO_LARGE_RESPONSE = { error: 'The export is larger than the row limit', code: CHANGE_EXPORT_ERROR_CODES.tooLarge } as const;
 const CHANGE_EXPORT_FAILED_RESPONSE = { error: 'Unable to export the change log', code: CHANGE_EXPORT_ERROR_CODES.failed } as const;
@@ -53,7 +55,7 @@ export function createChangeExportHandler(limits: ChangeExportLimits) {
 
       return new NextResponse(csv, {
         status: HTTPResponses.OK,
-        headers: { 'Content-Type': CSV_CONTENT_TYPE, 'Content-Disposition': `attachment; filename="${filename}"` }
+        headers: { 'Content-Type': CSV_CONTENT_TYPE, 'Cache-Control': NO_STORE_CACHE_CONTROL, 'Content-Disposition': `attachment; filename="${filename}"` }
       });
     } catch (error: unknown) {
       if (error instanceof ExportTooLargeError) {

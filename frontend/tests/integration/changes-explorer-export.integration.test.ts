@@ -32,6 +32,7 @@ const OUT_OF_SCOPE_SCHEMA = 'forestgeo_panama';
 const ROUTE_KEY = 'changes/explorer/export';
 const ROUTE_CONTEXT = { params: Promise.resolve({}) };
 const CSV_CONTENT_TYPE = 'text/csv; charset=utf-8';
+const NO_STORE_CACHE_CONTROL = 'no-store';
 const EXPORT_SUCCEEDED_EVENT = 'RecentChangesCsvExported';
 const GENEROUS_LIMITS: ChangeExportLimits = { maxRows: 10_000, pageSize: 2 };
 
@@ -178,6 +179,7 @@ describe('POST /api/changes/explorer/export', () => {
 
       expect(response.status, `export must succeed; body: ${text.slice(0, 500)}`).toBe(HTTPResponses.OK);
       expect(response.headers.get('Content-Type')).toBe(CSV_CONTENT_TYPE);
+      expect(response.headers.get('Cache-Control'), 'the CSV contains users’ emails').toBe(NO_STORE_CACHE_CONTROL);
       expect(response.headers.get('Content-Disposition')).toMatch(
         new RegExp(`^attachment; filename="changelog-${schema}-plot${plotID}-\\d{4}-\\d{2}-\\d{2}\\.csv"$`)
       );
