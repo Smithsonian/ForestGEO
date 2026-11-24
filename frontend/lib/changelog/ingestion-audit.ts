@@ -130,7 +130,7 @@ export async function recordCommittedCoreMeasurementsAudit(params: RecordCommitt
  * the row (see recordDeletedCoreMeasurementsAudit's doc comment), so this is
  * still the live row, not a reconstruction.
  */
-function buildDeleteAuditRowsSQL(idCount: number): string {
+function buildDeleteAuditRowsSQL(whereClause: string): string {
   return `INSERT INTO ??.unifiedchangelog
    (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
  SELECT
@@ -143,7 +143,7 @@ function buildDeleteAuditRowsSQL(idCount: number): string {
    ?,
    ?
  FROM ??.coremeasurements cm
- WHERE cm.CoreMeasurementID IN (${buildInPlaceholders(idCount)})`;
+ WHERE ${whereClause}`;
 }
 
 export interface RecordDeletedCoreMeasurementsAuditParams {
@@ -179,7 +179,7 @@ export async function recordDeletedCoreMeasurementsAudit(params: RecordDeletedCo
   const { tx, schema, coreMeasurementIDs, changedBy, plotID, censusID } = params;
   if (coreMeasurementIDs.length === 0) return 0;
 
-  const sql = safeFormatQuery(schema, buildDeleteAuditRowsSQL(coreMeasurementIDs.length));
+  const sql = safeFormatQuery(schema, buildDeleteAuditRowsSQL(`cm.CoreMeasurementID IN (${buildInPlaceholders(coreMeasurementIDs.length)})`));
   const recordIDForError = coreMeasurementIDs.join(',');
   try {
     const result = await tx.query(sql, [changedBy, plotID, censusID, ...coreMeasurementIDs]);
@@ -265,7 +265,7 @@ export function snapshotRowsEqual(a: Record<string, unknown>, b: Record<string, 
 const SNAPSHOT_AUDIT_INSERT_CHUNK_SIZE = 500;
 
 export interface SnapshotAuditRowInput {
-  id: number;
+  id: number | string;
   oldRow: Record<string, unknown> | null;
   newRow: Record<string, unknown> | null;
 }
@@ -281,13 +281,14 @@ export interface SnapshotAuditRowInput {
 export async function recordSnapshotRowsAudit(params: {
   tx: Pick<BulkIngestionExecutor, 'query'>;
   schema: string;
+  tableName?: string;
   operation: ChangelogOperation;
   rows: SnapshotAuditRowInput[];
   changedBy: string | null;
-  plotID: number;
-  censusID: number;
+  plotID: number | null;
+  censusID: number | null;
 }): Promise<number> {
-  const { tx, schema, operation, rows, changedBy, plotID, censusID } = params;
+  const { tx, schema, tableName = COREMEASUREMENTS_TABLE_NAME, operation, rows, changedBy, plotID, censusID } = params;
   if (rows.length === 0) return 0;
 
   let totalWritten = 0;
@@ -301,7 +302,7 @@ export async function recordSnapshotRowsAudit(params: {
        VALUES ${valueTuples}`
     );
     const bindings = chunk.flatMap(row => [
-      COREMEASUREMENTS_TABLE_NAME,
+      tableName,
       row.id,
       operation,
       row.oldRow ? JSON.stringify(row.oldRow) : null,
@@ -315,7 +316,7 @@ export async function recordSnapshotRowsAudit(params: {
       const result = await tx.query(sql, bindings);
       totalWritten += Number((result as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
     } catch (error: unknown) {
-      throw new ChangelogWriteError(operation, COREMEASUREMENTS_TABLE_NAME, recordIDForError, error);
+      throw new ChangelogWriteError(operation, tableName, recordIDForError, error);
     }
   }
   return totalWritten;
@@ -568,13 +569,7 @@ export async function auditCoreMeasurementsKeyedDiff(params: AuditCoreMeasuremen
   return { insertedCount, updatedCount, unchangedCount, after };
 }
 
-/**
- * Inserts one DELETE-operation `unifiedchangelog` row per coremeasurements row of
- * `censusID`, set-based, for a whole-census clear (app/api/clearcensus, #507). Same
- * contract as recordDeletedCoreMeasurementsAudit: run it in the SAME transaction as, and
- * BEFORE, the delete, so OldRowState is each row's last real state. Returns the number
- * of audit rows written.
- */
+/** The census-wide form of recordDeletedCoreMeasurementsAudit, for a whole-census clear. */
 export async function recordDeletedCensusCoreMeasurementsAudit(params: {
   tx: Pick<BulkIngestionExecutor, 'query'>;
   schema: string;
@@ -583,22 +578,7 @@ export async function recordDeletedCensusCoreMeasurementsAudit(params: {
   plotID: number;
 }): Promise<number> {
   const { tx, schema, censusID, changedBy, plotID } = params;
-  const sql = safeFormatQuery(
-    schema,
-    `INSERT INTO ??.unifiedchangelog
-       (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
-     SELECT
-       '${COREMEASUREMENTS_TABLE_NAME}',
-       cm.CoreMeasurementID,
-       '${ChangelogOperation.DELETE}',
-       ${COREMEASUREMENTS_SNAPSHOT_JSON},
-       NOW(),
-       ?,
-       ?,
-       ?
-     FROM ??.coremeasurements cm
-     WHERE cm.CensusID = ?`
-  );
+  const sql = safeFormatQuery(schema, buildDeleteAuditRowsSQL('cm.CensusID = ?'));
   try {
     const result = await tx.query(sql, [changedBy, plotID, censusID, censusID]);
     return Number((result as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
@@ -615,18 +595,13 @@ export async function recordDeletedCensusCoreMeasurementsAudit(params: {
 const COMPARED_ONLY_COLUMNS = ['UserDefinedFields', 'RawPublishedStemID'] as const;
 
 export interface CoreMeasurementIDSnapshotRow {
-  /** The ingestion-snapshot image recorded as OldRowState/NewRowState. */
   image: Record<string, unknown>;
   comparedOnly: Record<string, unknown>;
 }
 
 export type CoreMeasurementsIDSnapshot = Map<number, CoreMeasurementIDSnapshotRow>;
 
-/**
- * Reads exactly `coreMeasurementIDs` under FOR UPDATE, keyed by CoreMeasurementID, in
- * SNAPSHOT_BY_KEY_CHUNK_SIZE slices. The before-image for a rewrite that keeps each row's
- * id (reingestion reconciles new values back onto the original rows, #507).
- */
+/** Locks and reads `coreMeasurementIDs`: the before-image for a rewrite that keeps each row's id (reingestion). */
 export async function snapshotCoreMeasurementsByIDs(
   tx: Pick<BulkIngestionExecutor, 'query'>,
   schema: string,
@@ -673,10 +648,8 @@ export interface CoreMeasurementsIDDiffResult {
 }
 
 /**
- * Re-reads every id in `before` and audits what changed: present but different → UPDATE,
- * gone → DELETE, identical → nothing. Ids not in `before` are never read, so rows the
- * caller created and removed again inside its own transaction (reingestion's transient
- * rows) leave no history. Both counts are asserted against the rows written.
+ * Audits each id in `before` against its current state: changed → UPDATE, gone → DELETE.
+ * Ids not in `before` are never read, so reingestion's transient rows leave no history.
  */
 export async function auditCoreMeasurementsIDDiff(params: {
   tx: Pick<BulkIngestionExecutor, 'query'>;

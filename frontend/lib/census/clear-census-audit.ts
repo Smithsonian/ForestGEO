@@ -13,15 +13,8 @@
  */
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { callProcedureInCallerTransaction, type CallerOwnedTransactionFlag, type CallerTransactionExecutor } from '@/lib/db/caller-owned-procedure-call';
-import {
-  ChangelogOperation,
-  ChangelogWriteError,
-  normalizeBitColumns,
-  recordDeletedRows,
-  recordMutation,
-  type ChangelogRowState
-} from '@/lib/changelog/record-mutation';
-import { recordDeletedCensusCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
+import { ChangelogOperation, normalizeBitColumns, recordMutation, type ChangelogRowState } from '@/lib/changelog/record-mutation';
+import { COREMEASUREMENTS_TABLE_NAME, recordDeletedCensusCoreMeasurementsAudit, recordSnapshotRowsAudit } from '@/lib/changelog/ingestion-audit';
 
 export const CLEAR_CENSUS_CALLER_OWNS_TRANSACTION_SQL = 'SET @clearcensus_caller_owns_transaction = 1';
 export const CLEAR_CENSUS_CLEAR_CALLER_TRANSACTION_SQL = 'SET @clearcensus_caller_owns_transaction = NULL';
@@ -33,38 +26,33 @@ const CLEAR_CENSUS_CALLER_FLAG: CallerOwnedTransactionFlag = {
   clearFailedReason: CLEAR_CENSUS_FLAG_CLEAR_FAILED_REASON
 };
 
-/** The census clear types that have a stored procedure behind them. */
 export const CLEAR_CENSUS_TYPES = ['msmts', 'full'] as const;
 export type ClearCensusType = (typeof CLEAR_CENSUS_TYPES)[number];
 
 const CLEAR_CENSUS_FULL_TYPE: ClearCensusType = 'full';
 const CENSUS_TABLE_NAME = 'census';
 
-interface ReferenceTableKey {
+interface ReferenceTable {
   tableName: string;
-  /** Columns that identify one physical row; attributes is keyed on (Code, IsActive). */
-  keyColumns: readonly string[];
-  /** Column stored as RecordID — the grid's own id for the table (attributes: Code). */
+  /** Stored as RecordID: the grid's own id for the table (attributes: Code). */
   recordIDColumn: string;
-  /** Column of the procedure's caller-owned result set holding this table's delete count. */
   deletedCountColumn: string;
 }
 
 /** The tables clearcensusfull empties on the last census, in its own delete order. */
-export const CLEAR_CENSUS_FULL_REFERENCE_TABLES: readonly ReferenceTableKey[] = [
-  { tableName: 'attributes', keyColumns: ['Code', 'IsActive'], recordIDColumn: 'Code', deletedCountColumn: 'DeletedAttributes' },
-  { tableName: 'personnel', keyColumns: ['PersonnelID'], recordIDColumn: 'PersonnelID', deletedCountColumn: 'DeletedPersonnel' },
-  { tableName: 'roles', keyColumns: ['RoleID'], recordIDColumn: 'RoleID', deletedCountColumn: 'DeletedRoles' },
-  { tableName: 'quadrats', keyColumns: ['QuadratID'], recordIDColumn: 'QuadratID', deletedCountColumn: 'DeletedQuadrats' },
-  { tableName: 'species', keyColumns: ['SpeciesID'], recordIDColumn: 'SpeciesID', deletedCountColumn: 'DeletedSpecies' },
-  { tableName: 'specieslimits', keyColumns: ['SpeciesLimitID'], recordIDColumn: 'SpeciesLimitID', deletedCountColumn: 'DeletedSpecieslimits' },
-  { tableName: 'genus', keyColumns: ['GenusID'], recordIDColumn: 'GenusID', deletedCountColumn: 'DeletedGenus' },
-  { tableName: 'family', keyColumns: ['FamilyID'], recordIDColumn: 'FamilyID', deletedCountColumn: 'DeletedFamily' },
-  { tableName: 'reference', keyColumns: ['ReferenceID'], recordIDColumn: 'ReferenceID', deletedCountColumn: 'DeletedReference' }
+export const CLEAR_CENSUS_FULL_REFERENCE_TABLES: readonly ReferenceTable[] = [
+  { tableName: 'attributes', recordIDColumn: 'Code', deletedCountColumn: 'DeletedAttributes' },
+  { tableName: 'personnel', recordIDColumn: 'PersonnelID', deletedCountColumn: 'DeletedPersonnel' },
+  { tableName: 'roles', recordIDColumn: 'RoleID', deletedCountColumn: 'DeletedRoles' },
+  { tableName: 'quadrats', recordIDColumn: 'QuadratID', deletedCountColumn: 'DeletedQuadrats' },
+  { tableName: 'species', recordIDColumn: 'SpeciesID', deletedCountColumn: 'DeletedSpecies' },
+  { tableName: 'specieslimits', recordIDColumn: 'SpeciesLimitID', deletedCountColumn: 'DeletedSpecieslimits' },
+  { tableName: 'genus', recordIDColumn: 'GenusID', deletedCountColumn: 'DeletedGenus' },
+  { tableName: 'family', recordIDColumn: 'FamilyID', deletedCountColumn: 'DeletedFamily' },
+  { tableName: 'reference', recordIDColumn: 'ReferenceID', deletedCountColumn: 'DeletedReference' }
 ];
 
 const DELETED_MEASUREMENTS_COLUMN = 'DeletedMeasurements';
-const COREMEASUREMENTS_TABLE_NAME = 'coremeasurements';
 
 type ReferenceTablesSnapshot = Map<string, ChangelogRowState[]>;
 type ClearCensusDeletedCounts = Record<string, number>;
@@ -86,10 +74,6 @@ export class ClearCensusAuditMismatchError extends Error {
 
 export function isClearCensusType(value: string): value is ClearCensusType {
   return (CLEAR_CENSUS_TYPES as readonly string[]).includes(value);
-}
-
-function rowKey(row: ChangelogRowState, keyColumns: readonly string[]): string {
-  return keyColumns.map(column => String(row[column])).join('\u0000');
 }
 
 function assertAuditedEveryDeletedRow(tableName: string, deletedCount: number, auditedCount: number): void {
@@ -125,9 +109,9 @@ async function callClearCensusInCallerTransaction(
 }
 
 /**
- * Locks the census row and every one of its measurements, then audits them. Under READ
- * COMMITTED the INSERT ... SELECT is a non-locking read, so the rows are locked first:
- * no edit can then change a measurement between its audit and its delete.
+ * Under READ COMMITTED the audit's INSERT ... SELECT is a non-locking read, so the
+ * measurements are locked first: no edit can then change one between its audit and its
+ * delete. The route has already locked the census row, so it is always found.
  */
 async function auditCensusAndMeasurements(params: {
   tx: CallerTransactionExecutor;
@@ -137,16 +121,7 @@ async function auditCensusAndMeasurements(params: {
   changedBy: string;
 }): Promise<number> {
   const { tx, schema, censusID, plotID, changedBy } = params;
-  const censusRows = await tx.query<ChangelogRowState[]>(safeFormatQuery(schema, 'SELECT * FROM ??.census WHERE CensusID = ? FOR UPDATE'), [censusID]);
-  const censusRow = censusRows[0];
-  if (!censusRow) {
-    throw new ChangelogWriteError(
-      ChangelogOperation.DELETE,
-      CENSUS_TABLE_NAME,
-      censusID,
-      new Error('The census row vanished before its delete could be audited.')
-    );
-  }
+  const [censusRow] = await tx.query<ChangelogRowState[]>(safeFormatQuery(schema, 'SELECT * FROM ??.census WHERE CensusID = ? FOR UPDATE'), [censusID]);
 
   const lockedMeasurements = await countRows(tx, safeFormatQuery(schema, 'SELECT COUNT(*) AS total FROM ??.coremeasurements WHERE CensusID = ? FOR UPDATE'), [
     censusID
@@ -168,11 +143,7 @@ async function auditCensusAndMeasurements(params: {
   return auditedMeasurements;
 }
 
-/**
- * clearcensusfull empties the reference tables only when it removes the schema's last
- * census, so they are read (and locked) only then. If another census appears or vanishes
- * concurrently, the delete counts the procedure reports expose it.
- */
+/** Read and locked only when clearing the schema's last census, the only time clearcensusfull empties them. */
 async function snapshotReferenceTablesForLastCensus(tx: CallerTransactionExecutor, schema: string): Promise<ReferenceTablesSnapshot> {
   const snapshot: ReferenceTablesSnapshot = new Map();
   if ((await countRows(tx, safeFormatQuery(schema, 'SELECT COUNT(*) AS total FROM ??.census'), [])) !== 1) return snapshot;
@@ -184,43 +155,36 @@ async function snapshotReferenceTablesForLastCensus(tx: CallerTransactionExecuto
 }
 
 /**
- * Audits, as DELETE rows, every snapshot row whose key is gone after the CALL, and checks
- * each table's count against what the procedure deleted. Reference data is schema-wide,
- * so PlotID and CensusID stay NULL, as on every other reference writer.
+ * The procedure deletes every row of each table unconditionally and the snapshot holds
+ * them all locked, so the snapshot is exactly what it removed unless a row was inserted
+ * concurrently, which the delete count exposes. Reference data is schema-wide, so PlotID
+ * and CensusID stay NULL.
  */
 async function auditRemovedReferenceRows(params: {
   tx: CallerTransactionExecutor;
   schema: string;
-  before: ReferenceTablesSnapshot;
+  removed: ReferenceTablesSnapshot;
   deletedCounts: ClearCensusDeletedCounts;
   changedBy: string;
 }): Promise<void> {
-  const { tx, schema, before, deletedCounts, changedBy } = params;
+  const { tx, schema, removed, deletedCounts, changedBy } = params;
   for (const table of CLEAR_CENSUS_FULL_REFERENCE_TABLES) {
-    const priorRows = before.get(table.tableName) ?? [];
-    let audited = 0;
-    if (priorRows.length > 0) {
-      const keyList = table.keyColumns.map(column => safeEscapeId(column)).join(', ');
-      const remainingRows = await tx.query<ChangelogRowState[]>(safeFormatQuery(schema, `SELECT ${keyList} FROM ??.${safeEscapeId(table.tableName)}`));
-      const remainingKeys = new Set((Array.isArray(remainingRows) ? remainingRows : []).map(row => rowKey(row, table.keyColumns)));
-      const removedRows = priorRows
-        .filter(row => !remainingKeys.has(rowKey(row, table.keyColumns)))
-        .map(row => ({ recordID: String(row[table.recordIDColumn]), oldRowState: row }));
-      if (removedRows.length > 0) {
-        audited = await recordDeletedRows({ tx, schema, tableName: table.tableName, rows: removedRows, changedBy, plotID: null, censusID: null });
-      }
-    }
+    const rows = (removed.get(table.tableName) ?? []).map(row => ({ id: String(row[table.recordIDColumn]), oldRow: row, newRow: null }));
+    const audited = await recordSnapshotRowsAudit({
+      tx,
+      schema,
+      tableName: table.tableName,
+      operation: ChangelogOperation.DELETE,
+      rows,
+      changedBy,
+      plotID: null,
+      censusID: null
+    });
     assertAuditedEveryDeletedRow(table.tableName, deletedCounts[table.deletedCountColumn] ?? 0, audited);
   }
 }
 
-/**
- * Clears one census through its procedure in the caller's transaction and writes a
- * Recent Changes DELETE row for the census, each of its measurements and, on a
- * last-census `full` clear, each reference row removed. Throws
- * ClearCensusAuditMismatchError when any deleted row went unaudited; the caller must then
- * roll back.
- */
+/** Throws ClearCensusAuditMismatchError when any deleted row went unaudited; the caller must then roll back. */
 export async function clearCensusWithAudit(params: {
   tx: CallerTransactionExecutor;
   schema: string;
@@ -236,6 +200,6 @@ export async function clearCensusWithAudit(params: {
   const deletedCounts = await callClearCensusInCallerTransaction(tx, schema, type, censusID);
   assertAuditedEveryDeletedRow(COREMEASUREMENTS_TABLE_NAME, deletedCounts[DELETED_MEASUREMENTS_COLUMN], auditedMeasurements);
   if (type === CLEAR_CENSUS_FULL_TYPE) {
-    await auditRemovedReferenceRows({ tx, schema, before: referenceSnapshot, deletedCounts, changedBy });
+    await auditRemovedReferenceRows({ tx, schema, removed: referenceSnapshot, deletedCounts, changedBy });
   }
 }
