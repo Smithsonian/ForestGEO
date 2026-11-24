@@ -8,15 +8,7 @@ import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
-import {
-  CLEAR_CENSUS_FULL_TYPE,
-  CLEAR_CENSUS_TYPES,
-  auditRemovedReferenceRows,
-  callClearCensusInCallerTransaction,
-  isClearCensusType,
-  recordCensusClearAudit,
-  snapshotReferenceTables
-} from '@/lib/census/clear-census-audit';
+import { CLEAR_CENSUS_TYPES, ClearCensusAuditMismatchError, clearCensusWithAudit, isClearCensusType } from '@/lib/census/clear-census-audit';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -160,13 +152,7 @@ export async function POST(request: NextRequest) {
     // or roll back with the deletes they describe (issue #507).
     const tx = transactionExecutorFor(connectionManager, transactionID);
     const changedBy = authenticatedSessionIdentity(session?.user);
-    const plotID = Number(censusRow.PlotID);
-    await recordCensusClearAudit({ tx, schema, censusID, plotID, changedBy });
-    const referenceSnapshot = type === CLEAR_CENSUS_FULL_TYPE ? await snapshotReferenceTables(tx, schema) : undefined;
-    await callClearCensusInCallerTransaction(tx, schema, type, censusID);
-    if (referenceSnapshot) {
-      await auditRemovedReferenceRows({ tx, schema, before: referenceSnapshot, changedBy });
-    }
+    await clearCensusWithAudit({ tx, schema, type, censusID, plotID: Number(censusRow.PlotID), changedBy });
     await connectionManager.commitTransaction(transactionID);
     ailogger.info(`Census cleared successfully: ${schema}.clearcensus${type}(${censusID})`);
     return NextResponse.json({ message: 'Census cleared successfully' }, { status: HTTPResponses.OK });
@@ -174,6 +160,12 @@ export async function POST(request: NextRequest) {
     ailogger.error('Census clear failed:', e);
     if (transactionID) {
       await connectionManager.rollbackTransaction(transactionID);
+    }
+    if (e instanceof ClearCensusAuditMismatchError) {
+      return NextResponse.json(
+        { error: 'Data changed while the census was being cleared. Nothing was deleted; please retry.' },
+        { status: HTTPResponses.CONFLICT }
+      );
     }
     return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {

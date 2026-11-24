@@ -425,6 +425,16 @@ BEGIN
     declare vPrevForeignKeyChecks int;
     declare vPrevDisableTriggers int default null;
     declare vCallerOwnsTransaction boolean default false;
+    declare vDeletedMeasurements int default 0;
+    declare vDeletedAttributes int default 0;
+    declare vDeletedPersonnel int default 0;
+    declare vDeletedRoles int default 0;
+    declare vDeletedQuadrats int default 0;
+    declare vDeletedSpecies int default 0;
+    declare vDeletedSpecieslimits int default 0;
+    declare vDeletedGenus int default 0;
+    declare vDeletedFamily int default 0;
+    declare vDeletedReference int default 0;
 
     -- Issue #509: restore the caller's EXACT prior foreign_key_checks /
     -- @disable_triggers on every exit path (a caller may invoke this from
@@ -481,6 +491,7 @@ BEGIN
     WHERE CensusID = targetCensusID;
 
     delete from coremeasurements where CensusID = targetCensusID;
+    SET vDeletedMeasurements = ROW_COUNT();
     delete from stems where CensusID = targetCensusID;
 
     delete from trees where CensusID = targetCensusID;
@@ -492,14 +503,23 @@ BEGIN
         -- Issue #509: DELETE (not TRUNCATE) keeps this inside the transaction
         -- above so the EXIT HANDLER's ROLLBACK actually reverts it.
         delete from attributes;
+        SET vDeletedAttributes = ROW_COUNT();
         delete from personnel;
+        SET vDeletedPersonnel = ROW_COUNT();
         delete from roles;
+        SET vDeletedRoles = ROW_COUNT();
         delete from quadrats;
+        SET vDeletedQuadrats = ROW_COUNT();
         delete from species;
+        SET vDeletedSpecies = ROW_COUNT();
         delete from specieslimits;
+        SET vDeletedSpecieslimits = ROW_COUNT();
         delete from genus;
+        SET vDeletedGenus = ROW_COUNT();
         delete from family;
+        SET vDeletedFamily = ROW_COUNT();
         delete from reference;
+        SET vDeletedReference = ROW_COUNT();
         -- Issue #509: unifiedchangelog is audit history, not census data —
         -- intentionally NOT cleared here (previously destroyed by TRUNCATE).
     end if;
@@ -514,6 +534,20 @@ BEGIN
     END IF;
     SET foreign_key_checks = vPrevForeignKeyChecks;
     SET @disable_triggers = vPrevDisableTriggers;
+    -- Issue #507: a caller-owned clear reports what it deleted so the caller can
+    -- refuse to commit unless every deleted row was audited.
+    IF vCallerOwnsTransaction THEN
+        SELECT vDeletedMeasurements AS DeletedMeasurements,
+               vDeletedAttributes AS DeletedAttributes,
+               vDeletedPersonnel AS DeletedPersonnel,
+               vDeletedRoles AS DeletedRoles,
+               vDeletedQuadrats AS DeletedQuadrats,
+               vDeletedSpecies AS DeletedSpecies,
+               vDeletedSpecieslimits AS DeletedSpecieslimits,
+               vDeletedGenus AS DeletedGenus,
+               vDeletedFamily AS DeletedFamily,
+               vDeletedReference AS DeletedReference;
+    END IF;
 END $$
 
 create procedure clearcensusmsmts(IN targetCensusID int)
@@ -522,6 +556,7 @@ BEGIN
     declare vPrevForeignKeyChecks int;
     declare vPrevDisableTriggers int default null;
     declare vCallerOwnsTransaction boolean default false;
+    declare vDeletedMeasurements int default 0;
 
     -- Issue #509: restore the caller's EXACT prior foreign_key_checks /
     -- @disable_triggers on every exit path (a caller may invoke this from
@@ -581,6 +616,7 @@ BEGIN
 
     -- Delete core measurements, stems, and trees for this census
     delete from coremeasurements where CensusID = targetCensusID;
+    SET vDeletedMeasurements = ROW_COUNT();
     delete from stems where CensusID = targetCensusID;
     delete from trees where CensusID = targetCensusID;
 
@@ -594,6 +630,11 @@ BEGIN
     END IF;
     SET foreign_key_checks = vPrevForeignKeyChecks;
     SET @disable_triggers = vPrevDisableTriggers;
+    -- Issue #507: a caller-owned clear reports what it deleted so the caller can
+    -- refuse to commit unless every deleted row was audited.
+    IF vCallerOwnsTransaction THEN
+        SELECT vDeletedMeasurements AS DeletedMeasurements;
+    END IF;
 END $$
 
 -- reingestfailedrows removed: operated on legacy failedmeasurements table.

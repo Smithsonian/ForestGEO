@@ -91,6 +91,10 @@ interface ClearCensusQueryScript {
   censusRow?: Record<string, unknown>;
   referenceRows?: Record<string, Record<string, unknown>[]>;
   referenceRowsRemainingAfterCall?: Record<string, Record<string, unknown>[]>;
+  /** Rows of the census the measurement lock sees, and the procedure's own delete counts. */
+  lockedMeasurements?: number;
+  censusCountInSchema?: number;
+  deletedCounts?: Record<string, number>;
   auditFailure?: Error;
 }
 
@@ -102,13 +106,15 @@ function scriptClearCensusQueries(exec: ReturnType<typeof vi.spyOn>, script: Cle
     if (/SELECT PlotID FROM/i.test(sql)) return [{ PlotID: 1 }];
     if (/MAX\(PlotCensusNumber\)/i.test(sql)) return [{ PlotID: 1, PlotCensusNumber: 2, MaxPlotCensusNumber: 2 }];
     if (/SELECT \* FROM \?\?\.census WHERE CensusID/i.test(sql)) return [script.censusRow ?? AUDITED_CENSUS_ROW];
+    if (/COUNT\(\*\) AS total FROM \?\?\.coremeasurements WHERE CensusID = \? FOR UPDATE/.test(sql)) return [{ total: script.lockedMeasurements ?? 3 }];
+    if (/COUNT\(\*\) AS total FROM \?\?\.census$/.test(sql)) return [{ total: script.censusCountInSchema ?? 1 }];
     if (sql.includes('unifiedchangelog')) {
       if (script.auditFailure) throw script.auditFailure;
       return { affectedRows: sql.includes('FROM ??.coremeasurements cm') ? 3 : (sql.match(/\(\?, \?, \?, CONVERT/g)?.length ?? 1) };
     }
     if (/^CALL /i.test(sql)) {
       procedureCalled = true;
-      return {};
+      return [[{ DeletedMeasurements: 3, ...script.deletedCounts }], { affectedRows: 0 }];
     }
     const referenceTable = sql.match(/FROM \?\?\.`(\w+)`/)?.[1];
     if (referenceTable) {
@@ -235,7 +241,8 @@ describe('POST /api/clearcensus', () => {
     const keptSpecies = { SpeciesID: 2, SpeciesCode: 'KEEP' };
     scriptClearCensusQueries(exec, {
       referenceRows: { attributes: [alive], species: [{ SpeciesID: 1, SpeciesCode: 'ACRU' }, keptSpecies] },
-      referenceRowsRemainingAfterCall: { species: [{ SpeciesID: 2 }] }
+      referenceRowsRemainingAfterCall: { species: [{ SpeciesID: 2 }] },
+      deletedCounts: { DeletedAttributes: 1, DeletedSpecies: 1 }
     });
     const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
@@ -256,6 +263,44 @@ describe('POST /api/clearcensus', () => {
     }
     expect(JSON.parse(String(referenceAudits[0].params[3]))).toEqual(alive);
     expect(commit).toHaveBeenCalledWith('tx-full');
+  });
+
+  it.each([
+    ['a measurement inserted after the lock', { deletedCounts: { DeletedMeasurements: 4 } }, 'msmts'],
+    ['a reference row inserted after the snapshot', { referenceRows: { species: [{ SpeciesID: 1 }] }, deletedCounts: { DeletedSpecies: 2 } }, 'full'],
+    ['a last-census wipe the route did not foresee', { censusCountInSchema: 2, deletedCounts: { DeletedQuadrats: 5 } }, 'full']
+  ] as const)('409 and rollback when the procedure deleted rows nobody audited: %s', async (_case, script, type) => {
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-mismatch');
+    vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+    scriptClearCensusQueries(vi.spyOn(cm, 'executeQuery'), script);
+    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+    const commit = vi.spyOn(cm, 'commitTransaction');
+
+    const res = await POST(makeRequest(`http://localhost/api/clearcensus?schema=myschema&censusID=12&type=${type}`));
+
+    expect(res.status).toBe(HTTPResponses.CONFLICT);
+    expect((await res.json()).error).toMatch(/Nothing was deleted/);
+    expect(rollback).toHaveBeenCalledWith('tx-mismatch');
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('full skips the reference snapshot when other censuses remain', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-not-last');
+    vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+    const exec = vi.spyOn(cm, 'executeQuery');
+    scriptClearCensusQueries(exec, { censusCountInSchema: 3 });
+    vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+
+    const res = await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=full'));
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    const statements = exec.mock.calls.map(call => String(call[0]));
+    expect(
+      statements.some(sql => /FROM \?\?\.`species`/.test(sql)),
+      statements.join('\n')
+    ).toBe(false);
   });
 
   it('rolls back without calling the procedure when an audit row cannot be written', async () => {

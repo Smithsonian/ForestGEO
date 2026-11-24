@@ -335,9 +335,12 @@ describe('Unified Changelog Tracking System', () => {
         .spyOn(cm, 'executeQuery')
         .mockResolvedValueOnce([{ PlotID: 1 }])
         .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
-        .mockResolvedValueOnce([{ CensusID: 7, PlotID: 1, PlotCensusNumber: 1 }])
-        .mockResolvedValueOnce({ affectedRows: 40 })
-        .mockResolvedValueOnce({ affectedRows: 1 })
+        .mockResolvedValueOnce([{ CensusID: 7, PlotID: 1, PlotCensusNumber: 1 }]) // census row, locked
+        .mockResolvedValueOnce([{ total: 40 }]) // its measurements, locked
+        .mockResolvedValueOnce({ affectedRows: 40 }) // measurement audit rows
+        .mockResolvedValueOnce({ affectedRows: 1 }) // census audit row
+        .mockResolvedValueOnce({}) // SET caller-owns-transaction flag
+        .mockResolvedValueOnce([[{ DeletedMeasurements: 40 }], {}]) // CALL, with its delete counts
         .mockResolvedValue({});
 
       const req = makeRequest('http://localhost/api/clearcensus', 'POST', { schema: 'testschema', censusID: 7, type: 'msmts' });
