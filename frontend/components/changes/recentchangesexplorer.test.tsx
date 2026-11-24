@@ -958,15 +958,17 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     });
   });
 
-  it('drops the in-flight response and clears loading when the range becomes inverted', async () => {
+  it('aborts the in-flight request, ignores its late answer and clears loading when the range becomes inverted', async () => {
     const inFlightResponses: Deferred<ReturnType<typeof jsonResponse>>[] = [];
+    const abortedRequestIndexes: number[] = [];
     global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === '/api/changes/explorer/facets') return Promise.resolve(jsonResponse(NO_FACETS));
       if (url === '/api/changes/explorer/query') {
         const response = deferred<ReturnType<typeof jsonResponse>>();
-        inFlightResponses.push(response);
-        init?.signal?.addEventListener('abort', () => response.reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+        const requestIndex = inFlightResponses.push(response) - 1;
+        // Left pending on abort, so the late answer below really arrives and only the component's own guard can drop it.
+        init?.signal?.addEventListener('abort', () => abortedRequestIndexes.push(requestIndex));
         return response.promise;
       }
       return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
@@ -987,15 +989,16 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
 
     fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
     await screen.findByText('From must be on or before To.');
+    expect(abortedRequestIndexes, 'the request sent for the valid range is aborted when the range turns invalid').toContain(1);
     await act(async () => {
       inFlightResponses[1].resolve(jsonResponse(lateResponse));
       await Promise.resolve();
     });
 
     expect(inFlightResponses, 'no request for the inverted range').toHaveLength(2);
-    expect(screen.queryByText('late_table'), 'the response sent before the range was inverted must not render').not.toBeInTheDocument();
+    expect(screen.queryByText('late_table'), 'an answer to an aborted request must not render').not.toBeInTheDocument();
     expect(totalChangesCount(), 'the late response must not update Total Changes either').toBe(totalBeforeLateResponse);
-    expect(container.querySelectorAll('.MuiSkeleton-root'), 'loading clears once the request is aborted').toHaveLength(0);
+    expect(container.querySelectorAll('.MuiSkeleton-root'), 'loading clears as soon as the range is invalid').toHaveLength(0);
   });
 
   it('keeps both dates and resets the other filters when a preset is clicked', async () => {
