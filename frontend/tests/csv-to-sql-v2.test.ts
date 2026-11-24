@@ -611,13 +611,17 @@ describe('renderStage2', () => {
   it('stem_lookup declares its (TreeID, StemTagKey) key inline and groups a NULL destination StemTag with blank ones (#577)', () => {
     const s = sql();
     expect(s).toContain(`CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTagKey)) AS`);
-    expect(s).toMatch(/SELECT s\.TreeID,\s+COALESCE\(TRIM\(TRAILING ' ' FROM s\.StemTag\), ''\) AS StemTagKey,/);
+    expect(s).toMatch(
+      /SELECT s\.TreeID,\s+CASE WHEN s\.StemTag IS NULL OR TRIM\(TRAILING ' ' FROM s\.StemTag\) = '' THEN '' ELSE s\.StemTag END AS StemTagKey,/
+    );
     expect(s).toMatch(/GROUP BY s\.TreeID, StemTagKey;/);
   });
 
   it('stem write-back compares the same blank-folded key, so NULL never fails to equal blank (#577)', () => {
     const s = sql();
-    expect(s).toMatch(/sl\.TreeID = t\.TreeID\s+AND sl\.StemTagKey = COALESCE\(TRIM\(TRAILING ' ' FROM t\.StemTag\), ''\)\s+AND sl\.StemCount = 1/);
+    expect(s).toMatch(
+      /sl\.TreeID = t\.TreeID\s+AND sl\.StemTagKey = CASE WHEN t\.StemTag IS NULL OR TRIM\(TRAILING ' ' FROM t\.StemTag\) = '' THEN '' ELSE t\.StemTag END\s+AND sl\.StemCount = 1/
+    );
     expect(s, 'a raw <=> on StemTag treats NULL and blank as different stems').not.toMatch(/sl\.StemTag <=>/);
   });
 
@@ -696,7 +700,7 @@ describe('renderStage5', () => {
   it('check 4: ambiguous stem key (StemCount > 1) uses the same blank-folded key as the Stage 2 lookup (#577)', () => {
     expect(sql()).toMatch(/'Ambiguous stem key'/);
     expect(sql()).toMatch(
-      /sl\.TreeID = `staging_measurements`\.TreeID AND sl\.StemTagKey = COALESCE\(TRIM\(TRAILING ' ' FROM `staging_measurements`\.StemTag\), ''\) AND sl\.StemCount > 1/
+      /sl\.TreeID = `staging_measurements`\.TreeID AND sl\.StemTagKey = CASE WHEN `staging_measurements`\.StemTag IS NULL OR TRIM\(TRAILING ' ' FROM `staging_measurements`\.StemTag\) = '' THEN '' ELSE `staging_measurements`\.StemTag END AND sl\.StemCount > 1/
     );
   });
 

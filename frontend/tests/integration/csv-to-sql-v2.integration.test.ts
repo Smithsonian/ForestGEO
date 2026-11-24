@@ -1891,6 +1891,8 @@ const FIRST_MISSING_TAG_STEM_ID = 201;
 const SECOND_MISSING_TAG_STEM_ID = 202;
 const NEW_TREE_FOR_MISSING_TAG_TAG = 'NEW577';
 const SPACE_ONLY_STEM_TAG = ' ';
+const LETTER_STEM_TAG = 'A';
+const LETTER_WITH_TRAILING_SPACE_STEM_TAG = 'A ';
 const QUADRAT_A2_ID = 2;
 const LIVING_TSM_CODE = 'LI';
 const LIVING_TSM_ID = 3;
@@ -1903,13 +1905,15 @@ interface DestinationEngine {
   databaseSlug: string;
   serverOptions: TestDbServerOptions;
   expectedVersion: RegExp;
+  noPadCollation: string;
 }
 
 const MYSQL_DESTINATION: DestinationEngine = {
   label: 'MySQL 8.0.36',
   databaseSlug: 'mysql',
   serverOptions: testDbServerOptions(),
-  expectedVersion: /^8\.0\.36\b/
+  expectedVersion: /^8\.0\.36\b/,
+  noPadCollation: 'utf8mb4_0900_ai_ci'
 };
 
 const MARIADB_DESTINATION: DestinationEngine | null = MARIADB_PORT
@@ -1917,7 +1921,8 @@ const MARIADB_DESTINATION: DestinationEngine | null = MARIADB_PORT
       label: 'MariaDB 10.4',
       databaseSlug: 'mariadb',
       serverOptions: { ...testDbServerOptions(), port: Number(MARIADB_PORT) },
-      expectedVersion: /^10\.4\.\d+-MariaDB/
+      expectedVersion: /^10\.4\.\d+-MariaDB/,
+      noPadCollation: 'utf8mb4_general_nopad_ci'
     }
   : null;
 
@@ -1935,6 +1940,7 @@ interface MissingTagScenario {
   name: string;
   incomingStemTag: string;
   seededStems: SeededStem[];
+  noPadDestination?: boolean;
   expected: MissingTagOutcome;
 }
 
@@ -2021,6 +2027,20 @@ const MISSING_TAG_SCENARIOS: MissingTagScenario[] = [
     expected: { kind: 'rejects', reasons: [AMBIGUOUS_STEM_KEY_REASON] }
   },
   {
+    name: 'NO PAD destination, blank tag, one space-only stem in the same quadrat: retains it',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [{ stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: SPACE_ONLY_STEM_TAG, quadratId: QUADRAT_A1_ID }],
+    noPadDestination: true,
+    expected: { kind: 'retains-existing-stem', stemId: FIRST_MISSING_TAG_STEM_ID }
+  },
+  {
+    name: "NO PAD destination, tag 'A', one 'A ' stem in the same quadrat: adds a stem, because only blank tags are folded",
+    incomingStemTag: LETTER_STEM_TAG,
+    seededStems: [{ stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: LETTER_WITH_TRAILING_SPACE_STEM_TAG, quadratId: QUADRAT_A1_ID }],
+    noPadDestination: true,
+    expected: { kind: 'creates-new-stem' }
+  },
+  {
     name: "tag '1', one '1' stem and one NULL stem in the same quadrat: retains the tagged stem",
     incomingStemTag: FIRST_STEM_TAG,
     seededStems: [
@@ -2052,6 +2072,12 @@ async function dropDestinationDatabase(destination: mysql.Connection, databaseNa
   } finally {
     await destination.end();
   }
+}
+
+// A destination whose Stem.StemTag, and the staging tables the artifact creates, compare without padding.
+async function makeDestinationNoPad(destination: mysql.Connection, databaseName: string, noPadCollation: string): Promise<void> {
+  await destination.query(`ALTER DATABASE \`${databaseName}\` CHARACTER SET utf8mb4 COLLATE ${noPadCollation}`);
+  await destination.query(`ALTER TABLE Stem MODIFY StemTag varchar(32) CHARACTER SET utf8mb4 COLLATE ${noPadCollation} DEFAULT NULL`);
 }
 
 async function seedMissingTagTree(destination: mysql.Connection, seededStems: SeededStem[]): Promise<void> {
@@ -2130,6 +2156,7 @@ describe.each(DESTINATION_ENGINES)('#577 missing stem tags on $label: NULL and b
   });
 
   it.each(MISSING_TAG_SCENARIOS)('$name', async scenario => {
+    if (scenario.noPadDestination) await makeDestinationNoPad(destination, databaseName, engine.noPadCollation);
     await seedMissingTagTree(destination, scenario.seededStems);
     const incomingTreeTag = scenario.seededStems.length === 0 ? NEW_TREE_FOR_MISSING_TAG_TAG : MISSING_TAG_TREE_TAG;
     const incoming = makeMeasurement({
@@ -2192,8 +2219,17 @@ describe.each(DESTINATION_ENGINES)('#577 missing stem tags on $label: NULL and b
       return;
     }
 
-    expect(stemsBefore, diagnostics).toEqual([]);
-    expect(stemsAfter, `one new untagged stem in ${QUADRAT_A1_NAME}; ${diagnostics}`).toHaveLength(1);
-    expect(stemsAfter[0], diagnostics).toMatchObject({ StemID: Number(census2Dbh[0].StemID), StemTag: EMPTY_STEM_TAG, QuadratID: QUADRAT_A1_ID });
+    const existingStemIds = new Set(stemsBefore.map(stem => stem.StemID));
+    const addedStems = stemsAfter.filter(stem => !existingStemIds.has(stem.StemID));
+    expect(
+      stemsAfter.filter(stem => existingStemIds.has(stem.StemID)),
+      `existing stems must not be rewritten; ${diagnostics}`
+    ).toEqual(stemsBefore);
+    expect(addedStems, `exactly one new stem; ${diagnostics}`).toHaveLength(1);
+    expect(addedStems[0], `the new stem carries the incoming tag in ${QUADRAT_A1_NAME} and the census-2 DBH; ${diagnostics}`).toMatchObject({
+      StemID: Number(census2Dbh[0].StemID),
+      StemTag: scenario.incomingStemTag,
+      QuadratID: QUADRAT_A1_ID
+    });
   });
 });
