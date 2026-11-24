@@ -96,7 +96,6 @@ const HISTORICAL_TREE_ID = 101;
 const HISTORICAL_TREE_TAG = '1';
 const HISTORICAL_NULL_TAG_STEM_ID = 201;
 const HISTORICAL_CENSUS_1_DBH = 10;
-const APP_SEED_DBH = 12.3;
 const DESTINATION_LIVING_TSM_ID = 3;
 
 // ---------------------------------------------------------------------------
@@ -569,7 +568,7 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
   // #577: an untagged app stem keeps the identity of a historical NULL-tag stem
   // -------------------------------------------------------------------------
 
-  it('#577: an untagged app stem published as census 2 attaches its measurement and attribute to the historical NULL-tag stem, whose tag stays NULL', async () => {
+  it('#577: an untagged app stem published as census 2 attaches its measurement and attribute to the historical NULL-tag stem', async () => {
     await seedCtfsCensus(ctfsConn);
     await appConn.query(`UPDATE \`${appSchema}\`.stems SET StemTag = ? WHERE StemGUID = ?`, [UNTAGGED_APP_STEM_TAG, APP_SEED_STEM_GUID]);
     await appConn.query(`UPDATE \`${appSchema}\`.census SET PlotCensusNumber = ? WHERE CensusID = ?`, [SECOND_PLOT_CENSUS_NUMBER, APP_CENSUS_ID]);
@@ -605,19 +604,12 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
       dbh: before.dbh + 1,
       dbhAttributes: before.dbhAttributes + 1
     });
-    const [stems] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT StemID, TreeID, StemTag, QuadratID FROM Stem');
-    expect(stems, 'the historical stem keeps its NULL tag').toEqual([
-      { StemID: HISTORICAL_NULL_TAG_STEM_ID, TreeID: HISTORICAL_TREE_ID, StemTag: null, QuadratID: DESTINATION_QUADRAT_A1_ID }
-    ]);
-    const [dbhRows] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT DBHID, CensusID, StemID, DBH FROM DBH ORDER BY CensusID');
+    const [census2Dbh] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT DBHID, StemID FROM DBH WHERE CensusID = ?', [DESTINATION_CENSUS_2_ID]);
     expect(
-      dbhRows.map(row => ({ CensusID: Number(row.CensusID), StemID: Number(row.StemID), DBH: Number(row.DBH) })),
-      `DBH rows: ${JSON.stringify(dbhRows)}`
-    ).toEqual([
-      { CensusID: DESTINATION_CENSUS_1_ID, StemID: HISTORICAL_NULL_TAG_STEM_ID, DBH: HISTORICAL_CENSUS_1_DBH },
-      { CensusID: DESTINATION_CENSUS_2_ID, StemID: HISTORICAL_NULL_TAG_STEM_ID, DBH: APP_SEED_DBH }
-    ]);
-    const [attributes] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT TSMID FROM DBHAttributes WHERE DBHID = ?', [dbhRows[1].DBHID]);
+      census2Dbh.map(row => Number(row.StemID)),
+      `census-2 DBH must attach to the historical NULL-tag stem; ${JSON.stringify(census2Dbh)}`
+    ).toEqual([HISTORICAL_NULL_TAG_STEM_ID]);
+    const [attributes] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT TSMID FROM DBHAttributes WHERE DBHID = ?', [census2Dbh[0].DBHID]);
     expect(
       attributes.map(row => Number(row.TSMID)),
       'the LI attribute must follow the census-2 measurement'

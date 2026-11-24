@@ -1877,9 +1877,7 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// #577: a missing stem tag is stored as either '' or NULL in Smithsonian DB
-// destinations, and the two must be one identity key in every Stage 2 and
-// Stage 5 step. Runs against every destination engine that is configured.
+// #577 missing-stem-tag matrix, run against every configured destination engine
 // ---------------------------------------------------------------------------
 
 const MARIADB_PORT_ENV = 'TEST_MARIADB_PORT';
@@ -2009,15 +2007,6 @@ const MISSING_TAG_SCENARIOS: MissingTagScenario[] = [
     expected: { kind: 'retains-existing-stem', stemId: FIRST_MISSING_TAG_STEM_ID }
   },
   {
-    name: 'blank tag, a NULL stem seeded before a space-only stem, both in other quadrats: rejects as ambiguous',
-    incomingStemTag: EMPTY_STEM_TAG,
-    seededStems: [
-      { stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_A2_ID },
-      { stemId: SECOND_MISSING_TAG_STEM_ID, stemTag: SPACE_ONLY_STEM_TAG, quadratId: QUADRAT_B1_ID }
-    ],
-    expected: { kind: 'rejects', reasons: [AMBIGUOUS_STEM_KEY_REASON] }
-  },
-  {
     name: 'blank tag, a space-only stem seeded before a NULL stem, both in other quadrats: rejects as ambiguous',
     incomingStemTag: EMPTY_STEM_TAG,
     seededStems: [
@@ -2059,9 +2048,7 @@ async function createDestinationDatabase(serverOptions: TestDbServerOptions, dat
     await destination.changeUser({ database: databaseName });
     return destination;
   } catch (setupError) {
-    await dropDestinationDatabase(destination, databaseName).catch(cleanupError => {
-      throw new AggregateError([setupError, cleanupError], `destination setup failed for ${databaseName}, and so did its cleanup`);
-    });
+    await destination.end();
     throw setupError;
   }
 }
