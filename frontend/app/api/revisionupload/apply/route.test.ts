@@ -20,6 +20,8 @@ import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writ
 // the route's recomputed hash provably the same function, not just two
 // implementations that happen to agree today.
 import { computeInvalidRowsIntegrityHash, REVISION_UPLOAD_FILE_ID } from '../shared/invalidrowintegrity';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
+import { TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 
 const REVISION_TRANSACTION_ID = 'tx-1';
 const MATCHED_PLAN_HASH = 'plan-hash-matched';
@@ -769,7 +771,7 @@ describe('POST /api/revisionupload/apply', () => {
     );
 
     expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-    await expect(response.json()).resolves.toEqual({ error: clearError.message });
+    await expect(response.json()).resolves.toEqual({ error: INTERNAL_SERVER_ERROR_MESSAGE });
     expect(mocks.discardTransaction).toHaveBeenCalledWith(REVISION_TRANSACTION_ID, FLAG_CLEAR_FAILED_REASON);
     expect(mocks.refreshMeasurementViewsForScope, 'no derived refresh may follow a discarded transaction').not.toHaveBeenCalled();
   });
@@ -1219,6 +1221,35 @@ describe('POST /api/revisionupload/apply', () => {
     expect((beforeState[0].row as Record<string, unknown>).deletedDuplicateCoreMeasurementIDs).toEqual([]);
   });
 
+  it('tells the user the changes may already be saved when the apply COMMIT outcome is unknown', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) return [buildDbRow(101)];
+      return [];
+    });
+    mocks.applyEditInTransaction.mockImplementation(async () => ({
+      updatedIDs: { CoreMeasurementID: 101 },
+      applyErrors: [],
+      editOperationID: null,
+      validationPending: true
+    }));
+    const commitOutcomeUnknown = new TransactionCommitOutcomeUnknownError('tx-1', 'connection_lost', 1000);
+    mocks.withTransaction.mockImplementation(
+      async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) => {
+        await fn({ query: (sql: string, params?: unknown[]) => mocks.executeQuery(sql, params), id: 'tx-1' });
+        throw commitOutcomeUnknown;
+      }
+    );
+
+    const response = await POST(buildRequest(buildValidBody({ matchedRows: [{ coreMeasurementID: 101, csvRow: { dbh: '12.5' } }] })));
+    const text = await response.text();
+    console.log('[revision apply commit outcome unknown]', response.status, text);
+
+    expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(JSON.parse(text)).toEqual({ error: commitOutcomeUnknown.message });
+  });
+
   it('rolls back the entire batch and surfaces 500 when the writer throws mid-loop', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
@@ -1260,7 +1291,7 @@ describe('POST /api/revisionupload/apply', () => {
 
     expect(response.status).toBe(500);
     const body = await response.json();
-    expect(body.error).toBe('writer blew up on row 2');
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(2);
     expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
   });

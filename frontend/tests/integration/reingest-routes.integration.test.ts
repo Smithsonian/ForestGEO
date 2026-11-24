@@ -14,6 +14,7 @@ import {
 import { assertIngestionOutcome, INGESTION_ERROR_CODE, readIngestionOutcome } from '../setup/ingestion-outcome';
 import { buildFailedMeasurementsSelectQuery, INGESTION_ERROR_SOURCE, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { HTTPResponses } from '@/config/macros';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 const AUTH_USER_EMAIL = 'integration-runner@forestgeo.test';
 
@@ -1014,7 +1015,7 @@ describe('Reingest route integration tests', () => {
         const body = await response.json();
 
         expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-        expect(body.error).toContain(INJECTED_FAILURE_MESSAGE);
+        expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
       } finally {
         spy.mockRestore();
       }
@@ -1114,7 +1115,7 @@ describe('Reingest route integration tests', () => {
       const response = await bulkReingestGet(makeBulkRequest('GET'), makeBulkParams());
       const body = await response.json();
       expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-      expect(body.error).toContain(INJECTED_FAILURE_MESSAGE);
+      expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     } finally {
       spy.mockRestore();
     }

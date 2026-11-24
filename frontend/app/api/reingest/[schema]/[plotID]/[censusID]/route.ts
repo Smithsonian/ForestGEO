@@ -9,6 +9,7 @@ import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
 import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -16,6 +17,13 @@ export const runtime = 'nodejs';
 
 const MAX_SIGNED_INT = 2147483647;
 const REINGESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes for bulk reingestion
+
+class ReingestionInProgressError extends Error {
+  constructor(schema: string, plotID: number, censusID: number) {
+    super(`Another reingestion is already in progress for ${schema} plot ${plotID} census ${censusID}`);
+    this.name = 'ReingestionInProgressError';
+  }
+}
 
 interface ReingestionSourceRow {
   CoreMeasurementID: number;
@@ -533,7 +541,7 @@ export async function POST(
 
     return new NextResponse(
       JSON.stringify({
-        error: e.message,
+        error: INTERNAL_SERVER_ERROR_MESSAGE,
         responseMessage: 'Failed to prepare reingestion - check logs for details'
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
@@ -574,7 +582,7 @@ export async function GET(
         // Without this, two concurrent requests can corrupt each other's staging data.
         const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, tx.id, REINGESTION_TIMEOUT_MS);
         if (!lockAcquired) {
-          throw new Error(`Another reingestion is already in progress for ${schema} plot ${plotID} census ${censusID}`);
+          throw new ReingestionInProgressError(schema, plotID, censusID);
         }
 
         // Step 1: Stage failed rows to temporarymeasurements
@@ -642,11 +650,14 @@ export async function GET(
       { status: HTTPResponses.OK }
     );
   } catch (e: any) {
+    if (e instanceof ReingestionInProgressError) {
+      return NextResponse.json({ error: e.message }, { status: HTTPResponses.CONFLICT });
+    }
     ailogger.error('Reingestion failed:', e);
 
     return new NextResponse(
       JSON.stringify({
-        error: e.message,
+        error: INTERNAL_SERVER_ERROR_MESSAGE,
         responseMessage: 'Reingestion failed - check logs for details'
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }

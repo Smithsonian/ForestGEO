@@ -135,6 +135,7 @@ import {
   type ViewDataShowOption,
   type ViewDataStateCounts
 } from '@/config/viewdata';
+import { FOREIGN_KEY_CONFLICT_MESSAGE } from '@/lib/errorhelpers';
 
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
 const SEARCH_WORD_SEPARATOR = ' ';
@@ -1032,7 +1033,7 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       const error = await response.json().catch(() => ({}));
       if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
         setSnackbar({
-          children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`,
+          children: `Error: ${FOREIGN_KEY_CONFLICT_MESSAGE}`,
           severity: 'error'
         });
       } else {

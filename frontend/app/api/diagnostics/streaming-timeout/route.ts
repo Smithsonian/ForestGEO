@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import ailogger from '@/ailogger';
 import { STREAMING_RESPONSE_HEADERS } from '@/components/processors/streamingvalidation';
 import { isAllowedStreamingDiagnosticHost, normalizeStreamingDiagnosticHost } from './helpers';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 export const runtime = 'nodejs';
 
@@ -134,7 +135,7 @@ export async function GET(request: Request) {
       headers: STREAMING_RESPONSE_HEADERS
     });
   } catch (error: any) {
-    ailogger.error('[StreamingDiagnostic] Failed to start diagnostic stream:', error.message);
-    return NextResponse.json({ error: error.message, success: false }, { status: 500 });
+    ailogger.error('[StreamingDiagnostic] Failed to start diagnostic stream:', toError(error));
+    return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE, success: false }, { status: 500 });
   }
 }

@@ -6,6 +6,7 @@ import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -57,8 +58,8 @@ async function handler(request: NextRequest, context: RouteContext) {
     await collapseCensus(connectionManager, { schema, censusID: Number(censusID) });
     return new NextResponse(JSON.stringify({ responseMessage: 'Processing procedure executed' }), { status: HTTPResponses.OK });
   } catch (e: any) {
-    ailogger.error(`Collapser failed for census ${censusID}:`, e.message);
-    return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    ailogger.error(`Collapser failed for census ${censusID}:`, toError(e));
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }
 

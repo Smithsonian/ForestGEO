@@ -8,6 +8,7 @@ import { generateShortBatchID } from '@/config/utils';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -266,7 +267,7 @@ async function handler(_request: NextRequest, context: RouteContext) {
     if (transactionID) {
       await connectionManager.rollbackTransaction(transactionID);
     }
-    return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     // Always close connection to prevent connection leaks
     try {

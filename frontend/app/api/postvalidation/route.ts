@@ -4,6 +4,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -37,7 +38,7 @@ async function handler(request: NextRequest, _context: RouteContext) {
   } catch (e: unknown) {
     const error = e instanceof Error ? e : new Error(String(e));
     ailogger.error('[postvalidation API] Error:', error);
-    return new NextResponse(JSON.stringify({ error: error.message }), {
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   } finally {

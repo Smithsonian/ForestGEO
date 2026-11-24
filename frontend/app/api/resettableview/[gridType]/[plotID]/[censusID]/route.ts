@@ -103,7 +103,7 @@ async function processReset(gridType: string, schema: string, _plotID: number, _
     if (transactionID) {
       await connectionManager.rollbackTransaction(transactionID);
     }
-    return NextResponse.json({ error: 'Reset operation failed', details: e.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: 'Reset operation failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

@@ -16,6 +16,7 @@ import {
 import type { QuadratCsvRow } from '@/lib/provisioning/types';
 import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
 import { claimReferenceTableReplacement, recordReferenceTableReplacement } from '@/lib/uploads/upload-session-replacement-marker';
+import { UploadRefusedError } from '@/lib/uploads/upload-refused-error';
 
 const MAX_LISTED_ISSUES = 20;
 
@@ -218,7 +219,7 @@ export async function writeQuadratUpload(
     });
 
     if (blockingQuadrats.length > 0) {
-      throw new Error(
+      throw new UploadRefusedError(
         `Clean re-upload refused: active quadrat rows in plot ${plotID} are already referenced ` +
           `by stems for the following QuadratName value(s): ${formatBlockedValues(blockingQuadratNames)}. ` +
           `Deleting quadrats would cascade-delete stems and downstream measurements even if the same names appear in the upload. ` +
@@ -243,7 +244,7 @@ export async function writeQuadratUpload(
     // The placeholder-grid guard protects revisions only: in a clean session the existing rows
     // were written by this session's earlier files, not by grid provisioning.
     if (uploadMode === UploadMode.REVISIONS && quadratRevisionAppendsDivergentSet(existingActiveNames, incomingNames)) {
-      throw new Error(buildDivergentQuadratUploadError(plotID, existingActiveNames, incomingNames.length));
+      throw new UploadRefusedError(buildDivergentQuadratUploadError(plotID, existingActiveNames, incomingNames.length));
     }
 
     const incomingNamesLower = new Set(incomingGeometry.map(row => row.quadratName.toLowerCase()));

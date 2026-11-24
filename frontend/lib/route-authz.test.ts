@@ -20,6 +20,7 @@ const NON_ADMIN_ROLE = 'field crew';
 
 const SCHEMA_QUARANTINED_CODE = 'SCHEMA_QUARANTINED';
 const SCHEMA_GATE_UNAVAILABLE_CODE = 'SCHEMA_GATE_UNAVAILABLE';
+const CATALOG_FAILURE_MESSAGE = "Table 'catalog.schema_quarantine' doesn't exist";
 const QUARANTINED_SCHEMA = 'forestgeo_serc';
 const quarantineRecord = { schemaName: QUARANTINED_SCHEMA, quarantinedAt: new Date('2026-09-02T18:04:11Z'), reason: 'DRIFT', runRef: null };
 const quarantinedRequest = () => new NextRequest(`http://localhost/api/validations/validationlist?schema=${QUARANTINED_SCHEMA}`);
@@ -210,14 +211,17 @@ describe('withRouteAuthz', () => {
 
   it('fails closed with 503 SCHEMA_GATE_UNAVAILABLE when the lookup throws', async () => {
     vi.mocked(auth).mockResolvedValueOnce({ user: { userStatus: NON_ADMIN_ROLE, sites: [{ schemaName: QUARANTINED_SCHEMA }] } } as any);
-    vi.mocked(findSchemaQuarantine).mockRejectedValueOnce(new Error('catalog unreachable'));
+    vi.mocked(findSchemaQuarantine).mockRejectedValueOnce(new Error(CATALOG_FAILURE_MESSAGE));
     const handler = makeHandler();
     const wrapped = withRouteAuthz('validations/validationlist', handler, { schema: fromQuery('schema') });
 
     const res = await wrapped(quarantinedRequest(), emptyCtx);
 
     expect(res.status).toBe(HTTP_SERVICE_UNAVAILABLE);
-    expect((await res.json()).code).toBe(SCHEMA_GATE_UNAVAILABLE_CODE);
+    const text = await res.text();
+    console.log('[schema gate unavailable body]', text);
+    expect(JSON.parse(text).code).toBe(SCHEMA_GATE_UNAVAILABLE_CODE);
+    expect(text, 'the catalog error stays in the log').not.toContain(CATALOG_FAILURE_MESSAGE);
     expect(handler).not.toHaveBeenCalled();
   });
 });

@@ -10,6 +10,8 @@ import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-fa
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { auth } from '@/auth';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { getErrorCode } from '@/lib/errorhelpers';
+import { TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -106,7 +108,9 @@ async function handler(request: NextRequest, context: RouteContext) {
       return new NextResponse(JSON.stringify({ error: setupError.message, fileID, batchID }), { status: HTTPResponses.CONFLICT });
     }
     ailogger.error(`Setup phase failed for ${fileID}-${batchID}: ${setupError.message}`, setupError);
-    return new NextResponse(JSON.stringify({ error: `Setup failed: ${setupError.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
+    return new NextResponse(JSON.stringify({ error: setupFailureSummary(getErrorCode(setupError)), fileID, batchID }), {
+      status: HTTPResponses.SERVICE_UNAVAILABLE
+    });
   }
 
   // withRouteAuthz already authenticated this request and does not forward the
@@ -141,7 +145,9 @@ async function handler(request: NextRequest, context: RouteContext) {
       );
     }
     ailogger.error(`Ingestion failed for ${fileID}-${batchID}: ${error.message}`, error);
-    return new NextResponse(JSON.stringify({ error: `Ingestion failed: ${error.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
+    return new NextResponse(JSON.stringify({ error: ingestionFailureMessage(error), fileID, batchID }), {
+      status: HTTPResponses.SERVICE_UNAVAILABLE
+    });
   }
 
   if (result.noDataFound) {
@@ -164,6 +170,12 @@ async function handler(request: NextRequest, context: RouteContext) {
     }),
     { status: HTTPResponses.OK }
   );
+}
+
+/** These two errors carry app-written text; any other failure may carry SQL text. */
+function ingestionFailureMessage(error: unknown): string {
+  if (error instanceof BatchFamilyScopeError || error instanceof TransactionCommitOutcomeUnknownError) return error.message;
+  return setupFailureSummary(getErrorCode(error));
 }
 
 export const GET = withRouteAuthz('setupbulkprocedure/[fileID]/[batchID]', handler, { schema: fromQuery('schema') });

@@ -50,6 +50,7 @@ import ailogger from '@/ailogger';
 import connectionmanager from '@/lib/db/connectionmanager';
 import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 function makeRequest(body: unknown) {
   const req = new Request('http://localhost/api', {
@@ -250,7 +251,7 @@ describe('batchedupload POST route', () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.message).toMatch(/Database error/i);
-    expect(body.error).toMatch(/boom/);
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
 
     const logErr = ((ailogger as any).error ?? (ailogger as any).default?.error) as ReturnType<typeof vi.fn>;
     expect(logErr).toHaveBeenCalled();

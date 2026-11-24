@@ -5,7 +5,7 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
-import { toError } from '@/lib/errorhelpers';
+import { toError, INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
@@ -101,7 +101,7 @@ async function handler(request: NextRequest, context: RouteContext) {
     return new NextResponse(
       JSON.stringify({
         error: 'Failure transfer to unresolved coremeasurements detected.',
-        details: error instanceof ChangelogWriteError ? 'Unable to record failure history. Please retry.' : error.message
+        details: error instanceof ChangelogWriteError ? 'Unable to record failure history. Please retry.' : INTERNAL_SERVER_ERROR_MESSAGE
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

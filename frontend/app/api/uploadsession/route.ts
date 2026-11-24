@@ -156,7 +156,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ailogger.error('[UploadSession API] POST error:', error);
 
     // Check for concurrent upload error
-    if (error instanceof UploadSessionOwnershipError || error.message?.includes('Another upload is in progress')) {
+    if (error instanceof UploadSessionOwnershipError) {
       return new NextResponse(JSON.stringify({ error: error.message }), {
         status: HTTPResponses.CONFLICT
       });
@@ -168,7 +168,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
-    return new NextResponse(JSON.stringify({ error: error.message || 'Failed to create session' }), {
+    return new NextResponse(JSON.stringify({ error: 'Failed to create session' }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }
@@ -230,7 +230,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
   } catch (error: any) {
     ailogger.error('[UploadSession API] GET error:', error);
-    return new NextResponse(JSON.stringify({ error: error.message || 'Failed to get session' }), {
+    return new NextResponse(JSON.stringify({ error: 'Failed to get session' }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }
@@ -315,7 +315,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     }
   } catch (error: any) {
     ailogger.error('[UploadSession API] PATCH error:', error);
-    return new NextResponse(JSON.stringify({ error: error.message || 'Failed to update session' }), {
+    return new NextResponse(JSON.stringify({ error: 'Failed to update session' }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }
@@ -374,7 +374,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     });
   } catch (error: any) {
     ailogger.error('[UploadSession API] DELETE error:', error);
-    return new NextResponse(JSON.stringify({ error: error.message || 'Failed to cancel session' }), {
+    return new NextResponse(JSON.stringify({ error: 'Failed to cancel session' }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }

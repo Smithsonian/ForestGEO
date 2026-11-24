@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { CALLER_OWNS_TRANSACTION_SQL, CLEAR_CALLER_TRANSACTION_SQL, FLAG_CLEAR_FAILED_REASON } from '@/lib/ingestion/bulk-ingestion-call';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 const ROUTE_TRANSACTION_ID = 'txn-1';
 
@@ -253,7 +254,7 @@ describe('reingestsinglefailure API route', () => {
 
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toBe(clearError.message);
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     expect(mockConnectionManager.discardTransaction).toHaveBeenCalledWith(ROUTE_TRANSACTION_ID, FLAG_CLEAR_FAILED_REASON);
     expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
     expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith(ROUTE_TRANSACTION_ID);

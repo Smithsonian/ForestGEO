@@ -6,6 +6,7 @@ import { GET, POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { UNSUPPORTED_LOGIC_OPERATOR_MESSAGE } from '@/components/processors/processormacros';
 import { VIEW_DATA_REQUEST_ERRORS } from '@/lib/viewdata/measurementssummaryquery';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // ---------- Hoisted spies (usable inside vi.mock factories) ----------
 const mapperSpies = vi.hoisted(() => {
@@ -395,7 +396,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();
-    expect(body.error).toMatch(/columns fail/i);
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
 
     expect(exec).toHaveBeenCalledTimes(1);
   });

@@ -20,6 +20,8 @@ import { insertOrUpdate } from '@/components/processors/processorhelperfunctions
 import { HTTPResponses } from '@/config/macros';
 import { BULKCRUD_REJECTION_MESSAGES } from '@/lib/bulkcrud/required-context';
 import { CALLER_OWNS_TRANSACTION_SQL, CLEAR_CALLER_TRANSACTION_SQL, FLAG_CLEAR_FAILED_REASON } from '@/lib/ingestion/bulk-ingestion-call';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
+import ailogger from '@/ailogger';
 
 vi.mock('@/lib/db/connectionmanager', async () => {
   // Pull whatever the environment currently exports
@@ -374,8 +376,8 @@ describe('bulkcrud POST route', () => {
 
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toMatch(/Failed to record INSERT audit for coremeasurements/i);
-    expect(body.error).toMatch(/unifiedchangelog deadlock/i);
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
+    expect(JSON.stringify(body)).not.toMatch(/unifiedchangelog deadlock/i);
 
     expect(commitSpy).not.toHaveBeenCalled();
     expect(rollbackSpy).toHaveBeenCalledWith('tx-audit-fail');
@@ -527,6 +529,7 @@ describe('bulkcrud POST route', () => {
     const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
     const closeSpy = vi.spyOn(instance, 'closeConnection');
 
+    const loggedError = vi.spyOn(ailogger, 'error').mockImplementation(() => undefined);
     // Force the summary path so we hit executeQuery early
     const req = makeRequest({
       gridType: 'measurementssummary',
@@ -553,8 +556,8 @@ describe('bulkcrud POST route', () => {
     const res = await POST(req);
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.responseMessage).toMatch(/Failure in connecting to SQL/i);
-    expect(body.error).toMatch(/kaboom/i);
+    expect(body).toEqual({ error: INTERNAL_SERVER_ERROR_MESSAGE });
+    expect(loggedError).toHaveBeenCalledWith(expect.stringContaining('bulkcrud'), expect.objectContaining({ message: expect.stringMatching(/kaboom/i) }));
 
     expect(beginSpy).toHaveBeenCalledTimes(1);
     expect(execSpy).toHaveBeenCalled(); // failed on first insert exec
@@ -589,7 +592,7 @@ describe('bulkcrud POST route', () => {
     );
 
     expect(res.status).toBe(500);
-    expect((await res.json()).error).toBe(clearError.message);
+    expect((await res.json()).error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     expect(discardSpy).toHaveBeenCalledWith('tx-flag', FLAG_CLEAR_FAILED_REASON);
     expect(rollbackSpy).toHaveBeenCalledWith('tx-flag');
     expect(commitSpy).not.toHaveBeenCalled();

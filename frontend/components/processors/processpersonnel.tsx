@@ -3,10 +3,11 @@ import { PersonnelResult, RoleResult } from '@/lib/db/definitions/personnel';
 import { SpecialProcessingProps } from '@/config/macros';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
 import { auditHandleUpsertResult } from '@/lib/changelog/reference-audit';
+import { UploadRefusedError } from '@/lib/uploads/upload-refused-error';
 
 export async function processPersonnel(props: Readonly<SpecialProcessingProps>) {
   const { connectionManager, rowData, schema, transactionID, fullName } = props;
-  if (!rowData.role) throw createError('Row data does not contain a role property - role is required for personnel processing', { rowData });
+  if (!rowData.role) throw new UploadRefusedError('A personnel row has no role. Every personnel row needs a role.');
   if (!transactionID) {
     throw createError('processPersonnel requires a transactionID so personnel/role writes and their changelog audit share the caller transaction', {
       rowData

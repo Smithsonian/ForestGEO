@@ -289,8 +289,7 @@ export async function POST(request: NextRequest) {
     ailogger.error('Error executing query:', error);
     return new NextResponse(
       JSON.stringify({
-        error: 'Failed to execute query',
-        details: error.message
+        error: 'Failed to execute query'
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

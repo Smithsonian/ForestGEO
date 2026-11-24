@@ -256,8 +256,7 @@ export async function GET(
 
     return NextResponse.json(
       {
-        error: 'Failed to retrieve aggregated dashboard metrics',
-        details: error.message
+        error: 'Failed to retrieve aggregated dashboard metrics'
       },
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

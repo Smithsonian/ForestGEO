@@ -13,6 +13,7 @@ import ailogger from '@/ailogger';
 import { runGlobalCleanup, startPeriodicCleanup, stopPeriodicCleanup, getCleanupStatus } from '@/config/startupcleanup';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 export const runtime = 'nodejs';
 
@@ -31,7 +32,7 @@ export async function GET(): Promise<NextResponse> {
     });
   } catch (error: any) {
     ailogger.error('[Cleanup Status API] GET error:', error);
-    return new NextResponse(JSON.stringify({ error: error.message }), {
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   } catch (error: any) {
     ailogger.error('[Cleanup Status API] POST error:', error);
-    return new NextResponse(JSON.stringify({ error: error.message }), {
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }
