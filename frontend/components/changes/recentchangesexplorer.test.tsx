@@ -990,6 +990,7 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     fireEvent.change(screen.getByLabelText(TO_LABEL), { target: { value: '2026-11-05' } });
     await screen.findByText('From must be on or before To.');
     expect(abortedRequestIndexes, 'the request sent for the valid range is aborted when the range turns invalid').toContain(1);
+    expect(container.querySelectorAll('.MuiSkeleton-root'), 'loading clears while the aborted request is still unanswered').toHaveLength(0);
     await act(async () => {
       inFlightResponses[1].resolve(jsonResponse(lateResponse));
       await Promise.resolve();
@@ -998,7 +999,6 @@ describe('RecentChangesExplorer: date range (#592 §8.2, D9)', () => {
     expect(inFlightResponses, 'no request for the inverted range').toHaveLength(2);
     expect(screen.queryByText('late_table'), 'an answer to an aborted request must not render').not.toBeInTheDocument();
     expect(totalChangesCount(), 'the late response must not update Total Changes either').toBe(totalBeforeLateResponse);
-    expect(container.querySelectorAll('.MuiSkeleton-root'), 'loading clears as soon as the range is invalid').toHaveLength(0);
   });
 
   it('keeps both dates and resets the other filters when a preset is clicked', async () => {
