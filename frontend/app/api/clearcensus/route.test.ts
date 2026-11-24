@@ -199,7 +199,7 @@ describe('POST /api/clearcensus', () => {
     // The target scope is resolved first, then an advisory lock serializes all
     // clears for that plot; the latest guard runs only after the lock is held.
     expect(String(statements[0])).toMatch(/SELECT PlotID FROM myschema\.census/i);
-    expect(acquireLock).toHaveBeenCalledWith('clear-census:myschema:1', 'tx-1', 0);
+    expect(acquireLock).toHaveBeenCalledWith('clear-census:myschema', 'tx-1', 0);
     expect(statements[1]).toMatch(/MAX\(PlotCensusNumber\)/i);
     expect(statements[1]).toMatch(/FOR UPDATE/i);
     expect(acquireLock.mock.invocationCallOrder[0]).toBeLessThan(exec.mock.invocationCallOrder[1]);
@@ -391,7 +391,7 @@ describe('POST /api/clearcensus', () => {
     expect(begin).toHaveBeenCalledTimes(1);
     expect(exec).toHaveBeenCalledTimes(2);
     expect(exec.mock.calls[1][2]).toBe('tx-409');
-    expect(acquireLock).toHaveBeenCalledWith('clear-census:myschema:1', 'tx-409', 0);
+    expect(acquireLock).toHaveBeenCalledWith('clear-census:myschema', 'tx-409', 0);
     expect(rollback).toHaveBeenCalledWith('tx-409');
     expect(commit).not.toHaveBeenCalled();
   });
@@ -412,7 +412,22 @@ describe('POST /api/clearcensus', () => {
     expect(commit).not.toHaveBeenCalled();
   });
 
-  it('409 when another clear holds the plot lock; it never runs the latest-census check or procedure', async () => {
+  it('takes one site-wide lock, so clears of two different plots exclude each other (#507: clearcensusfull counts every plot)', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const acquireLock = vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValue(false);
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValue('tx-plot');
+    vi.spyOn(cm, 'rollbackTransaction').mockResolvedValue(undefined);
+    vi.spyOn(cm, 'executeQuery')
+      .mockResolvedValueOnce([{ PlotID: 1 }])
+      .mockResolvedValueOnce([{ PlotID: 2 }]);
+
+    await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=full'));
+    await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=13&type=full'));
+
+    expect(acquireLock.mock.calls.map(call => call[0])).toEqual(['clear-census:myschema', 'clear-census:myschema']);
+  });
+
+  it('409 when another clear holds the site lock; it never runs the latest-census check or procedure', async () => {
     const cm = (ConnectionManager as any).getInstance();
     vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-locked');
     const acquireLock = vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(false);
@@ -423,7 +438,7 @@ describe('POST /api/clearcensus', () => {
     const res = await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=msmts'));
 
     expect(res.status).toBe(HTTPResponses.CONFLICT);
-    expect(acquireLock).toHaveBeenCalledWith('clear-census:myschema:4', 'tx-locked', 0);
+    expect(acquireLock).toHaveBeenCalledWith('clear-census:myschema', 'tx-locked', 0);
     expect(exec).toHaveBeenCalledTimes(1);
     expect(rollback).toHaveBeenCalledWith('tx-locked');
     expect(commit).not.toHaveBeenCalled();
