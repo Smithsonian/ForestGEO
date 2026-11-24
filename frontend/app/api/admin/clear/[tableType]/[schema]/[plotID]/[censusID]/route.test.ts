@@ -153,6 +153,23 @@ describe('admin clear failedmeasurements route', () => {
     expect(mockCommitTransaction).not.toHaveBeenCalled();
   });
 
+  it('DELETE re-runs the whole transaction once when the audited walk deadlocks, and commits only the retry', async () => {
+    const deadlock = Object.assign(new Error('Deadlock found when trying to get lock'), { code: 'ER_LOCK_DEADLOCK', errno: 1213 });
+    deleteWithAuditMock.mockRejectedValueOnce(deadlock).mockResolvedValueOnce(2);
+    mockBeginTransaction.mockResolvedValueOnce('tx-attempt-1').mockResolvedValueOnce('tx-attempt-2');
+
+    const response = await DELETE(
+      new Request('http://localhost/api/admin/clear/failedmeasurements/forestgeo_testing/1/2', { method: 'DELETE' }) as any,
+      makeParams()
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).recordsCleared).toBe(2);
+    expect(deleteWithAuditMock.mock.calls.map(call => call[7])).toEqual(['tx-attempt-1', 'tx-attempt-2']);
+    expect(mockRollbackTransaction.mock.calls).toEqual([['tx-attempt-1']]);
+    expect(mockCommitTransaction.mock.calls).toEqual([['tx-attempt-2']]);
+  });
+
   it('DELETE of staging rows deletes them unaudited and reports the affected-row count', async () => {
     mockExecuteQuery.mockResolvedValueOnce({ affectedRows: 4 });
 
