@@ -92,6 +92,20 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
+      # Smithsonian DB destinations still run MariaDB 10.4; the publish-artifact
+      # tests replay their stem-matching matrix against it (#577).
+      mariadb:
+        image: mariadb:10.4
+        env:
+          MARIADB_ROOT_PASSWORD: testpassword
+          TZ: UTC
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -ptestpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
 
     steps:
       - uses: actions/checkout@v4
@@ -111,6 +125,7 @@ jobs:
         env:
           TEST_DB_HOST: 127.0.0.1
           TEST_DB_PORT: "3306"
+          TEST_MARIADB_PORT: "3307"
           TEST_DB_USER: root
           TEST_DB_PASSWORD: testpassword
           # A non-UTC runtime is the only one in which a mysql2 pool missing

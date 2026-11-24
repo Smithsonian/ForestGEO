@@ -58,6 +58,13 @@ export const TREE_LOOKUP_AMBIGUITY_INDEX_NAME = 'idxTreeCount';
 // Stage 5 check 1b reason. The operator manual quotes this text verbatim.
 export const EMPTY_STEMTAG_COLLISION_REASON = 'Empty StemTag collides with another stem under same Tree+Quadrat';
 
+// Destinations store an untagged stem as '' or NULL (#577), and a PAD SPACE destination groups a
+// spaces-only tag with them while a NO PAD staging table would not, so all three fold to ''. Other tags
+// stay as stored; OCTET_LENGTH keeps a collation that ignores a character from calling a tag blank.
+export function stemTagMatchKey(stemTagColumn: string): string {
+  return `CASE WHEN ${stemTagColumn} IS NULL OR OCTET_LENGTH(TRIM(TRAILING ' ' FROM ${stemTagColumn})) = 0 THEN '' ELSE ${stemTagColumn} END`;
+}
+
 // Live scalars only — resprout/cursor scratch removed with the pivot.
 // `_viewfulltable_installed` is populated by the Stage 0 ViewFullTable probe.
 // `_tag_col_width` is populated by the Stage 0 Tree.Tag width probe.
@@ -444,9 +451,9 @@ export interface Stage2Options {
  *      Groups by (Tag, SpeciesID, SubSpeciesID)
  *   6. UPDATE measurementsTable JOIN tree_lookup (TreeCount = 1) with NULL-safe <=> on SubSpeciesID
  *      to write back TreeID
- *   7. CREATE TEMPORARY TABLE stem_lookup — its (TreeID, StemTag) key declared inline in the CREATE
+ *   7. CREATE TEMPORARY TABLE stem_lookup — its (TreeID, StemTagKey) key declared inline in the CREATE
  *      (never ALTER TABLE, which would commit the load transaction); scoped via Stem → Quadrat → @target_plot_id
- *   8. UPDATE measurementsTable JOIN stem_lookup with NULL-safe StemTag (<=>) and StemCount = 1
+ *   8. UPDATE measurementsTable JOIN stem_lookup on the same StemTagKey and StemCount = 1
  *      to write back StemID
  *   9. UPDATE attributesTable JOIN TSMAttributes to resolve TSMID
  *
@@ -552,19 +559,19 @@ export function renderStage2(opts: Stage2Options): string {
   -- Stem lookup (also plot-scoped). The key is declared here because ALTER TABLE or
   -- CREATE INDEX on a temporary table would implicitly commit the load transaction.
   DROP TEMPORARY TABLE IF EXISTS stem_lookup;
-  CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTag)) AS
+  CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTagKey)) AS
     SELECT s.TreeID,
-           s.StemTag,
+           ${stemTagMatchKey('s.StemTag')} AS StemTagKey,
            MIN(s.StemID) AS StemID,
            COUNT(*)      AS StemCount
       FROM Stem s
       JOIN Quadrat q ON q.QuadratID = s.QuadratID
      WHERE q.PlotID = @target_plot_id
-     GROUP BY s.TreeID, s.StemTag;
+     GROUP BY s.TreeID, StemTagKey;
 
   UPDATE ${m} t
     JOIN stem_lookup sl ON sl.TreeID = t.TreeID
-                       AND sl.StemTag <=> t.StemTag
+                       AND sl.StemTagKey = ${stemTagMatchKey('t.StemTag')}
                        AND sl.StemCount = 1
     SET t.StemID = sl.StemID;
 
@@ -646,11 +653,12 @@ ${appendErr(
        OR QuadratName IS NULL OR QuadratName = '' OR ExactDate IS NULL`
 )}
 
-  -- Stage 5 check 1b: empty StemTag is a destination contract failure when the
-  -- destination tree already has another stem with the same empty tag. The app
-  -- stores stems.StemTag with default '' NOT NULL, so legitimate "no stem tag"
-  -- rows arrive here as empty strings; reject duplicates explicitly rather than
-  -- silently colliding on the <=> match in Stage 2/7.
+  -- Stage 5 check 1b: an untagged row that Stage 2 could not match is a destination
+  -- contract failure when its tree and quadrat already hold an untagged stem ('' or
+  -- NULL), or when the batch stages two untagged stems there. The app stores
+  -- stems.StemTag with default '' NOT NULL, so legitimate "no stem tag" rows arrive
+  -- here as empty strings; reject these explicitly rather than let Stage 7 insert a
+  -- second untagged identity.
   DROP TEMPORARY TABLE IF EXISTS _stage5_empty_stemtag;
   CREATE TEMPORARY TABLE _stage5_empty_stemtag AS
     SELECT TreeID, QuadratID, COUNT(*) AS cnt
@@ -711,7 +719,7 @@ ${appendErr(
   'Ambiguous stem key',
   `TreeID IS NOT NULL AND EXISTS (
        SELECT 1 FROM stem_lookup sl
-       WHERE sl.TreeID = ${m}.TreeID AND sl.StemTag <=> ${m}.StemTag AND sl.StemCount > 1
+       WHERE sl.TreeID = ${m}.TreeID AND sl.StemTagKey = ${stemTagMatchKey(`${m}.StemTag`)} AND sl.StemCount > 1
      )`
 )}
 
