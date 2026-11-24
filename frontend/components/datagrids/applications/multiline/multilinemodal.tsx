@@ -58,7 +58,6 @@ export default function MultilineModal(props: MultilineModalProps) {
 
   useEffect(() => {
     if (isManualEntryFormOpen) return;
-    setChangesSubmitted(false);
     setOpenValidations(false);
     setOpenUpdateValidations(false);
     setTempReviewState(ReviewStates.VALIDATE);

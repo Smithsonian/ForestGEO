@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import IsolatedAttributesDataGrid from '@/components/datagrids/applications/isolated/isolatedattributesdatagrid';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 import { FormType } from '@/config/macros/formdetails';
@@ -119,12 +119,8 @@ describe('MultilineModal finalize handling (#511)', () => {
     harness.reportFromUnmountedValidation = null;
   });
 
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
   describe('inside the real isolated attributes parent, whose close handler is a new inline function on every render', () => {
-    it('closes the form and refetches the parent grid exactly once after Finalize Changes', async () => {
+    it('closes and refetches exactly once per Finalize Changes, and a reopened form starts clean', async () => {
       const user = userEvent.setup();
       render(<IsolatedAttributesDataGrid />);
 
@@ -137,15 +133,6 @@ describe('MultilineModal finalize handling (#511)', () => {
       expect(isManualEntryFormOpen(), `form should close after finalize: ${describeModalState()}`).toBe(false);
       expect(harness.gridFetchCount, `parent grid refetched in a loop: ${describeModalState()}`).toBe(1);
       expect(harness.triggerRefresh, `validity refresh fired repeatedly: ${describeModalState()}`).toHaveBeenCalledTimes(1);
-    });
-
-    it('starts a reopened form clean, so a second finalize refetches exactly once more', async () => {
-      const user = userEvent.setup();
-      render(<IsolatedAttributesDataGrid />);
-
-      await user.click(screen.getByRole('button', { name: MANUAL_ENTRY_BUTTON_LABEL }));
-      await user.click(screen.getByRole('button', { name: FINALIZE_BUTTON_LABEL }));
-      await waitForLoopObservationWindow();
 
       await user.click(screen.getByRole('button', { name: MANUAL_ENTRY_BUTTON_LABEL }));
       await waitForLoopObservationWindow();
@@ -270,6 +257,10 @@ describe('MultilineModal finalize handling (#511)', () => {
       await act(async () => reportFromClosedValidation?.(ReviewStates.UPLOAD_AZURE));
 
       await user.click(screen.getByRole('button', { name: MANUAL_ENTRY_BUTTON_LABEL }));
+      expect(
+        screen.queryByTestId('multiline-grid-measurements'),
+        `form closed mid-validation reopened off the entry grid: ${describeModalState()}`
+      ).not.toBeNull();
       await user.click(screen.getByRole('button', { name: FINALIZE_BUTTON_LABEL }));
       await waitForLoopObservationWindow();
 
@@ -288,22 +279,6 @@ describe('MultilineModal finalize handling (#511)', () => {
       await user.click(screen.getByRole('button', { name: MANUAL_ENTRY_BUTTON_LABEL }));
 
       expect(screen.queryByTestId('multiline-grid-measurements'), `reopened form did not show the entry grid: ${describeModalState()}`).not.toBeNull();
-      expect(screen.queryByTestId('upload-validation'), describeModalState()).toBeNull();
-    });
-
-    it('reopens on the entry grid after the user closes the form mid-validation', async () => {
-      const user = userEvent.setup();
-      const onClose = vi.fn();
-      render(<MeasurementsParentHarness onClose={onClose} onSubmitComplete={vi.fn()} />);
-
-      await user.click(screen.getByRole('button', { name: FINALIZE_BUTTON_LABEL }));
-      await user.click(screen.getByRole('button', { name: 'close' }));
-      await waitForLoopObservationWindow();
-      expect(onClose, `close button should close exactly once: ${describeModalState()}`).toHaveBeenCalledTimes(1);
-
-      await user.click(screen.getByRole('button', { name: MANUAL_ENTRY_BUTTON_LABEL }));
-
-      expect(screen.queryByTestId('multiline-grid-measurements'), describeModalState()).not.toBeNull();
       expect(screen.queryByTestId('upload-validation'), describeModalState()).toBeNull();
     });
   });

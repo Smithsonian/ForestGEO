@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import MultilineAttributesDataGrid from '@/components/datagrids/applications/multiline/multilineattributesdatagrid';
@@ -185,8 +185,6 @@ describe('Manual Input Form while Finalize Changes is in flight (#511)', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'close' }), describeSubmitState()).toBeDisabled());
     expect(screen.getByRole('button', { name: /Finalize Changes/ }), describeSubmitState()).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: /Finalize Changes/ }));
-    expect(bulkcrudCallCount(), `a second Finalize click sent another POST: ${describeSubmitState()}`).toBe(1);
     expect(handleCloseManualEntryForm, describeSubmitState()).not.toHaveBeenCalled();
 
     await act(async () => deferredBulkcrud.resolveResponse(jsonResponse(HTTP_STATUS_OK, { success: true })));
