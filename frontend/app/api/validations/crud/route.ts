@@ -34,6 +34,9 @@ const VALIDATIONS_TABLE_NAME = 'sitespecificvalidations';
 const SELECT_VALIDATION_FOR_UPDATE = 'SELECT * FROM ??.sitespecificvalidations WHERE ValidationID = ? FOR UPDATE';
 
 const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/;
+const NON_OBJECT_BODY_MESSAGE = 'Request body must be a JSON object';
+const INVALID_VALIDATION_ID_MESSAGE = 'validationID must be a positive integer';
+const NO_WRITABLE_FIELD_MESSAGE = 'No writable validation fields were provided';
 /** The only columns a client may set; ValidationID is the database's to assign and never moves. */
 const WRITABLE_VALIDATION_COLUMNS: ReadonlySet<string> = new Set([
   'ProcedureName',
@@ -65,7 +68,8 @@ async function readValidationBody(request: NextRequest): Promise<ValidationProce
 }
 
 /** Keeps only the exact writable column names the mapper produced, so no spelling of a key can reach SET. */
-function writableValidationColumns(mappedData: Record<string, unknown>): Record<string, unknown> {
+function writableValidationColumns(validationProcedure: ValidationProceduresRDS): Record<string, unknown> {
+  const [mappedData] = MapperFactory.getMapper<ValidationProceduresRDS, Record<string, unknown>>('sitespecificvalidations').demapData([validationProcedure]);
   return Object.fromEntries(Object.entries(mappedData).filter(([column]) => WRITABLE_VALIDATION_COLUMNS.has(column)));
 }
 
@@ -73,14 +77,14 @@ function validationNotFound(validationID: unknown): NextResponse {
   return NextResponse.json({ error: `Validation ${String(validationID)} not found` }, { status: HTTPResponses.NOT_FOUND });
 }
 
-async function readValidationRow(
+async function readValidationRows(
   connectionManager: ConnectionManager,
   schema: string,
   validationID: unknown,
   transactionID: string
-): Promise<ChangelogRowState | undefined> {
+): Promise<ChangelogRowState[]> {
   const rows: ChangelogRowState[] = await connectionManager.executeQuery(safeFormatQuery(schema, SELECT_VALIDATION_FOR_UPDATE), [validationID], transactionID);
-  return rows[0] ? normalizeBitColumns(rows[0]) : undefined;
+  return rows.map(normalizeBitColumns);
 }
 
 export async function GET(request: NextRequest) {
@@ -108,24 +112,18 @@ export async function POST(request: NextRequest) {
   if (authError) return authError;
 
   const validationProcedure = await readValidationBody(request);
-  if (!validationProcedure) return invalidRequest('Request body must be a JSON object');
+  if (!validationProcedure) return invalidRequest(NON_OBJECT_BODY_MESSAGE);
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
+  const writableColumns = writableValidationColumns(validationProcedure);
+  if (Object.keys(writableColumns).length === 0) return invalidRequest(NO_WRITABLE_FIELD_MESSAGE);
   const connectionManager = ConnectionManager.getInstance();
   const transactionID = await connectionManager.beginTransaction();
   try {
-    const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
-    const writableColumns = writableValidationColumns(mapper.demapData([validationProcedure])[0]);
-    if (Object.keys(writableColumns).length === 0) {
-      await connectionManager.rollbackTransaction(transactionID);
-      return invalidRequest('No writable validation fields were provided');
-    }
-
     const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.sitespecificvalidations`, writableColumns]);
     const results = await connectionManager.executeQuery(insertQuery, [], transactionID);
     const insertID = results.insertId;
-    const insertedRow = await readValidationRow(connectionManager, schema, insertID, transactionID);
-    if (!insertedRow) throw new Error(`Validation ${insertID} vanished immediately after its own insert`);
+    const [insertedRow] = await readValidationRows(connectionManager, schema, insertID, transactionID);
     await recordMutation({
       tx: toTxExecutor(connectionManager, transactionID),
       schema,
@@ -152,22 +150,17 @@ export async function PATCH(request: NextRequest) {
   if (authError) return authError;
 
   const validationProcedure = await readValidationBody(request);
-  if (!validationProcedure) return invalidRequest('Request body must be a JSON object');
+  if (!validationProcedure) return invalidRequest(NON_OBJECT_BODY_MESSAGE);
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
   const validationID = parseValidationID(validationProcedure.validationID);
-  if (validationID === undefined) return invalidRequest('validationID must be a positive integer');
+  if (validationID === undefined) return invalidRequest(INVALID_VALIDATION_ID_MESSAGE);
+  const writableColumns = writableValidationColumns(validationProcedure);
+  if (Object.keys(writableColumns).length === 0) return invalidRequest(NO_WRITABLE_FIELD_MESSAGE);
   const connectionManager = ConnectionManager.getInstance();
   const transactionID = await connectionManager.beginTransaction();
   try {
-    const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
-    const writableColumns = writableValidationColumns(mapper.demapData([validationProcedure])[0]);
-    if (Object.keys(writableColumns).length === 0) {
-      await connectionManager.rollbackTransaction(transactionID);
-      return invalidRequest('No writable validation fields were provided');
-    }
-
-    const priorRow = await readValidationRow(connectionManager, schema, validationID, transactionID);
+    const [priorRow] = await readValidationRows(connectionManager, schema, validationID, transactionID);
     if (!priorRow) {
       await connectionManager.rollbackTransaction(transactionID);
       return validationNotFound(validationID);
@@ -175,8 +168,7 @@ export async function PATCH(request: NextRequest) {
 
     const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, writableColumns, validationID]);
     await connectionManager.executeQuery(updateQuery, [], transactionID);
-    const updatedRow = await readValidationRow(connectionManager, schema, validationID, transactionID);
-    if (!updatedRow) throw new Error(`Validation ${validationID} vanished during its own update`);
+    const [updatedRow] = await readValidationRows(connectionManager, schema, validationID, transactionID);
     await recordMutation({
       tx: toTxExecutor(connectionManager, transactionID),
       schema,
@@ -204,15 +196,15 @@ export async function DELETE(request: NextRequest) {
   if (authError) return authError;
 
   const validationProcedure = await readValidationBody(request);
-  if (!validationProcedure) return invalidRequest('Request body must be a JSON object');
+  if (!validationProcedure) return invalidRequest(NON_OBJECT_BODY_MESSAGE);
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
   const validationID = parseValidationID(validationProcedure.validationID);
-  if (validationID === undefined) return invalidRequest('validationID must be a positive integer');
+  if (validationID === undefined) return invalidRequest(INVALID_VALIDATION_ID_MESSAGE);
   const connectionManager = ConnectionManager.getInstance();
   const transactionID = await connectionManager.beginTransaction();
   try {
-    const priorRow = await readValidationRow(connectionManager, schema, validationID, transactionID);
+    const [priorRow] = await readValidationRows(connectionManager, schema, validationID, transactionID);
     if (!priorRow) {
       await connectionManager.rollbackTransaction(transactionID);
       return validationNotFound(validationID);

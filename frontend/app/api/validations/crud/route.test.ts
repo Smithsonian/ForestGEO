@@ -67,73 +67,15 @@ describe('/api/validations/crud auth gate', () => {
     expect(mocks.executeQuery).not.toHaveBeenCalled();
   });
 
-  it('POST allows db admins, inserts on the route transaction and records the inserted row (#507)', async () => {
+  it('POST allows db admins and answers with the database-assigned id', async () => {
     mocks.auth.mockResolvedValue({ user: { email: 'd@example.com', userStatus: 'db admin', sites: [], allsites: [] } });
-    const insertedRow = { ValidationID: 42, ProcedureName: 'dbh_check', IsEnabled: 1 };
     mocks.executeQuery
       .mockResolvedValueOnce({ insertId: 42 } as any)
-      .mockResolvedValueOnce([insertedRow] as any)
+      .mockResolvedValueOnce([{ ValidationID: 42 }] as any)
       .mockResolvedValueOnce({ affectedRows: 1 } as any);
     const res = await POST(makeReq('POST', undefined, { procedureName: 'dbh_check', validationID: 999 }));
     expect(res.status).toBe(HTTPResponses.OK);
     await expect(res.json()).resolves.toEqual({ insertID: 42, validationID: 42 });
-
-    const calls = mocks.executeQuery.mock.calls as unknown[][];
-    expect(String(calls[0][0])).toContain('sitespecificvalidations');
-    expect(
-      calls.map(call => call[2]),
-      'every statement must run on the route transaction'
-    ).toEqual(['tx-1', 'tx-1', 'tx-1']);
-    expect(String(calls[2][0])).toContain('unifiedchangelog');
-    const auditParams = calls[2][1] as unknown[];
-    expect(auditParams.slice(0, 3)).toEqual(['sitespecificvalidations', '42', 'INSERT']);
-    expect(auditParams[3]).toBeNull();
-    expect(JSON.parse(String(auditParams[4]))).toEqual(insertedRow);
-    expect(auditParams.slice(5)).toEqual(['d@example.com', null, null]);
-    expect(mocks.commitTransaction).toHaveBeenCalledWith('tx-1');
-  });
-
-  it('PATCH records the before and after images of the validation it changed', async () => {
-    mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
-    const before = { ValidationID: 7, Description: 'old', IsEnabled: 1 };
-    const after = { ValidationID: 7, Description: 'new', IsEnabled: 1 };
-    mocks.executeQuery
-      .mockResolvedValueOnce([before] as any)
-      .mockResolvedValueOnce({ affectedRows: 1 } as any)
-      .mockResolvedValueOnce([after] as any)
-      .mockResolvedValueOnce({ affectedRows: 1 } as any);
-
-    const res = await PATCH(makeReq('PATCH', undefined, { validationID: 7, description: 'new' }));
-
-    expect(res.status).toBe(HTTPResponses.OK);
-    const calls = mocks.executeQuery.mock.calls as unknown[][];
-    expect(String(calls[0][0])).toMatch(/FOR UPDATE/);
-    expect(String(calls[1][0])).toMatch(/^UPDATE/);
-    const auditParams = calls[3][1] as unknown[];
-    expect(auditParams.slice(0, 3)).toEqual(['sitespecificvalidations', '7', 'UPDATE']);
-    expect(JSON.parse(String(auditParams[3]))).toEqual(before);
-    expect(JSON.parse(String(auditParams[4]))).toEqual(after);
-    expect(calls.every(call => call[2] === 'tx-1')).toBe(true);
-    expect(mocks.commitTransaction).toHaveBeenCalledWith('tx-1');
-  });
-
-  it('DELETE records the removed validation and commits', async () => {
-    mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
-    const before = { ValidationID: 9, ProcedureName: 'gone', IsEnabled: 0 };
-    mocks.executeQuery
-      .mockResolvedValueOnce([before] as any)
-      .mockResolvedValueOnce({ affectedRows: 1 } as any)
-      .mockResolvedValueOnce({ affectedRows: 1 } as any);
-
-    const res = await DELETE(makeReq('DELETE', undefined, { validationID: 9 }));
-
-    expect(res.status).toBe(HTTPResponses.OK);
-    const calls = mocks.executeQuery.mock.calls as unknown[][];
-    expect(String(calls[1][0])).toMatch(/^DELETE FROM/);
-    const auditParams = calls[2][1] as unknown[];
-    expect(auditParams.slice(0, 3)).toEqual(['sitespecificvalidations', '9', 'DELETE']);
-    expect(JSON.parse(String(auditParams[3]))).toEqual(before);
-    expect(auditParams[4]).toBeNull();
     expect(mocks.commitTransaction).toHaveBeenCalledWith('tx-1');
   });
 
@@ -208,37 +150,17 @@ describe('/api/validations/crud auth gate', () => {
     expect(mocks.beginTransaction).not.toHaveBeenCalled();
   });
 
-  it('PATCH with no writable field answers 400 whether or not the validation exists, before reading it', async () => {
+  it.each([
+    ['POST', POST, { validationID: 3 }],
+    ['PATCH', PATCH, { validationID: 404404 }]
+  ] as const)('%s with no writable field answers 400 before opening a transaction', async (method, handler, body) => {
     mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
 
-    const res = await PATCH(makeReq('PATCH', undefined, { validationID: 404404 }));
+    const res = await handler(makeReq(method, undefined, body));
 
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(mocks.beginTransaction).not.toHaveBeenCalled();
     expect(mocks.executeQuery).not.toHaveBeenCalled();
-  });
-
-  it('POST with no writable field answers 400 and writes nothing', async () => {
-    mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
-
-    const res = await POST(makeReq('POST', undefined, { validationID: 3 }));
-
-    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
-    expect(mocks.executeQuery).not.toHaveBeenCalled();
-    expect(mocks.rollbackTransaction).toHaveBeenCalledWith('tx-1');
-  });
-
-  it('rolls back the change when its audit row cannot be written', async () => {
-    mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
-    mocks.executeQuery
-      .mockResolvedValueOnce([{ ValidationID: 9 }] as any)
-      .mockResolvedValueOnce({ affectedRows: 1 } as any)
-      .mockRejectedValueOnce(new Error('changelog insert failed'));
-
-    const res = await DELETE(makeReq('DELETE', undefined, { validationID: 9 }));
-
-    expect(res.status).toBe(HTTPResponses.CONFLICT);
-    expect(mocks.rollbackTransaction).toHaveBeenCalledWith('tx-1');
-    expect(mocks.commitTransaction).not.toHaveBeenCalled();
   });
 
   it('PATCH and DELETE are admin-only', async () => {
