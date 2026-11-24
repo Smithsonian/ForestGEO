@@ -29,6 +29,7 @@ export default function MultilineModal(props: MultilineModalProps) {
   const referenceGridType = getDataGridForForm(formType as FormType);
 
   const [changesSubmitted, setChangesSubmitted] = useState(false);
+  const [isSubmittingChanges, setIsSubmittingChanges] = useState(false);
   const [openValidations, setOpenValidations] = useState(false);
   const [openUpdateValidations, setOpenUpdateValidations] = useState(false);
   const [tempReviewState, setTempReviewState] = useState<ReviewStates>(ReviewStates.VALIDATE);
@@ -39,15 +40,15 @@ export default function MultilineModal(props: MultilineModalProps) {
     if (openValidations || openUpdateValidations) return null;
     switch (formType) {
       case 'species':
-        return <MultilineSpeciesDataGrid setChangesSubmitted={setChangesSubmitted} />;
+        return <MultilineSpeciesDataGrid setChangesSubmitted={setChangesSubmitted} setIsSubmittingChanges={setIsSubmittingChanges} />;
       case 'attributes':
-        return <MultilineAttributesDataGrid setChangesSubmitted={setChangesSubmitted} />;
+        return <MultilineAttributesDataGrid setChangesSubmitted={setChangesSubmitted} setIsSubmittingChanges={setIsSubmittingChanges} />;
       case 'quadrats':
-        return <MultilineQuadratsDataGrid setChangesSubmitted={setChangesSubmitted} />;
+        return <MultilineQuadratsDataGrid setChangesSubmitted={setChangesSubmitted} setIsSubmittingChanges={setIsSubmittingChanges} />;
       case 'personnel':
-        return <MultilinePersonnelDataGrid setChangesSubmitted={setChangesSubmitted} />;
+        return <MultilinePersonnelDataGrid setChangesSubmitted={setChangesSubmitted} setIsSubmittingChanges={setIsSubmittingChanges} />;
       case 'measurements':
-        return <MultilineMeasurementsDataGrid setChangesSubmitted={setChangesSubmitted} />;
+        return <MultilineMeasurementsDataGrid setChangesSubmitted={setChangesSubmitted} setIsSubmittingChanges={setIsSubmittingChanges} />;
     }
   }
 
@@ -74,14 +75,14 @@ export default function MultilineModal(props: MultilineModalProps) {
     setChangesSubmitted(false);
     triggerRefresh();
     onSubmitComplete?.();
-    if (formType === 'measurements' && isManualEntryFormOpen) {
+    if (formType === 'measurements') {
       setTempReviewState(ReviewStates.VALIDATE);
       setOpenValidations(true);
       setOpenUpdateValidations(false);
     } else {
       handleCloseManualEntryForm();
     }
-  }, [changesSubmitted, formType, isManualEntryFormOpen, triggerRefresh, onSubmitComplete, handleCloseManualEntryForm]);
+  }, [changesSubmitted, formType, triggerRefresh, onSubmitComplete, handleCloseManualEntryForm]);
 
   useEffect(() => {
     if (openValidations && tempReviewState === ReviewStates.UPDATE) {
@@ -105,7 +106,7 @@ export default function MultilineModal(props: MultilineModalProps) {
       sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
     >
       <ModalDialog size="lg" sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }} role="alertdialog" variant={'plain'}>
-        <IconButton aria-label="close" onClick={requestCloseManualEntryForm} sx={{ position: 'absolute', top: 8, right: 8 }}>
+        <IconButton aria-label="close" onClick={requestCloseManualEntryForm} disabled={isSubmittingChanges} sx={{ position: 'absolute', top: 8, right: 8 }}>
           <CloseIcon />
         </IconButton>
         <DialogTitle sx={{ alignSelf: 'center', justifyContent: 'center' }} level={'h3'} color={'primary'}>

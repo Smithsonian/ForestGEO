@@ -16,7 +16,7 @@ import { getSelectableOptionsForField, loadSelectableOptions, selectableAutocomp
 import ailogger from '@/ailogger';
 
 export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
-  const { setChangesSubmitted } = props;
+  const { setChangesSubmitted, setIsSubmittingChanges } = props;
   const initialMeasurementsFormRow = {
     id: 0,
     tag: '',
@@ -105,6 +105,7 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
         setRefresh={setRefresh}
         initialRow={initialMeasurementsFormRow}
         setChangesSubmitted={setChangesSubmitted}
+        setIsSubmittingChanges={setIsSubmittingChanges}
       />
     </Box>
   ) : (

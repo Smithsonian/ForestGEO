@@ -18,7 +18,7 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
   type ExtendedRoleRDS = RoleRDS & {
     inputValue?: string;
   };
-  const { setChangesSubmitted } = props;
+  const { setChangesSubmitted, setIsSubmittingChanges } = props;
   const initialPersonnelRow = {
     id: 0,
     firstname: '',
@@ -173,6 +173,7 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
         setRefresh={setRefresh}
         initialRow={initialPersonnelRow}
         setChangesSubmitted={setChangesSubmitted}
+        setIsSubmittingChanges={setIsSubmittingChanges}
       />
     </Box>
   );
