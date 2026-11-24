@@ -302,6 +302,7 @@ interface FailedMeasurementRow {
 interface ValidationFailureCapture {
   signalMessage: string | null;
   failedMeasurementRows: FailedMeasurementRow[];
+  lockHeldAfterRun?: boolean;
 }
 
 function isMeasurementTraceRow(row: CallbackRowDataPacket | OkPacket): row is CallbackRowDataPacket {
@@ -329,28 +330,51 @@ function runStatementCollectingTraceRows(callbackConnection: CallbackConnection,
  * and the EXIT HANDLER rolls staging back, so the rows can only be captured from the stream. The artifact is
  * self-contained (Stage 0 sets its own session variables), so running it on a separate session is faithful.
  * signalMessage is null when the artifact completed without a SIGNAL.
+ *
+ * Closing a session frees its named locks, so lockToProbe is checked on the publishing session while it is still
+ * open: lockHeldAfterRun is true only if the procedure returned without releasing it.
  */
 async function executeArtifactCapturingValidationFailure(
   databaseName: string,
   sql: string,
-  serverOptions: TestDbServerOptions = testDbServerOptions()
+  serverOptions: TestDbServerOptions = testDbServerOptions(),
+  lockToProbe?: string
 ): Promise<ValidationFailureCapture> {
   const callbackConnection = createCallbackConnection({ ...serverOptions, database: databaseName });
   const failedMeasurementRows: FailedMeasurementRow[] = [];
   try {
-    for (const statement of splitSqlFile(sql)) {
-      if (!statement.sql.trim()) continue;
-      try {
-        await runStatementCollectingTraceRows(callbackConnection, statement.sql, failedMeasurementRows);
-      } catch (error) {
-        if (isUserSignal(error)) return { signalMessage: error.message, failedMeasurementRows };
-        throw error;
-      }
-    }
-    return { signalMessage: null, failedMeasurementRows };
+    const signalMessage = await runArtifactUntilSignal(callbackConnection, sql, failedMeasurementRows);
+    if (!lockToProbe) return { signalMessage, failedMeasurementRows };
+    return { signalMessage, failedMeasurementRows, lockHeldAfterRun: await isLockHeldBySession(callbackConnection, lockToProbe) };
   } finally {
     await new Promise<void>(resolve => callbackConnection.end(() => resolve()));
   }
+}
+
+async function runArtifactUntilSignal(
+  callbackConnection: CallbackConnection,
+  sql: string,
+  failedMeasurementRows: FailedMeasurementRow[]
+): Promise<string | null> {
+  for (const statement of splitSqlFile(sql)) {
+    if (!statement.sql.trim()) continue;
+    try {
+      await runStatementCollectingTraceRows(callbackConnection, statement.sql, failedMeasurementRows);
+    } catch (error) {
+      if (isUserSignal(error)) return error.message;
+      throw error;
+    }
+  }
+  return null;
+}
+
+function isLockHeldBySession(callbackConnection: CallbackConnection, lockName: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    callbackConnection.query<CallbackRowDataPacket[]>('SELECT IS_USED_LOCK(?) AS holder', [lockName], (error, rows) => {
+      if (error) return reject(error);
+      resolve(rows[0].holder !== null);
+    });
+  });
 }
 
 async function countRows(connection: mysql.Connection, table: string, where = ''): Promise<number> {
@@ -2009,10 +2033,17 @@ const MISSING_TAG_SCENARIOS: MissingTagScenario[] = [
 
 async function createDestinationDatabase(serverOptions: TestDbServerOptions, databaseName: string): Promise<mysql.Connection> {
   const destination = await mysql.createConnection({ ...serverOptions });
-  await destination.query(`DROP DATABASE IF EXISTS \`${databaseName}\``);
-  await destination.query(`CREATE DATABASE \`${databaseName}\` CHARACTER SET utf8mb4`);
-  await destination.changeUser({ database: databaseName });
-  return destination;
+  try {
+    await destination.query(`DROP DATABASE IF EXISTS \`${databaseName}\``);
+    await destination.query(`CREATE DATABASE \`${databaseName}\` CHARACTER SET utf8mb4`);
+    await destination.changeUser({ database: databaseName });
+    return destination;
+  } catch (setupError) {
+    await dropDestinationDatabase(destination, databaseName).catch(cleanupError => {
+      throw new AggregateError([setupError, cleanupError], `destination setup failed for ${databaseName}, and so did its cleanup`);
+    });
+    throw setupError;
+  }
 }
 
 async function dropDestinationDatabase(destination: mysql.Connection, databaseName: string): Promise<void> {
@@ -2070,11 +2101,6 @@ async function selectAttributeTsmIdsForDbh(destination: mysql.Connection, dbhId:
   return rows.map(row => Number(row.TSMID));
 }
 
-async function isLockFree(destination: mysql.Connection, lockName: string): Promise<boolean> {
-  const [rows] = await destination.query<mysql.RowDataPacket[]>('SELECT IS_FREE_LOCK(?) AS isFree', [lockName]);
-  return Number(rows[0].isFree) === 1;
-}
-
 describe(`#577 MariaDB 10.4 leg (runs when ${MARIADB_PORT_ENV} is set; configured: ${Boolean(MARIADB_DESTINATION)})`, () => {
   it(`is configured in CI: ${MARIADB_PORT_ENV} must be set whenever ${CONTINUOUS_INTEGRATION_ENV} is`, () => {
     if (!process.env[CONTINUOUS_INTEGRATION_ENV]) return;
@@ -2127,7 +2153,8 @@ describe.each(DESTINATION_ENGINES)('#577 missing stem tags on $label: NULL and b
         measurementRows: [incoming],
         attributeRows: [makeAttribute(incoming.CoreMeasurementID, LIVING_TSM_CODE)]
       }),
-      engine.serverOptions
+      engine.serverOptions,
+      LOCK_NAME_CENSUS_2
     );
 
     const stemsAfter = await selectStemsOfTree(destination, incomingTreeTag);
@@ -2137,7 +2164,7 @@ describe.each(DESTINATION_ENGINES)('#577 missing stem tags on $label: NULL and b
     expect(await selectDbhRowsForCensus(destination, SEEDED_CENSUS_1_ID), `historical census-1 DBH rows must survive; ${diagnostics}`).toEqual(
       census1DbhBefore
     );
-    expect(await isLockFree(destination, LOCK_NAME_CENSUS_2), `the export lock must be released; ${diagnostics}`).toBe(true);
+    expect(result.lockHeldAfterRun, `the procedure must release the export lock before returning; ${diagnostics}`).toBe(false);
 
     if (scenario.expected.kind === 'rejects') {
       expect(result.signalMessage, diagnostics).toMatch(/Validation failed/);
@@ -2149,7 +2176,8 @@ describe.each(DESTINATION_ENGINES)('#577 missing stem tags on $label: NULL and b
       return;
     }
 
-    expect(result, `the artifact must commit; ${diagnostics}`).toEqual({ signalMessage: null, failedMeasurementRows: [] });
+    expect(result.signalMessage, `the artifact must commit; ${diagnostics}`).toBeNull();
+    expect(result.failedMeasurementRows, diagnostics).toEqual([]);
     expect(census2Dbh, `exactly one census-2 DBH row; ${diagnostics}`).toHaveLength(1);
     expect(Number(census2Dbh[0].DBH), diagnostics).toBe(CENSUS_2_DBH);
     expect(await selectAttributeTsmIdsForDbh(destination, Number(census2Dbh[0].DBHID)), `the attribute must follow the measurement; ${diagnostics}`).toEqual([
