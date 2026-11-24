@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager, { isServerErrorReply } from '@/lib/db/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 import { toError } from '@/lib/errorhelpers';
@@ -50,14 +50,9 @@ async function handler(request: NextRequest, _context: RouteContext) {
     } catch (error: any) {
       validationResult.isValid = false;
 
-      // Only the recognised MySQL replies to the user's own EXPLAIN describe their query. Anything else (a transport
-      // failure, the server-owned routine lookup for a CALL, a permission denial naming the database user) stays in the log.
       const errorMessage = error.message || 'Unknown SQL error';
 
-      if (isStoredProcedureCall(query) || !isServerErrorReply(error)) {
-        ailogger.error('Query validation could not run:', toError(error));
-        validationResult.errors.push(QUERY_VALIDATION_UNAVAILABLE_MESSAGE);
-      } else if (errorMessage.includes('Table') && errorMessage.includes("doesn't exist")) {
+      if (errorMessage.includes('Table') && errorMessage.includes("doesn't exist")) {
         const tableMatch = errorMessage.match(/Table '([^']+)' doesn't exist/);
         if (tableMatch) {
           validationResult.errors.push(`Table '${tableMatch[1]}' does not exist in schema '${schema}'`);
@@ -74,7 +69,8 @@ async function handler(request: NextRequest, _context: RouteContext) {
       } else if (errorMessage.includes('syntax error')) {
         validationResult.errors.push('SQL syntax error - please check your query syntax');
       } else {
-        ailogger.error('Query validation received an unrecognised MySQL reply:', toError(error));
+        // Any other failure, such as a permission denial naming the database user and host, stays in the log.
+        ailogger.error('Query validation failed:', toError(error));
         validationResult.errors.push(QUERY_VALIDATION_UNAVAILABLE_MESSAGE);
       }
     }

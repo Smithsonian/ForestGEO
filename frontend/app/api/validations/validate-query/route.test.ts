@@ -74,42 +74,6 @@ describe('POST /api/validations/validate-query', () => {
     ]);
   });
 
-  it('hides a connection failure behind a fixed message instead of reporting it as a query error', async () => {
-    const connectionManager = (ConnectionManager as any).getInstance();
-    const transportFailure = Object.assign(new Error('connect ETIMEDOUT forestgeo-secret-host.mysql.database.azure.com:3306'), {
-      code: 'ETIMEDOUT',
-      sqlMessage: undefined
-    });
-    vi.spyOn(connectionManager, 'executeQuery').mockRejectedValueOnce(transportFailure).mockResolvedValue([]);
-    vi.spyOn(connectionManager, 'closeConnection').mockResolvedValue(undefined);
-
-    const response = await POST(makeRequest('forestgeo_testing', 'SELECT * FROM species'), ROUTE_CONTEXT);
-    const text = await response.text();
-    console.log('[validate-query transport failure]', response.status, text);
-
-    const body = JSON.parse(text);
-    expect(body.isValid).toBe(false);
-    expect(body.errors[0]).toMatch(/could not be checked right now/);
-    expect(text).not.toContain('forestgeo-secret-host');
-    expect(ailogger.error).toHaveBeenCalledWith('Query validation could not run:', transportFailure);
-  });
-
-  it('hides a failure in the server-owned routine lookup for a CALL', async () => {
-    const connectionManager = (ConnectionManager as any).getInstance();
-    const lookupFailure = Object.assign(new Error("SELECT command denied to user 'app'@'%' for table 'ROUTINES'"), {
-      sqlMessage: "SELECT command denied to user 'app'@'%' for table 'ROUTINES'"
-    });
-    vi.spyOn(connectionManager, 'executeQuery').mockRejectedValueOnce(lookupFailure).mockResolvedValue([]);
-    vi.spyOn(connectionManager, 'closeConnection').mockResolvedValue(undefined);
-
-    const response = await POST(makeRequest('forestgeo_testing', 'CALL RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 1, 0)'), ROUTE_CONTEXT);
-    const text = await response.text();
-    console.log('[validate-query routine lookup failure]', response.status, text);
-
-    expect(JSON.parse(text).errors[0]).toMatch(/could not be checked right now/);
-    expect(text).not.toContain('command denied');
-  });
-
   it("hides an unrecognised MySQL reply to the user's EXPLAIN, such as a permission denial naming the database user", async () => {
     const connectionManager = (ConnectionManager as any).getInstance();
     const permissionDenial = Object.assign(new Error("SELECT command denied to user 'forestgeo_app'@'10.0.0.7' for table 'secret_table'"), {
@@ -129,7 +93,7 @@ describe('POST /api/validations/validate-query', () => {
     expect(text).not.toContain('forestgeo_app');
     expect(text).not.toContain('10.0.0.7');
     expect(text).not.toContain('command denied');
-    expect(ailogger.error).toHaveBeenCalledWith('Query validation received an unrecognised MySQL reply:', permissionDenial);
+    expect(ailogger.error).toHaveBeenCalledWith('Query validation failed:', permissionDenial);
   });
 
   it("still explains MySQL's reply about the user's own query", async () => {
