@@ -608,6 +608,21 @@ export async function recordDeletedCensusCoreMeasurementsAudit(params: {
 }
 
 /**
+ * Columns reconciliation rewrites that the ingestion snapshot deliberately leaves out of
+ * the image (the #592 export tells upload rows apart by the absence of UserDefinedFields).
+ * They are compared, never recorded, so a change confined to them still yields an UPDATE.
+ */
+const COMPARED_ONLY_COLUMNS = ['UserDefinedFields', 'RawPublishedStemID'] as const;
+
+export interface CoreMeasurementIDSnapshotRow {
+  /** The ingestion-snapshot image recorded as OldRowState/NewRowState. */
+  image: Record<string, unknown>;
+  comparedOnly: Record<string, unknown>;
+}
+
+export type CoreMeasurementsIDSnapshot = Map<number, CoreMeasurementIDSnapshotRow>;
+
+/**
  * Reads exactly `coreMeasurementIDs` under FOR UPDATE, keyed by CoreMeasurementID, in
  * SNAPSHOT_BY_KEY_CHUNK_SIZE slices. The before-image for a rewrite that keeps each row's
  * id (reingestion reconciles new values back onto the original rows, #507).
@@ -616,14 +631,15 @@ export async function snapshotCoreMeasurementsByIDs(
   tx: Pick<BulkIngestionExecutor, 'query'>,
   schema: string,
   coreMeasurementIDs: number[]
-): Promise<CoreMeasurementsScopeSnapshot> {
-  const snapshot: CoreMeasurementsScopeSnapshot = new Map();
+): Promise<CoreMeasurementsIDSnapshot> {
+  const snapshot: CoreMeasurementsIDSnapshot = new Map();
   const uniqueIDs = Array.from(new Set(coreMeasurementIDs));
   for (let start = 0; start < uniqueIDs.length; start += SNAPSHOT_BY_KEY_CHUNK_SIZE) {
     const chunk = uniqueIDs.slice(start, start + SNAPSHOT_BY_KEY_CHUNK_SIZE);
     const sql = safeFormatQuery(
       schema,
-      `SELECT ${COREMEASUREMENTS_SNAPSHOT_COLUMNS.join(', ')}, CAST(IsValidated AS UNSIGNED) AS IsValidated
+      `SELECT ${COREMEASUREMENTS_SNAPSHOT_COLUMNS.join(', ')}, CAST(IsValidated AS UNSIGNED) AS IsValidated,
+         CAST(UserDefinedFields AS CHAR) AS UserDefinedFields, RawPublishedStemID
        FROM ??.coremeasurements
        WHERE CoreMeasurementID IN (${buildInPlaceholders(chunk.length)})
        FOR UPDATE`
@@ -631,13 +647,23 @@ export async function snapshotCoreMeasurementsByIDs(
     try {
       const rows = await tx.query<Record<string, unknown>[]>(sql, chunk);
       for (const row of Array.isArray(rows) ? rows : []) {
-        snapshot.set(Number(row.CoreMeasurementID), row);
+        const image = { ...row };
+        const comparedOnly: Record<string, unknown> = {};
+        for (const column of COMPARED_ONLY_COLUMNS) {
+          comparedOnly[column] = row[column];
+          delete image[column];
+        }
+        snapshot.set(Number(row.CoreMeasurementID), { image, comparedOnly });
       }
     } catch (error: unknown) {
       throw new ChangelogWriteError(ChangelogOperation.UPDATE, COREMEASUREMENTS_TABLE_NAME, chunk.join(','), error);
     }
   }
   return snapshot;
+}
+
+function idSnapshotRowsEqual(a: CoreMeasurementIDSnapshotRow, b: CoreMeasurementIDSnapshotRow): boolean {
+  return snapshotRowsEqual(a.image, b.image) && COMPARED_ONLY_COLUMNS.every(column => snapshotValuesEqual(a.comparedOnly[column], b.comparedOnly[column]));
 }
 
 export interface CoreMeasurementsIDDiffResult {
@@ -655,7 +681,7 @@ export interface CoreMeasurementsIDDiffResult {
 export async function auditCoreMeasurementsIDDiff(params: {
   tx: Pick<BulkIngestionExecutor, 'query'>;
   schema: string;
-  before: CoreMeasurementsScopeSnapshot;
+  before: CoreMeasurementsIDSnapshot;
   changedBy: string | null;
   plotID: number;
   censusID: number;
@@ -668,11 +694,10 @@ export async function auditCoreMeasurementsIDDiff(params: {
   let unchangedCount = 0;
   for (const [id, priorRow] of before) {
     const row = after.get(id);
-    if (row === undefined) removedRows.push({ id, oldRow: priorRow, newRow: null });
-    else if (!snapshotRowsEqual(priorRow, row)) changedRows.push({ id, oldRow: priorRow, newRow: row });
+    if (row === undefined) removedRows.push({ id, oldRow: priorRow.image, newRow: null });
+    else if (!idSnapshotRowsEqual(priorRow, row)) changedRows.push({ id, oldRow: priorRow.image, newRow: row.image });
     else unchangedCount += 1;
   }
-
   const recordIDForError = Array.from(before.keys()).join(',');
   const updatedCount = await recordSnapshotRowsAudit({ tx, schema, operation: ChangelogOperation.UPDATE, rows: changedRows, changedBy, plotID, censusID });
   if (updatedCount !== changedRows.length) {

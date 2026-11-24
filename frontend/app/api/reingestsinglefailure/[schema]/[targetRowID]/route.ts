@@ -200,6 +200,12 @@ async function handler(_request: NextRequest, context: RouteContext) {
   try {
     transactionID = await connectionManager.beginTransaction();
 
+    // Lock and capture the original row before staging it: it is rewritten in place below
+    // from the staged copy, and this image is the before-side of its Recent Changes UPDATE
+    // row (issue #507).
+    const auditTx = transactionExecutorFor(connectionManager, transactionID);
+    const originalRowBefore = await snapshotCoreMeasurementsByIDs(auditTx, schema, [targetMeasurementID]);
+
     const shiftResult: any = await connectionManager.executeQuery(
       shiftQuery,
       [SINGLE_ROW_FILE_ID, batchID, targetMeasurementID, INGESTION_ERROR_SOURCE],
@@ -221,9 +227,6 @@ async function handler(_request: NextRequest, context: RouteContext) {
       throw new Error('Single-row reingestion staging insert did not return a usable insertId');
     }
 
-    // The original row is rewritten in place below; its prior state is the before-image
-    // of the Recent Changes UPDATE row (issue #507).
-    const auditTx = transactionExecutorFor(connectionManager, transactionID);
     const targetScopeRows: Array<{ PlotID: number; CensusID: number }> = await connectionManager.executeQuery(
       targetScopeSQL,
       [targetMeasurementID],
@@ -233,7 +236,6 @@ async function handler(_request: NextRequest, context: RouteContext) {
     if (!targetScope) {
       throw new Error(`Failed measurement ${targetMeasurementID} has no census to scope its audit row to`);
     }
-    const originalRowBefore = await snapshotCoreMeasurementsByIDs(auditTx, schema, [targetMeasurementID]);
 
     await callBulkIngestionInCallerTransaction(auditTx, schema, SINGLE_ROW_FILE_ID, batchID);
 

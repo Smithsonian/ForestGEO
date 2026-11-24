@@ -112,6 +112,8 @@ async function validateAndExtractParams(
   return { schema, plotID, censusID };
 }
 
+// Locks the source rows: reconciliation later writes values derived from this read back
+// onto them, so no edit may land in between (issue #507).
 async function getFailedMeasurementRows(
   connectionManager: any,
   schema: string,
@@ -151,7 +153,8 @@ async function getFailedMeasurementRows(
          WHERE mel.MeasurementID = cm.CoreMeasurementID
            AND me.ErrorSource = ?
        )
-     ORDER BY cm.CoreMeasurementID`
+     ORDER BY cm.CoreMeasurementID
+     FOR UPDATE OF cm`
   );
 
   return connectionManager.executeQuery(selectSQL, [plotID, censusID, INGESTION_ERROR_SOURCE], transactionID);

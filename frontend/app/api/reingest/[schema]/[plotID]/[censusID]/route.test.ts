@@ -10,7 +10,7 @@ const RECONCILIATION_MAP_TABLE = 'reingestion_map';
 
 function expectCallBracketedByFlag(calls: any[][]) {
   const statements = calls.map(call => String(call[0]));
-  const callIndex = statements.findIndex(sql => sql.includes('bulkingestionprocess'));
+  const callIndex = statements.findIndex((sql: string) => sql.includes('bulkingestionprocess'));
   expect(callIndex, 'bulkingestionprocess must be called').toBeGreaterThan(0);
   expect(statements[callIndex - 1]).toBe(CALLER_OWNS_TRANSACTION_SQL);
   expect(statements[callIndex + 1]).toBe(CLEAR_CALLER_TRANSACTION_SQL);
@@ -335,10 +335,10 @@ describe('reingest API routes', () => {
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
       const statements = calls.map((call: any[]) => String(call[0]));
-      const beforeSnapshotIndex = statements.findIndex(sql => sql.includes('FOR UPDATE') && sql.includes('CoreMeasurementID IN'));
-      const callIndex = statements.findIndex(sql => sql.includes('bulkingestionprocess'));
-      const syncIndex = statements.findIndex(sql => sql.includes('SET orig.CensusID'));
-      const auditIndex = statements.findIndex(sql => sql.includes('unifiedchangelog'));
+      const beforeSnapshotIndex = statements.findIndex((sql: string) => sql.includes('FOR UPDATE') && sql.includes('CoreMeasurementID IN'));
+      const callIndex = statements.findIndex((sql: string) => sql.includes('bulkingestionprocess'));
+      const syncIndex = statements.findIndex((sql: string) => sql.includes('SET orig.CensusID'));
+      const auditIndex = statements.findIndex((sql: string) => sql.includes('unifiedchangelog'));
       expect(beforeSnapshotIndex, `statements:\n${statements.join('\n---\n')}`).toBeGreaterThan(-1);
       expect(beforeSnapshotIndex, 'the before-image must be read before the CALL can touch any row').toBeLessThan(callIndex);
       expect(auditIndex, 'the audit row must describe the synced state').toBeGreaterThan(syncIndex);

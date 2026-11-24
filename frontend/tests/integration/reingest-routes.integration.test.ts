@@ -485,6 +485,9 @@ describe('Reingest route integration tests', () => {
     const before = await getCoreMeasurementSnapshots(originalIDs);
 
     await connection.query('UPDATE coremeasurements SET RawSpCode = ? WHERE CoreMeasurementID IN (?, ?)', [validSpeciesCode, originalIDs[0], originalIDs[1]]);
+    // The row that stays failed changes only in UserDefinedFields, which the audit image
+    // leaves out; it must still be recorded as an UPDATE (#507).
+    await connection.query(`UPDATE coremeasurements SET UserDefinedFields = '{"note":"field crew remark"}' WHERE CoreMeasurementID = ?`, [originalIDs[2]]);
 
     const response = await bulkReingestGet(makeBulkRequest('GET'), makeBulkParams());
     const body = await response.json();
@@ -538,11 +541,11 @@ describe('Reingest route integration tests', () => {
     const remainingFailed = await getFailedMeasurements(connection, { fileID, batchID });
     expect(remainingFailed).toHaveLength(1);
 
-    expectReingestionAudit(
-      await loadMeasurementAuditRows(),
-      resolvedRows.map(row => row.CoreMeasurementID),
-      after
-    );
+    const [[unresolvedAfter]] = await connection.query<RowDataPacket[]>('SELECT UserDefinedFields FROM coremeasurements WHERE CoreMeasurementID = ?', [
+      originalIDs[2]
+    ]);
+    expect(unresolvedAfter.UserDefinedFields, 'precondition: reconciliation rewrote UserDefinedFields').toBeNull();
+    expectReingestionAudit(await loadMeasurementAuditRows(), originalIDs, after);
   });
 
   it('single-row reingest updates the original row in place and leaves no transient rows behind', async () => {

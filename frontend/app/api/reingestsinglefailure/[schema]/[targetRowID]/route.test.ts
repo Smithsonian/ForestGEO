@@ -89,9 +89,9 @@ describe('reingestsinglefailure API route', () => {
 
   it('reconciles onto original row without overwriting upload metadata fields', async () => {
     mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([]) // audit: lock and snapshot the original row before staging
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
       .mockResolvedValueOnce([{ PlotID: 1, CensusID: 1 }]) // audit: target row's plot and census
-      .mockResolvedValueOnce([]) // audit: snapshot original row before the CALL
       .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
       .mockResolvedValueOnce(undefined) // bulkingestionprocess
       .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
@@ -162,9 +162,9 @@ describe('reingestsinglefailure API route', () => {
   it('threads RawPlotX/RawPlotY through restaging, the snapshot SELECT, and back onto the original CoreMeasurementID', async () => {
     const TARGET_MEASUREMENT_ID = 123;
     mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([]) // audit: lock and snapshot the original row before staging
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
       .mockResolvedValueOnce([{ PlotID: 1, CensusID: 1 }]) // audit: target row's plot and census
-      .mockResolvedValueOnce([]) // audit: snapshot original row before the CALL
       .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
       .mockResolvedValueOnce(undefined) // bulkingestionprocess
       .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
@@ -247,9 +247,9 @@ describe('reingestsinglefailure API route', () => {
   it('returns 500 and rolls back without reconciling when the CALL succeeded but the caller flag could not be cleared', async () => {
     const clearError = new Error('connection lost while clearing the caller flag');
     mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([]) // audit: lock and snapshot the original row before staging
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
       .mockResolvedValueOnce([{ PlotID: 1, CensusID: 1 }]) // audit: target row's plot and census
-      .mockResolvedValueOnce([]) // audit: snapshot original row before the CALL
       .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
       .mockResolvedValueOnce(undefined) // bulkingestionprocess
       .mockRejectedValueOnce(clearError); // helper: CLEAR caller-owns-transaction flag
