@@ -61,8 +61,10 @@ export const EMPTY_STEMTAG_COLLISION_REASON = 'Empty StemTag collides with anoth
 // Smithsonian DB destinations store a missing stem tag as either '' or NULL, and
 // both mean the same untagged stem. Every stem-key comparison goes through this
 // so the lookup grouping, the write-back and the ambiguity check agree (#577).
+// Trailing spaces are trimmed because stem_lookup groups under the destination's
+// PAD SPACE collation while a probe may compare under staging's NO PAD one.
 function stemTagMatchKey(stemTagColumn: string): string {
-  return `COALESCE(${stemTagColumn}, '')`;
+  return `COALESCE(TRIM(TRAILING ' ' FROM ${stemTagColumn}), '')`;
 }
 
 // Live scalars only — resprout/cursor scratch removed with the pivot.

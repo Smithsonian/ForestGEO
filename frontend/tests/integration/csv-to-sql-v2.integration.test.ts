@@ -1866,6 +1866,7 @@ const MISSING_TAG_TREE_TAG = String(MISSING_TAG_TREE_ID);
 const FIRST_MISSING_TAG_STEM_ID = 201;
 const SECOND_MISSING_TAG_STEM_ID = 202;
 const NEW_TREE_FOR_MISSING_TAG_TAG = 'NEW577';
+const SPACE_ONLY_STEM_TAG = ' ';
 const QUADRAT_A2_ID = 2;
 const LIVING_TSM_CODE = 'LI';
 const LIVING_TSM_ID = 3;
@@ -1967,6 +1968,30 @@ const MISSING_TAG_SCENARIOS: MissingTagScenario[] = [
     incomingStemTag: EMPTY_STEM_TAG,
     seededStems: [
       { stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_A2_ID },
+      { stemId: SECOND_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_B1_ID }
+    ],
+    expected: { kind: 'rejects', reasons: [AMBIGUOUS_STEM_KEY_REASON] }
+  },
+  {
+    name: 'blank tag, one space-only stem in the same quadrat: retains it, because the destination collation already treats it as blank',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [{ stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: SPACE_ONLY_STEM_TAG, quadratId: QUADRAT_A1_ID }],
+    expected: { kind: 'retains-existing-stem', stemId: FIRST_MISSING_TAG_STEM_ID }
+  },
+  {
+    name: 'blank tag, a NULL stem seeded before a space-only stem, both in other quadrats: rejects as ambiguous',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [
+      { stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_A2_ID },
+      { stemId: SECOND_MISSING_TAG_STEM_ID, stemTag: SPACE_ONLY_STEM_TAG, quadratId: QUADRAT_B1_ID }
+    ],
+    expected: { kind: 'rejects', reasons: [AMBIGUOUS_STEM_KEY_REASON] }
+  },
+  {
+    name: 'blank tag, a space-only stem seeded before a NULL stem, both in other quadrats: rejects as ambiguous',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [
+      { stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: SPACE_ONLY_STEM_TAG, quadratId: QUADRAT_A2_ID },
       { stemId: SECOND_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_B1_ID }
     ],
     expected: { kind: 'rejects', reasons: [AMBIGUOUS_STEM_KEY_REASON] }
