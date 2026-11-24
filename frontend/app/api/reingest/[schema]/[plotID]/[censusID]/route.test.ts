@@ -249,6 +249,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(10)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 10, insertId: 501 }) // move: insert temp rows
+        .mockResolvedValueOnce([]) // audit: snapshot original rows before the CALL
         .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 8 records', batch_failed: false, records_failed: 0 }]]) // call bulkingestionprocess
         .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
@@ -296,11 +297,68 @@ describe('reingest API routes', () => {
       expect(mockConnectionManager.withTransaction).toHaveBeenCalledTimes(1);
     });
 
+    it('writes one Recent Changes UPDATE per original row the reconciliation changed, after the sync and on the route transaction (#507)', async () => {
+      const auditedUser = 'reingest-auditor@forestgeo.test';
+      authMock.mockResolvedValue({ user: { email: auditedUser, userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } });
+      const originalBefore = {
+        CoreMeasurementID: 1,
+        StemGUID: null,
+        CensusID: 1,
+        MeasuredDBH: 12.3,
+        IsValidated: null,
+        UploadFileID: 'f.csv',
+        UploadBatchID: 'b1'
+      };
+      const originalAfter = { ...originalBefore, StemGUID: 7001 };
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
+        .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
+        .mockResolvedValueOnce({ affectedRows: 1, insertId: 701 }) // move: insert temp rows
+        .mockResolvedValueOnce([originalBefore]) // audit: snapshot original rows before the CALL
+        .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
+        .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 1 records', batch_failed: false, records_failed: 0 }]]) // call bulkingestionprocess
+        .mockResolvedValueOnce(undefined); // helper: CLEAR caller-owns-transaction flag
+      for (let reconcileStatement = 0; reconcileStatement < 15; reconcileStatement++) {
+        mockConnectionManager.executeQuery.mockResolvedValueOnce(undefined);
+      }
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce([{ count: 1 }]) // reconcile: successful reingestions
+        .mockResolvedValueOnce([{ count: 0 }]) // reconcile: remaining failures
+        .mockResolvedValueOnce(undefined) // reconcile: final drop temp reingestion_attributes
+        .mockResolvedValueOnce(undefined) // reconcile: final drop temp reingestion_results
+        .mockResolvedValueOnce(undefined) // reconcile: final drop temp map table
+        .mockResolvedValueOnce([originalAfter]) // audit: snapshot original rows after the sync
+        .mockResolvedValueOnce({ affectedRows: 1 }); // audit: changelog INSERT
+
+      const res = await GET(makeRequest('GET'), makeParams());
+      expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+
+      const calls = mockConnectionManager.executeQuery.mock.calls;
+      const statements = calls.map((call: any[]) => String(call[0]));
+      const beforeSnapshotIndex = statements.findIndex(sql => sql.includes('FOR UPDATE') && sql.includes('CoreMeasurementID IN'));
+      const callIndex = statements.findIndex(sql => sql.includes('bulkingestionprocess'));
+      const syncIndex = statements.findIndex(sql => sql.includes('SET orig.CensusID'));
+      const auditIndex = statements.findIndex(sql => sql.includes('unifiedchangelog'));
+      expect(beforeSnapshotIndex, `statements:\n${statements.join('\n---\n')}`).toBeGreaterThan(-1);
+      expect(beforeSnapshotIndex, 'the before-image must be read before the CALL can touch any row').toBeLessThan(callIndex);
+      expect(auditIndex, 'the audit row must describe the synced state').toBeGreaterThan(syncIndex);
+      expect(calls[beforeSnapshotIndex][1]).toEqual([1]);
+      expect(calls[beforeSnapshotIndex][2]).toBe(TEST_TRANSACTION_ID);
+      expect(calls[auditIndex][2], 'the audit row must commit or roll back with the reconciliation').toBe(TEST_TRANSACTION_ID);
+
+      const auditParams = calls[auditIndex][1] as unknown[];
+      expect(auditParams.slice(0, 3)).toEqual(['coremeasurements', 1, 'UPDATE']);
+      expect(JSON.parse(String(auditParams[3]))).toMatchObject({ StemGUID: null });
+      expect(JSON.parse(String(auditParams[4]))).toMatchObject({ StemGUID: 7001 });
+      expect(auditParams.slice(5)).toEqual([auditedUser, 1, 1]);
+    });
+
     it('still reconciles rows when the ingestion procedure reports partial failures', async () => {
       mockConnectionManager.executeQuery
         .mockResolvedValueOnce(mockUnresolvedRows(3)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 3, insertId: 41 }) // move: insert temp rows
+        .mockResolvedValueOnce([]) // audit: snapshot original rows before the CALL
         .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed: 2 valid, 1 failed', batch_failed: false, records_failed: 1 }]]) // call bulkingestionprocess
         .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
@@ -356,6 +414,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 1, insertId: 11 }) // move: insert temp rows
+        .mockResolvedValueOnce([]) // audit: snapshot original rows before the CALL
         .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockRejectedValueOnce(new Error('Bulk ingestion failed')) // call bulkingestionprocess
         .mockResolvedValueOnce(undefined); // helper: CLEAR caller-owns-transaction flag
@@ -376,6 +435,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 1, insertId: 11 }) // move: insert temp rows
+        .mockResolvedValueOnce([]) // audit: snapshot original rows before the CALL
         .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 1 records', batch_failed: false }]]) // call bulkingestionprocess
         .mockRejectedValueOnce(clearError); // helper: CLEAR caller-owns-transaction flag
@@ -459,6 +519,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 1, insertId: 601 }) // move: insert temp rows
+        .mockResolvedValueOnce([]) // audit: snapshot original rows before the CALL
         .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 1 records', batch_failed: false, records_failed: 0 }]]) // call bulkingestionprocess
         .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag

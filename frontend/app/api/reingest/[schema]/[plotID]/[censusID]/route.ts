@@ -9,6 +9,8 @@ import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
 import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { auditCoreMeasurementsIDDiff, snapshotCoreMeasurementsByIDs } from '@/lib/changelog/ingestion-audit';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -560,6 +562,7 @@ export async function GET(
   }
 
   const { schema, plotID, censusID } = paramsResult;
+  const changedBy = authenticatedSessionIdentity((await auth())?.user);
 
   const connectionManager = ConnectionManager.getInstance();
   try {
@@ -584,12 +587,22 @@ export async function GET(
           return { totalRows: 0, successfulReingestions: 0, remainingFailures: 0 };
         }
 
+        // Reconciliation rewrites the original rows in place; their prior state is the
+        // before-image of the Recent Changes UPDATE rows written below (issue #507).
+        const auditTx = transactionExecutorFor(connectionManager, tx.id);
+        const originalRowsBefore = await snapshotCoreMeasurementsByIDs(
+          auditTx,
+          schema,
+          rowMappings.map(mapping => mapping.originalMeasurementID)
+        );
+
         // Step 2: Run bulkingestionprocess within the same transaction
-        const procedureResult = await callBulkIngestionInCallerTransaction(transactionExecutorFor(connectionManager, tx.id), schema, fileID, batchID);
+        const procedureResult = await callBulkIngestionInCallerTransaction(auditTx, schema, fileID, batchID);
         const ingestionStatus = parseBulkIngestionStatus(procedureResult);
 
         // Step 3: Reconcile processed rows back onto original CoreMeasurementIDs
         const { successfulReingestions, remainingFailures } = await reconcileReingestionRows(connectionManager, schema, fileID, batchID, rowMappings, tx.id);
+        await auditCoreMeasurementsIDDiff({ tx: auditTx, schema, before: originalRowsBefore, changedBy, plotID, censusID });
 
         if (ingestionStatus.batchFailed) {
           ailogger.warn(`Reingestion batch ${batchID} failed internally: ${ingestionStatus.message ?? 'Unknown failure'}`);

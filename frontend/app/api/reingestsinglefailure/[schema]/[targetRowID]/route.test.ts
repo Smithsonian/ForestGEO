@@ -90,6 +90,8 @@ describe('reingestsinglefailure API route', () => {
   it('reconciles onto original row without overwriting upload metadata fields', async () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
+      .mockResolvedValueOnce([{ PlotID: 1, CensusID: 1 }]) // audit: target row's plot and census
+      .mockResolvedValueOnce([]) // audit: snapshot original row before the CALL
       .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
       .mockResolvedValueOnce(undefined) // bulkingestionprocess
       .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
@@ -161,6 +163,8 @@ describe('reingestsinglefailure API route', () => {
     const TARGET_MEASUREMENT_ID = 123;
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
+      .mockResolvedValueOnce([{ PlotID: 1, CensusID: 1 }]) // audit: target row's plot and census
+      .mockResolvedValueOnce([]) // audit: snapshot original row before the CALL
       .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
       .mockResolvedValueOnce(undefined) // bulkingestionprocess
       .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
@@ -244,6 +248,8 @@ describe('reingestsinglefailure API route', () => {
     const clearError = new Error('connection lost while clearing the caller flag');
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
+      .mockResolvedValueOnce([{ PlotID: 1, CensusID: 1 }]) // audit: target row's plot and census
+      .mockResolvedValueOnce([]) // audit: snapshot original row before the CALL
       .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
       .mockResolvedValueOnce(undefined) // bulkingestionprocess
       .mockRejectedValueOnce(clearError); // helper: CLEAR caller-owns-transaction flag
