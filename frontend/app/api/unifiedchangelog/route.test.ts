@@ -18,14 +18,13 @@ import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/
  * since 2025-05-12.
  *
  * Exclusions:
- * - Bulk census deletions (would flood the log with thousands of entries)
  * - Raw-SQL changes made outside the app, which only a trigger or the binlog
  *   could catch
  *
  * Test Coverage:
  * 1. Single-row UPDATE operations create ONE changelog entry
  * 2. Single-row DELETE operations create ONE changelog entry
- * 3. Census deletions do NOT create changelog entries
+ * 3. Census deletions are audited in the procedure's transaction (#507)
  * 4. File uploads create ONE changelog entry per file (not per batch)
  * 5. Multiple batches from same file UPDATE the same changelog entry
  */
@@ -325,64 +324,33 @@ describe('Unified Changelog Tracking System', () => {
     });
   });
 
-  describe('3. Census Deletion Exclusion', () => {
-    it('should NOT create changelog entries during full census deletion', async () => {
+  describe('3. Census Deletion Audit (#507)', () => {
+    it('records the census and its measurements in the same transaction as the destructive CALL, before it runs', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
-      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-4');
-      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-4');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
-      // clearcensus flow: resolve target plot, latest-census guard, destructive CALL
       const exec = vi
         .spyOn(cm, 'executeQuery')
         .mockResolvedValueOnce([{ PlotID: 1 }])
         .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
-        .mockResolvedValueOnce({});
-
-      const req = makeRequest('http://localhost/api/clearcensus', 'POST', { schema: 'testschema', censusID: 5, type: 'full' });
-
-      const res = await CLEARCENSUS_POST(req);
-
-      expect(res.status).toBe(HTTPResponses.OK);
-      const body = await res.json();
-      expect(body).toEqual({ message: 'Census cleared successfully' });
-
-      // Verify the stored procedure is called with correct parameters
-      const [sql, params] = exec.mock.calls[2];
-      expect(String(sql)).toMatch(/CALL testschema\.clearcensusfull\((5|\?)\);?/i);
-      expect(params).toEqual([]);
-
-      // The stored procedure sets @disable_triggers = 1
-      // This prevents changelog entries from being created during bulk deletion
-      expect(_commit).toHaveBeenCalledWith('tx-4');
-    });
-
-    it('should NOT create changelog entries during partial census deletion (measurements only)', async () => {
-      const cm = (ConnectionManager as any).getInstance();
-
-      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-5');
-      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
-      // clearcensus flow: resolve target plot, latest-census guard, destructive CALL
-      const exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ PlotID: 1 }])
-        .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
-        .mockResolvedValueOnce({});
+        .mockResolvedValueOnce([{ CensusID: 7, PlotID: 1, PlotCensusNumber: 1 }])
+        .mockResolvedValueOnce({ affectedRows: 40 })
+        .mockResolvedValueOnce({ affectedRows: 1 })
+        .mockResolvedValue({});
 
       const req = makeRequest('http://localhost/api/clearcensus', 'POST', { schema: 'testschema', censusID: 7, type: 'msmts' });
-
       const res = await CLEARCENSUS_POST(req);
 
       expect(res.status).toBe(HTTPResponses.OK);
-
-      // Verify the stored procedure is called
-      const [sql, params] = exec.mock.calls[2];
-      expect(String(sql)).toMatch(/CALL testschema\.clearcensusmsmts\((7|\?)\);?/i);
-      expect(params).toEqual([]);
-
-      // The stored procedure sets @disable_triggers = 1
-      expect(_commit).toHaveBeenCalledWith('tx-5');
+      const statements = exec.mock.calls.map(call => String(call[0]));
+      const changelogIndexes = statements.flatMap((sql, index) => (sql.includes('unifiedchangelog') ? [index] : []));
+      const callIndex = statements.findIndex(sql => /CALL .*clearcensusmsmts/i.test(sql));
+      expect(changelogIndexes, statements.join('\n---\n')).toHaveLength(2);
+      expect(Math.max(...changelogIndexes)).toBeLessThan(callIndex);
+      expect(exec.mock.calls.every(call => call[2] === 'tx-4')).toBe(true);
+      expect(commit).toHaveBeenCalledWith('tx-4');
     });
   });
 

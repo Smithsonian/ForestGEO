@@ -6,20 +6,25 @@ import { format } from 'mysql2/promise';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import {
+  CLEAR_CENSUS_FULL_TYPE,
+  CLEAR_CENSUS_TYPES,
+  auditRemovedReferenceRows,
+  callClearCensusInCallerTransaction,
+  isClearCensusType,
+  recordCensusClearAudit,
+  snapshotReferenceTables
+} from '@/lib/census/clear-census-audit';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-// Valid census clear types - must match actual stored procedure names
-const VALID_CENSUS_TYPES = ['msmts', 'full', 'measurements', 'attributes', 'personnel', 'quadrats'] as const;
-type CensusType = (typeof VALID_CENSUS_TYPES)[number];
-
-// Census clear procedures manage (START/COMMIT) their own transactions. A
-// row-level lock acquired by this route would be released when the procedure
-// starts its transaction, so serialize clears with a connection-scoped MySQL
-// advisory lock instead. A second admin can retry immediately rather than
-// waiting behind a potentially long destructive operation.
+// Clears for one plot are serialized with a connection-scoped MySQL advisory
+// lock. A second admin can retry immediately rather than waiting behind a
+// potentially long destructive operation.
 const CLEAR_CENSUS_LOCK_TIMEOUT_MS = 0;
 
 function buildClearCensusLockName(schema: string, plotID: number): string {
@@ -82,12 +87,12 @@ export async function POST(request: NextRequest) {
   }
 
   // Validate type to prevent SQL injection
-  if (!VALID_CENSUS_TYPES.includes(type as CensusType)) {
+  if (!isClearCensusType(type)) {
     ailogger.error(`Invalid census type in clearcensus: ${type}`);
     return new NextResponse(
       JSON.stringify({
         error: 'Invalid census type',
-        validTypes: VALID_CENSUS_TYPES
+        validTypes: CLEAR_CENSUS_TYPES
       }),
       { status: HTTPResponses.INVALID_REQUEST }
     );
@@ -121,12 +126,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // The procedures called below issue START TRANSACTION/COMMIT themselves,
-    // which implicitly ends this route transaction and releases any FOR UPDATE
-    // row locks. GET_LOCK is connection-scoped and survives those boundaries,
-    // so it serializes every clear for this plot through the destructive CALL.
-    // Re-check after acquiring it so a waiter observes the previous clear's
-    // committed state rather than acting on its pre-wait snapshot.
+    // Re-check after acquiring the lock so a waiter observes the previous
+    // clear's committed state rather than acting on its pre-wait snapshot.
     const latestCensusSQL = format(
       `SELECT c.PlotID, c.PlotCensusNumber, latest.MaxPlotCensusNumber
        FROM ??.census c
@@ -155,13 +156,19 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Construct safe procedure name and call
-    const procedureName = `clearcensus${type}`;
-    const callSQL = format('CALL ??.??(?)', [schema, procedureName, censusID]);
-
-    await connectionManager.executeQuery(callSQL, [], transactionID);
+    // The procedure runs in caller-owned mode, so the audit rows below commit
+    // or roll back with the deletes they describe (issue #507).
+    const tx = transactionExecutorFor(connectionManager, transactionID);
+    const changedBy = authenticatedSessionIdentity(session?.user);
+    const plotID = Number(censusRow.PlotID);
+    await recordCensusClearAudit({ tx, schema, censusID, plotID, changedBy });
+    const referenceSnapshot = type === CLEAR_CENSUS_FULL_TYPE ? await snapshotReferenceTables(tx, schema) : undefined;
+    await callClearCensusInCallerTransaction(tx, schema, type, censusID);
+    if (referenceSnapshot) {
+      await auditRemovedReferenceRows({ tx, schema, before: referenceSnapshot, changedBy });
+    }
     await connectionManager.commitTransaction(transactionID);
-    ailogger.info(`Census cleared successfully: ${schema}.${procedureName}(${censusID})`);
+    ailogger.info(`Census cleared successfully: ${schema}.clearcensus${type}(${censusID})`);
     return NextResponse.json({ message: 'Census cleared successfully' }, { status: HTTPResponses.OK });
   } catch (e: any) {
     ailogger.error('Census clear failed:', e);

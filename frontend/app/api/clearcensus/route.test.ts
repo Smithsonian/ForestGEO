@@ -8,7 +8,8 @@ vi.mock('@/auth', () => ({ auth: authMock }));
 // ---- Mock SQL security utilities ----
 vi.mock('@/lib/db/sqlsecurity', () => ({
   validateSchemaOrThrow: vi.fn(),
-  safeFormatQuery: vi.fn((schema, query) => query)
+  safeFormatQuery: vi.fn((schema, query) => query),
+  safeEscapeId: vi.fn((identifier: string) => `\`${identifier}\``)
 }));
 
 // ---- Mock ailogger ----
@@ -82,9 +83,45 @@ function makeRequest(url: string) {
 // ---- Import handler AFTER mocks ----
 import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { CLEAR_CENSUS_CALLER_OWNS_TRANSACTION_SQL, CLEAR_CENSUS_CLEAR_CALLER_TRANSACTION_SQL } from '@/lib/census/clear-census-audit';
+
+const AUDITED_CENSUS_ROW = { CensusID: 12, PlotID: 1, PlotCensusNumber: 2, Description: 'second census' };
+
+interface ClearCensusQueryScript {
+  censusRow?: Record<string, unknown>;
+  referenceRows?: Record<string, Record<string, unknown>[]>;
+  referenceRowsRemainingAfterCall?: Record<string, Record<string, unknown>[]>;
+  auditFailure?: Error;
+}
+
+/** Answers each statement the clear flow sends by what it is, not by its position. */
+function scriptClearCensusQueries(exec: ReturnType<typeof vi.spyOn>, script: ClearCensusQueryScript = {}) {
+  let procedureCalled = false;
+  exec.mockImplementation(async (rawSQL: unknown) => {
+    const sql = String(rawSQL);
+    if (/SELECT PlotID FROM/i.test(sql)) return [{ PlotID: 1 }];
+    if (/MAX\(PlotCensusNumber\)/i.test(sql)) return [{ PlotID: 1, PlotCensusNumber: 2, MaxPlotCensusNumber: 2 }];
+    if (/SELECT \* FROM \?\?\.census WHERE CensusID/i.test(sql)) return [script.censusRow ?? AUDITED_CENSUS_ROW];
+    if (sql.includes('unifiedchangelog')) {
+      if (script.auditFailure) throw script.auditFailure;
+      return { affectedRows: sql.includes('FROM ??.coremeasurements cm') ? 3 : (sql.match(/\(\?, \?, \?, CONVERT/g)?.length ?? 1) };
+    }
+    if (/^CALL /i.test(sql)) {
+      procedureCalled = true;
+      return {};
+    }
+    const referenceTable = sql.match(/FROM \?\?\.`(\w+)`/)?.[1];
+    if (referenceTable) {
+      const rows = procedureCalled ? script.referenceRowsRemainingAfterCall?.[referenceTable] : script.referenceRows?.[referenceTable];
+      return rows ?? [];
+    }
+    return {};
+  });
+}
 
 describe('POST /api/clearcensus', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     authMock.mockResolvedValue({ user: { id: 'admin-user', userStatus: 'global' } });
   });
@@ -133,15 +170,12 @@ describe('POST /api/clearcensus', () => {
     expect(await res.text()).toMatch(/Missing required parameters/i);
   });
 
-  it('200 on success: locks the plot, re-checks latest census, calls proc, and commits', async () => {
+  it('200 on success: locks the plot, re-checks latest census, audits the census and its measurements, then calls the proc in caller-owned mode and commits once', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-1');
     const acquireLock = vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
-    const exec = vi
-      .spyOn(cm, 'executeQuery')
-      .mockResolvedValueOnce([{ PlotID: 1 }])
-      .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 2, MaxPlotCensusNumber: 2 }])
-      .mockResolvedValueOnce({});
+    const exec = vi.spyOn(cm, 'executeQuery');
+    scriptClearCensusQueries(exec);
     const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
     const rollback = vi.spyOn(cm, 'rollbackTransaction');
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
@@ -149,36 +183,96 @@ describe('POST /api/clearcensus', () => {
     const res = await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=msmts'));
 
     expect(res.status).toBe(HTTPResponses.OK);
-    const body = await res.json();
-    expect(body).toEqual({ message: 'Census cleared successfully' });
-
+    expect(await res.json()).toEqual({ message: 'Census cleared successfully' });
     expect(begin).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledTimes(3);
+
+    const statements = exec.mock.calls.map(call => String(call[0]));
+    const transactions = exec.mock.calls.map(call => call[2]);
+    expect(new Set(transactions), `every statement must run on the route transaction:\n${statements.join('\n---\n')}`).toEqual(new Set(['tx-1']));
 
     // The target scope is resolved first, then an advisory lock serializes all
-    // clears for that plot even though the stored procedure starts its own tx.
-    expect(begin.mock.invocationCallOrder[0]).toBeLessThan(exec.mock.invocationCallOrder[0]);
-    const [scopeSql, , scopeTx] = exec.mock.calls[0];
-    expect(String(scopeSql)).toMatch(/SELECT PlotID FROM myschema\.census/i);
-    expect(scopeTx).toBe('tx-1');
+    // clears for that plot; the latest guard runs only after the lock is held.
+    expect(String(statements[0])).toMatch(/SELECT PlotID FROM myschema\.census/i);
     expect(acquireLock).toHaveBeenCalledWith('clear-census:myschema:1', 'tx-1', 0);
-
-    // The latest guard is evaluated only after the plot lock is held.
-    const [guardSql, , guardTx] = exec.mock.calls[1];
-    expect(String(guardSql)).toMatch(/MAX\(PlotCensusNumber\)/i);
-    expect(String(guardSql)).toMatch(/FOR UPDATE/i);
-    expect(guardTx).toBe('tx-1');
+    expect(statements[1]).toMatch(/MAX\(PlotCensusNumber\)/i);
+    expect(statements[1]).toMatch(/FOR UPDATE/i);
     expect(acquireLock.mock.invocationCallOrder[0]).toBeLessThan(exec.mock.invocationCallOrder[1]);
 
-    const [sql, params, callTx] = exec.mock.calls[2];
-    // format() replaces placeholders, so we get the formatted SQL
-    expect(String(sql)).toMatch(/^CALL myschema\.clearcensusmsmts\((12|\?)\);?$/i);
-    expect(params).toEqual([]);
-    expect(callTx).toBe('tx-1');
+    const measurementAuditIndex = statements.findIndex(sql => sql.includes('unifiedchangelog') && sql.includes('FROM ??.coremeasurements cm'));
+    const censusAuditIndex = exec.mock.calls.findIndex(call => String(call[0]).includes('unifiedchangelog') && (call[1] as unknown[])?.[0] === 'census');
+    const callIndex = statements.findIndex(sql => /^CALL /i.test(sql));
+    expect(measurementAuditIndex, 'measurement deletes must be audited before the CALL removes the rows').toBeGreaterThan(-1);
+    expect(measurementAuditIndex).toBeLessThan(callIndex);
+    expect(censusAuditIndex).toBeLessThan(callIndex);
+    expect(exec.mock.calls[measurementAuditIndex][1]).toEqual(['admin-user', 1, 12, 12]);
+
+    const censusAuditParams = exec.mock.calls[censusAuditIndex][1] as unknown[];
+    expect(censusAuditParams.slice(0, 3)).toEqual(['census', '12', 'DELETE']);
+    expect(JSON.parse(String(censusAuditParams[3]))).toEqual(AUDITED_CENSUS_ROW);
+    expect(censusAuditParams.slice(5)).toEqual(['admin-user', 1, 12]);
+
+    expect(statements[callIndex]).toMatch(/^CALL \?\?\.`clearcensusmsmts`\(\?\)$/);
+    expect(exec.mock.calls[callIndex][1]).toEqual([12]);
+    expect(statements[callIndex - 1]).toBe(CLEAR_CENSUS_CALLER_OWNS_TRANSACTION_SQL);
+    expect(statements[callIndex + 1]).toBe(CLEAR_CENSUS_CLEAR_CALLER_TRANSACTION_SQL);
+    expect(
+      statements.some(sql => /SELECT \* FROM \?\?\.`species`/.test(sql)),
+      'msmts never touches reference data'
+    ).toBe(false);
 
     expect(commit).toHaveBeenCalledWith('tx-1');
+    expect(commit.mock.invocationCallOrder[0]).toBeGreaterThan(exec.mock.invocationCallOrder.at(-1)!);
     expect(rollback).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('full: audits, after the CALL, exactly the reference rows the CALL removed, schema-wide (no plot or census)', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-full');
+    vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+    const exec = vi.spyOn(cm, 'executeQuery');
+    const alive = { Code: 'A', IsActive: 1, Description: 'alive' };
+    const keptSpecies = { SpeciesID: 2, SpeciesCode: 'KEEP' };
+    scriptClearCensusQueries(exec, {
+      referenceRows: { attributes: [alive], species: [{ SpeciesID: 1, SpeciesCode: 'ACRU' }, keptSpecies] },
+      referenceRowsRemainingAfterCall: { species: [{ SpeciesID: 2 }] }
+    });
+    const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+
+    const res = await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=full'));
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    const callOrder = exec.mock.calls.findIndex(call => /^CALL /i.test(String(call[0])));
+    const referenceAudits = exec.mock.calls
+      .map((call, index) => ({ index, sql: String(call[0]), params: (call[1] ?? []) as unknown[] }))
+      .filter(entry => entry.sql.includes('unifiedchangelog') && ['attributes', 'species'].includes(String(entry.params[0])));
+    expect(referenceAudits.map(entry => entry.params.slice(0, 3))).toEqual([
+      ['attributes', 'A', 'DELETE'],
+      ['species', '1', 'DELETE']
+    ]);
+    for (const audit of referenceAudits) {
+      expect(audit.index, 'reference rows are audited only once the CALL has removed them').toBeGreaterThan(callOrder);
+      expect(audit.params.slice(4)).toEqual(['admin-user', null, null]);
+    }
+    expect(JSON.parse(String(referenceAudits[0].params[3]))).toEqual(alive);
+    expect(commit).toHaveBeenCalledWith('tx-full');
+  });
+
+  it('rolls back without calling the procedure when an audit row cannot be written', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-audit-fail');
+    vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+    const exec = vi.spyOn(cm, 'executeQuery');
+    scriptClearCensusQueries(exec, { auditFailure: new Error('changelog unavailable') });
+    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+    const commit = vi.spyOn(cm, 'commitTransaction');
+
+    const res = await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=msmts'));
+
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(exec.mock.calls.some(call => /^CALL /i.test(String(call[0])))).toBe(false);
+    expect(rollback).toHaveBeenCalledWith('tx-audit-fail');
+    expect(commit).not.toHaveBeenCalled();
   });
 
   it('500 on DB error: rolls back with transaction id and returns error text', async () => {
@@ -207,22 +301,15 @@ describe('POST /api/clearcensus', () => {
     expect(text).toMatch(/boom/i);
   });
 
-  it('builds stored procedure name using `type` param (smoke check)', async () => {
+  it.each(['measurements', 'attributes', 'personnel', 'quadrats'])('400 for type %s, which has no stored procedure, before any SQL runs', async type => {
     const cm = (ConnectionManager as any).getInstance();
-    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-2');
-    vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
-    const exec = vi
-      .spyOn(cm, 'executeQuery')
-      .mockResolvedValueOnce([{ PlotID: 1 }])
-      .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 5, MaxPlotCensusNumber: 5 }])
-      .mockResolvedValueOnce({});
-    vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+    const begin = vi.spyOn(cm, 'beginTransaction');
 
-    await POST(makeRequest('http://localhost/api/clearcensus?schema=s1&censusID=5&type=attributes'));
+    const res = await POST(makeRequest(`http://localhost/api/clearcensus?schema=s1&censusID=5&type=${type}`));
 
-    const [sql] = exec.mock.calls[2];
-    // format() replaces placeholders, so we get the formatted SQL
-    expect(String(sql)).toMatch(/^CALL s1\.clearcensusattributes\((5|\?)\);?$/i);
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(await res.json()).toEqual({ error: 'Invalid census type', validTypes: ['msmts', 'full'] });
+    expect(begin).not.toHaveBeenCalled();
   });
 
   it('400 when invalid type is provided', async () => {
