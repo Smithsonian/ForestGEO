@@ -63,9 +63,10 @@ export const EMPTY_STEMTAG_COLLISION_REASON = 'Empty StemTag collides with anoth
 // so the lookup grouping, the write-back and the ambiguity check agree (#577).
 // A spaces-only tag folds to '' too, because stem_lookup groups under the
 // destination's PAD SPACE collation while a probe may compare under staging's
-// NO PAD one. Non-blank tags are left exactly as stored.
+// NO PAD one. Non-blank tags are left exactly as stored. Blankness is measured in
+// bytes so a collation that ignores characters such as U+00AD cannot fold a tag.
 function stemTagMatchKey(stemTagColumn: string): string {
-  return `CASE WHEN ${stemTagColumn} IS NULL OR TRIM(TRAILING ' ' FROM ${stemTagColumn}) = '' THEN '' ELSE ${stemTagColumn} END`;
+  return `CASE WHEN ${stemTagColumn} IS NULL OR OCTET_LENGTH(TRIM(TRAILING ' ' FROM ${stemTagColumn})) = 0 THEN '' ELSE ${stemTagColumn} END`;
 }
 
 // Live scalars only — resprout/cursor scratch removed with the pivot.
