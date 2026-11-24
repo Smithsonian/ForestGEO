@@ -29,6 +29,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { cleanupTestMeasurements, setupTestDatabase, teardownTestDatabase, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
+import ailogger from '@/ailogger';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 const AUTH_USER_EMAIL = 'recent-changes-audit-runner@forestgeo.test';
 const BULK_CRUD_FILE_ID = 'sample_bulk_insert.csv';
@@ -69,9 +71,22 @@ vi.mock('@/ailogger', () => ({
   default: {
     info: () => undefined,
     warn: () => undefined,
-    error: () => undefined
+    error: vi.fn()
   }
 }));
+
+function expectFailureLoggedButNotReturned(body: unknown, injectedMessage: string): void {
+  expect(body, 'the route answers with the fixed message (#574)').toMatchObject({ error: INTERNAL_SERVER_ERROR_MESSAGE });
+  expect(JSON.stringify(body), 'the injected failure text stays out of the response').not.toContain(injectedMessage);
+  const loggedTexts = vi
+    .mocked(ailogger.error)
+    .mock.calls.flat()
+    .map(argument => (argument instanceof Error ? argument.message : String(argument)));
+  expect(
+    loggedTexts.some(text => text.includes(injectedMessage)),
+    `ailogger.error must record the injected failure "${injectedMessage}"; logged: ${JSON.stringify(loggedTexts)}`
+  ).toBe(true);
+}
 
 // Deterministic batchID so the audit assertions below can scope their SELECTs to
 // exactly this test's rows without parsing the generated ID out of the response.
@@ -309,7 +324,7 @@ describe('Recent Changes audit atomicity (#507): POST /api/bulkcrud measurements
     const body = await res.json();
 
     expect(res.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-    expect(body.error).toContain(AUDIT_FAILURE_MESSAGE);
+    expectFailureLoggedButNotReturned(body, AUDIT_FAILURE_MESSAGE);
     expect(sharedState.lastBatchID, 'the route must still have generated a batchID before failing').not.toBeNull();
 
     // The connection must be usable afterward: ROLLBACK, not an abandoned transaction.
@@ -473,7 +488,7 @@ describe('Recent Changes audit atomicity (#507): POST /api/sqlpacketload fixed-d
     const body = await res.json();
 
     expect(res.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.SERVICE_UNAVAILABLE);
-    expect(body.error).toContain(PER_ROW_AUDIT_FAILURE_MESSAGE);
+    expectFailureLoggedButNotReturned(body, PER_ROW_AUDIT_FAILURE_MESSAGE);
 
     // The connection must be usable afterward: ROLLBACK, not an abandoned transaction.
     expect(sharedState.activeTransactionID, 'rollbackTransaction must have cleared the active transaction').toBeNull();
@@ -499,7 +514,7 @@ describe('Recent Changes audit atomicity (#507): POST /api/sqlpacketload fixed-d
     const body = await res.json();
 
     expect(res.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.SERVICE_UNAVAILABLE);
-    expect(body.error).toContain(FILE_SUMMARY_AUDIT_FAILURE_MESSAGE);
+    expectFailureLoggedButNotReturned(body, FILE_SUMMARY_AUDIT_FAILURE_MESSAGE);
     expect(sharedState.activeTransactionID, 'rollbackTransaction must have cleared the active transaction').toBeNull();
 
     // Both rows wrote successfully (and were individually auditable) before the summary write
