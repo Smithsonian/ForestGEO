@@ -567,3 +567,130 @@ export async function auditCoreMeasurementsKeyedDiff(params: AuditCoreMeasuremen
 
   return { insertedCount, updatedCount, unchangedCount, after };
 }
+
+/**
+ * Inserts one DELETE-operation `unifiedchangelog` row per coremeasurements row of
+ * `censusID`, set-based, for a whole-census clear (app/api/clearcensus, #507). Same
+ * contract as recordDeletedCoreMeasurementsAudit: run it in the SAME transaction as, and
+ * BEFORE, the delete, so OldRowState is each row's last real state. Returns the number
+ * of audit rows written.
+ */
+export async function recordDeletedCensusCoreMeasurementsAudit(params: {
+  tx: Pick<BulkIngestionExecutor, 'query'>;
+  schema: string;
+  censusID: number;
+  changedBy: string | null;
+  plotID: number;
+}): Promise<number> {
+  const { tx, schema, censusID, changedBy, plotID } = params;
+  const sql = safeFormatQuery(
+    schema,
+    `INSERT INTO ??.unifiedchangelog
+       (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
+     SELECT
+       '${COREMEASUREMENTS_TABLE_NAME}',
+       cm.CoreMeasurementID,
+       '${ChangelogOperation.DELETE}',
+       ${COREMEASUREMENTS_SNAPSHOT_JSON},
+       NOW(),
+       ?,
+       ?,
+       ?
+     FROM ??.coremeasurements cm
+     WHERE cm.CensusID = ?`
+  );
+  try {
+    const result = await tx.query(sql, [changedBy, plotID, censusID, censusID]);
+    return Number((result as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
+  } catch (error: unknown) {
+    throw new ChangelogWriteError(ChangelogOperation.DELETE, COREMEASUREMENTS_TABLE_NAME, `census:${censusID}`, error);
+  }
+}
+
+/**
+ * Reads exactly `coreMeasurementIDs` under FOR UPDATE, keyed by CoreMeasurementID, in
+ * SNAPSHOT_BY_KEY_CHUNK_SIZE slices. The before-image for a rewrite that keeps each row's
+ * id (reingestion reconciles new values back onto the original rows, #507).
+ */
+export async function snapshotCoreMeasurementsByIDs(
+  tx: Pick<BulkIngestionExecutor, 'query'>,
+  schema: string,
+  coreMeasurementIDs: number[]
+): Promise<CoreMeasurementsScopeSnapshot> {
+  const snapshot: CoreMeasurementsScopeSnapshot = new Map();
+  const uniqueIDs = Array.from(new Set(coreMeasurementIDs));
+  for (let start = 0; start < uniqueIDs.length; start += SNAPSHOT_BY_KEY_CHUNK_SIZE) {
+    const chunk = uniqueIDs.slice(start, start + SNAPSHOT_BY_KEY_CHUNK_SIZE);
+    const sql = safeFormatQuery(
+      schema,
+      `SELECT ${COREMEASUREMENTS_SNAPSHOT_COLUMNS.join(', ')}, CAST(IsValidated AS UNSIGNED) AS IsValidated
+       FROM ??.coremeasurements
+       WHERE CoreMeasurementID IN (${buildInPlaceholders(chunk.length)})
+       FOR UPDATE`
+    );
+    try {
+      const rows = await tx.query<Record<string, unknown>[]>(sql, chunk);
+      for (const row of Array.isArray(rows) ? rows : []) {
+        snapshot.set(Number(row.CoreMeasurementID), row);
+      }
+    } catch (error: unknown) {
+      throw new ChangelogWriteError(ChangelogOperation.UPDATE, COREMEASUREMENTS_TABLE_NAME, chunk.join(','), error);
+    }
+  }
+  return snapshot;
+}
+
+export interface CoreMeasurementsIDDiffResult {
+  updatedCount: number;
+  deletedCount: number;
+  unchangedCount: number;
+}
+
+/**
+ * Re-reads every id in `before` and audits what changed: present but different → UPDATE,
+ * gone → DELETE, identical → nothing. Ids not in `before` are never read, so rows the
+ * caller created and removed again inside its own transaction (reingestion's transient
+ * rows) leave no history. Both counts are asserted against the rows written.
+ */
+export async function auditCoreMeasurementsIDDiff(params: {
+  tx: Pick<BulkIngestionExecutor, 'query'>;
+  schema: string;
+  before: CoreMeasurementsScopeSnapshot;
+  changedBy: string | null;
+  plotID: number;
+  censusID: number;
+}): Promise<CoreMeasurementsIDDiffResult> {
+  const { tx, schema, before, changedBy, plotID, censusID } = params;
+  const after = await snapshotCoreMeasurementsByIDs(tx, schema, Array.from(before.keys()));
+
+  const changedRows: SnapshotAuditRowInput[] = [];
+  const removedRows: SnapshotAuditRowInput[] = [];
+  let unchangedCount = 0;
+  for (const [id, priorRow] of before) {
+    const row = after.get(id);
+    if (row === undefined) removedRows.push({ id, oldRow: priorRow, newRow: null });
+    else if (!snapshotRowsEqual(priorRow, row)) changedRows.push({ id, oldRow: priorRow, newRow: row });
+    else unchangedCount += 1;
+  }
+
+  const recordIDForError = Array.from(before.keys()).join(',');
+  const updatedCount = await recordSnapshotRowsAudit({ tx, schema, operation: ChangelogOperation.UPDATE, rows: changedRows, changedBy, plotID, censusID });
+  if (updatedCount !== changedRows.length) {
+    throw new ChangelogWriteError(
+      ChangelogOperation.UPDATE,
+      COREMEASUREMENTS_TABLE_NAME,
+      recordIDForError,
+      new Error(`Expected to audit ${changedRows.length} changed row(s) but audited ${updatedCount} — the audit trail and the data would disagree.`)
+    );
+  }
+  const deletedCount = await recordSnapshotRowsAudit({ tx, schema, operation: ChangelogOperation.DELETE, rows: removedRows, changedBy, plotID, censusID });
+  if (deletedCount !== removedRows.length) {
+    throw new ChangelogWriteError(
+      ChangelogOperation.DELETE,
+      COREMEASUREMENTS_TABLE_NAME,
+      recordIDForError,
+      new Error(`Expected to audit ${removedRows.length} removed row(s) but audited ${deletedCount} — the audit trail and the data would disagree.`)
+    );
+  }
+  return { updatedCount, deletedCount, unchangedCount };
+}
