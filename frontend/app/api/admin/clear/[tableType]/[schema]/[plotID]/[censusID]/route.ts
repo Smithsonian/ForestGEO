@@ -8,6 +8,8 @@ import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { COREMEASUREMENTS_JOIN_ALIAS, deleteCoreMeasurementsInBoundedChunksWithAudit } from '@/lib/ingestion/temporary-measurements';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -22,6 +24,8 @@ const VALID_TABLE_TYPES = {
 } as const;
 
 type TableType = keyof typeof VALID_TABLE_TYPES;
+
+const FAILED_MEASUREMENTS_SCOPE_FROM_SQL = '??.coremeasurements cm JOIN ??.census c ON c.CensusID = cm.CensusID';
 
 function buildFailedMeasurementsScopeWhereClause(schema: string) {
   return `c.PlotID = ?
@@ -52,7 +56,8 @@ export async function DELETE(
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
-  const authError = requireAdmin(await auth());
+  const session = await auth();
+  const authError = requireAdmin(session);
   if (authError) return authError;
 
   const { tableType, schema: schemaParam, plotID: plotIDParam, censusID: censusIDParam } = await props.params;
@@ -121,35 +126,30 @@ export async function DELETE(
   try {
     transactionID = await connectionManager.beginTransaction();
 
-    let countSQL = '';
-    let countParams: any[] = [];
-    let deleteSQL = '';
-    let deleteParams: any[] = [];
+    let totalRecords: number;
 
     if (tableType === 'failedmeasurements') {
-      // Schema is validated above via validateSchemaOrThrow — safe to interpolate as identifier
-      countSQL = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
-         FROM ${schema}.coremeasurements cm
-         JOIN ${schema}.census c ON c.CensusID = cm.CensusID
-         WHERE ${buildFailedMeasurementsScopeWhereClause(schema)}`;
-      countParams = buildFailedMeasurementsScopeParams(plotID, censusID);
-
-      deleteSQL = `DELETE cm
-         FROM ${schema}.coremeasurements cm
-         JOIN ${schema}.census c ON c.CensusID = cm.CensusID
-         WHERE ${buildFailedMeasurementsScopeWhereClause(schema)}`;
-      deleteParams = buildFailedMeasurementsScopeParams(plotID, censusID);
+      // Schema is validated above via validateSchemaOrThrow — safe to interpolate as identifier.
+      // Failed rows are measurements of record, so each one gets a Recent Changes DELETE row (issue #507).
+      totalRecords = await deleteCoreMeasurementsInBoundedChunksWithAudit(
+        connectionManager,
+        schema,
+        buildFailedMeasurementsScopeWhereClause(schema),
+        buildFailedMeasurementsScopeParams(plotID, censusID),
+        authenticatedSessionIdentity(session?.user),
+        plotID,
+        censusID,
+        transactionID,
+        FAILED_MEASUREMENTS_SCOPE_FROM_SQL,
+        [COREMEASUREMENTS_JOIN_ALIAS]
+      );
     } else {
+      // Staging rows are not data of record and are not audited.
       const tableName = VALID_TABLE_TYPES[tableType as TableType];
-      countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
-      deleteSQL = format('DELETE FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
-      countParams = [plotID, censusID];
-      deleteParams = [plotID, censusID];
+      const deleteSQL = format('DELETE FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+      const deleteResult = await connectionManager.executeQuery(deleteSQL, [plotID, censusID], transactionID);
+      totalRecords = Number(deleteResult?.affectedRows ?? 0);
     }
-
-    // First, get count of records that will be deleted for confirmation
-    const countResult = await connectionManager.executeQuery(countSQL, countParams, transactionID);
-    const totalRecords = countResult[0]?.total || 0;
 
     if (totalRecords === 0) {
       await connectionManager.commitTransaction(transactionID);
@@ -161,9 +161,6 @@ export async function DELETE(
         { status: HTTPResponses.OK }
       );
     }
-
-    // Delete all records for this plot/census from the specified table
-    await connectionManager.executeQuery(deleteSQL, deleteParams, transactionID);
 
     await connectionManager.commitTransaction(transactionID);
 
