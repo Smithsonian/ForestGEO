@@ -51,28 +51,45 @@ export default function MultilineModal(props: MultilineModalProps) {
     }
   }
 
-  useEffect(() => {
-    if (changesSubmitted) {
-      if (formType === 'measurements' && tempReviewState === ReviewStates.VALIDATE) {
-        setOpenValidations(true);
-        setOpenUpdateValidations(false);
-      } else {
-        handleCloseManualEntryForm();
-      }
-      triggerRefresh();
-      if (onSubmitComplete) {
-        onSubmitComplete();
-      }
-    }
-  }, [changesSubmitted, formType, tempReviewState, handleCloseManualEntryForm, triggerRefresh, onSubmitComplete]);
+  const [isClosingAfterValidation, setIsClosingAfterValidation] = useState(false);
+  const isValidationStepOpen = openValidations || openUpdateValidations;
+  const hasValidationFinished = tempReviewState !== ReviewStates.VALIDATE && tempReviewState !== ReviewStates.UPDATE;
 
   useEffect(() => {
-    // monitor changes in tempReviewState and trigger update once they're done
+    if (isManualEntryFormOpen) return;
+    setChangesSubmitted(false);
+    setOpenValidations(false);
+    setOpenUpdateValidations(false);
+    setTempReviewState(ReviewStates.VALIDATE);
+    setIsClosingAfterValidation(false);
+  }, [isManualEntryFormOpen]);
+
+  useEffect(() => {
+    if (!changesSubmitted) return;
+    setChangesSubmitted(false);
+    triggerRefresh();
+    onSubmitComplete?.();
+    if (formType === 'measurements') {
+      setOpenValidations(true);
+      setOpenUpdateValidations(false);
+    } else {
+      handleCloseManualEntryForm();
+    }
+  }, [changesSubmitted, formType, triggerRefresh, onSubmitComplete, handleCloseManualEntryForm]);
+
+  useEffect(() => {
     if (openValidations && tempReviewState === ReviewStates.UPDATE) {
       setOpenValidations(false);
       setOpenUpdateValidations(true);
     }
   }, [tempReviewState, openValidations]);
+
+  useEffect(() => {
+    if (isValidationStepOpen && hasValidationFinished && !isClosingAfterValidation) {
+      setIsClosingAfterValidation(true);
+      handleCloseManualEntryForm();
+    }
+  }, [isValidationStepOpen, hasValidationFinished, isClosingAfterValidation, handleCloseManualEntryForm]);
 
   return (
     <Modal
