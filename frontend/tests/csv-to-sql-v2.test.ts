@@ -608,14 +608,17 @@ describe('renderStage2', () => {
     expect(s).not.toMatch(/tl\.SubSpeciesID IS NULL/);
   });
 
-  it('stem_lookup declares its (TreeID, StemTag) key inline, is plot-scoped and grouped by (TreeID, StemTag)', () => {
+  it('stem_lookup declares its (TreeID, StemTagKey) key inline and groups a NULL destination StemTag with blank ones (#577)', () => {
     const s = sql();
-    expect(s).toContain(`CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTag)) AS`);
-    expect(s).toMatch(/GROUP BY s\.TreeID, s\.StemTag/);
+    expect(s).toContain(`CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTagKey)) AS`);
+    expect(s).toMatch(/SELECT s\.TreeID,\s+COALESCE\(s\.StemTag, ''\) AS StemTagKey,/);
+    expect(s).toMatch(/GROUP BY s\.TreeID, StemTagKey;/);
   });
 
-  it('stem write-back uses NULL-safe <=> on StemTag', () => {
-    expect(sql()).toMatch(/sl\.TreeID = t\.TreeID\s+AND sl\.StemTag <=> t\.StemTag\s+AND sl\.StemCount = 1/);
+  it('stem write-back compares the same blank-folded key, so NULL never fails to equal blank (#577)', () => {
+    const s = sql();
+    expect(s).toMatch(/sl\.TreeID = t\.TreeID\s+AND sl\.StemTagKey = COALESCE\(t\.StemTag, ''\)\s+AND sl\.StemCount = 1/);
+    expect(s, 'a raw <=> on StemTag treats NULL and blank as different stems').not.toMatch(/sl\.StemTag <=>/);
   });
 
   it('TSMID resolution UPDATE joins staging_attributes to TSMAttributes by TSMCode', () => {
@@ -690,9 +693,11 @@ describe('renderStage5', () => {
     expect(sql()).toMatch(/tl\.TreeCount > 1/);
   });
 
-  it('check 4: ambiguous stem key (StemCount > 1)', () => {
+  it('check 4: ambiguous stem key (StemCount > 1) uses the same blank-folded key as the Stage 2 lookup (#577)', () => {
     expect(sql()).toMatch(/'Ambiguous stem key'/);
-    expect(sql()).toMatch(/sl\.StemCount > 1/);
+    expect(sql()).toMatch(
+      /sl\.TreeID = `staging_measurements`\.TreeID AND sl\.StemTagKey = COALESCE\(`staging_measurements`\.StemTag, ''\) AND sl\.StemCount > 1/
+    );
   });
 
   it('check 5: unknown quadrat', () => {
