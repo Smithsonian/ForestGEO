@@ -35,6 +35,25 @@ services:
       retries: 5
       start_period: 30s
 
+  # Optional: MariaDB 10.4 for the publish-artifact destination matrix (#577).
+  #   docker compose --profile mariadb up -d mariadb
+  #   cd frontend && TEST_MARIADB_PORT=3307 npm run test:integration
+  mariadb:
+    image: mariadb:10.4
+    container_name: forestgeo-mariadb-local
+    environment:
+      MARIADB_ROOT_PASSWORD: ${TEST_DB_PASSWORD:-testpassword}
+      TZ: UTC
+    ports:
+      - "${TEST_MARIADB_PORT:-3307}:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${TEST_DB_PASSWORD:-testpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - mariadb
+
   # Optional: Run integration tests in a container
   test-runner:
     image: node:20-slim

@@ -264,6 +264,7 @@ it('should reject record with NULL TreeTag', async () => {
 | `TEST_DB_USER` | `root` | MySQL user |
 | `TEST_DB_PASSWORD` | `testpassword` | MySQL password |
 | `TEST_DB_NAMESPACE` | hash of the checkout path | Namespace segment of the test database name; set it to a short identifier when another process needs to predict the name |
+| `TEST_MARIADB_PORT` | unset | Port of a MariaDB 10.4 server (`docker compose --profile mariadb up -d mariadb` serves 3307). When set, the publish-artifact stem-tag matrix in `csv-to-sql-v2.integration.test.ts` also runs against it; CI requires it |
 | `VITEST_POOL_ID` | `default` | Pool segment of the test database name (always `1` under `singleFork`) |
 
 ## Validation IDs Reference

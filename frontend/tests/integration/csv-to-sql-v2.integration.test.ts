@@ -1859,6 +1859,7 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
 // ---------------------------------------------------------------------------
 
 const MARIADB_PORT_ENV = 'TEST_MARIADB_PORT';
+const CONTINUOUS_INTEGRATION_ENV = 'CI';
 const MARIADB_PORT = process.env[MARIADB_PORT_ENV];
 const MISSING_TAG_TREE_ID = 200;
 const MISSING_TAG_TREE_TAG = String(MISSING_TAG_TREE_ID);
@@ -2048,6 +2049,13 @@ async function isLockFree(destination: mysql.Connection, lockName: string): Prom
   const [rows] = await destination.query<mysql.RowDataPacket[]>('SELECT IS_FREE_LOCK(?) AS isFree', [lockName]);
   return Number(rows[0].isFree) === 1;
 }
+
+describe(`#577 MariaDB 10.4 leg (runs when ${MARIADB_PORT_ENV} is set; configured: ${Boolean(MARIADB_DESTINATION)})`, () => {
+  it(`is configured in CI: ${MARIADB_PORT_ENV} must be set whenever ${CONTINUOUS_INTEGRATION_ENV} is`, () => {
+    if (!process.env[CONTINUOUS_INTEGRATION_ENV]) return;
+    expect(MARIADB_DESTINATION, `${MARIADB_PORT_ENV} is unset in CI, so the MariaDB 10.4 leg of the #577 matrix would be skipped silently`).not.toBeNull();
+  });
+});
 
 describe.each(DESTINATION_ENGINES)('#577 missing stem tags on $label: NULL and blank are one stem key', engine => {
   const databaseName = `forestgeo_v2_stemtag_${engine.databaseSlug}_${process.pid}_${Date.now()}`;
