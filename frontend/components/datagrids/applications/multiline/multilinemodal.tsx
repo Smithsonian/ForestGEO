@@ -51,7 +51,7 @@ export default function MultilineModal(props: MultilineModalProps) {
     }
   }
 
-  const [isClosingAfterValidation, setIsClosingAfterValidation] = useState(false);
+  const [hasRequestedClose, setHasRequestedClose] = useState(false);
   const isValidationStepOpen = openValidations || openUpdateValidations;
   const hasValidationFinished = tempReviewState !== ReviewStates.VALIDATE && tempReviewState !== ReviewStates.UPDATE;
 
@@ -61,21 +61,27 @@ export default function MultilineModal(props: MultilineModalProps) {
     setOpenValidations(false);
     setOpenUpdateValidations(false);
     setTempReviewState(ReviewStates.VALIDATE);
-    setIsClosingAfterValidation(false);
+    setHasRequestedClose(false);
   }, [isManualEntryFormOpen]);
+
+  function requestCloseManualEntryForm() {
+    setHasRequestedClose(true);
+    handleCloseManualEntryForm();
+  }
 
   useEffect(() => {
     if (!changesSubmitted) return;
     setChangesSubmitted(false);
     triggerRefresh();
     onSubmitComplete?.();
-    if (formType === 'measurements') {
+    if (formType === 'measurements' && isManualEntryFormOpen) {
+      setTempReviewState(ReviewStates.VALIDATE);
       setOpenValidations(true);
       setOpenUpdateValidations(false);
     } else {
       handleCloseManualEntryForm();
     }
-  }, [changesSubmitted, formType, triggerRefresh, onSubmitComplete, handleCloseManualEntryForm]);
+  }, [changesSubmitted, formType, isManualEntryFormOpen, triggerRefresh, onSubmitComplete, handleCloseManualEntryForm]);
 
   useEffect(() => {
     if (openValidations && tempReviewState === ReviewStates.UPDATE) {
@@ -85,11 +91,11 @@ export default function MultilineModal(props: MultilineModalProps) {
   }, [tempReviewState, openValidations]);
 
   useEffect(() => {
-    if (isValidationStepOpen && hasValidationFinished && !isClosingAfterValidation) {
-      setIsClosingAfterValidation(true);
+    if (isValidationStepOpen && hasValidationFinished && !hasRequestedClose) {
+      setHasRequestedClose(true);
       handleCloseManualEntryForm();
     }
-  }, [isValidationStepOpen, hasValidationFinished, isClosingAfterValidation, handleCloseManualEntryForm]);
+  }, [isValidationStepOpen, hasValidationFinished, hasRequestedClose, handleCloseManualEntryForm]);
 
   return (
     <Modal
@@ -99,7 +105,7 @@ export default function MultilineModal(props: MultilineModalProps) {
       sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
     >
       <ModalDialog size="lg" sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }} role="alertdialog" variant={'plain'}>
-        <IconButton aria-label="close" onClick={handleCloseManualEntryForm} sx={{ position: 'absolute', top: 8, right: 8 }}>
+        <IconButton aria-label="close" onClick={requestCloseManualEntryForm} sx={{ position: 'absolute', top: 8, right: 8 }}>
           <CloseIcon />
         </IconButton>
         <DialogTitle sx={{ alignSelf: 'center', justifyContent: 'center' }} level={'h3'} color={'primary'}>

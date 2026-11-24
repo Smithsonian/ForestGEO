@@ -306,17 +306,21 @@ describe('Fixed Data Management', () => {
 
     openFixedDataGrid('Stem Codes');
     startManualStemCodeRow('ATTR104');
-    saveAndFinalizeManualForm();
-    cy.wait('@finalizeLoopCheckRows');
-    cy.contains(MANUAL_ATTRIBUTES_FORM, 'Manual Input Form - Attributes').should('not.exist');
+    cy.get('@fetchIsolatedGridRows.all').then(requestsBeforeFinalize => {
+      const countBeforeFinalize = requestsBeforeFinalize.length;
+      saveAndFinalizeManualForm();
+      cy.wait('@finalizeLoopCheckRows');
+      cy.contains(MANUAL_ATTRIBUTES_FORM, 'Manual Input Form - Attributes').should('not.exist');
 
-    cy.wait(POST_FINALIZE_SETTLE_MS);
-    cy.get('@fetchIsolatedGridRows.all').then(settledRequests => {
-      const settledCount = settledRequests.length;
-      cy.task('log', `[#511 grid fetches after first settle window] count=${settledCount}`);
       cy.wait(POST_FINALIZE_SETTLE_MS);
-      cy.get('@fetchIsolatedGridRows.all').should(laterRequests => {
-        expect(laterRequests.length, `grid GETs kept firing after finalize (was ${settledCount} after the first window)`).to.equal(settledCount);
+      cy.get('@fetchIsolatedGridRows.all').then(settledRequests => {
+        const settledCount = settledRequests.length;
+        cy.task('log', `[#511 grid fetches] beforeFinalize=${countBeforeFinalize} afterFirstSettleWindow=${settledCount}`);
+        expect(settledCount, 'finalize never refreshed the grid').to.be.greaterThan(countBeforeFinalize);
+        cy.wait(POST_FINALIZE_SETTLE_MS);
+        cy.get('@fetchIsolatedGridRows.all').should(laterRequests => {
+          expect(laterRequests.length, `grid GETs kept firing after finalize (was ${settledCount} after the first window)`).to.equal(settledCount);
+        });
       });
     });
   });

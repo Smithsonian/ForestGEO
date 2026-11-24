@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import IsolatedAttributesDataGrid from '@/components/datagrids/applications/isolated/isolatedattributesdatagrid';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 import { FormType } from '@/config/macros/formdetails';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 
 const MANUAL_ENTRY_BUTTON_LABEL = 'Manual Entry Form';
 const FINALIZE_BUTTON_LABEL = 'Finalize Changes';
@@ -14,7 +15,9 @@ const LOOP_OBSERVATION_WINDOW_MS = 300;
 
 const harness = vi.hoisted(() => ({
   gridFetchCount: 0,
-  triggerRefresh: vi.fn()
+  triggerRefresh: vi.fn(),
+  submitFromUnmountedGrid: null as ((value: boolean) => void) | null,
+  reportFromUnmountedValidation: null as ((state: string) => void) | null
 }));
 
 vi.mock('@/components/datagrids/isolateddatagridcommons', async () => {
@@ -55,6 +58,7 @@ vi.mock('@/components/client/rendergridformexplanations', () => ({ default: () =
 function mockMultilineGrid(gridName: string) {
   return async () => {
     function MultilineGridStub({ setChangesSubmitted }: { setChangesSubmitted: (value: boolean) => void }) {
+      harness.submitFromUnmountedGrid = setChangesSubmitted;
       return (
         <div data-testid={`multiline-grid-${gridName}`}>
           <button onClick={() => setChangesSubmitted(true)}>{FINALIZE_BUTTON_LABEL}</button>
@@ -74,6 +78,7 @@ vi.mock('@/components/datagrids/applications/multiline/multilinemeasurementsdata
 vi.mock('@/components/uploadsystem/segments/uploadvalidation', async () => {
   const { ReviewStates } = await import('@/config/macros/uploadsystemmacros');
   function UploadValidationStub({ setReviewState }: { setReviewState: (state: string) => void }) {
+    harness.reportFromUnmountedValidation = setReviewState;
     return (
       <div data-testid="upload-validation">
         <button onClick={() => setReviewState(ReviewStates.UPLOAD_AZURE)}>{COMPLETE_VALIDATION_BUTTON_LABEL}</button>
@@ -113,6 +118,8 @@ describe('MultilineModal finalize handling (#511)', () => {
   beforeEach(() => {
     harness.gridFetchCount = 0;
     harness.triggerRefresh.mockClear();
+    harness.submitFromUnmountedGrid = null;
+    harness.reportFromUnmountedValidation = null;
   });
 
   afterEach(() => {
@@ -154,6 +161,24 @@ describe('MultilineModal finalize handling (#511)', () => {
       expect(isManualEntryFormOpen(), describeModalState()).toBe(false);
       expect(harness.gridFetchCount, `second finalize did not refetch exactly once more: ${describeModalState()}`).toBe(2);
       expect(harness.triggerRefresh, describeModalState()).toHaveBeenCalledTimes(2);
+    });
+
+    it('refreshes the grid but keeps the form closed when Finalize succeeds after the user already closed the form', async () => {
+      const user = userEvent.setup();
+      render(<IsolatedAttributesDataGrid />);
+
+      await user.click(screen.getByRole('button', { name: MANUAL_ENTRY_BUTTON_LABEL }));
+      const submitFromClosedForm = harness.submitFromUnmountedGrid;
+      await user.click(screen.getByRole('button', { name: 'close' }));
+      await waitForLoopObservationWindow();
+      const fetchesAfterClose = harness.gridFetchCount;
+
+      await act(async () => submitFromClosedForm?.(true));
+      await waitForLoopObservationWindow();
+
+      expect(isManualEntryFormOpen(), describeModalState()).toBe(false);
+      expect(harness.gridFetchCount, `late finalize should refetch the committed rows exactly once: ${describeModalState()}`).toBe(fetchesAfterClose + 1);
+      expect(harness.triggerRefresh, describeModalState()).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -238,6 +263,55 @@ describe('MultilineModal finalize handling (#511)', () => {
 
       expect(isManualEntryFormOpen(), describeModalState()).toBe(false);
       expect(onClose.mock.calls, `close requested more than once while the parent re-rendered: ${describeModalState()}`).toEqual([[true]]);
+    });
+
+    it('requests close once when validation finishes while the parent is still reloading after the close button', async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(<MeasurementsParentHarness onClose={onClose} onSubmitComplete={vi.fn()} reloadBeforeCloseMs={LOOP_OBSERVATION_WINDOW_MS} />);
+
+      await user.click(screen.getByRole('button', { name: FINALIZE_BUTTON_LABEL }));
+      await user.click(screen.getByRole('button', { name: 'close' }));
+      await waitFor(() => expect(screen.queryByTestId('parent-reloading'), describeModalState()).not.toBeNull());
+      await user.click(screen.getByRole('button', { name: COMPLETE_VALIDATION_BUTTON_LABEL }));
+      await waitForLoopObservationWindow();
+
+      expect(isManualEntryFormOpen(), describeModalState()).toBe(false);
+      expect(onClose.mock.calls, `close button plus finished validation started a second parent reload: ${describeModalState()}`).toEqual([[true]]);
+    });
+
+    it('does not reopen on validation when Finalize succeeds after the user already closed the form', async () => {
+      const user = userEvent.setup();
+      render(<MeasurementsParentHarness onClose={vi.fn()} onSubmitComplete={vi.fn()} />);
+
+      const submitFromClosedForm = harness.submitFromUnmountedGrid;
+      await user.click(screen.getByRole('button', { name: 'close' }));
+      await act(async () => submitFromClosedForm?.(true));
+      await waitForLoopObservationWindow();
+
+      await user.click(screen.getByRole('button', { name: MANUAL_ENTRY_BUTTON_LABEL }));
+
+      expect(screen.queryByTestId('multiline-grid-measurements'), `reopened form did not show the entry grid: ${describeModalState()}`).not.toBeNull();
+      expect(screen.queryByTestId('upload-validation'), describeModalState()).toBeNull();
+      expect(harness.triggerRefresh, `late finalize should still refresh data validity: ${describeModalState()}`).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores a validation result that arrives after the form closed when the next Finalize starts validation', async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(<MeasurementsParentHarness onClose={onClose} onSubmitComplete={vi.fn()} />);
+
+      await user.click(screen.getByRole('button', { name: FINALIZE_BUTTON_LABEL }));
+      const reportFromClosedValidation = harness.reportFromUnmountedValidation;
+      await user.click(screen.getByRole('button', { name: 'close' }));
+      await act(async () => reportFromClosedValidation?.(ReviewStates.UPLOAD_AZURE));
+
+      await user.click(screen.getByRole('button', { name: MANUAL_ENTRY_BUTTON_LABEL }));
+      await user.click(screen.getByRole('button', { name: FINALIZE_BUTTON_LABEL }));
+      await waitForLoopObservationWindow();
+
+      expect(screen.queryByTestId('upload-validation'), `second finalize skipped its validation step: ${describeModalState()}`).not.toBeNull();
+      expect(onClose, `stale validation result closed the second submission early: ${describeModalState()}`).toHaveBeenCalledTimes(1);
     });
 
     it('reopens on the entry grid rather than the finished validation step', async () => {
