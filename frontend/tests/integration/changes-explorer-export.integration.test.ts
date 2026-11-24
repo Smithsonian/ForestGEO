@@ -20,7 +20,7 @@ import { HTTPResponses } from '@/config/macros';
 import { EXPORT_COLUMNS, SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
 import { CHANGE_EXPORT_ERROR_CODES, DEFAULT_RECENT_CHANGES_FILTERS, type RecentChangesFilters } from '@/config/recentchangesexplorer';
 import { ChangelogOperation } from '@/lib/changelog/record-mutation';
-import type { ChangeExportLimits } from '@/lib/changes/exportsnapshot';
+import { NON_ERROR_FAILURE_MESSAGE, type ChangeExportLimits } from '@/lib/changes/exportsnapshot';
 import { ROUTE_POLICIES } from '@/lib/route-policy';
 import { fromBody, withRouteAuthz } from '@/lib/route-authz';
 import { createChangeExportHandler } from '@/app/api/changes/explorer/export/handler';
@@ -302,9 +302,10 @@ describe('POST /api/changes/explorer/export', () => {
     });
 
     it.each([
-      { thrown: 'an Error', sinkFailure: new TypeError(SINK_FAILURE_TEXT) as unknown },
-      { thrown: 'a string', sinkFailure: SINK_FAILURE_TEXT as unknown }
-    ])('answers the fixed 500 and logs stage handler when the telemetry sink throws $thrown after the read', async ({ sinkFailure }) => {
+      { thrown: 'an Error', sinkFailure: new TypeError(SINK_FAILURE_TEXT) as unknown, loggedMessage: SINK_FAILURE_TEXT },
+      { thrown: 'a string', sinkFailure: SINK_FAILURE_TEXT as unknown, loggedMessage: SINK_FAILURE_TEXT },
+      { thrown: 'an object String() cannot print', sinkFailure: Object.create(null) as unknown, loggedMessage: NON_ERROR_FAILURE_MESSAGE }
+    ])('answers the fixed 500 and logs stage handler when the telemetry sink throws $thrown after the read', async ({ sinkFailure, loggedMessage }) => {
       await seedQuadratInsert(721, { QuadratName: 'HANDLER-Q' }, TIME_FIRST);
       mocks.logEvent.mockImplementation(() => {
         throw sinkFailure;
@@ -320,7 +321,7 @@ describe('POST /api/changes/explorer/export', () => {
       expect(mocks.logError).toHaveBeenCalledTimes(1);
       const [, loggedError, context] = mocks.logError.mock.calls[0];
       expect(loggedError, 'what was thrown is logged as an Error').toBeInstanceOf(Error);
-      expect((loggedError as Error).message).toBe(SINK_FAILURE_TEXT);
+      expect((loggedError as Error).message).toBe(loggedMessage);
       expect(context, 'not a read failure, so not a reader stage').toEqual({ schema, plotID, stage: 'handler', driverCode: undefined });
     });
   });

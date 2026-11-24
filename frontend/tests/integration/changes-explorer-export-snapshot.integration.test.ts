@@ -26,6 +26,7 @@ import {
   buildBaseBatchExpression,
   ChangeExportReadError,
   ExportTooLargeError,
+  NON_ERROR_FAILURE_MESSAGE,
   readChangeExportSnapshot,
   SNAPSHOT_BEGIN_STATEMENT,
   SNAPSHOT_ISOLATION_STATEMENT,
@@ -966,6 +967,21 @@ describe('readChangeExportSnapshot', () => {
       expect(mocks.logError, 'the rollback failure is logged once').toHaveBeenCalledTimes(1);
       expect(mocks.logError.mock.calls[0][1], 'the rollback error itself is logged').toMatchObject({ code: ROLLBACK_DRIVER_CODE });
       expect(mocks.logError.mock.calls[0][2]).toEqual({ schema, plotID });
+    });
+
+    it('still destroys and releases when rollback rejects with an object String() cannot print', async () => {
+      await seedThreeChanges();
+      ownedDouble.rollback.mockImplementation(async () => {
+        await ownedConnection.rollback();
+        throw Object.create(null);
+      });
+
+      const snapshot = await readSnapshot();
+
+      expect(snapshot.rows, 'reporting the rollback failure must not replace the result').toHaveLength(3);
+      expect(ownedDouble.destroy, 'reporting the rollback failure must not skip the disposal').toHaveBeenCalledTimes(1);
+      expect(ownedDouble.release).toHaveBeenCalledTimes(1);
+      expect((mocks.logError.mock.calls[0][1] as Error).message).toBe(NON_ERROR_FAILURE_MESSAGE);
     });
 
     it('returns the rows when only the cleanup fails', async () => {

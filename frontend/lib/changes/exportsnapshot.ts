@@ -87,6 +87,14 @@ export function buildBaseBatchExpression(): SqlFragment {
 
 export type ChangeExportReadStage = 'acquire' | 'begin' | 'detail' | 'rollup' | 'labels';
 
+export const NON_ERROR_FAILURE_MESSAGE = 'Change export failed with a value that is not an Error';
+
+/** A thrown value in a form the logger takes. Never coerces an object: String() itself throws on one with no prototype. */
+export function loggableError(failure: unknown): Error {
+  if (failure instanceof Error) return failure;
+  return new Error(typeof failure === 'string' ? failure : NON_ERROR_FAILURE_MESSAGE, { cause: failure });
+}
+
 function driverCodeOf(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
 }
@@ -365,8 +373,7 @@ async function rolledBackCleanly(conn: PoolConnection, scope: ChangeExportReadSc
     await conn.rollback();
     return true;
   } catch (rollbackError: unknown) {
-    const cause = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
-    ailogger.error(ROLLBACK_FAILED_MESSAGE, cause, { schema: scope.schema, plotID: scope.plotID });
+    ailogger.error(ROLLBACK_FAILED_MESSAGE, loggableError(rollbackError), { schema: scope.schema, plotID: scope.plotID });
     return false;
   }
 }

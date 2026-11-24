@@ -5,7 +5,7 @@ import { buildChangeExportFilename, serializeChangeExportCsv } from '@/config/ch
 import { CHANGE_EXPORT_ERROR_CODES } from '@/config/recentchangesexplorer';
 import { parseExplorerRequest, readExplorerRequestJson } from '@/lib/errorsexplorer/explorerrequest';
 import { changeExportRequestSchema, INVALID_CHANGE_EXPORT_REQUEST_RESPONSE } from '@/lib/changes/explorerrequest';
-import { ChangeExportReadError, ExportTooLargeError, readChangeExportSnapshot, type ChangeExportLimits } from '@/lib/changes/exportsnapshot';
+import { ChangeExportReadError, ExportTooLargeError, loggableError, readChangeExportSnapshot, type ChangeExportLimits } from '@/lib/changes/exportsnapshot';
 import type { RouteContext } from '@/lib/route-authz';
 
 const EXPORT_SUCCEEDED_EVENT = 'RecentChangesCsvExported';
@@ -67,7 +67,7 @@ export function createChangeExportHandler(limits: ChangeExportLimits) {
       const readFailure = error instanceof ChangeExportReadError ? error : null;
       const underlyingFailure: unknown = readFailure ? readFailure.cause : error;
       // The full error goes to the log, as on the list route; the response below stays fixed.
-      ailogger.error(EXPORT_FAILED_LOG_MESSAGE, underlyingFailure instanceof Error ? underlyingFailure : new Error(String(underlyingFailure)), {
+      ailogger.error(EXPORT_FAILED_LOG_MESSAGE, loggableError(underlyingFailure), {
         schema,
         plotID,
         stage: readFailure?.stage ?? HANDLER_STAGE,
