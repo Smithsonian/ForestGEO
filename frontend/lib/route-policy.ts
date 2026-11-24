@@ -114,7 +114,6 @@ export const ROUTE_POLICIES = {
   'formvalidation/[dataType]/[[...slugs]]': 'site-scoped',
   'details/cmid': 'site-scoped',
   'specieslimits/[plotID]/[plotCensusNumber]': 'site-scoped',
-  'resettableview/[gridType]/[plotID]/[censusID]': 'site-scoped',
   // Changelog
   'changelog/overview/[changelogType]/[[...options]]': 'site-scoped',
   // Recent changes explorer
