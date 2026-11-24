@@ -150,6 +150,22 @@ describe('POST /api/uploadsession', () => {
     expect(mocks.createUploadSession).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'mason@example.com', 'file.csv', 3, 'idem-1', undefined);
   });
 
+  it('does not echo an untyped error even when its text mentions another upload', async () => {
+    mocks.createUploadSession.mockRejectedValue(new Error("Another upload is in progress: Lock wait timeout on 'forestgeo_secret.upload_sessions'"));
+
+    const request = new Request('http://localhost/api/uploadsession', {
+      method: 'POST',
+      body: JSON.stringify({ schema: 'forestgeo_testing', plotId: 1, censusId: 2, userId: 'mason', fileId: 'file.csv', totalChunks: 3, fileHash: 'hash-1' })
+    }) as any;
+
+    const response = await POST(request);
+    const text = await response.text();
+    console.log('[uploadsession untyped failure]', response.status, text);
+
+    expect(response.status).toBe(500);
+    expect(JSON.parse(text)).toEqual({ error: 'Failed to create session' });
+  });
+
   it('forwards the upload mode from the request body to createUploadSession', async () => {
     mocks.createUploadSession.mockResolvedValue({ sessionId: 'session-3' });
 

@@ -3,7 +3,7 @@ import { runCombinedDBHValidations } from '@/components/processors/processorhelp
 import { streamWithHeartbeats, STREAMING_RESPONSE_HEADERS } from '@/components/processors/streamingvalidation';
 import { fromBody, withRouteAuthz } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
-import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 export const runtime = 'nodejs';
 
@@ -28,7 +28,7 @@ async function handler(request: NextRequest) {
 
     return new Response(stream, { headers: STREAMING_RESPONSE_HEADERS });
   } catch (error: any) {
-    ailogger.error('Error during combined DBH validation:', error.message);
+    ailogger.error('Error during combined DBH validation:', toError(error));
     return Response.json({ error: INTERNAL_SERVER_ERROR_MESSAGE, success: false }, { status: 500 });
   }
 }

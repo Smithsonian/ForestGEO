@@ -11,6 +11,7 @@ import type { UpsertOperation } from '@/config/utils';
 import { recordMutation, ChangelogOperation, type ChangelogRowState } from '@/lib/changelog/record-mutation';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
 import { trimReferenceTextFields } from '@/lib/reference-text';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 // need to try integrating this into validation system:
 
@@ -731,13 +732,13 @@ export async function runCombinedDBHValidations(schema: string, params: Validati
         await new Promise(resolve => setTimeout(resolve, delay));
         delay = Math.min(delay * 2, 5000);
       } else {
-        ailogger.error(`Combined DBH validations failed with non-deadlock error:`, e.message, e.code);
+        ailogger.error(`Combined DBH validations failed with non-deadlock error:`, toError(e), { code: e.code });
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
           ailogger.error('Rollback error:', rollbackError);
         }
-        return { success: false, ranGrowth: false, ranShrinkage: false, error: e.message };
+        return { success: false, ranGrowth: false, ranShrinkage: false, error: INTERNAL_SERVER_ERROR_MESSAGE };
       }
     }
   }
@@ -862,7 +863,7 @@ export async function runCombinedCrossCensusLocationValidations(
         await new Promise(resolve => setTimeout(resolve, delay));
         delay = Math.min(delay * 2, 5000);
       } else {
-        ailogger.error(`Combined cross-census location validations failed with non-deadlock error:`, e.message, e.code);
+        ailogger.error(`Combined cross-census location validations failed with non-deadlock error:`, toError(e), { code: e.code });
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
@@ -872,7 +873,7 @@ export async function runCombinedCrossCensusLocationValidations(
           success: false,
           ranQuadratMismatch: false,
           ranCoordinateDrift: false,
-          error: e.message
+          error: INTERNAL_SERVER_ERROR_MESSAGE
         };
       }
     }

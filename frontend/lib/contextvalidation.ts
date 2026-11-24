@@ -6,7 +6,7 @@ import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { hasSchemaAccess, isAdminSession } from '@/lib/authz';
 import { findSchemaQuarantine, schemaGateUnavailableResponse, schemaQuarantinedResponse } from '@/lib/schema-quarantine';
-import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 export interface ContextValues {
   siteID?: number;
@@ -163,7 +163,7 @@ export async function validateContextualValues(
       try {
         quarantine = await findSchemaQuarantine(values.schema);
       } catch (error) {
-        ailogger.error(`[contextvalidation] schema quarantine lookup failed for '${values.schema}'`, error instanceof Error ? error : undefined);
+        ailogger.error(`[contextvalidation] schema quarantine lookup failed for '${values.schema}'`, toError(error));
         return { success: false, response: schemaGateUnavailableResponse() };
       }
       if (quarantine) {
@@ -219,13 +219,11 @@ export async function validateContextualValues(
   } catch (error: unknown) {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     ailogger.error('Context validation error:', errorObj);
-    const message = errorObj.message;
     return {
       success: false,
       response: NextResponse.json(
         {
           error: 'Failed to validate context values',
-          details: message,
           fallback: allowFallback
         },
         { status: HTTPResponses.INTERNAL_SERVER_ERROR }

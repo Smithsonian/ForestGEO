@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/lib/db/connectionmanager';
+import ConnectionManager, { isServerErrorReply } from '@/lib/db/connectionmanager';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
+import { toError } from '@/lib/errorhelpers';
+
+const QUERY_VALIDATION_UNAVAILABLE_MESSAGE = 'The query could not be checked right now. Try again, or contact the ForestGEO team if this continues.';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -47,10 +50,14 @@ async function handler(request: NextRequest, _context: RouteContext) {
     } catch (error: any) {
       validationResult.isValid = false;
 
-      // Parse MySQL error messages for better user feedback
+      // Only MySQL's reply to the user's own EXPLAIN describes their query. A transport failure, or a failure
+      // in the server-owned routine lookup for a CALL, is infrastructure text and stays in the log.
       const errorMessage = error.message || 'Unknown SQL error';
 
-      if (errorMessage.includes('Table') && errorMessage.includes("doesn't exist")) {
+      if (isStoredProcedureCall(query) || !isServerErrorReply(error)) {
+        ailogger.error('Query validation could not run:', toError(error));
+        validationResult.errors.push(QUERY_VALIDATION_UNAVAILABLE_MESSAGE);
+      } else if (errorMessage.includes('Table') && errorMessage.includes("doesn't exist")) {
         const tableMatch = errorMessage.match(/Table '([^']+)' doesn't exist/);
         if (tableMatch) {
           validationResult.errors.push(`Table '${tableMatch[1]}' does not exist in schema '${schema}'`);

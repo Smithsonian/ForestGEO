@@ -109,7 +109,6 @@ export function schemaQuarantinedResponse(record: QuarantineRecord): NextRespons
       code: SCHEMA_QUARANTINED_CODE,
       schema: record.schemaName,
       quarantinedAt,
-      reason: record.reason,
       runRef: record.runRef
     },
     { status: HTTPResponses.SERVICE_UNAVAILABLE }

@@ -51,7 +51,7 @@ import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
 import { ReferenceReplacementInProgressError } from '@/lib/uploads/upload-session-replacement-marker';
 import { referenceUploadRowLimitError } from '@/lib/uploads/reference-upload-limits';
 import { TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
-import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 import { UploadRefusedError } from '@/lib/uploads/upload-refused-error';
 
 const REFERENCE_REPLACEMENT_IN_PROGRESS_CODE = 'REFERENCE_REPLACEMENT_IN_PROGRESS';
@@ -654,7 +654,7 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        ailogger.error(`Error processing file ${fileName} after ${retryCount} attempts:`, e.message);
+        ailogger.error(`Error processing file ${fileName} after ${retryCount} attempts:`, toError(e));
         return new NextResponse(
           JSON.stringify({
             responseMessage: `Error processing file ${fileName}`,
@@ -913,6 +913,7 @@ export async function POST(request: NextRequest) {
         return new NextResponse(
           JSON.stringify({
             responseMessage: `Unknown processing error at row, in file ${fileName}`,
+            error: INTERNAL_SERVER_ERROR_MESSAGE,
             failingRows: Array.from(failingRows),
             retryCount
           }),

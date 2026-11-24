@@ -75,8 +75,7 @@ export async function withDatabase<T = any>(
     // Default error response
     return NextResponse.json(
       {
-        error: INTERNAL_SERVER_ERROR_MESSAGE,
-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        error: INTERNAL_SERVER_ERROR_MESSAGE
       },
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

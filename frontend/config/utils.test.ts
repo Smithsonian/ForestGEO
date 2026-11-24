@@ -139,6 +139,20 @@ describe('Database Query Utilities', () => {
       expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps the MySQL error code on the rethrown error, so handleError can answer a duplicate with 409', async () => {
+      const duplicate = Object.assign(new Error("Duplicate entry 'ABCD' for key 'species.SpeciesCode'"), { code: 'ER_DUP_ENTRY' });
+      (mockConnectionManager.executeQuery as any).mockRejectedValueOnce(duplicate);
+
+      const rethrown = await handleUpsert(mockConnectionManager, 'testSchema', 'species', { SpeciesCode: 'ABCD' }, 'SpeciesID').catch(
+        (error: unknown) => error
+      );
+
+      console.log('[handleUpsert rethrew]', rethrown);
+      expect(rethrown).toBeInstanceOf(Error);
+      expect((rethrown as Error & { code?: string }).code).toBe('ER_DUP_ENTRY');
+      expect((rethrown as Error).message).toBe(duplicate.message);
+    });
+
     it('should pass transactionID through executeQuery calls when provided', async () => {
       const data: { id?: number; name: string; age: number } = { name: 'Test', age: 25 };
       (mockConnectionManager.executeQuery as any).mockResolvedValueOnce({ insertId: 123 });

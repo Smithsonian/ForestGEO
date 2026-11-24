@@ -11,6 +11,7 @@ import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz'
 import { auth } from '@/auth';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { getErrorCode } from '@/lib/errorhelpers';
+import { COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE, TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -173,7 +174,9 @@ async function handler(request: NextRequest, context: RouteContext) {
 
 /** BatchFamilyScopeError names only IDs and scopes, so it stays readable; anything else may carry SQL text. */
 function ingestionFailureMessage(error: unknown): string {
-  return error instanceof BatchFamilyScopeError ? error.message : setupFailureSummary(getErrorCode(error));
+  if (error instanceof BatchFamilyScopeError) return error.message;
+  if (error instanceof TransactionCommitOutcomeUnknownError) return COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE;
+  return setupFailureSummary(getErrorCode(error));
 }
 
 export const GET = withRouteAuthz('setupbulkprocedure/[fileID]/[batchID]', handler, { schema: fromQuery('schema') });

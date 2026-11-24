@@ -640,6 +640,8 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
   // Unexpected error / 500 path
   // -------------------------------------------------------------------------
 
+  const CTFS_EXPORT_FAILED_MESSAGE = 'Export failed';
+
   it('returns 500 and logs ailogger.error when an unexpected error is thrown', async () => {
     mocks.selectMeasurements.mockRejectedValue(new Error('DB exploded'));
 
@@ -647,7 +649,8 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();
-    expect(body.error).toMatch(/DB exploded/i);
+    expect(body).toEqual({ error: CTFS_EXPORT_FAILED_MESSAGE });
+    expect(JSON.stringify(body), 'the database message stays in the log (#574)').not.toMatch(/DB exploded/i);
 
     expect(mocks.loggerError).toHaveBeenCalledTimes(1);
     const [message, meta] = mocks.loggerError.mock.calls[0];
@@ -669,6 +672,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();
-    expect(body.error).toBe('a plain string error');
+    expect(body).toEqual({ error: CTFS_EXPORT_FAILED_MESSAGE });
+    expect(mocks.loggerError.mock.calls[0][1].message).toBe('a plain string error');
   });
 });

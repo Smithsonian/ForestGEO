@@ -79,7 +79,7 @@ function isAbandoned(meta: TransactionMeta, now: number): boolean {
  * A server error reply always carries a string sqlMessage. mysql2's promise adapter copies sqlMessage onto every
  * rejection (make_done_cb.js:11), as undefined for transport errors, so test the value, never the key.
  */
-function isServerErrorReply(error: unknown): boolean {
+export function isServerErrorReply(error: unknown): boolean {
   return typeof (error as { sqlMessage?: unknown } | null)?.sqlMessage === 'string';
 }
 

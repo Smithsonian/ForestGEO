@@ -156,7 +156,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ailogger.error('[UploadSession API] POST error:', error);
 
     // Check for concurrent upload error
-    if (error instanceof UploadSessionOwnershipError || error.message?.includes('Another upload is in progress')) {
+    if (error instanceof UploadSessionOwnershipError) {
       return new NextResponse(JSON.stringify({ error: error.message }), {
         status: HTTPResponses.CONFLICT
       });

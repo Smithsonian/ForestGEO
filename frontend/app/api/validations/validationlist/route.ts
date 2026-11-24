@@ -4,7 +4,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fromQuery, withRouteAuthz } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
-import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -40,7 +40,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ coreValidations: validationMessages }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    ailogger.error('Error in validationlist GET request:', error.message);
+    ailogger.error('Error in validationlist GET request:', toError(error));
     return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }

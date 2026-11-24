@@ -4,7 +4,7 @@ import { streamWithHeartbeats, STREAMING_RESPONSE_HEADERS } from '@/components/p
 import { HTTPResponses } from '@/config/macros';
 import { fromBody, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
-import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -50,7 +50,7 @@ async function handler(request: NextRequest, context: RouteContext) {
 
     return new Response(stream, { headers: STREAMING_RESPONSE_HEADERS });
   } catch (error: any) {
-    ailogger.error('Error during validation:', error.message);
+    ailogger.error('Error during validation:', toError(error));
     return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }

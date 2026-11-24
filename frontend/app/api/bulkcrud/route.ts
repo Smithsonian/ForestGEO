@@ -16,6 +16,7 @@ import { recordCommittedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { BULKCRUD_REJECTION_MESSAGES, findMissingBulkcrudContext, isMeasurementGridType } from '@/lib/bulkcrud/required-context';
 import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
+import { UploadRefusedError } from '@/lib/uploads/upload-refused-error';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -152,7 +153,7 @@ export async function POST(request: NextRequest) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
     return new NextResponse(
       JSON.stringify({
-        error: INTERNAL_SERVER_ERROR_MESSAGE
+        error: e instanceof UploadRefusedError ? e.message : INTERNAL_SERVER_ERROR_MESSAGE
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

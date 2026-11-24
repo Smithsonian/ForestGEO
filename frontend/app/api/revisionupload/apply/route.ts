@@ -60,6 +60,7 @@ import {
   isValidUploadAttemptID,
   REVISION_UPLOAD_FILE_ID
 } from '../shared/invalidrowintegrity';
+import { COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE, TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 
 export const runtime = 'nodejs';
 
@@ -1562,6 +1563,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (errorObj instanceof RevisionApplyConflictError) {
       return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.CONFLICT });
+    }
+    if (errorObj instanceof TransactionCommitOutcomeUnknownError) {
+      return NextResponse.json({ error: COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE, code: errorObj.code }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     }
     return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {

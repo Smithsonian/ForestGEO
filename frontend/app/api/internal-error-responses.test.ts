@@ -276,11 +276,18 @@ function buildRequest(routeCase: RouteCase): NextRequest {
   return new NextRequest(`${BASE_URL}${routeCase.path}`, { method: routeCase.method, headers, body });
 }
 
+/**
+ * ailogger.error(message, exception) keeps the cause only when the exception slot holds an Error (or the message
+ * itself names it); a bare string in the exception slot loses the stack in production.
+ */
 function loggedTextContainsTheDatabaseMessage(): boolean {
   return vi
     .mocked(ailogger.error)
-    .mock.calls.flat()
-    .some(argument => (argument instanceof Error ? argument.message : String(argument)).includes(SECRET_DATABASE_MESSAGE));
+    .mock.calls.some(
+      ([message, exception]) =>
+        (typeof message === 'string' && message.includes(SECRET_DATABASE_MESSAGE)) ||
+        (exception instanceof Error && exception.message.includes(SECRET_DATABASE_MESSAGE))
+    );
 }
 
 beforeEach(() => {
@@ -306,6 +313,52 @@ describe('#574 API routes keep database error text out of failure responses', ()
     }
     if (routeCase.expectedError !== undefined) {
       expect(JSON.parse(text).error).toBe(routeCase.expectedError);
+    }
+    expect(loggedTextContainsTheDatabaseMessage(), 'the database message is still logged for the team').toBe(true);
+  });
+});
+
+interface StreamedValidationCase {
+  name: string;
+  load: () => Promise<Record<string, unknown>>;
+  path: string;
+}
+
+const STREAMED_VALIDATION_CASES: StreamedValidationCase[] = [
+  { name: 'combined DBH validations', load: () => import('./validations/procedures/shared-dbh/route'), path: '/validations/procedures/shared-dbh' },
+  {
+    name: 'combined cross-census location validations',
+    load: () => import('./validations/procedures/shared-cross-census-location/route'),
+    path: '/validations/procedures/shared-cross-census-location'
+  }
+];
+
+describe('#574 streamed validations keep database error text out of the NDJSON body', () => {
+  it.each(STREAMED_VALIDATION_CASES)('$name reports failure without the database message', async streamedCase => {
+    const routeModule = await streamedCase.load();
+    const handler = routeModule[METHOD_POST] as RouteHandler;
+    const request = new NextRequest(`${BASE_URL}${streamedCase.path}`, {
+      method: METHOD_POST,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schema: SCHEMA, p_CensusID: CENSUS_ID, p_PlotID: PLOT_ID })
+    });
+
+    const response = await handler(request, { params: Promise.resolve({}) });
+    const text = await response.text();
+    console.log(`[${streamedCase.name}] ${response.status} ${text}`);
+    console.log(`[${streamedCase.name}] database calls: ${failingConnectionManager.calls.join(', ')}`);
+
+    expect(failingConnectionManager.calls.length, 'the validation reached the failing database').toBeGreaterThan(0);
+    const lines = text
+      .split('\n')
+      .filter(line => line.trim().length > 0)
+      .map(line => JSON.parse(line));
+    const finalLine = lines.at(-1);
+    const failureText = finalLine?.type === 'result' ? finalLine.data?.error : finalLine?.message;
+    expect(finalLine?.type === 'error' || finalLine?.data?.success === false, `final line reports failure: ${JSON.stringify(finalLine)}`).toBe(true);
+    expect(failureText).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
+    for (const fragment of SECRET_FRAGMENTS) {
+      expect(text, `the stream must not contain "${fragment}"`).not.toContain(fragment);
     }
     expect(loggedTextContainsTheDatabaseMessage(), 'the database message is still logged for the team').toBe(true);
   });

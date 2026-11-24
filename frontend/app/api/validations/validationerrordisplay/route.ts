@@ -5,7 +5,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fromQuery, withRouteAuthz } from '@/lib/route-authz';
-import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -70,7 +70,7 @@ async function handler(request: NextRequest) {
       }
     );
   } catch (error: any) {
-    ailogger.error('Error in validation error display:', error.message, { endpoint: request.nextUrl.pathname });
+    ailogger.error('Error in validation error display:', toError(error), { endpoint: request.nextUrl.pathname });
     return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });

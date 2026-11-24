@@ -11,6 +11,8 @@
  */
 export const INTERNAL_SERVER_ERROR_MESSAGE = 'The server could not complete this request. The error has been logged.';
 
+export const FOREIGN_KEY_CONFLICT_MESSAGE = 'Other records still use this row, so it cannot be deleted. Remove or reassign those records first.';
+
 /**
  * MySQL-specific error interface
  * Extends Error with MySQL error properties
