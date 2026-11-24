@@ -322,14 +322,21 @@ interface StreamedValidationCase {
   name: string;
   load: () => Promise<Record<string, unknown>>;
   path: string;
+  procedureFlags: string[];
 }
 
 const STREAMED_VALIDATION_CASES: StreamedValidationCase[] = [
-  { name: 'combined DBH validations', load: () => import('./validations/procedures/shared-dbh/route'), path: '/validations/procedures/shared-dbh' },
+  {
+    name: 'combined DBH validations',
+    load: () => import('./validations/procedures/shared-dbh/route'),
+    path: '/validations/procedures/shared-dbh',
+    procedureFlags: ['ranGrowth', 'ranShrinkage']
+  },
   {
     name: 'combined cross-census location validations',
     load: () => import('./validations/procedures/shared-cross-census-location/route'),
-    path: '/validations/procedures/shared-cross-census-location'
+    path: '/validations/procedures/shared-cross-census-location',
+    procedureFlags: ['ranQuadratMismatch', 'ranCoordinateDrift']
   }
 ];
 
@@ -354,9 +361,12 @@ describe('#574 streamed validations keep database error text out of the NDJSON b
       .filter(line => line.trim().length > 0)
       .map(line => JSON.parse(line));
     const finalLine = lines.at(-1);
-    const failureText = finalLine?.type === 'result' ? finalLine.data?.error : finalLine?.message;
-    expect(finalLine?.type === 'error' || finalLine?.data?.success === false, `final line reports failure: ${JSON.stringify(finalLine)}`).toBe(true);
-    expect(failureText).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
+    expect(finalLine?.type, `the helper resolves a failure result instead of throwing: ${JSON.stringify(finalLine)}`).toBe('result');
+    expect(finalLine.data.success).toBe(false);
+    for (const flag of streamedCase.procedureFlags) {
+      expect(finalLine.data[flag], `${flag} reports that the procedure did not run`).toBe(false);
+    }
+    expect(finalLine.data.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     for (const fragment of SECRET_FRAGMENTS) {
       expect(text, `the stream must not contain "${fragment}"`).not.toContain(fragment);
     }

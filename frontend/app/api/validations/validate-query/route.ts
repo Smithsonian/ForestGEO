@@ -50,8 +50,8 @@ async function handler(request: NextRequest, _context: RouteContext) {
     } catch (error: any) {
       validationResult.isValid = false;
 
-      // Only MySQL's reply to the user's own EXPLAIN describes their query. A transport failure, or a failure
-      // in the server-owned routine lookup for a CALL, is infrastructure text and stays in the log.
+      // Only the recognised MySQL replies to the user's own EXPLAIN describe their query. Anything else (a transport
+      // failure, the server-owned routine lookup for a CALL, a permission denial naming the database user) stays in the log.
       const errorMessage = error.message || 'Unknown SQL error';
 
       if (isStoredProcedureCall(query) || !isServerErrorReply(error)) {
@@ -74,7 +74,8 @@ async function handler(request: NextRequest, _context: RouteContext) {
       } else if (errorMessage.includes('syntax error')) {
         validationResult.errors.push('SQL syntax error - please check your query syntax');
       } else {
-        validationResult.errors.push(`SQL Error: ${errorMessage}`);
+        ailogger.error('Query validation received an unrecognised MySQL reply:', toError(error));
+        validationResult.errors.push(QUERY_VALIDATION_UNAVAILABLE_MESSAGE);
       }
     }
 

@@ -110,6 +110,28 @@ describe('POST /api/validations/validate-query', () => {
     expect(text).not.toContain('command denied');
   });
 
+  it("hides an unrecognised MySQL reply to the user's EXPLAIN, such as a permission denial naming the database user", async () => {
+    const connectionManager = (ConnectionManager as any).getInstance();
+    const permissionDenial = Object.assign(new Error("SELECT command denied to user 'forestgeo_app'@'10.0.0.7' for table 'secret_table'"), {
+      code: 'ER_TABLEACCESS_DENIED_ERROR',
+      sqlMessage: "SELECT command denied to user 'forestgeo_app'@'10.0.0.7' for table 'secret_table'"
+    });
+    vi.spyOn(connectionManager, 'executeQuery').mockRejectedValueOnce(permissionDenial).mockResolvedValue([]);
+    vi.spyOn(connectionManager, 'closeConnection').mockResolvedValue(undefined);
+
+    const response = await POST(makeRequest('forestgeo_testing', 'SELECT * FROM secret_table'), ROUTE_CONTEXT);
+    const text = await response.text();
+    console.log('[validate-query EXPLAIN permission denial]', response.status, text);
+
+    const body = JSON.parse(text);
+    expect(body.isValid).toBe(false);
+    expect(body.errors[0]).toMatch(/could not be checked right now/);
+    expect(text).not.toContain('forestgeo_app');
+    expect(text).not.toContain('10.0.0.7');
+    expect(text).not.toContain('command denied');
+    expect(ailogger.error).toHaveBeenCalledWith('Query validation received an unrecognised MySQL reply:', permissionDenial);
+  });
+
   it("still explains MySQL's reply about the user's own query", async () => {
     const connectionManager = (ConnectionManager as any).getInstance();
     const unknownColumn = Object.assign(new Error("Unknown column 'dbhh' in 'field list'"), { sqlMessage: "Unknown column 'dbhh' in 'field list'" });
