@@ -7,7 +7,7 @@ import { UploadRefusedError } from '@/lib/uploads/upload-refused-error';
 
 export async function processPersonnel(props: Readonly<SpecialProcessingProps>) {
   const { connectionManager, rowData, schema, transactionID, fullName } = props;
-  if (!rowData.role) throw new UploadRefusedError('Row data does not contain a role property - role is required for personnel processing');
+  if (!rowData.role) throw new UploadRefusedError('A personnel row has no role. Every personnel row needs a role.');
   if (!transactionID) {
     throw createError('processPersonnel requires a transactionID so personnel/role writes and their changelog audit share the caller transaction', {
       rowData
