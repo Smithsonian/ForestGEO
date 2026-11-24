@@ -58,14 +58,10 @@ export const TREE_LOOKUP_AMBIGUITY_INDEX_NAME = 'idxTreeCount';
 // Stage 5 check 1b reason. The operator manual quotes this text verbatim.
 export const EMPTY_STEMTAG_COLLISION_REASON = 'Empty StemTag collides with another stem under same Tree+Quadrat';
 
-// Smithsonian DB destinations store a missing stem tag as either '' or NULL, and
-// both mean the same untagged stem. Every stem-key comparison goes through this
-// so the lookup grouping, the write-back and the ambiguity check agree (#577).
-// A spaces-only tag folds to '' too, because stem_lookup groups under the
-// destination's PAD SPACE collation while a probe may compare under staging's
-// NO PAD one. Non-blank tags are left exactly as stored. Blankness is measured in
-// bytes so a collation that ignores characters such as U+00AD cannot fold a tag.
-function stemTagMatchKey(stemTagColumn: string): string {
+// Destinations store an untagged stem as '' or NULL (#577), and a PAD SPACE destination groups a
+// spaces-only tag with them while a NO PAD staging table would not, so all three fold to ''. Other tags
+// stay as stored; OCTET_LENGTH keeps a collation that ignores a character from calling a tag blank.
+export function stemTagMatchKey(stemTagColumn: string): string {
   return `CASE WHEN ${stemTagColumn} IS NULL OR OCTET_LENGTH(TRIM(TRAILING ' ' FROM ${stemTagColumn})) = 0 THEN '' ELSE ${stemTagColumn} END`;
 }
 
@@ -455,10 +451,8 @@ export interface Stage2Options {
  *      Groups by (Tag, SpeciesID, SubSpeciesID)
  *   6. UPDATE measurementsTable JOIN tree_lookup (TreeCount = 1) with NULL-safe <=> on SubSpeciesID
  *      to write back TreeID
- *   7. CREATE TEMPORARY TABLE stem_lookup — grouped by (TreeID, StemTagKey), where StemTagKey
- *      folds a NULL destination StemTag into '' so both spellings of "untagged" form one group;
- *      its key is declared inline in the CREATE (never ALTER TABLE, which would commit the load
- *      transaction); scoped via Stem → Quadrat → @target_plot_id
+ *   7. CREATE TEMPORARY TABLE stem_lookup — its (TreeID, StemTagKey) key declared inline in the CREATE
+ *      (never ALTER TABLE, which would commit the load transaction); scoped via Stem → Quadrat → @target_plot_id
  *   8. UPDATE measurementsTable JOIN stem_lookup on the same StemTagKey and StemCount = 1
  *      to write back StemID
  *   9. UPDATE attributesTable JOIN TSMAttributes to resolve TSMID
@@ -564,8 +558,6 @@ export function renderStage2(opts: Stage2Options): string {
 
   -- Stem lookup (also plot-scoped). The key is declared here because ALTER TABLE or
   -- CREATE INDEX on a temporary table would implicitly commit the load transaction.
-  -- A historical untagged stem may hold '' or NULL; StemTagKey makes them one group,
-  -- so one untagged stem of either spelling is matched and two are ambiguous.
   DROP TEMPORARY TABLE IF EXISTS stem_lookup;
   CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTagKey)) AS
     SELECT s.TreeID,
