@@ -1,36 +1,61 @@
-export type ChangeOperation = 'all' | 'INSERT' | 'UPDATE' | 'DELETE';
+import { FILE_UPLOAD_CHANGELOG_TABLE, type ChangelogRecord } from '@/config/changelogdecode';
+
+export const CHANGE_OPERATIONS = ['all', 'INSERT', 'UPDATE', 'DELETE'] as const;
+export type ChangeOperation = (typeof CHANGE_OPERATIONS)[number];
 
 export interface RecentChangesFilters {
   operation: ChangeOperation;
   changedBy: string;
   tableName: string;
   quickSearch: string;
+  /** Calendar day `YYYY-MM-DD` of the stored ChangeTimestamp; blank means no bound. */
+  changedFrom: string;
+  changedTo: string;
   presetId?: string;
 }
 
-export interface RecentChangesQueryRequest {
-  schema: string;
-  plotID: number;
-  page: number;
-  pageSize: number;
-  filters: RecentChangesFilters;
+/** What the server filters on; presetId only drives chip highlighting on the client. */
+export type RecentChangesServerFilters = Omit<RecentChangesFilters, 'presetId'>;
+
+/** A preset says nothing about dates, so a preset click keeps the date range (#592 D9). */
+export type RecentChangesPresetFilters = Pick<RecentChangesFilters, 'operation' | 'changedBy' | 'tableName' | 'quickSearch'>;
+
+/** The server compares dates against ChangeTimestamp in the database zone, which production runs as UTC (checked 2026-11-23; #592 O1). */
+export const CHANGE_DATE_ZONE_LABEL = 'UTC';
+
+export const NO_DATE_BOUND = '';
+
+export function isDateRangeInverted(changedFrom: string, changedTo: string): boolean {
+  return changedFrom !== NO_DATE_BOUND && changedTo !== NO_DATE_BOUND && changedFrom > changedTo;
 }
+
+/** Most rows one export may hold; the largest field-level row count in any production schema is 450 (checked 2026-11-23; #592 O2). The export route and the too-large message both read it. */
+export const MAX_EXPORT_ROWS = 50_000;
+
+/** `code` values of the export route's JSON error bodies; the client picks its message by them. */
+export const CHANGE_EXPORT_ERROR_CODES = {
+  invalidRequest: 'INVALID_EXPORT_REQUEST',
+  tooLarge: 'EXPORT_TOO_LARGE',
+  failed: 'CHANGE_EXPORT_FAILED'
+} as const;
 
 export interface ChangelogEntry {
   changeID: number;
   tableName: string;
   recordID: string;
   operation: 'INSERT' | 'UPDATE' | 'DELETE';
+  /** Populated only when the change holds exactly one record; `records` is the full picture. */
   oldRowState: Record<string, unknown> | null;
   newRowState: Record<string, unknown> | null;
+  records: ChangelogRecord[];
   changeTimestamp: string;
-  changedBy: string;
+  changedBy: string | null;
 }
 
 export interface BatchInsertGroup {
   type: 'batch';
   tableName: string;
-  changedBy: string;
+  changedBy: string | null;
   timestamp: string;
   count: number;
   entries: ChangelogEntry[];
@@ -72,6 +97,8 @@ export const DEFAULT_RECENT_CHANGES_FILTERS: RecentChangesFilters = {
   changedBy: '',
   tableName: '',
   quickSearch: '',
+  changedFrom: NO_DATE_BOUND,
+  changedTo: NO_DATE_BOUND,
   presetId: 'all_changes'
 };
 
@@ -79,29 +106,29 @@ export const RECENT_CHANGES_PRESETS = [
   {
     id: 'all_changes',
     label: 'All Changes',
-    filters: { operation: 'all', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesFilters
+    filters: { operation: 'all', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesPresetFilters
   },
   {
     id: 'measurement_updates',
     label: 'Measurement Updates',
-    filters: { operation: 'UPDATE', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesFilters
+    filters: { operation: 'UPDATE', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesPresetFilters
   },
   {
     id: 'deletions',
     label: 'Deletions',
-    filters: { operation: 'DELETE', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesFilters
+    filters: { operation: 'DELETE', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesPresetFilters
   },
   {
     id: 'uploads',
     label: 'Uploads',
-    filters: { operation: 'INSERT', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesFilters
+    filters: { operation: 'INSERT', changedBy: '', tableName: '', quickSearch: '' } satisfies RecentChangesPresetFilters
   }
 ] as const;
 
 const BATCH_WINDOW_MS = 60_000;
 
 // file_upload rows are already per-file aggregates; batching them would hide which file is which behind a row count.
-const TABLES_EXCLUDED_FROM_BATCHING = new Set(['file_upload']);
+const TABLES_EXCLUDED_FROM_BATCHING = new Set([FILE_UPLOAD_CHANGELOG_TABLE]);
 
 export function groupIntoBatches(entries: ChangelogEntry[]): FeedItem[] {
   if (entries.length === 0) return [];

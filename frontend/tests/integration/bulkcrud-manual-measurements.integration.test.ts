@@ -22,6 +22,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { cleanupTestMeasurements, setupTestDatabase, teardownTestDatabase, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
+import { classifyChangesAfter, describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
+import { SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
 
 const TEST_DB_HOST = process.env.TEST_DB_HOST || 'localhost';
 if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
@@ -42,6 +44,7 @@ const MANUAL_ENTRY_LOCAL_X = 5;
 const MANUAL_ENTRY_LOCAL_Y = 7;
 const MANUAL_ENTRY_DATE = '2024-06-15';
 const TRANSACTION_ID = 'bulkcrud-manual-measurements-tx';
+const NO_EARLIER_CHANGE = 0;
 
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null,
@@ -230,5 +233,22 @@ describe('POST /api/bulkcrud from the View Data manual measurement entry form', 
 
     const changedBy = await auditChangedByFor(Number(ingested.CoreMeasurementID));
     expect(changedBy, 'one Recent Changes entry attributed to the signed-in user').toEqual([AUTH_USER_EMAIL]);
+
+    // #592 D5: manual entry has the ingestion-snapshot shape and must still export field by field.
+    const [manualEntryChange] = (await classifyChangesAfter(connection, config.database, NO_EARLIER_CHANGE)).filter(
+      change => change.tableName === 'coremeasurements' && change.recordID === String(ingested.CoreMeasurementID)
+    );
+    expect(manualEntryChange, 'the manual-entry audit row').toMatchObject({ operation: 'INSERT', isUploadPipelineRow: false, isDetailRow: true });
+    const manualEntryRows = (await exportedRowsForPlot(connection, config.database, testData.plots[0].plotID)).filter(
+      row => row.LogID === manualEntryChange.changeID
+    );
+    console.log(`[manual-entry] exported rows:\n${describeExportedRows(manualEntryRows)}`);
+    expect(manualEntryRows.length, 'one CSV row per recorded field of the measurement').toBeGreaterThan(1);
+    expect(
+      manualEntryRows.every(row => row.Action === 'I' && row.ChangedColumn !== SUMMARY_COLUMN_MARKER && row.Old === ''),
+      'field-level I rows, never a rollup'
+    ).toBe(true);
+    expect(manualEntryRows.find(row => row.ChangedColumn === 'MeasuredDBH')?.New).toBe(MANUAL_ENTRY_DBH);
+    expect(manualEntryRows.find(row => row.ChangedColumn === 'UploadFileID')?.New).toBe(BULK_CRUD_FILE_ID);
   });
 });

@@ -27,6 +27,7 @@ import { NextRequest } from 'next/server';
 
 import { createAdditionalCensus, setupTestDatabase, teardownTestDatabase, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
+import { classifyChangesAfter, describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
 import {
   DEFAULT_RECENT_CHANGES_FILTERS,
   type ChangelogEntry,
@@ -47,6 +48,7 @@ const TEST_TRANSACTION_ID = 'recent-changes-read-path-txn';
 const READ_PATH_CHANGED_BY = 'recent-changes-read-path@forestgeo.test';
 const LEGACY_CHANGED_BY = 'legacy-recent-changes-read-path@forestgeo.test';
 
+const NO_EARLIER_CHANGE = 0;
 const LIVE_MARKER = 'READPATH_LIVE_A1_MARKER';
 const HISTORICAL_MARKER = 'READPATH_HISTORICAL_A1_MARKER';
 const PLOT_B_MARKER = 'READPATH_PLOTB_MARKER';
@@ -63,7 +65,7 @@ const NULL_SCOPE_PLAN_HASH = 'readpath-null-scope';
 const SECOND_PLOT_NAME = 'Recent Changes Read-Path Second Plot';
 // No real row needs to exist for this: edit_operations.CensusID carries no FK,
 // and the plot-B assertions below only exercise the explorer search route,
-// which (see _shared.ts buildWhereClause) never filters on CensusID at all.
+// which (see buildChangeFilter in lib/changes/changefilter.ts) never filters on CensusID at all.
 const PLOT_B_ARBITRARY_CENSUS_ID = 909090;
 
 // ---------------------------------------------------------------------------
@@ -491,6 +493,20 @@ describe('Recent Changes read path (#507): production ledger write -> production
       const matches = rows.filter(row => row.recordID === liveA1RecordID());
       expect(matches).toHaveLength(1);
       expect(matches[0].newRowState?.Description).toBe(LIVE_MARKER);
+    });
+
+    it('the change-log export: field rows traced to the edit operation (#592)', async () => {
+      const [liveChange] = (await classifyChangesAfter(connection, schema, NO_EARLIER_CHANGE)).filter(change => change.recordID === liveA1RecordID());
+      expect(liveChange, 'an edit-operation row is never an upload-pipeline row').toMatchObject({ isUploadPipelineRow: false, isDetailRow: true });
+
+      const liveRows = (await exportedRowsForPlot(connection, schema, plotA)).filter(row => row.LogID === liveChange.changeID);
+      console.log(`[read-path export]\n${describeExportedRows(liveRows)}`);
+      expect(liveRows.length).toBeGreaterThan(0);
+      for (const row of liveRows) {
+        expect([row.ChangedTable, row.PrimaryKey, row.Action]).toEqual(['coremeasurements', String(LIVE_A1_PRIMARY_KEY), 'U']);
+        expect(String(row.Description).endsWith(`(edit #${liveA1OperationID})`), String(row.Description)).toBe(true);
+      }
+      expect(liveRows.find(row => row.ChangedColumn === 'Description')?.New, 'the edited field with its new value').toBe(LIVE_MARKER);
     });
   });
 

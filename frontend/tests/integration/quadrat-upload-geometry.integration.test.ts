@@ -14,6 +14,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { cleanupTestMeasurements, insertDirectMeasurements, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
+import { exportedRowsForPlot } from './helpers/changeexportprobe';
+import { SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
 import {
   buildQuadratOverlapAcknowledgment,
   QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
@@ -351,6 +353,23 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     expect(event.statement).toBe(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT);
     expect(event.summaries[0].pairs.some((pair: { message: string }) => pair.message.includes('ACKA'))).toBe(true);
     expect(event.acknowledgedBy).toBeDefined();
+
+    // #592 D6: a quadrat upload is not audited row by row: one row for the file, one for the acknowledgment.
+    const quadratExportRows = await exportedRowsForPlot(connection, config.database, plotID);
+    const quadratFileRow = quadratExportRows.filter(row => row.ChangedTable === 'file_upload' && row.PrimaryKey === 'quadrats.csv').at(-1);
+    const acknowledgmentRow = quadratExportRows.filter(row => row.ChangedTable === 'quadrat_overlap_acknowledgment').at(-1);
+    console.log(`[quadrat export] ${JSON.stringify([quadratFileRow, acknowledgmentRow])}`);
+    expect(quadratFileRow).toMatchObject({ ChangedColumn: SUMMARY_COLUMN_MARKER, Action: 'I' });
+    expect(String(quadratFileRow?.Description).startsWith('Uploaded quadrats.csv (')).toBe(true);
+    expect(acknowledgmentRow).toMatchObject({
+      ChangedColumn: SUMMARY_COLUMN_MARKER,
+      Action: 'I',
+      Description: 'Acknowledged overlapping quadrats in upload quadrats.csv (1 layout(s))'
+    });
+    expect(
+      quadratExportRows.filter(row => row.ChangedTable === 'quadrats' && (row.New === 'ACKA' || row.New === 'ACKB')),
+      'quadrat rows written by an upload leave no per-row changelog entry'
+    ).toEqual([]);
   });
 
   it('rejects a row with a blank StartX with 400', async () => {

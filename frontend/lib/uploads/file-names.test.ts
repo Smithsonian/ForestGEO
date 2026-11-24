@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   attemptScopedBlobName,
+  BULK_CRUD_FILE_ID,
   describeUploadFileNameCollisions,
   findUploadFileNameCollisions,
   isValidUploadAttemptID,
@@ -135,5 +136,12 @@ describe('isValidUploadAttemptID', () => {
     expect(isValidUploadAttemptID('short'), 'too short to be unguessable').toBe(false);
     expect(isValidUploadAttemptID('a'.repeat(65)), 'too long').toBe(false);
     expect(isValidUploadAttemptID(''), 'empty').toBe(false);
+  });
+});
+
+describe('BULK_CRUD_FILE_ID', () => {
+  it('is stored exactly as written: sanitizing leaves it unchanged and it fits the FileID column', () => {
+    expect(sanitizeUploadFileName(BULK_CRUD_FILE_ID)).toBe(BULK_CRUD_FILE_ID);
+    expect(measurementFileIDValidationError(BULK_CRUD_FILE_ID)).toBeNull();
   });
 });

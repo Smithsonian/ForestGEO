@@ -53,8 +53,8 @@ export async function getErrorsExplorerDetails(scope: RowMutationScope, measurem
   return readJsonOrThrow<ErrorExplorerDetailsResponse>(response, DETAILS_FALLBACK_MESSAGE);
 }
 
-export function extractFilenameFromContentDisposition(headerValue: string | null): string {
-  return headerValue?.match(CONTENT_DISPOSITION_FILENAME)?.[1] ?? EXPORT_CSV_FALLBACK_FILENAME;
+export function extractFilenameFromContentDisposition(headerValue: string | null, fallbackFilename: string): string {
+  return headerValue?.match(CONTENT_DISPOSITION_FILENAME)?.[1] ?? fallbackFilename;
 }
 
 export async function postErrorsExplorerExport(
@@ -71,5 +71,8 @@ export async function postErrorsExplorerExport(
     const data: unknown = await response.json().catch(() => null);
     throw new Error(data !== null && typeof data === 'object' && 'error' in data && typeof data.error === 'string' ? data.error : EXPORT_FALLBACK_MESSAGE);
   }
-  return { blob: await response.blob(), filename: extractFilenameFromContentDisposition(response.headers.get('Content-Disposition')) };
+  return {
+    blob: await response.blob(),
+    filename: extractFilenameFromContentDisposition(response.headers.get('Content-Disposition'), EXPORT_CSV_FALLBACK_FILENAME)
+  };
 }

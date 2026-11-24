@@ -1,8 +1,11 @@
+import ailogger from '@/ailogger';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
+import { decodeChangelogRow } from '@/config/changelogdecode';
+import { buildChangeFilter, PLOT_SCOPE_CONDITION, ROW_STATE_TEXT_COLUMNS_SQL } from '@/lib/changes/changefilter';
 import {
   ChangelogEntry,
-  RecentChangesFilters,
+  RecentChangesServerFilters,
   RecentChangesFacetsResponse,
   RecentChangesSummary,
   FacetOption,
@@ -15,80 +18,53 @@ type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
 
 const CHANGELOG_ORDER_BY = 'ORDER BY uc.ChangeTimestamp DESC, uc.ChangeID DESC';
 const MIN_RAW_FETCH_CHUNK_SIZE = 100;
+const MAX_LOGGED_UNDECODABLE_CHANGE_IDS = 20;
 
 interface RawChangelogRow {
   ChangeID: number;
   TableName: string;
   RecordID: string;
   Operation: 'INSERT' | 'UPDATE' | 'DELETE';
-  OldRowState: string | Record<string, unknown> | null;
-  NewRowState: string | Record<string, unknown> | null;
+  OldRowState: string | null;
+  NewRowState: string | null;
   ChangeTimestamp: string | Date;
-  ChangedBy: string;
+  ChangedBy: string | null;
 }
 
-function unwrapArray(obj: unknown): Record<string, unknown> | null {
-  if (Array.isArray(obj)) {
-    return obj.length === 1 && typeof obj[0] === 'object' && obj[0] !== null ? (obj[0] as Record<string, unknown>) : null;
-  }
-  return typeof obj === 'object' && obj !== null ? (obj as Record<string, unknown>) : null;
-}
-
-function parseJsonField(value: string | Record<string, unknown> | unknown[] | null): Record<string, unknown> | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'object') return unwrapArray(value);
-  try {
-    return unwrapArray(JSON.parse(value));
-  } catch {
-    return null;
-  }
-}
-
-function toChangelogEntry(row: RawChangelogRow): ChangelogEntry {
-  return {
+function toChangelogEntry(row: RawChangelogRow): { entry: ChangelogEntry; undecodable: boolean } {
+  const { records, undecodable } = decodeChangelogRow({
+    tableName: row.TableName,
+    recordID: row.RecordID,
+    oldRowState: row.OldRowState,
+    newRowState: row.NewRowState
+  });
+  const soleRecord = records.length === 1 ? records[0] : null;
+  const entry: ChangelogEntry = {
     changeID: row.ChangeID,
     tableName: row.TableName,
     recordID: row.RecordID,
     operation: row.Operation,
-    oldRowState: parseJsonField(row.OldRowState),
-    newRowState: parseJsonField(row.NewRowState),
+    oldRowState: soleRecord?.oldState ?? null,
+    newRowState: soleRecord?.newState ?? null,
+    records,
     changeTimestamp: row.ChangeTimestamp instanceof Date ? row.ChangeTimestamp.toISOString() : row.ChangeTimestamp,
     changedBy: row.ChangedBy
   };
+  return { entry, undecodable };
 }
 
-function buildWhereClause(filters: RecentChangesFilters): { clause: string; params: unknown[] } {
-  const conditions: string[] = ['(uc.PlotID = ? OR uc.PlotID IS NULL)'];
-  const params: unknown[] = [];
-
-  if (filters.operation !== 'all') {
-    conditions.push('uc.Operation = ?');
-    params.push(filters.operation);
-  }
-
-  if (filters.changedBy) {
-    conditions.push('uc.ChangedBy = ?');
-    params.push(filters.changedBy);
-  }
-
-  if (filters.tableName) {
-    conditions.push('uc.TableName = ?');
-    params.push(filters.tableName);
-  }
-
-  if (filters.quickSearch) {
-    const searchPattern = `%${filters.quickSearch}%`;
-    conditions.push(
-      '(uc.RecordID LIKE ? OR uc.TableName LIKE ? OR uc.ChangedBy LIKE ? OR CAST(uc.OldRowState AS CHAR) LIKE ? OR CAST(uc.NewRowState AS CHAR) LIKE ?)'
-    );
-    params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
-  }
-
-  return { clause: conditions.join(' AND '), params };
+function warnAboutUndecodableRows(schema: string, undecodableChangeIDs: number[]): void {
+  if (undecodableChangeIDs.length === 0) return;
+  ailogger.warn(`Recent changes: ${undecodableChangeIDs.length} change-log row(s) hold a row state that could not be decoded`, {
+    schema,
+    undecodableCount: undecodableChangeIDs.length,
+    changeIDs: undecodableChangeIDs.slice(0, MAX_LOGGED_UNDECODABLE_CHANGE_IDS)
+  });
 }
 
 function buildChangelogQuery(schema: string): string {
-  return `SELECT SQL_CALC_FOUND_ROWS uc.* FROM ${schema}.unifiedchangelog uc`;
+  return `SELECT SQL_CALC_FOUND_ROWS uc.ChangeID, uc.TableName, uc.RecordID, uc.Operation, ${ROW_STATE_TEXT_COLUMNS_SQL}, uc.ChangeTimestamp, uc.ChangedBy
+          FROM ${schema}.unifiedchangelog uc`;
 }
 
 function buildCountQuery(schema: string): string {
@@ -123,6 +99,7 @@ async function queryRecentChangesPage(
   const endItemIndexExclusive = startItemIndex + pageSize;
   const chunkSize = Math.max(MIN_RAW_FETCH_CHUNK_SIZE, pageSize * 4);
   const entries: ChangelogEntry[] = [];
+  const undecodableChangeIDs: number[] = [];
   let groupedItems: FeedItem[] = [];
   let offset = 0;
 
@@ -134,7 +111,11 @@ async function queryRecentChangesPage(
       break;
     }
 
-    entries.push(...rawRows.map(toChangelogEntry));
+    for (const row of rawRows) {
+      const { entry, undecodable } = toChangelogEntry(row);
+      entries.push(entry);
+      if (undecodable) undecodableChangeIDs.push(row.ChangeID);
+    }
     groupedItems = groupIntoBatches(entries);
 
     const reachedEndOfRows = rawRows.length < chunkSize;
@@ -144,6 +125,8 @@ async function queryRecentChangesPage(
 
     offset += rawRows.length;
   }
+
+  warnAboutUndecodableRows(schema, undecodableChangeIDs);
 
   return {
     items: groupedItems.slice(startItemIndex, endItemIndexExclusive),
@@ -157,11 +140,9 @@ export async function queryRecentChanges(
   plotID: number,
   page: number,
   pageSize: number,
-  filters: RecentChangesFilters
+  filters: RecentChangesServerFilters
 ): Promise<RecentChangesQueryResponse> {
-  const { clause, params } = buildWhereClause(filters);
-  const plotParams = [plotID];
-  const allWhereParams = [...plotParams, ...params];
+  const { sql: clause, params: allWhereParams } = buildChangeFilter(plotID, filters);
 
   const countQuery = `${buildCountQuery(schema)} WHERE ${clause}`;
   const summaryQuery = `${buildSummaryQuery(schema)} WHERE ${clause} GROUP BY uc.Operation`;
@@ -188,7 +169,7 @@ export async function queryRecentChanges(
 }
 
 export async function queryRecentChangesFacets(connectionManager: ExplorerConnection, schema: string, plotID: number): Promise<RecentChangesFacetsResponse> {
-  const plotCondition = '(uc.PlotID = ? OR uc.PlotID IS NULL)';
+  const plotCondition = PLOT_SCOPE_CONDITION;
   const plotParams = [plotID];
 
   const usersQuery = `${buildFacetsUsersQuery(schema)} WHERE ${plotCondition} GROUP BY uc.ChangedBy ORDER BY cnt DESC`;

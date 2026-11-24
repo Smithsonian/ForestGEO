@@ -26,7 +26,9 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { classifyChangesAfter, describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
+import { SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
 
 // The write path calls getCookie('censusID'); every route calls auth(). Mock
 // both so the real handlers + real mapper + real DB run unimpeded. The
@@ -61,6 +63,7 @@ const STALE_QUADRAT_ID = 999999;
 const OUT_OF_RANGE_CENSUS_ID = 99999999999;
 
 const CHANGELOG_OPERATION = { INSERT: 'INSERT', UPDATE: 'UPDATE', DELETE: 'DELETE' } as const;
+const NO_EARLIER_CHANGE = 0;
 
 let setupConnection: Connection | null = null;
 let config: TestDatabaseConfig;
@@ -312,6 +315,47 @@ describe('operation shapes', () => {
 
     const [gone] = await setupConnection!.query<RowDataPacket[]>(`SELECT QuadratID FROM \`${schema}\`.quadrats WHERE QuadratID = ?`, [quadratID]);
     expect(gone).toHaveLength(0);
+  });
+
+  it('exports a manual grid delete of an uploaded measurement as field-level D rows, never an upload rollup (#592 D5)', async () => {
+    const UPLOADED_FILE_ID = 'grid-delete-census.csv';
+    const UPLOADED_BATCH_ID = 'griddeletebatch__sub001';
+    const plot = await seededPlot();
+    const [censusRows] = await setupConnection!.query<RowDataPacket[]>(`SELECT CensusID FROM \`${schema}\`.census ORDER BY CensusID LIMIT 1`);
+    const [inserted] = await setupConnection!.query<ResultSetHeader>(
+      `INSERT INTO \`${schema}\`.coremeasurements
+         (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, UploadFileID, UploadBatchID, RawTreeTag, IsActive)
+       VALUES (?, NULL, FALSE, '2026-03-01', 15.5, 1.3, ?, ?, 'GRID-DELETE-T1', 1)`,
+      [censusRows[0].CensusID, UPLOADED_FILE_ID, UPLOADED_BATCH_ID]
+    );
+    const coreMeasurementID = inserted.insertId;
+    await truncateChangelog();
+
+    const response = await deleteRow('measurementssummary', 'coreMeasurementID', { id: 1, coreMeasurementID });
+    expect(response.status, 'the measurement DELETE must succeed').toBe(HTTPResponses.OK);
+
+    const rows = await readChangelog('coremeasurements');
+    logChangelog('measurementssummary DELETE', rows);
+    expect(rows.map(row => [row.Operation, row.RecordID, row.PlotID])).toEqual([[CHANGELOG_OPERATION.DELETE, String(coreMeasurementID), null]]);
+
+    const [classified] = await classifyChangesAfter(setupConnection!, schema, NO_EARLIER_CHANGE);
+    expect(classified, 'a person deleting an uploaded measurement is not the upload pipeline').toMatchObject({
+      tableName: 'coremeasurements',
+      isUploadPipelineRow: false,
+      isDetailRow: true
+    });
+
+    const exportedRows = await exportedRowsForPlot(setupConnection!, schema, Number(plot.PlotID));
+    const deleteRows = exportedRows.filter(row => row.LogID === rows[0].ChangeID);
+    console.log(`[metadata-changelog-audit] grid delete export:\n${describeExportedRows(deleteRows)}`);
+    expect(deleteRows.length, 'one row per recorded column of the deleted measurement').toBeGreaterThan(1);
+    expect(deleteRows.every(row => row.Action === 'D' && row.ChangedColumn !== SUMMARY_COLUMN_MARKER && row.New === '')).toBe(true);
+    expect(deleteRows.find(row => row.ChangedColumn === 'UploadFileID')?.Old).toBe(UPLOADED_FILE_ID);
+    expect(deleteRows.find(row => row.ChangedColumn === 'RawTreeTag')?.Old).toBe('GRID-DELETE-T1');
+    expect(
+      exportedRows.filter(row => row.PrimaryKey === UPLOADED_FILE_ID),
+      'no rollup row is keyed by the uploaded file'
+    ).toEqual([]);
   });
 
   it('fans a single alltaxonomiesview POST out into family, genus and species rows', async () => {

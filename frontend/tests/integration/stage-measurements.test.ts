@@ -17,6 +17,9 @@ import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildFileUploadChangelogRecordID } from '@/lib/uploads/file-names';
+import { classifyChanges, describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
+import { SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
+import { familyRootOf } from '@/lib/uploads/batch-family';
 
 // ---------------------------------------------------------------------------
 // Safety guard — setupTestDatabase DROPs/CREATEs its schema; never run remote.
@@ -1055,6 +1058,89 @@ describe('stageMeasurementChunk — integration', () => {
       expect(metadata.rowCount, `attempt ${row.RecordID} must report its OWN count, not the other attempt's`).toBe(EXPECTED_STAGED_ROW_COUNT);
       expect(metadata.batchCount).toBe(1);
     }
+  });
+
+  it('exports two attempts of one file name as two file_upload rows and two measurement rollups, one per base batch (#592 D3, D5)', async () => {
+    const DROPPED_TREETAG = 'T0001';
+    const DROPPED_PER_ATTEMPT = 1;
+    const SECOND_ATTEMPT_SESSION_ID = 'stage-int-test-session-export-second';
+    const SECOND_ATTEMPT_BATCH_ID = 'stage-batch-0001-export-second';
+    await seedUploadSession(UPLOAD_SESSION_ID);
+
+    const firstSpy = buildTreeTagDropSpy(DROPPED_TREETAG);
+    try {
+      const firstAttemptTransactionID = await replaceThenBegin({ uploadSessionID: UPLOAD_SESSION_ID });
+      await stageMeasurementChunk(connectionManager, baseParams(firstAttemptTransactionID, { uploadSessionID: UPLOAD_SESSION_ID }));
+      await connectionManager.commitTransaction(firstAttemptTransactionID);
+    } finally {
+      firstSpy.mockRestore();
+    }
+
+    // Only one session per scope may be active (see the test above); end the first before seeding the second.
+    await connection.query(`UPDATE upload_sessions SET state = 'completed' WHERE session_id = ?`, [UPLOAD_SESSION_ID]);
+    await seedUploadSession(SECOND_ATTEMPT_SESSION_ID);
+
+    const secondSpy = buildTreeTagDropSpy(DROPPED_TREETAG);
+    try {
+      const secondOverrides = { uploadSessionID: SECOND_ATTEMPT_SESSION_ID, batchID: SECOND_ATTEMPT_BATCH_ID };
+      const secondAttemptTransactionID = await replaceThenBegin(secondOverrides);
+      await stageMeasurementChunk(connectionManager, baseParams(secondAttemptTransactionID, secondOverrides));
+      await connectionManager.commitTransaction(secondAttemptTransactionID);
+    } finally {
+      secondSpy.mockRestore();
+    }
+
+    // 1. Classification first: each attempt's parked row must be an upload-pipeline row (§6.3).
+    const [parkedAuditRows] = await connection.query<RowDataPacket[]>(
+      `SELECT ChangeID, NewRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND Operation = 'INSERT' ORDER BY ChangeID`
+    );
+    console.log(`[export two-attempts] parked audit rows: ${JSON.stringify(parkedAuditRows)}`);
+    expect(parkedAuditRows, 'one parked row audited per attempt').toHaveLength(2);
+    const parkedClassification = await classifyChanges(
+      connection,
+      schema,
+      parkedAuditRows.map(row => Number(row.ChangeID))
+    );
+    console.log(`[export two-attempts] classification: ${JSON.stringify(parkedClassification)}`);
+    for (const change of parkedClassification) {
+      expect(change, `parked row change ${change.changeID} must be an upload-pipeline row; if not, STOP and report (see the plan)`).toMatchObject({
+        isUploadPipelineRow: true,
+        isDetailRow: false
+      });
+    }
+
+    // 2. The export: one summary row per attempt, and one "added" rollup per base batch under the same file.
+    const exportedRows = await exportedRowsForPlot(connection, schema, plotID);
+    console.log(`[export two-attempts] exported rows:\n${describeExportedRows(exportedRows)}`);
+
+    const fileUploadExportRows = exportedRows.filter(row => row.ChangedTable === 'file_upload');
+    expect(fileUploadExportRows.map(row => String(row.PrimaryKey)).sort(), 'the stored RecordID is never split or merged').toEqual(
+      [buildFileUploadChangelogRecordID(FILE_NAME, UPLOAD_SESSION_ID), buildFileUploadChangelogRecordID(FILE_NAME, SECOND_ATTEMPT_SESSION_ID)].sort()
+    );
+    for (const row of fileUploadExportRows) {
+      expect([row.ChangedColumn, row.Action]).toEqual([SUMMARY_COLUMN_MARKER, 'I']);
+      expect(String(row.Description).startsWith(`Uploaded ${FILE_NAME} (measurements, `), String(row.Description)).toBe(true);
+      expect(
+        String(row.Description).endsWith(`: ${EXPECTED_STAGED_ROW_COUNT - DROPPED_PER_ATTEMPT} rows staged, ${DROPPED_PER_ATTEMPT} dropped, in 1 chunk(s)`),
+        String(row.Description)
+      ).toBe(true);
+    }
+
+    // The second attempt's census replacement may also remove the first attempt's parked row (a D rollup); only the I rollups are counted here.
+    const addedRollups = exportedRows.filter(
+      row => row.ChangedTable === 'coremeasurements' && row.ChangedColumn === SUMMARY_COLUMN_MARKER && row.Action === 'I'
+    );
+    expect(
+      addedRollups.map(row => [row.PrimaryKey, row.Description]),
+      'the same file name under two base batches is two uploads'
+    ).toEqual([
+      [FILE_NAME, `Upload ${FILE_NAME}: added ${DROPPED_PER_ATTEMPT} measurement rows (batch ${familyRootOf(BATCH_ID)})`],
+      [FILE_NAME, `Upload ${FILE_NAME}: added ${DROPPED_PER_ATTEMPT} measurement rows (batch ${familyRootOf(SECOND_ATTEMPT_BATCH_ID)})`]
+    ]);
+    expect(
+      exportedRows.filter(row => row.ChangedTable === 'coremeasurements' && row.ChangedColumn !== SUMMARY_COLUMN_MARKER),
+      'no parked row is expanded field by field'
+    ).toEqual([]);
   });
 
   // ---------------------------------------------------------------------------

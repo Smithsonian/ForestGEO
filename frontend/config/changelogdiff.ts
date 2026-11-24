@@ -4,7 +4,7 @@ export interface DiffEntry {
   newValue: unknown;
 }
 
-const EXCLUDED_FIELDS = new Set(['id', 'changeID', 'plotID', 'censusID', 'PlotID', 'CensusID', 'ChangeID', 'CreatedAt', 'UpdatedAt', 'createdAt', 'updatedAt']);
+export const EXCLUDED_FIELDS: ReadonlySet<string> = new Set(['id', 'changeID', 'ChangeID', 'CreatedAt', 'UpdatedAt', 'createdAt', 'updatedAt']);
 
 export function computeDiff(oldRowState: Record<string, unknown> | null, newRowState: Record<string, unknown> | null): DiffEntry[] {
   if (!oldRowState && !newRowState) return [];
@@ -29,4 +29,11 @@ export function computeDiff(oldRowState: Record<string, unknown> | null, newRowS
   }
 
   return diffs.sort((a, b) => a.field.localeCompare(b.field));
+}
+
+/** The fields of one row image that carry a value a reader can see: not null, not excluded, in the order computeDiff uses. */
+export function recordedFieldNames(rowState: Record<string, unknown>): string[] {
+  return Object.keys(rowState)
+    .filter(field => !EXCLUDED_FIELDS.has(field) && rowState[field] !== null && rowState[field] !== undefined)
+    .sort((a, b) => a.localeCompare(b));
 }

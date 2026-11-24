@@ -7,18 +7,22 @@ interface RecentChangeEntry {
   operation: 'UPDATE';
   oldRowState: Record<string, unknown>;
   newRowState: Record<string, unknown>;
+  records: Array<{ primaryKey: string; oldState: Record<string, unknown> | null; newState: Record<string, unknown> | null }>;
   changeTimestamp: string;
   changedBy: string;
 }
 
 function makeUpdate(changeID: number, treeTag: string): RecentChangeEntry {
+  const oldRowState = { TreeTag: treeTag, MeasuredDBH: 10 };
+  const newRowState = { TreeTag: treeTag, MeasuredDBH: 12 };
   return {
     changeID,
     tableName: 'measurements',
     recordID: String(changeID),
     operation: 'UPDATE',
-    oldRowState: { TreeTag: treeTag, MeasuredDBH: 10 },
-    newRowState: { TreeTag: treeTag, MeasuredDBH: 12 },
+    oldRowState,
+    newRowState,
+    records: [{ primaryKey: String(changeID), oldState: oldRowState, newState: newRowState }],
     changeTimestamp: '2026-09-01T12:00:00.000Z',
     changedBy: 'e2e-admin@forestgeo.si.edu'
   };

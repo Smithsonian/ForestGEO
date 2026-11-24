@@ -1,8 +1,26 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Box, Button, Card, Chip, FormControl, FormLabel, Input, Option, Select, Sheet, Skeleton, Stack, Typography } from '@mui/joy';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  Chip,
+  CircularProgress,
+  FormControl,
+  FormHelperText,
+  FormLabel,
+  Input,
+  Option,
+  Select,
+  Sheet,
+  Skeleton,
+  Stack,
+  Typography
+} from '@mui/joy';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
@@ -14,15 +32,38 @@ import {
   RecentChangesQueryResponse,
   RecentChangesSummary,
   RECENT_CHANGES_PRESETS,
+  CHANGE_DATE_ZONE_LABEL,
+  isDateRangeInverted,
+  NO_DATE_BOUND,
   ChangelogEntry,
   BatchInsertGroup,
   getKeyFields
 } from '@/config/recentchangesexplorer';
-import { computeDiff, DiffEntry } from '@/config/changelogdiff';
+import { computeDiff, DiffEntry, recordedFieldNames } from '@/config/changelogdiff';
+import {
+  BULK_REVISION_CHANGELOG_TABLE,
+  FILE_UPLOAD_CHANGELOG_TABLE,
+  SUMMARY_CHANGELOG_TABLES,
+  type ChangelogRecord,
+  type ChangelogRowImage
+} from '@/config/changelogdecode';
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
+import { CHANGE_QUICK_SEARCH_MAX_LENGTH, EARLIEST_FILTER_DATE_YEAR, LATEST_FILTER_DATE_YEAR, isFilterableDate } from '@/lib/changes/explorerrequest';
+import { changeExportFailureMessage, CHANGE_EXPORT_FAILURE_MESSAGES, ChangeExportRequestError, postRecentChangesExport } from '@/lib/changes/explorertransport';
 import moment from 'moment';
 
 const DEFAULT_PAGE_SIZE = 25;
+const UNKNOWN_USER_LABEL = 'unknown';
+const ROW_IMAGES_NOT_RECORDED_TEXT = 'Row images were not recorded for this change';
+const ROW_IMAGES_NOT_RECORDED_LINE = "row added, but the older change log didn't save its values";
+const PRIOR_VALUES_NOT_RECORDED_CAPTION = 'Prior values were not recorded';
+const NEW_VALUES_NOT_RECORDED_CAPTION = 'New values were not recorded';
+const NO_FIELD_VALUES_RECORDED_TEXT = 'No field values were recorded';
+const NEW_ROW_FALLBACK = 'New row';
+const REMOVED_ROW_FALLBACK = 'Removed row';
+const INSERT_LINE_COLOR = '#6ee77a';
+const DELETE_LINE_COLOR = '#f87171';
+const RECORD_PANEL_SX = { backgroundColor: 'neutral.900', borderRadius: '6px', p: 1.5, fontFamily: 'monospace', fontSize: '12px' } as const;
 
 const OPERATION_COLORS = {
   INSERT: 'success',
@@ -74,16 +115,36 @@ export function summarizeChange(entry: Pick<ChangelogEntry, 'operation' | 'table
   };
   const objectLabel = singularTableLabel[tableLabel] ?? tableLabel;
   // bulk-revision-apply rows are summaries (see projectBulkRevisionRow), not a real table.
-  if (entry.tableName === 'bulk-revision-apply') return 'Applied a bulk revision';
-  if (entry.operation === 'INSERT' && entry.tableName === 'file_upload') return filename ? `Uploaded ${filename}` : 'Uploaded a file';
+  if (entry.tableName === BULK_REVISION_CHANGELOG_TABLE) return 'Applied a bulk revision';
+  if (entry.operation === 'INSERT' && entry.tableName === FILE_UPLOAD_CHANGELOG_TABLE) return filename ? `Uploaded ${filename}` : 'Uploaded a file';
   if (entry.operation === 'UPDATE' && /measurement/i.test(entry.tableName)) return 'Updated a measurement record';
   if (entry.operation === 'DELETE') return `Deleted a ${objectLabel}`;
   if (entry.operation === 'INSERT') return `Added a ${objectLabel}`;
   return `Changed ${tableLabel}`;
 }
 
-function displayName(value: string): string {
+function displayName(value: string | null): string {
+  if (value === null) return UNKNOWN_USER_LABEL;
   return value.replace(/\s*\[[^\]]*\]\s*$/, '').trim();
+}
+
+function keyFieldsLine(tableName: string, image: ChangelogRowImage | null): string {
+  if (image === null) return '';
+  return getKeyFields(tableName, image)
+    .map(field => `${field}: ${formatDiffValue(image[field])}`)
+    .join(', ');
+}
+
+function hasNoRowImage(entry: ChangelogEntry): boolean {
+  return entry.records.length === 0 && !SUMMARY_CHANGELOG_TABLES.has(entry.tableName);
+}
+
+function RowImagesNotRecorded() {
+  return (
+    <Typography level="body-sm" sx={{ color: 'neutral.500', fontStyle: 'italic' }}>
+      {ROW_IMAGES_NOT_RECORDED_TEXT}
+    </Typography>
+  );
 }
 
 function DiffBlock({ diffs }: { diffs: DiffEntry[] }) {
@@ -145,25 +206,69 @@ function DiffBlock({ diffs }: { diffs: DiffEntry[] }) {
   );
 }
 
-function InsertSummary({ entry }: { entry: ChangelogEntry }) {
-  const fields = entry.newRowState ? getKeyFields(entry.tableName, entry.newRowState) : [];
-  const display = fields.map(f => `${f}: ${formatDiffValue(entry.newRowState?.[f])}`).join(', ');
+/** One line per record. The primary key labels a line only when the change holds several records. */
+function RecordLines({ entry, side, sign, color, fallback }: { entry: ChangelogEntry; side: 'old' | 'new'; sign: '+' | '-'; color: string; fallback: string }) {
+  const lines =
+    entry.records.length === 0
+      ? [`${sign} ${fallback}`]
+      : entry.records.map(record => {
+          const keyLabel = entry.records.length > 1 ? `${record.primaryKey} · ` : '';
+          const fields = keyFieldsLine(entry.tableName, side === 'new' ? record.newState : record.oldState);
+          return `${sign} ${keyLabel}${fields || fallback}`;
+        });
 
   return (
-    <Box sx={{ backgroundColor: 'neutral.900', borderRadius: '6px', p: 1.5, fontFamily: 'monospace', fontSize: '12px' }}>
-      <Typography sx={{ color: '#6ee77a', fontFamily: 'inherit', fontSize: 'inherit' }}>+ {display || 'New row'}</Typography>
+    <Box sx={RECORD_PANEL_SX}>
+      {lines.map((line, index) => (
+        <Typography key={`${entry.changeID}-${index}`} sx={{ color, fontFamily: 'inherit', fontSize: 'inherit' }}>
+          {line}
+        </Typography>
+      ))}
     </Box>
   );
 }
 
+function InsertSummary({ entry }: { entry: ChangelogEntry }) {
+  if (hasNoRowImage(entry)) return <RowImagesNotRecorded />;
+  return <RecordLines entry={entry} side="new" sign="+" color={INSERT_LINE_COLOR} fallback={NEW_ROW_FALLBACK} />;
+}
+
 function DeleteSummary({ entry }: { entry: ChangelogEntry }) {
-  const fields = entry.oldRowState ? getKeyFields(entry.tableName, entry.oldRowState) : [];
-  const display = fields.map(f => `${f}: ${formatDiffValue(entry.oldRowState?.[f])}`).join(', ');
+  if (hasNoRowImage(entry)) return <RowImagesNotRecorded />;
+  return <RecordLines entry={entry} side="old" sign="-" color={DELETE_LINE_COLOR} fallback={REMOVED_ROW_FALLBACK} />;
+}
+
+/** One record of an UPDATE. A record with one side missing says which, matching the CSV Description (#592 D12). */
+function UpdateRecordBlock({ record, showPrimaryKey }: { record: ChangelogRecord; showPrimaryKey: boolean }) {
+  const diffs = useMemo(() => {
+    if (record.oldState !== null && record.newState !== null) return computeDiff(record.oldState, record.newState);
+    const recordedImage = record.oldState ?? record.newState;
+    if (recordedImage === null) return [];
+    return recordedFieldNames(recordedImage).map(field => ({ field, oldValue: record.oldState?.[field], newValue: record.newState?.[field] }));
+  }, [record.oldState, record.newState]);
+  const missingSideCaption = record.oldState === null ? PRIOR_VALUES_NOT_RECORDED_CAPTION : record.newState === null ? NEW_VALUES_NOT_RECORDED_CAPTION : null;
+  const hasNoRecordedField = missingSideCaption !== null && diffs.length === 0;
 
   return (
-    <Box sx={{ backgroundColor: 'neutral.900', borderRadius: '6px', p: 1.5, fontFamily: 'monospace', fontSize: '12px' }}>
-      <Typography sx={{ color: '#f87171', fontFamily: 'inherit', fontSize: 'inherit' }}>- {display || 'Removed row'}</Typography>
-    </Box>
+    <Stack spacing={0.5}>
+      {showPrimaryKey && (
+        <Typography level="body-xs" sx={{ fontFamily: 'monospace', color: 'neutral.400' }}>
+          {record.primaryKey}
+        </Typography>
+      )}
+      {missingSideCaption && (
+        <Typography level="body-xs" sx={{ color: 'warning.300' }}>
+          {missingSideCaption}
+        </Typography>
+      )}
+      {hasNoRecordedField ? (
+        <Typography level="body-sm" sx={{ color: 'neutral.500', fontStyle: 'italic' }}>
+          {NO_FIELD_VALUES_RECORDED_TEXT}
+        </Typography>
+      ) : (
+        <DiffBlock diffs={diffs} />
+      )}
+    </Stack>
   );
 }
 
@@ -179,6 +284,9 @@ function CardHeader({ entry }: { entry: ChangelogEntry }) {
         <Typography level="title-sm">{summarizeChange(entry)}</Typography>
         <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
           {entry.tableName}
+        </Typography>
+        <Typography level="body-xs" sx={{ color: 'neutral.500', fontFamily: 'monospace' }}>
+          #{entry.changeID}
         </Typography>
       </Stack>
       <Typography level="body-xs" sx={{ color: 'neutral.500' }} title={time.full}>
@@ -213,14 +321,8 @@ function BulkRevisionSummaryCard({ entry }: { entry: ChangelogEntry }) {
 }
 
 function UpdateCard({ entry }: { entry: ChangelogEntry }) {
-  const isBulkRevisionSummary = entry.newRowState?.summaryKind === BULK_REVISION_SUMMARY_KIND;
   // computeDiff must never run against a summary object (see BulkRevisionSummaryCard).
-  const diffs = useMemo(
-    () => (isBulkRevisionSummary ? [] : computeDiff(entry.oldRowState, entry.newRowState)),
-    [isBulkRevisionSummary, entry.oldRowState, entry.newRowState]
-  );
-
-  if (isBulkRevisionSummary) {
+  if (entry.newRowState?.summaryKind === BULK_REVISION_SUMMARY_KIND) {
     return <BulkRevisionSummaryCard entry={entry} />;
   }
 
@@ -228,7 +330,11 @@ function UpdateCard({ entry }: { entry: ChangelogEntry }) {
     <Sheet variant="outlined" sx={{ p: 1.75, borderRadius: 'md', borderLeft: '3px solid', borderLeftColor: 'primary.500' }}>
       <Stack spacing={1.25}>
         <CardHeader entry={entry} />
-        <DiffBlock diffs={diffs} />
+        {hasNoRowImage(entry) && <RowImagesNotRecorded />}
+        {entry.records.length === 0 && !hasNoRowImage(entry) && <DiffBlock diffs={[]} />}
+        {entry.records.map((record, index) => (
+          <UpdateRecordBlock key={`${entry.changeID}-${index}`} record={record} showPrimaryKey={entry.records.length > 1} />
+        ))}
       </Stack>
     </Sheet>
   );
@@ -278,15 +384,17 @@ function BatchInsertCard({ batch }: { batch: BatchInsertGroup }) {
         </Button>
 
         {expanded && (
-          <Box sx={{ backgroundColor: 'neutral.900', borderRadius: '6px', p: 1.5, fontFamily: 'monospace', fontSize: '12px' }}>
-            {batch.entries.map(entry => {
-              const fields = entry.newRowState ? getKeyFields(batch.tableName, entry.newRowState) : [];
-              const display = fields.map(f => `${f}: ${formatDiffValue(entry.newRowState?.[f])}`).join(', ');
-              return (
-                <Typography key={entry.changeID} sx={{ color: '#6ee77a', fontFamily: 'inherit', fontSize: 'inherit', mb: 0.5 }}>
-                  + {display || 'New row'}
+          <Box sx={RECORD_PANEL_SX}>
+            {batch.entries.flatMap(entry => {
+              const lines =
+                entry.records.length === 0
+                  ? [`#${entry.changeID} — ${ROW_IMAGES_NOT_RECORDED_LINE}`]
+                  : entry.records.map(record => `#${entry.changeID} + ${keyFieldsLine(batch.tableName, record.newState) || NEW_ROW_FALLBACK}`);
+              return lines.map((line, index) => (
+                <Typography key={`${entry.changeID}-${index}`} sx={{ color: INSERT_LINE_COLOR, fontFamily: 'inherit', fontSize: 'inherit', mb: 0.5 }}>
+                  {line}
                 </Typography>
-              );
+              ));
             })}
           </Box>
         )}
@@ -321,13 +429,37 @@ function FeedItemCard({ item }: { item: FeedItem }) {
   }
 }
 
+const DATE_RANGE_INVERTED_MESSAGE = 'From must be on or before To.';
+const EARLIEST_FILTER_DATE = `${EARLIEST_FILTER_DATE_YEAR}-01-01`;
+const LATEST_FILTER_DATE = `${LATEST_FILTER_DATE_YEAR}-12-31`;
+const UNFILTERABLE_DATE_MESSAGE = `Enter a date between ${EARLIEST_FILTER_DATE} and ${LATEST_FILTER_DATE}.`;
+const CHANGED_FROM_CONTROL_ID = 'changes-explorer-changed-from';
+const CHANGED_TO_CONTROL_ID = 'changes-explorer-changed-to';
+const CHANGED_FROM_HELPER_TEXT_ID = `${CHANGED_FROM_CONTROL_ID}-helper-text`;
+const DATE_RANGE_HELPER_TEXT_ID = `${CHANGED_TO_CONTROL_ID}-helper-text`;
+const CHANGED_FROM_LABEL = `From (${CHANGE_DATE_ZONE_LABEL})`;
+const CHANGED_TO_LABEL = `To (${CHANGE_DATE_ZONE_LABEL})`;
+const EXPORT_BUTTON_LABEL = 'Export CSV';
+const EXPORTING_INDICATOR_LABEL = 'Exporting change log';
+
+function scopeKey(schemaName: string, plotID: number): string {
+  return `${schemaName}:${plotID}`;
+}
+
+function isUnfilterableDateBound(value: string): boolean {
+  return value !== NO_DATE_BOUND && !isFilterableDate(value);
+}
+
 export default function RecentChangesExplorer() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
+  const currentScope = currentSite?.schemaName && currentPlot?.plotID ? scopeKey(currentSite.schemaName, currentPlot.plotID) : null;
   const facetsAbortRef = useRef<AbortController | null>(null);
   const itemsAbortRef = useRef<AbortController | null>(null);
   const facetsRequestRef = useRef(0);
   const itemsRequestRef = useRef(0);
+  const exportAbortRef = useRef<AbortController | null>(null);
+  const exportRequestRef = useRef(0);
 
   const [filters, setFilters] = useState<RecentChangesFilters>(DEFAULT_RECENT_CHANGES_FILTERS);
   const [items, setItems] = useState<FeedItem[]>([]);
@@ -339,6 +471,10 @@ export default function RecentChangesExplorer() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [_loadingFacets, setLoadingFacets] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  // Kept apart from errorMessage: a list refresh clears that one, and must not wipe an export failure.
+  const [exportErrorMessage, setExportErrorMessage] = useState<string | null>(null);
+  const [scopeOfResults, setScopeOfResults] = useState(currentScope);
 
   const updateFilters = useCallback((updater: (prev: RecentChangesFilters) => RecentChangesFilters) => {
     setFilters(prev => updater(prev));
@@ -348,7 +484,8 @@ export default function RecentChangesExplorer() {
   const handlePresetClick = useCallback((presetId: string) => {
     const preset = RECENT_CHANGES_PRESETS.find(p => p.id === presetId);
     if (!preset) return;
-    setFilters({ ...preset.filters, presetId });
+    // A preset says nothing about dates, so the date range carries over (#592 D9).
+    setFilters(prev => ({ ...preset.filters, changedFrom: prev.changedFrom, changedTo: prev.changedTo, presetId }));
     setPage(0);
   }, []);
 
@@ -371,7 +508,7 @@ export default function RecentChangesExplorer() {
       if (facetsRequestRef.current !== requestID || controller.signal.aborted) return;
       setFacets(data);
     } catch (error) {
-      if (isAbortError(error)) return;
+      if (isAbortError(error) || facetsRequestRef.current !== requestID || controller.signal.aborted) return;
       const msg = error instanceof Error ? error.message : String(error);
       setErrorMessage(msg);
     } finally {
@@ -384,10 +521,33 @@ export default function RecentChangesExplorer() {
     }
   }, [currentSite?.schemaName, currentPlot?.plotID]);
 
+  const changedFromUnfilterable = isUnfilterableDateBound(filters.changedFrom);
+  const changedToUnfilterable = isUnfilterableDateBound(filters.changedTo);
+  const dateRangeInverted = !changedFromUnfilterable && !changedToUnfilterable && isDateRangeInverted(filters.changedFrom, filters.changedTo);
+  const dateFiltersUnsendable = changedFromUnfilterable || changedToUnfilterable || dateRangeInverted;
+
+  // Results and failures belong to the plot that produced them, so a different plot starts from nothing, whatever the dates say.
+  // Reset while rendering, so the previous plot is never painted under the new one.
+  if (scopeOfResults !== currentScope) {
+    setScopeOfResults(currentScope);
+    setItems([]);
+    setSummary(DEFAULT_SUMMARY);
+    setHasMore(false);
+    setPage(0);
+    setErrorMessage(null);
+    setLoading(currentScope !== null && !dateFiltersUnsendable);
+    setLoadingMore(false);
+  }
+
   const fetchItems = useCallback(
     async (pageNum: number, append: boolean) => {
       if (!currentSite?.schemaName || !currentPlot?.plotID) return;
       itemsAbortRef.current?.abort();
+      if (dateFiltersUnsendable) {
+        setLoading(false);
+        setLoadingMore(false);
+        return;
+      }
       const controller = new AbortController();
       itemsAbortRef.current = controller;
       const requestID = ++itemsRequestRef.current;
@@ -423,7 +583,7 @@ export default function RecentChangesExplorer() {
         setSummary(data.summary);
         setHasMore(data.hasMore);
       } catch (error) {
-        if (isAbortError(error)) return;
+        if (isAbortError(error) || itemsRequestRef.current !== requestID || controller.signal.aborted) return;
         const msg = error instanceof Error ? error.message : String(error);
         setErrorMessage(msg);
       } finally {
@@ -436,8 +596,56 @@ export default function RecentChangesExplorer() {
         }
       }
     },
-    [currentSite?.schemaName, currentPlot?.plotID, filters]
+    [currentSite?.schemaName, currentPlot?.plotID, filters, dateFiltersUnsendable]
   );
+
+  const handleExport = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || dateFiltersUnsendable) return;
+    exportAbortRef.current?.abort();
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    const requestID = ++exportRequestRef.current;
+    setExporting(true);
+    setExportErrorMessage(null);
+    let objectUrl: string | null = null;
+    let anchor: HTMLAnchorElement | null = null;
+
+    try {
+      const { blob, filename } = await postRecentChangesExport({ schema: currentSite.schemaName, plotID: currentPlot.plotID }, filters, controller.signal);
+      if (exportRequestRef.current !== requestID || controller.signal.aborted) return;
+      objectUrl = URL.createObjectURL(blob);
+      anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+    } catch (error: unknown) {
+      if (isAbortError(error) || exportRequestRef.current !== requestID) return;
+      setExportErrorMessage(error instanceof ChangeExportRequestError ? changeExportFailureMessage(error) : CHANGE_EXPORT_FAILURE_MESSAGES.generic);
+    } finally {
+      anchor?.remove();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (exportRequestRef.current === requestID) {
+        setExporting(false);
+        if (exportAbortRef.current === controller) {
+          exportAbortRef.current = null;
+        }
+      }
+    }
+  }, [currentSite?.schemaName, currentPlot?.plotID, filters, dateFiltersUnsendable]);
+
+  // An export belongs to the site and plot it was started for: leaving them, or the page, discards it.
+  // The abort only drops the client's result; the server finishes its read.
+  // A layout effect, so the cleanup runs inside the commit that changes the scope; a passive one can run after a late blob has downloaded.
+  useLayoutEffect(() => {
+    return () => {
+      exportAbortRef.current?.abort();
+      exportAbortRef.current = null;
+      exportRequestRef.current += 1;
+      setExporting(false);
+      setExportErrorMessage(null);
+    };
+  }, [currentSite?.schemaName, currentPlot?.plotID]);
 
   useEffect(() => {
     return () => {
@@ -451,6 +659,7 @@ export default function RecentChangesExplorer() {
   }, [fetchFacets]);
 
   useEffect(() => {
+    setPage(0);
     fetchItems(0, false);
   }, [fetchItems]);
 
@@ -478,6 +687,12 @@ export default function RecentChangesExplorer() {
       {errorMessage && (
         <Alert color="danger" startDecorator={<ReportProblemOutlinedIcon />}>
           {errorMessage}
+        </Alert>
+      )}
+
+      {exportErrorMessage && (
+        <Alert color="danger" startDecorator={<ReportProblemOutlinedIcon />} data-testid="recent-changes-export-alert">
+          {exportErrorMessage}
         </Alert>
       )}
 
@@ -566,11 +781,63 @@ export default function RecentChangesExplorer() {
               <Input
                 id="changes-explorer-quick-search"
                 aria-label="Quick Search"
+                slotProps={{ input: { maxLength: CHANGE_QUICK_SEARCH_MAX_LENGTH } }}
                 value={filters.quickSearch}
                 onChange={event => updateFilters(prev => ({ ...prev, quickSearch: event.target.value, presetId: undefined }))}
                 placeholder="Search records, tags, users..."
               />
             </FormControl>
+          </Stack>
+
+          {/* Date range */}
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ alignItems: { md: 'flex-start' } }}>
+            <FormControl id={CHANGED_FROM_CONTROL_ID} sx={{ minWidth: 190 }} error={changedFromUnfilterable || dateRangeInverted}>
+              <FormLabel htmlFor={CHANGED_FROM_CONTROL_ID}>{CHANGED_FROM_LABEL}</FormLabel>
+              <Input
+                id={CHANGED_FROM_CONTROL_ID}
+                type="date"
+                aria-label={CHANGED_FROM_LABEL}
+                value={filters.changedFrom}
+                slotProps={{
+                  input: {
+                    min: EARLIEST_FILTER_DATE,
+                    max: LATEST_FILTER_DATE,
+                    'aria-invalid': changedFromUnfilterable || dateRangeInverted,
+                    'aria-describedby': changedFromUnfilterable ? CHANGED_FROM_HELPER_TEXT_ID : dateRangeInverted ? DATE_RANGE_HELPER_TEXT_ID : undefined
+                  }
+                }}
+                onChange={event => updateFilters(prev => ({ ...prev, changedFrom: event.target.value }))}
+              />
+              {changedFromUnfilterable && <FormHelperText>{UNFILTERABLE_DATE_MESSAGE}</FormHelperText>}
+            </FormControl>
+
+            <FormControl id={CHANGED_TO_CONTROL_ID} sx={{ minWidth: 190 }} error={changedToUnfilterable || dateRangeInverted}>
+              <FormLabel htmlFor={CHANGED_TO_CONTROL_ID}>{CHANGED_TO_LABEL}</FormLabel>
+              <Input
+                id={CHANGED_TO_CONTROL_ID}
+                type="date"
+                aria-label={CHANGED_TO_LABEL}
+                value={filters.changedTo}
+                slotProps={{ input: { min: EARLIEST_FILTER_DATE, max: LATEST_FILTER_DATE, 'aria-invalid': changedToUnfilterable || dateRangeInverted } }}
+                onChange={event => updateFilters(prev => ({ ...prev, changedTo: event.target.value }))}
+              />
+              {changedToUnfilterable && <FormHelperText>{UNFILTERABLE_DATE_MESSAGE}</FormHelperText>}
+              {dateRangeInverted && <FormHelperText>{DATE_RANGE_INVERTED_MESSAGE}</FormHelperText>}
+            </FormControl>
+
+            <Button
+              variant="outlined"
+              color="neutral"
+              startDecorator={<FileDownloadOutlinedIcon />}
+              onClick={handleExport}
+              loading={exporting}
+              loadingIndicator={<CircularProgress color="neutral" thickness={3} aria-label={EXPORTING_INDICATOR_LABEL} />}
+              aria-busy={exporting}
+              disabled={dateFiltersUnsendable}
+              sx={{ alignSelf: { xs: 'flex-start', md: 'flex-end' } }}
+            >
+              {EXPORT_BUTTON_LABEL}
+            </Button>
           </Stack>
         </Stack>
       </Sheet>

@@ -29,10 +29,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { cleanupTestMeasurements, setupTestDatabase, teardownTestDatabase, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
+import { classifyChangesAfter, describeExportedRows, exportedRowsForPlot } from './helpers/changeexportprobe';
+import { SUMMARY_COLUMN_MARKER } from '@/config/changelogexport';
+import { recordedFieldNames } from '@/config/changelogdiff';
 
 const AUTH_USER_EMAIL = 'recent-changes-audit-runner@forestgeo.test';
 const BULK_CRUD_FILE_ID = 'sample_bulk_insert.csv';
 const AUDIT_FAILURE_MESSAGE = 'SIMULATED_AUDIT_WRITE_FAILURE_507';
+const NO_EARLIER_CHANGE = 0;
 
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null,
@@ -454,6 +458,37 @@ describe('Recent Changes audit atomicity (#507): POST /api/sqlpacketload fixed-d
     expect(summaryRows, 'the file_upload summary changelog row must have been written').toHaveLength(1);
     expect(summaryRows[0].ChangedBy).toBe(AUTH_USER_EMAIL);
     expect(summaryRows[0].ChangedBy).not.toBe('Forged Attacker Identity');
+
+    // #592 D6: a reference upload stays field-level; its file_upload row is one summary row.
+    const uploadChanges = (await classifyChangesAfter(connection, config.database, NO_EARLIER_CHANGE)).filter(
+      change =>
+        (change.tableName === 'attributes' && change.recordID === code) || (change.tableName === 'file_upload' && change.recordID === SQLPACKETLOAD_FILE_NAME)
+    );
+    expect(
+      uploadChanges.map(change => [change.tableName, change.isUploadPipelineRow, change.isDetailRow]),
+      'neither row is an upload-pipeline measurement row'
+    ).toEqual([
+      ['attributes', false, true],
+      ['file_upload', false, true]
+    ]);
+
+    const exportedRows = await exportedRowsForPlot(connection, config.database, testData.plots[0].plotID);
+    const attributeRows = exportedRows.filter(row => row.ChangedTable === 'attributes' && row.PrimaryKey === code);
+    const storedAttributeState = typeof auditRows[0].NewRowState === 'string' ? JSON.parse(auditRows[0].NewRowState) : auditRows[0].NewRowState;
+    console.log(`[sqlpacketload export] attribute rows:\n${describeExportedRows(attributeRows)}`);
+    expect(attributeRows.length, 'the attribute insert must export at least one field row').toBeGreaterThan(0);
+    expect(
+      attributeRows.map(row => row.ChangedColumn),
+      'one row per recorded field of the stored attribute'
+    ).toEqual(recordedFieldNames(storedAttributeState));
+    expect(attributeRows.every(row => row.Action === 'I' && row.Old === '' && row.Description === `Added attributes ${code}`)).toBe(true);
+
+    const fileRows = exportedRows.filter(row => row.ChangedTable === 'file_upload' && row.PrimaryKey === SQLPACKETLOAD_FILE_NAME);
+    expect(fileRows.map(row => [row.ChangedColumn, row.Action])).toEqual([[SUMMARY_COLUMN_MARKER, 'I']]);
+    expect(
+      String(fileRows[0].Description).startsWith(`Uploaded ${SQLPACKETLOAD_FILE_NAME} (attributes, revisions): 1 rows`),
+      String(fileRows[0].Description)
+    ).toBe(true);
   });
 
   it("rolls back an earlier, individually-successful row in the same request when a LATER row's per-row changelog audit write fails", async () => {

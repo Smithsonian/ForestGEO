@@ -206,6 +206,12 @@ export const MAX_SUB_BATCH_ORDINAL = 10 ** SUB_BATCH_ORDINAL_WIDTH - 1;
 const SUB_BATCH_SUFFIX = new RegExp(`${SUB_BATCH_SEPARATOR}\\d{${SUB_BATCH_ORDINAL_WIDTH}}$`);
 
 /**
+ * SUB_BATCH_SUFFIX for MySQL's ICU engine (REGEXP_REPLACE). `\z` is the absolute end of the
+ * value: ICU's `$` also matches before a final line break, which familyRootOf does not strip.
+ */
+export const SUB_BATCH_SUFFIX_SQL_PATTERN = `${SUB_BATCH_SEPARATOR}[0-9]{${SUB_BATCH_ORDINAL_WIDTH}}\\z`;
+
+/**
  * Rows per sub-batch. Staging and setup must read the same value: staging
  * assigns membership with it and setup rejects members larger than it.
  * Overridable via INGESTION_SUB_BATCH_ROWS so tests can force multi-sub-batch
