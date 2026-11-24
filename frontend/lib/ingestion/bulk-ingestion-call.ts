@@ -1,15 +1,7 @@
 /**
- * Runs bulkingestionprocess inside a transaction the caller already holds (#527).
- *
- * The procedure normally opens and commits its own transaction, which silently
- * commits the caller's. The session flag @bulkingestion_caller_owns_transaction
- * switches it to a savepoint instead. The flag must be cleared on every outcome:
- * a flag left set on a pooled connection would make the next, unrelated CALL
- * skip its own COMMIT. When the flag cannot be cleared, the connection is
- * discarded rather than returned to the pool (lib/db/caller-owned-procedure-call.ts).
- *
- * lib/uploads/ingest-batch.ts does not hold a transaction and calls the
- * procedure directly so that it keeps its own transaction.
+ * Runs bulkingestionprocess inside a transaction the caller already holds (#527); see
+ * lib/db/caller-owned-procedure-call.ts. lib/uploads/ingest-batch.ts holds no transaction
+ * and calls the procedure directly so that it keeps its own.
  */
 import type ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';

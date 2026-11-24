@@ -147,8 +147,7 @@ export async function DELETE(
     try {
       const clearedRecords =
         tableType === 'failedmeasurements'
-          ? // Failed rows are measurements of record, so each one gets a Recent Changes DELETE row.
-            await deleteCoreMeasurementsInBoundedChunksWithAudit(
+          ? await deleteCoreMeasurementsInBoundedChunksWithAudit(
               connectionManager,
               schema,
               buildFailedMeasurementsScopeWhereClause(schema),

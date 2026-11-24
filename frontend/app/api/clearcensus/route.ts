@@ -150,8 +150,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // The procedure runs in caller-owned mode, so the audit rows below commit
-    // or roll back with the deletes they describe (issue #507).
     const tx = transactionExecutorFor(connectionManager, transactionID);
     const changedBy = authenticatedSessionIdentity(session?.user);
     await clearCensusWithAudit({ tx, schema, type, censusID, plotID: Number(censusRow.PlotID), changedBy });

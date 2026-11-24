@@ -565,7 +565,6 @@ BEGIN
     -- can't leave the pooled connection poisoned for the next caller.
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- A caller-owned transaction is rolled back by the caller (issue #507).
         IF NOT vCallerOwnsTransaction THEN
             ROLLBACK;
         END IF;
@@ -574,10 +573,7 @@ BEGIN
         RESIGNAL;
     END;
 
-    -- Issue #507: with @clearcensus_caller_owns_transaction = 1 the caller holds the
-    -- transaction (and writes the Recent Changes audit in it), so this procedure must
-    -- neither start nor commit one. The flag is read once and cleared at once so it
-    -- can never leak into the next CALL on a pooled connection.
+    -- Issue #507: caller-owned mode, as in clearcensusfull above.
     SET vCallerOwnsTransaction = COALESCE(@clearcensus_caller_owns_transaction, 0) = 1;
     SET @clearcensus_caller_owns_transaction = NULL;
     SET vPrevForeignKeyChecks = @@foreign_key_checks;
@@ -630,8 +626,6 @@ BEGIN
     END IF;
     SET foreign_key_checks = vPrevForeignKeyChecks;
     SET @disable_triggers = vPrevDisableTriggers;
-    -- Issue #507: a caller-owned clear reports what it deleted so the caller can
-    -- refuse to commit unless every deleted row was audited.
     IF vCallerOwnsTransaction THEN
         SELECT vDeletedMeasurements AS DeletedMeasurements;
     END IF;
