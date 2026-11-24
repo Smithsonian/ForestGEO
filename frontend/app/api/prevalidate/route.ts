@@ -202,8 +202,7 @@ async function handler(request: NextRequest, _context: RouteContext) {
     return new NextResponse(
       JSON.stringify({
         valid: false,
-        error: 'Pre-validation failed',
-        details: error.message
+        error: 'Pre-validation failed'
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

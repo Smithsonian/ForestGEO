@@ -14,7 +14,7 @@ import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql, buildStemStatusFilterClauseSql } from '@/config/measurementstatefilters';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
-import { toError } from '@/lib/errorhelpers';
+import { toError, INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 import { parseViewDataStemStatusFilter, ViewDataRequestError } from '@/lib/viewdata/measurementssummaryquery';
 import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
@@ -142,7 +142,7 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
     }
   } catch (e: any) {
     ailogger.error('Error fetching columns in formdownload:', e);
-    return new NextResponse(JSON.stringify({ error: e.message }), {
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }
@@ -360,7 +360,7 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
     }
   } catch (e: any) {
     ailogger.error('Error in formdownload GET:', e);
-    return new NextResponse(JSON.stringify({ error: e.message }), {
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   } finally {

@@ -9,7 +9,7 @@ import { Box } from '@mui/joy';
 import RenderFormExplanations from '@/components/client/renderformexplanations';
 
 export default function MultilineAttributesDataGrid(props: DataGridSignals) {
-  const { setChangesSubmitted } = props;
+  const { setChangesSubmitted, setIsSubmittingChanges } = props;
   const initialAttributesRDSRow = {
     id: 0,
     code: '',
@@ -28,6 +28,7 @@ export default function MultilineAttributesDataGrid(props: DataGridSignals) {
         setRefresh={setRefresh}
         initialRow={initialAttributesRDSRow}
         setChangesSubmitted={setChangesSubmitted}
+        setIsSubmittingChanges={setIsSubmittingChanges}
       />
     </Box>
   );

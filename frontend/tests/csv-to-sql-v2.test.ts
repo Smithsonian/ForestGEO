@@ -22,6 +22,7 @@ import {
   TEMP_ID_INDEX_NAME,
   TREE_LOOKUP_AMBIGUITY_INDEX_NAME,
   EMPTY_STEMTAG_COLLISION_REASON,
+  stemTagMatchKey,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
 import { type MeasurementStagingRow, type AttributeStagingRow, renderInsertChunksMeasurements } from '../lib/csv-to-sql-shared';
@@ -608,14 +609,14 @@ describe('renderStage2', () => {
     expect(s).not.toMatch(/tl\.SubSpeciesID IS NULL/);
   });
 
-  it('stem_lookup declares its (TreeID, StemTag) key inline, is plot-scoped and grouped by (TreeID, StemTag)', () => {
+  it('stem_lookup groups, and the write-back joins, on the blank-folded StemTagKey rather than a raw StemTag <=> (#577)', () => {
     const s = sql();
-    expect(s).toContain(`CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTag)) AS`);
-    expect(s).toMatch(/GROUP BY s\.TreeID, s\.StemTag/);
-  });
-
-  it('stem write-back uses NULL-safe <=> on StemTag', () => {
-    expect(sql()).toMatch(/sl\.TreeID = t\.TreeID\s+AND sl\.StemTag <=> t\.StemTag\s+AND sl\.StemCount = 1/);
+    expect(s).toContain(`CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTagKey)) AS`);
+    expect(s).toContain(`${stemTagMatchKey('s.StemTag')} AS StemTagKey,`);
+    expect(s).toMatch(/GROUP BY s\.TreeID, StemTagKey;/);
+    expect(s).toMatch(/sl\.TreeID = t\.TreeID\s+AND sl\.StemTagKey = .+\s+AND sl\.StemCount = 1/);
+    expect(s).toContain(`sl.StemTagKey = ${stemTagMatchKey('t.StemTag')}`);
+    expect(s, 'a raw <=> on StemTag treats NULL and blank as different stems').not.toMatch(/sl\.StemTag <=>/);
   });
 
   it('TSMID resolution UPDATE joins staging_attributes to TSMAttributes by TSMCode', () => {
@@ -690,9 +691,10 @@ describe('renderStage5', () => {
     expect(sql()).toMatch(/tl\.TreeCount > 1/);
   });
 
-  it('check 4: ambiguous stem key (StemCount > 1)', () => {
-    expect(sql()).toMatch(/'Ambiguous stem key'/);
-    expect(sql()).toMatch(/sl\.StemCount > 1/);
+  it('check 4: ambiguous stem key (StemCount > 1) on the same StemTagKey as the Stage 2 lookup (#577)', () => {
+    const s = sql();
+    expect(s).toMatch(/'Ambiguous stem key'/);
+    expect(s).toContain(`sl.StemTagKey = ${stemTagMatchKey('`staging_measurements`.StemTag')} AND sl.StemCount > 1`);
   });
 
   it('check 5: unknown quadrat', () => {

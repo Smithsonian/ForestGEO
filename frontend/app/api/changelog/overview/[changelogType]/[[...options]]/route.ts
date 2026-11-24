@@ -106,7 +106,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ chang
     });
   } catch (e: any) {
     ailogger.error('Changelog query failed:', e);
-    return NextResponse.json({ error: 'Failed to fetch changelog data', details: e.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: 'Failed to fetch changelog data' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

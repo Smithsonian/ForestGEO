@@ -227,7 +227,7 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
     ailogger.error('ctfs-sql export failed', error, { schema, appPlotId, appCensusId });
-    return NextResponse.json({ error: error.message || 'Export failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: 'Export failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     if (transactionActive) {
       try {

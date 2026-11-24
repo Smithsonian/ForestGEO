@@ -20,6 +20,7 @@ import type { TxExecutor } from '@/lib/db/connectionmanager';
 import { getCensusDatesError, getCensusOverlapError } from '@/config/censuswindow';
 import { loadNeighbourCensusWindows, reopenValidationOutsideCensusWindow } from '@/lib/census/censusdateedit';
 import { toCalendarDayString, type CalendarDayInput } from '@/config/dateformats';
+import { FOREIGN_KEY_CONFLICT_MESSAGE } from '@/lib/errorhelpers';
 
 // Mapping from dataType to primary key column name
 const PRIMARY_KEY_MAP: Record<string, string> = {
@@ -864,15 +865,7 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
     if (error instanceof MutationRequestError) return mutationErrorResponse(error);
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
       // withTransaction has already rolled back; no manual rollback here.
-      const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
-      const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
-      return NextResponse.json(
-        {
-          message: 'Foreign key conflict detected',
-          referencingTable
-        },
-        { status: HTTPResponses.FOREIGN_KEY_CONFLICT }
-      );
+      return NextResponse.json({ message: FOREIGN_KEY_CONFLICT_MESSAGE }, { status: HTTPResponses.FOREIGN_KEY_CONFLICT });
     } else return handleError(error, connectionManager, undefined);
   }
 }

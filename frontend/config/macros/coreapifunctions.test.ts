@@ -6,6 +6,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import MapperFactory from '@/config/datamapper';
 import { applyEdit } from '@/config/editplan/apply';
 import { getCookie } from '@/app/actions/cookiemanager';
+import { FOREIGN_KEY_CONFLICT_MESSAGE } from '@/lib/errorhelpers';
 // Keep measurementerrors mocked even though no test reads the mock directly; it
 // prevents the module from hitting the real DB stack when imported transitively.
 
@@ -1376,6 +1377,27 @@ describe('CoreAPIFunctions', () => {
       // so the assertion includes the threaded transaction id as the trailing arg.
       expect(mockConnectionManager.executeQuery).toHaveBeenCalledWith(`DELETE FROM \`${TEST_SCHEMA}\`.species WHERE SpeciesID = ?`, [99], 'transaction-123');
       expect(response.status).toBe(200);
+    });
+
+    it('answers a foreign-key refusal with fixed guidance instead of a table name parsed from the MySQL message', async () => {
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'DELETE',
+        body: JSON.stringify({ newRow: { QuadratID: 7 } })
+      });
+      const foreignKeyRefusal = Object.assign(
+        new Error(
+          'Cannot delete or update a parent row: a foreign key constraint fails (`forestgeo_secretsite`.`stems`, CONSTRAINT `stems_quadrats` FOREIGN KEY (`QuadratID`) REFERENCES `quadrats` (`QuadratID`))'
+        ),
+        { code: 'ER_ROW_IS_REFERENCED_2' }
+      );
+      mockConnectionManager.executeQuery.mockRejectedValue(foreignKeyRefusal);
+
+      const response = await DELETE(mockRequest, { params: Promise.resolve({ dataType: 'quadrats', slugs: [TEST_SCHEMA, 'quadratID', '7'] }) });
+      const text = await response.text();
+      console.log('[DELETE foreign key refusal]', response.status, text);
+
+      expect(response.status).toBe(HTTPResponses.FOREIGN_KEY_CONFLICT);
+      expect(JSON.parse(text)).toEqual({ message: FOREIGN_KEY_CONFLICT_MESSAGE });
     });
 
     it('rolls back via withTransaction when a write fails in DELETE', async () => {

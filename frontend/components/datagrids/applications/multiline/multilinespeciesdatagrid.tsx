@@ -7,7 +7,7 @@ import { Box } from '@mui/joy';
 import RenderFormExplanations from '@/components/client/renderformexplanations';
 
 export default function MultilineSpeciesDataGrid(props: DataGridSignals) {
-  const { setChangesSubmitted } = props;
+  const { setChangesSubmitted, setIsSubmittingChanges } = props;
   const initialSpeciesRow = {
     id: 0,
     spcode: '',
@@ -31,6 +31,7 @@ export default function MultilineSpeciesDataGrid(props: DataGridSignals) {
         setRefresh={setRefresh}
         initialRow={initialSpeciesRow}
         setChangesSubmitted={setChangesSubmitted}
+        setIsSubmittingChanges={setIsSubmittingChanges}
       />
     </Box>
   );

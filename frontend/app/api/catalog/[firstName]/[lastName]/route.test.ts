@@ -3,6 +3,7 @@ import { HTTPResponses } from '@/config/macros';
 // -----------------------------------------------------------
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 import ailogger from '@/ailogger'; // Helpers
 
 // ---- Install mocks/wrappers BEFORE importing the route ----
@@ -131,7 +132,7 @@ describe('GET /api/catalog/[firstName]/[lastName]', () => {
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
 
     const body = await res.json();
-    expect(body.error).toMatch(/boom/i);
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
 
     const logErr = (ailogger as any).error as ReturnType<typeof vi.fn>;
     expect(logErr).toHaveBeenCalled();

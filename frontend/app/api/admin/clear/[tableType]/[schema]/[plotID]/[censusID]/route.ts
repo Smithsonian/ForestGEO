@@ -194,8 +194,7 @@ export async function DELETE(
     ailogger.error(`Error clearing ${tableType} for ${schema}/${plotID}/${censusID}:`, error);
     return new NextResponse(
       JSON.stringify({
-        error: `Failed to clear ${tableType}`,
-        details: error.message
+        error: `Failed to clear ${tableType}`
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
@@ -277,8 +276,7 @@ export async function GET(
     ailogger.error(`Error getting ${tableType} count for ${schema}/${plotID}/${censusID}:`, errObj);
     return new NextResponse(
       JSON.stringify({
-        error: 'Failed to get record count',
-        details: errObj.message
+        error: 'Failed to get record count'
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

@@ -109,17 +109,14 @@ export function schemaQuarantinedResponse(record: QuarantineRecord): NextRespons
       code: SCHEMA_QUARANTINED_CODE,
       schema: record.schemaName,
       quarantinedAt,
-      reason: record.reason,
       runRef: record.runRef
     },
     { status: HTTPResponses.SERVICE_UNAVAILABLE }
   );
 }
 
-export function schemaGateUnavailableResponse(error: unknown): NextResponse {
-  const detail = error instanceof Error ? error.message : String(error);
-  return NextResponse.json(
-    { error: `schema contract gate unavailable: ${detail}`, code: SCHEMA_GATE_UNAVAILABLE_CODE },
-    { status: HTTPResponses.SERVICE_UNAVAILABLE }
-  );
+export const SCHEMA_GATE_UNAVAILABLE_MESSAGE = 'schema contract gate unavailable';
+
+export function schemaGateUnavailableResponse(): NextResponse {
+  return NextResponse.json({ error: SCHEMA_GATE_UNAVAILABLE_MESSAGE, code: SCHEMA_GATE_UNAVAILABLE_CODE }, { status: HTTPResponses.SERVICE_UNAVAILABLE });
 }

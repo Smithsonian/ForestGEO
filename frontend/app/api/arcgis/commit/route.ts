@@ -95,6 +95,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     const errorObj = error instanceof Error ? error : new Error(String(error));
     ailogger.error('ArcGIS commit failed:', errorObj);
-    return NextResponse.json({ error: errorObj.message || 'ArcGIS commit failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: 'ArcGIS commit failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }

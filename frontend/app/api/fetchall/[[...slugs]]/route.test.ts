@@ -5,6 +5,7 @@ import { validateContextualValues } from '@/lib/contextvalidation';
 import { auth } from '@/auth';
 // ========== Import route AFTER mocks ==========
 import { GET } from './route';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 import ConnectionManager from '@/lib/db/connectionmanager'; // ========== Helpers ==========
 
 // ========== Hoisted spies/fixtures used by mocks ==========
@@ -377,7 +378,7 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();
-    expect(body.error).toBe('kaboom');
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     expect(loggerErr).toHaveBeenCalled(); // ailogger.error('Error:', error)
     expect(close).toHaveBeenCalledTimes(1);
   });

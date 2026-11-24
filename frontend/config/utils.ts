@@ -214,7 +214,7 @@ export async function handleUpsert<Result>(
     return { id, operation: 'inserted' };
   } catch (e: any) {
     // ailogger.error(`Error in handleUpsert: ${e.message} | Stack: ${e.stack}`);
-    throw createError(e.message, e);
+    throw Object.assign(createError(e.message, e), { code: e?.code });
   }
 }
 

@@ -5,6 +5,7 @@ import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { UNSUPPORTED_LOGIC_OPERATOR_MESSAGE } from '@/components/processors/processormacros';
 import ailogger from '@/ailogger';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // -------------------- hoisted spies (safe for vi.mock factories) --------------------
 const { mapDataSpy, singlePostSpy, filterStubSpy, searchStubSpy } = vi.hoisted(() => ({
@@ -404,7 +405,7 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();
-    expect(body.error).toMatch(/kapow/i);
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
 
     // The route does not use transactions -- errors are caught and connection is closed in finally
     expect(close).toHaveBeenCalledTimes(1);

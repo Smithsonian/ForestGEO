@@ -27,6 +27,7 @@ import {
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 /**
  * Cleanup result interface
@@ -200,8 +201,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Ensure upload_sessions table exists
     try {
       await ensureUploadSessionsTable(schema);
-    } catch (error: any) {
-      result.errors.push(`Failed to ensure upload_sessions table: ${error.message}`);
+    } catch (error: unknown) {
+      result.errors.push('Failed to ensure upload_sessions table');
+      ailogger.error('[Cleanup API] Failed to ensure upload_sessions table:', toError(error));
     }
 
     // 1. Run session cleanup (mark stale as abandoned, cleanup abandoned)
@@ -219,7 +221,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           result.orphanedTempRowsDeleted += sessionResult.totalTempDeleted;
         }
       } catch (error: any) {
-        result.errors.push(`Session cleanup error: ${error.message}`);
+        result.errors.push('Session cleanup error');
         ailogger.error('[Cleanup API] Session cleanup error:', error);
       }
     }
@@ -237,7 +239,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           ailogger.info(`[Cleanup API] Deleted ${deleted} orphaned temporary measurements`);
         }
       } catch (error: any) {
-        result.errors.push(`Orphaned temp cleanup error: ${error.message}`);
+        result.errors.push('Orphaned temp cleanup error');
         ailogger.error('[Cleanup API] Orphaned temp cleanup error:', error);
       }
     }
@@ -249,7 +251,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           result.oldSessionsPurged = await purgeOldSessions(schema, maxSessionAgeDays);
         }
       } catch (error: any) {
-        result.errors.push(`Session purge error: ${error.message}`);
+        result.errors.push('Session purge error');
         ailogger.error('[Cleanup API] Session purge error:', error);
       }
     }
@@ -261,7 +263,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           result.staleTransactionsCleared = await clearStaleTransactions();
         }
       } catch (error: any) {
-        result.errors.push(`Stale transaction cleanup error: ${error.message}`);
+        result.errors.push('Stale transaction cleanup error');
         ailogger.error('[Cleanup API] Stale transaction cleanup error:', error);
       }
     }
@@ -275,10 +277,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
   } catch (error: any) {
     result.duration = Date.now() - startTime;
-    result.errors.push(`Fatal error: ${error.message}`);
+    result.errors.push('Fatal error');
     ailogger.error('[Cleanup API] Fatal error:', error);
 
-    return new NextResponse(JSON.stringify({ result, error: error.message }), {
+    return new NextResponse(JSON.stringify({ result, error: INTERNAL_SERVER_ERROR_MESSAGE }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }
@@ -342,7 +344,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
   } catch (error: any) {
     ailogger.error('[Cleanup API] GET error:', error);
-    return new NextResponse(JSON.stringify({ error: error.message }), {
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }

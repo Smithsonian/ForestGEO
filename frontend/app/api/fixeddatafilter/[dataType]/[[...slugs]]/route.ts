@@ -26,6 +26,7 @@ import {
 } from '@/lib/viewdata/measurementssummaryquery';
 import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // Shape of the resolved catch-all params for this slug route; the re-exported
 // coreapifunctions CRUD handlers expect exactly this props shape.
@@ -204,8 +205,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
       } catch (e: unknown) {
         const errorObj = e instanceof Error ? e : new Error(String(e));
         ailogger.error('Error fetching columns in fixeddatafilter:', errorObj);
-        const message = errorObj.message;
-        return new NextResponse(JSON.stringify({ error: message }), {
+        return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), {
           status: HTTPResponses.INTERNAL_SERVER_ERROR
         });
       }
@@ -523,7 +523,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
         return new NextResponse(JSON.stringify({ error: UNSUPPORTED_LOGIC_OPERATOR_MESSAGE }), { status: HTTPResponses.INVALID_REQUEST });
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error in fixeddatafilter POST:', errorObj);
-      return new NextResponse(JSON.stringify({ error: errorObj.message }), {
+      return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), {
         status: HTTPResponses.INTERNAL_SERVER_ERROR
       });
     } finally {

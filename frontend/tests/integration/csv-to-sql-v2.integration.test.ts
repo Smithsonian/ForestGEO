@@ -41,7 +41,7 @@ import {
   EMPTY_STEMTAG_COLLISION_REASON
 } from '../../lib/csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../../lib/csv-to-sql-shared';
-import { testDbServerOptions } from '../setup/test-db-connection';
+import { testDbServerOptions, type TestDbServerOptions } from '../setup/test-db-connection';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -85,8 +85,6 @@ const EMPTY_STEM_TAG = '';
 const QUADRAT_B1_ID = 3;
 const BAR_SPECIES_ID = 2;
 const UNTAGGED_NEIGHBOUR_TREE_ID = 4;
-const NULL_TAGGED_TREE_ID = 5;
-const NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID = 6;
 const TWO_UNTAGGED_STEMS_TREE_ID = 7;
 const TWO_UNTAGGED_STEMS_SECOND_STEM_ID = 8;
 const PRIOR_TREE_COUNT = 1000;
@@ -304,6 +302,7 @@ interface FailedMeasurementRow {
 interface ValidationFailureCapture {
   signalMessage: string | null;
   failedMeasurementRows: FailedMeasurementRow[];
+  lockHeldAfterRun?: boolean;
 }
 
 function isMeasurementTraceRow(row: CallbackRowDataPacket | OkPacket): row is CallbackRowDataPacket {
@@ -331,24 +330,51 @@ function runStatementCollectingTraceRows(callbackConnection: CallbackConnection,
  * and the EXIT HANDLER rolls staging back, so the rows can only be captured from the stream. The artifact is
  * self-contained (Stage 0 sets its own session variables), so running it on a separate session is faithful.
  * signalMessage is null when the artifact completed without a SIGNAL.
+ *
+ * Closing a session frees its named locks, so lockToProbe is checked on the publishing session while it is still
+ * open: lockHeldAfterRun is true only if the procedure returned without releasing it.
  */
-async function executeArtifactCapturingValidationFailure(databaseName: string, sql: string): Promise<ValidationFailureCapture> {
-  const callbackConnection = createCallbackConnection({ ...testDbServerOptions(), database: databaseName });
+async function executeArtifactCapturingValidationFailure(
+  databaseName: string,
+  sql: string,
+  serverOptions: TestDbServerOptions = testDbServerOptions(),
+  lockToProbe?: string
+): Promise<ValidationFailureCapture> {
+  const callbackConnection = createCallbackConnection({ ...serverOptions, database: databaseName });
   const failedMeasurementRows: FailedMeasurementRow[] = [];
   try {
-    for (const statement of splitSqlFile(sql)) {
-      if (!statement.sql.trim()) continue;
-      try {
-        await runStatementCollectingTraceRows(callbackConnection, statement.sql, failedMeasurementRows);
-      } catch (error) {
-        if (isUserSignal(error)) return { signalMessage: error.message, failedMeasurementRows };
-        throw error;
-      }
-    }
-    return { signalMessage: null, failedMeasurementRows };
+    const signalMessage = await runArtifactUntilSignal(callbackConnection, sql, failedMeasurementRows);
+    if (!lockToProbe) return { signalMessage, failedMeasurementRows };
+    return { signalMessage, failedMeasurementRows, lockHeldAfterRun: await isLockHeldBySession(callbackConnection, lockToProbe) };
   } finally {
     await new Promise<void>(resolve => callbackConnection.end(() => resolve()));
   }
+}
+
+async function runArtifactUntilSignal(
+  callbackConnection: CallbackConnection,
+  sql: string,
+  failedMeasurementRows: FailedMeasurementRow[]
+): Promise<string | null> {
+  for (const statement of splitSqlFile(sql)) {
+    if (!statement.sql.trim()) continue;
+    try {
+      await runStatementCollectingTraceRows(callbackConnection, statement.sql, failedMeasurementRows);
+    } catch (error) {
+      if (isUserSignal(error)) return error.message;
+      throw error;
+    }
+  }
+  return null;
+}
+
+function isLockHeldBySession(callbackConnection: CallbackConnection, lockName: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    callbackConnection.query<CallbackRowDataPacket[]>('SELECT IS_USED_LOCK(?) AS holder', [lockName], (error, rows) => {
+      if (error) return reject(error);
+      resolve(rows[0].holder !== null);
+    });
+  });
 }
 
 async function countRows(connection: mysql.Connection, table: string, where = ''): Promise<number> {
@@ -1518,45 +1544,6 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
     ).toBe(EXPECTED_DBH_ROWS_PER_NEW_STEM);
   });
 
-  it('check 1b: a new untagged stem is rejected when the destination has a NULL-tagged stem under the same tree and quadrat', async () => {
-    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
-    await connection.query('INSERT INTO Tree (TreeID, Tag, SpeciesID, SubSpeciesID) VALUES (?, ?, ?, NULL)', [
-      NULL_TAGGED_TREE_ID,
-      String(NULL_TAGGED_TREE_ID),
-      FOO_SPECIES_ID
-    ]);
-    await connection.query('INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber) VALUES (?, ?, NULL, ?, ?)', [
-      NULL_TAGGED_TREE_ID,
-      NULL_TAGGED_TREE_ID,
-      QUADRAT_A1_ID,
-      LEGACY_DEFAULT_STEM_NUMBER
-    ]);
-    // <=> treats NULL and '' as different, so the staged '' does not resolve to the NULL-tagged stem in Stage 2.
-    const collidingStem = makeMeasurement({
-      Tag: String(NULL_TAGGED_TREE_ID),
-      StemTag: EMPTY_STEM_TAG,
-      QuadratName: QUADRAT_A1_NAME,
-      PlotCensusNumber: CENSUS_NUMBER_2
-    });
-    const before = await captureDestinationCounts(connection);
-
-    const result = await executeArtifactCapturingValidationFailure(
-      dbName,
-      buildArtifact({
-        destinationPlotId: DESTINATION_PLOT_ID,
-        censusNumber: CENSUS_NUMBER_2,
-        lockName: LOCK_NAME_CENSUS_2,
-        allowReload: false,
-        measurementRows: [collidingStem],
-        attributeRows: []
-      })
-    );
-
-    expect(result.signalMessage, `captured: ${JSON.stringify(result)}`).toMatch(/Validation failed/);
-    expect(result.failedMeasurementRows).toEqual([{ CoreMeasurementID: collidingStem.CoreMeasurementID, Errors: EMPTY_STEMTAG_COLLISION_REASON }]);
-    expectCountsUnchanged(await captureDestinationCounts(connection), before);
-  });
-
   it('check 1b: two new untagged stems under the same existing tree and quadrat are both rejected', async () => {
     await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
     const firstUntagged = makeMeasurement({
@@ -1595,51 +1582,6 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
     for (const row of result.failedMeasurementRows) {
       expect(row.Errors.split(ERROR_REASON_SEPARATOR), `row ${row.CoreMeasurementID}: ${row.Errors}`).toContain(EMPTY_STEMTAG_COLLISION_REASON);
     }
-  });
-
-  it('check 1b: a NULL-tagged stem on the same tree in a different quadrat does not block a new untagged stem, because the destination lookup is qualified by quadrat', async () => {
-    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
-    await connection.query('INSERT INTO Tree (TreeID, Tag, SpeciesID, SubSpeciesID) VALUES (?, ?, ?, NULL)', [
-      NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID,
-      String(NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID),
-      FOO_SPECIES_ID
-    ]);
-    await connection.query('INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber) VALUES (?, ?, NULL, ?, ?)', [
-      NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID,
-      NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID,
-      QUADRAT_B1_ID,
-      LEGACY_DEFAULT_STEM_NUMBER
-    ]);
-    // The staged '' resolves to no destination stem in Stage 2 (<=> treats NULL and '' as different) and forms
-    // no (TreeID, '') lookup group for check 4, so the artifact commits and inserts the stem in A1.
-    const newUntaggedStem = makeMeasurement({
-      Tag: String(NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID),
-      StemTag: EMPTY_STEM_TAG,
-      QuadratName: QUADRAT_A1_NAME,
-      PlotCensusNumber: CENSUS_NUMBER_2
-    });
-
-    const result = await executeArtifactCapturingValidationFailure(
-      dbName,
-      buildArtifact({
-        destinationPlotId: DESTINATION_PLOT_ID,
-        censusNumber: CENSUS_NUMBER_2,
-        lockName: LOCK_NAME_CENSUS_2,
-        allowReload: false,
-        measurementRows: [newUntaggedStem],
-        attributeRows: []
-      })
-    );
-
-    expect(result, `the artifact must commit; captured: ${JSON.stringify(result)}`).toEqual({ signalMessage: null, failedMeasurementRows: [] });
-    const [insertedStems] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID FROM Stem WHERE TreeID = ? AND StemTag = ? AND QuadratID = ?', [
-      NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID,
-      EMPTY_STEM_TAG,
-      QUADRAT_A1_ID
-    ]);
-    expect(insertedStems, `untagged stems on tree ${NULL_TAGGED_IN_OTHER_QUADRAT_TREE_ID} / ${QUADRAT_A1_NAME}: ${JSON.stringify(insertedStems)}`).toHaveLength(
-      EXPECTED_UNTAGGED_STEM_COUNT
-    );
   });
 
   it('check 1b: a new untagged stem is rejected with both the collision and the ambiguous-stem reasons when the destination tree has two empty-tag stems', async () => {
@@ -1931,5 +1873,350 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
     ).rejects.toThrow(/Validation failed/);
 
     expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #577 missing-stem-tag matrix, run against every configured destination engine
+// ---------------------------------------------------------------------------
+
+const MARIADB_PORT_ENV = 'TEST_MARIADB_PORT';
+const CONTINUOUS_INTEGRATION_ENV = 'CI';
+const MARIADB_PORT = process.env[MARIADB_PORT_ENV];
+const MISSING_TAG_TREE_ID = 200;
+const MISSING_TAG_TREE_TAG = String(MISSING_TAG_TREE_ID);
+const FIRST_MISSING_TAG_STEM_ID = 201;
+const SECOND_MISSING_TAG_STEM_ID = 202;
+const NEW_TREE_FOR_MISSING_TAG_TAG = 'NEW577';
+const SPACE_ONLY_STEM_TAG = ' ';
+const LETTER_STEM_TAG = 'A';
+const LETTER_WITH_TRAILING_SPACE_STEM_TAG = 'A ';
+const QUADRAT_A2_ID = 2;
+const LIVING_TSM_CODE = 'LI';
+const LIVING_TSM_ID = 3;
+const CENSUS_2_START_DATE = '2025-01-01';
+const CENSUS_2_END_DATE = '2025-12-31';
+const CENSUS_2_DBH = 14;
+
+interface DestinationEngine {
+  label: string;
+  databaseSlug: string;
+  serverOptions: TestDbServerOptions;
+  expectedVersion: RegExp;
+  noPadCollation: string;
+}
+
+const MYSQL_DESTINATION: DestinationEngine = {
+  label: 'MySQL 8.0.36',
+  databaseSlug: 'mysql',
+  serverOptions: testDbServerOptions(),
+  expectedVersion: /^8\.0\.36\b/,
+  noPadCollation: 'utf8mb4_0900_ai_ci'
+};
+
+const MARIADB_DESTINATION: DestinationEngine | null = MARIADB_PORT
+  ? {
+      label: 'MariaDB 10.4',
+      databaseSlug: 'mariadb',
+      serverOptions: { ...testDbServerOptions(), port: Number(MARIADB_PORT) },
+      expectedVersion: /^10\.4\.\d+-MariaDB/,
+      noPadCollation: 'utf8mb4_general_nopad_ci'
+    }
+  : null;
+
+const DESTINATION_ENGINES: DestinationEngine[] = MARIADB_DESTINATION ? [MYSQL_DESTINATION, MARIADB_DESTINATION] : [MYSQL_DESTINATION];
+
+interface SeededStem {
+  stemId: number;
+  stemTag: string | null;
+  quadratId: number;
+}
+
+type MissingTagOutcome = { kind: 'retains-existing-stem'; stemId: number } | { kind: 'creates-new-stem' } | { kind: 'rejects'; reasons: string[] };
+
+interface MissingTagScenario {
+  name: string;
+  incomingStemTag: string;
+  seededStems: SeededStem[];
+  noPadDestination?: boolean;
+  expected: MissingTagOutcome;
+}
+
+const MISSING_TAG_SCENARIOS: MissingTagScenario[] = [
+  {
+    name: 'blank tag, no existing tree: first publication creates the untagged stem',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [],
+    expected: { kind: 'creates-new-stem' }
+  },
+  {
+    name: 'blank tag, one blank stem in the same quadrat: retains it',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [{ stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: EMPTY_STEM_TAG, quadratId: QUADRAT_A1_ID }],
+    expected: { kind: 'retains-existing-stem', stemId: FIRST_MISSING_TAG_STEM_ID }
+  },
+  {
+    name: 'blank tag, one NULL stem in the same quadrat: retains it and keeps its NULL tag',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [{ stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_A1_ID }],
+    expected: { kind: 'retains-existing-stem', stemId: FIRST_MISSING_TAG_STEM_ID }
+  },
+  {
+    name: 'blank tag, one blank stem in another quadrat: retains it (quadrat is not part of the stem key)',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [{ stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: EMPTY_STEM_TAG, quadratId: QUADRAT_A2_ID }],
+    expected: { kind: 'retains-existing-stem', stemId: FIRST_MISSING_TAG_STEM_ID }
+  },
+  {
+    name: 'blank tag, one NULL stem in another quadrat: retains it exactly as a blank stem there would be retained, creating no second identity',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [{ stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_A2_ID }],
+    expected: { kind: 'retains-existing-stem', stemId: FIRST_MISSING_TAG_STEM_ID }
+  },
+  {
+    name: 'blank tag, two NULL stems in the same quadrat: rejects as ambiguous',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [
+      { stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_A1_ID },
+      { stemId: SECOND_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_A1_ID }
+    ],
+    expected: { kind: 'rejects', reasons: [EMPTY_STEMTAG_COLLISION_REASON, AMBIGUOUS_STEM_KEY_REASON] }
+  },
+  {
+    name: 'blank tag, one blank and one NULL stem in the same quadrat: rejects as ambiguous instead of picking the blank one',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [
+      { stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: EMPTY_STEM_TAG, quadratId: QUADRAT_A1_ID },
+      { stemId: SECOND_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_A1_ID }
+    ],
+    expected: { kind: 'rejects', reasons: [EMPTY_STEMTAG_COLLISION_REASON, AMBIGUOUS_STEM_KEY_REASON] }
+  },
+  {
+    name: 'blank tag, two NULL stems in other quadrats: rejects as ambiguous',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [
+      { stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_A2_ID },
+      { stemId: SECOND_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_B1_ID }
+    ],
+    expected: { kind: 'rejects', reasons: [AMBIGUOUS_STEM_KEY_REASON] }
+  },
+  {
+    name: 'blank tag, one space-only stem in the same quadrat: retains it, because the destination collation already treats it as blank',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [{ stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: SPACE_ONLY_STEM_TAG, quadratId: QUADRAT_A1_ID }],
+    expected: { kind: 'retains-existing-stem', stemId: FIRST_MISSING_TAG_STEM_ID }
+  },
+  {
+    name: 'blank tag, a space-only stem seeded before a NULL stem, both in other quadrats: rejects as ambiguous',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [
+      { stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: SPACE_ONLY_STEM_TAG, quadratId: QUADRAT_A2_ID },
+      { stemId: SECOND_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_B1_ID }
+    ],
+    expected: { kind: 'rejects', reasons: [AMBIGUOUS_STEM_KEY_REASON] }
+  },
+  {
+    name: 'NO PAD destination, blank tag, one space-only stem in the same quadrat: retains it',
+    incomingStemTag: EMPTY_STEM_TAG,
+    seededStems: [{ stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: SPACE_ONLY_STEM_TAG, quadratId: QUADRAT_A1_ID }],
+    noPadDestination: true,
+    expected: { kind: 'retains-existing-stem', stemId: FIRST_MISSING_TAG_STEM_ID }
+  },
+  {
+    name: "NO PAD destination, tag 'A', one 'A ' stem in the same quadrat: adds a stem, because only blank tags are folded",
+    incomingStemTag: LETTER_STEM_TAG,
+    seededStems: [{ stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: LETTER_WITH_TRAILING_SPACE_STEM_TAG, quadratId: QUADRAT_A1_ID }],
+    noPadDestination: true,
+    expected: { kind: 'creates-new-stem' }
+  },
+  {
+    name: "tag '1', one '1' stem and one NULL stem in the same quadrat: retains the tagged stem",
+    incomingStemTag: FIRST_STEM_TAG,
+    seededStems: [
+      { stemId: FIRST_MISSING_TAG_STEM_ID, stemTag: FIRST_STEM_TAG, quadratId: QUADRAT_A1_ID },
+      { stemId: SECOND_MISSING_TAG_STEM_ID, stemTag: null, quadratId: QUADRAT_A1_ID }
+    ],
+    expected: { kind: 'retains-existing-stem', stemId: FIRST_MISSING_TAG_STEM_ID }
+  }
+];
+
+async function createDestinationDatabase(serverOptions: TestDbServerOptions, databaseName: string): Promise<mysql.Connection> {
+  const destination = await mysql.createConnection({ ...serverOptions });
+  try {
+    await destination.query(`DROP DATABASE IF EXISTS \`${databaseName}\``);
+    await destination.query(`CREATE DATABASE \`${databaseName}\` CHARACTER SET utf8mb4`);
+    await destination.changeUser({ database: databaseName });
+    return destination;
+  } catch (setupError) {
+    await destination.end();
+    throw setupError;
+  }
+}
+
+async function dropDestinationDatabase(destination: mysql.Connection, databaseName: string): Promise<void> {
+  try {
+    await destination.query(`DROP DATABASE IF EXISTS \`${databaseName}\``);
+  } finally {
+    await destination.end();
+  }
+}
+
+// A destination whose Stem.StemTag, and the staging tables the artifact creates, compare without padding.
+async function makeDestinationNoPad(destination: mysql.Connection, databaseName: string, noPadCollation: string): Promise<void> {
+  await destination.query(`ALTER DATABASE \`${databaseName}\` CHARACTER SET utf8mb4 COLLATE ${noPadCollation}`);
+  await destination.query(`ALTER TABLE Stem MODIFY StemTag varchar(32) CHARACTER SET utf8mb4 COLLATE ${noPadCollation} DEFAULT NULL`);
+}
+
+async function seedMissingTagTree(destination: mysql.Connection, seededStems: SeededStem[]): Promise<void> {
+  await destination.query('INSERT INTO Census (CensusID, PlotID, PlotCensusNumber, StartDate, EndDate) VALUES (?, ?, ?, ?, ?)', [
+    SEEDED_CENSUS_2_ID,
+    DESTINATION_PLOT_ID,
+    CENSUS_NUMBER_2,
+    CENSUS_2_START_DATE,
+    CENSUS_2_END_DATE
+  ]);
+  if (seededStems.length === 0) return;
+  await destination.query('INSERT INTO Tree (TreeID, Tag, SpeciesID, SubSpeciesID) VALUES (?, ?, ?, NULL)', [
+    MISSING_TAG_TREE_ID,
+    MISSING_TAG_TREE_TAG,
+    FOO_SPECIES_ID
+  ]);
+  await destination.query('INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber) VALUES ?', [
+    seededStems.map(stem => [stem.stemId, MISSING_TAG_TREE_ID, stem.stemTag, stem.quadratId, LEGACY_DEFAULT_STEM_NUMBER])
+  ]);
+  await destination.query('INSERT INTO DBH (MeasureID, CensusID, StemID, DBH, HOM, ExactDate) VALUES ?', [
+    seededStems.map(stem => [LEGACY_DEFAULT_MEASURE_ID, SEEDED_CENSUS_1_ID, stem.stemId, PRIOR_DBH, PRIOR_HOM, PRIOR_EXACT_DATE])
+  ]);
+}
+
+interface StemIdentity {
+  StemID: number;
+  TreeID: number;
+  StemTag: string | null;
+  QuadratID: number;
+}
+
+async function selectStemsOfTree(destination: mysql.Connection, tag: string): Promise<StemIdentity[]> {
+  const [rows] = await destination.query<mysql.RowDataPacket[]>(
+    'SELECT s.StemID, s.TreeID, s.StemTag, s.QuadratID FROM Stem s JOIN Tree t ON t.TreeID = s.TreeID WHERE t.Tag = ? ORDER BY s.StemID',
+    [tag]
+  );
+  return rows.map(row => ({ StemID: Number(row.StemID), TreeID: Number(row.TreeID), StemTag: row.StemTag, QuadratID: Number(row.QuadratID) }));
+}
+
+async function selectDbhRowsForCensus(destination: mysql.Connection, censusId: number): Promise<mysql.RowDataPacket[]> {
+  const [rows] = await destination.query<mysql.RowDataPacket[]>('SELECT DBHID, StemID, DBH FROM DBH WHERE CensusID = ? ORDER BY StemID', [censusId]);
+  return rows;
+}
+
+async function selectAttributeTsmIdsForDbh(destination: mysql.Connection, dbhId: number): Promise<number[]> {
+  const [rows] = await destination.query<mysql.RowDataPacket[]>('SELECT TSMID FROM DBHAttributes WHERE DBHID = ? ORDER BY TSMID', [dbhId]);
+  return rows.map(row => Number(row.TSMID));
+}
+
+describe(`#577 MariaDB 10.4 leg (runs when ${MARIADB_PORT_ENV} is set; configured: ${Boolean(MARIADB_DESTINATION)})`, () => {
+  it(`is configured in CI: ${MARIADB_PORT_ENV} must be set whenever ${CONTINUOUS_INTEGRATION_ENV} is`, () => {
+    if (!process.env[CONTINUOUS_INTEGRATION_ENV]) return;
+    expect(MARIADB_DESTINATION, `${MARIADB_PORT_ENV} is unset in CI, so the MariaDB 10.4 leg of the #577 matrix would be skipped silently`).not.toBeNull();
+  });
+});
+
+describe.each(DESTINATION_ENGINES)('#577 missing stem tags on $label: NULL and blank are one stem key', engine => {
+  const databaseName = `forestgeo_v2_stemtag_${engine.databaseSlug}_${process.pid}_${Date.now()}`;
+  let destination: mysql.Connection;
+
+  beforeEach(async () => {
+    nextTempId = 1;
+    destination = await createDestinationDatabase(engine.serverOptions, databaseName);
+    await loadCanonicalDdl(destination, CANONICAL_DDL_PATH);
+    await loadSeedFile(destination, SEED_CENSUS_1_PATH);
+    await installCtfswebStub(destination);
+  });
+
+  afterEach(async () => {
+    if (destination) await dropDestinationDatabase(destination, databaseName);
+  });
+
+  it(`connects to ${engine.label}, not another server`, async () => {
+    const [rows] = await destination.query<mysql.RowDataPacket[]>('SELECT VERSION() AS version');
+    expect(String(rows[0].version)).toMatch(engine.expectedVersion);
+  });
+
+  it.each(MISSING_TAG_SCENARIOS)('$name', async scenario => {
+    if (scenario.noPadDestination) await makeDestinationNoPad(destination, databaseName, engine.noPadCollation);
+    await seedMissingTagTree(destination, scenario.seededStems);
+    const incomingTreeTag = scenario.seededStems.length === 0 ? NEW_TREE_FOR_MISSING_TAG_TAG : MISSING_TAG_TREE_TAG;
+    const incoming = makeMeasurement({
+      Tag: incomingTreeTag,
+      StemTag: scenario.incomingStemTag,
+      QuadratName: QUADRAT_A1_NAME,
+      PlotCensusNumber: CENSUS_NUMBER_2,
+      DBH: CENSUS_2_DBH
+    });
+    const stemsBefore = await selectStemsOfTree(destination, incomingTreeTag);
+    const census1DbhBefore = await selectDbhRowsForCensus(destination, SEEDED_CENSUS_1_ID);
+    const countsBefore = await captureDestinationCounts(destination);
+
+    const result = await executeArtifactCapturingValidationFailure(
+      databaseName,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows: [incoming],
+        attributeRows: [makeAttribute(incoming.CoreMeasurementID, LIVING_TSM_CODE)]
+      }),
+      engine.serverOptions,
+      LOCK_NAME_CENSUS_2
+    );
+
+    const stemsAfter = await selectStemsOfTree(destination, incomingTreeTag);
+    const census2Dbh = await selectDbhRowsForCensus(destination, SEEDED_CENSUS_2_ID);
+    const diagnostics = `seeded: ${JSON.stringify(scenario.seededStems)}; result: ${JSON.stringify(result)}; stems after: ${JSON.stringify(stemsAfter)}; census-2 DBH: ${JSON.stringify(census2Dbh)}`;
+
+    expect(await selectDbhRowsForCensus(destination, SEEDED_CENSUS_1_ID), `historical census-1 DBH rows must survive; ${diagnostics}`).toEqual(
+      census1DbhBefore
+    );
+    expect(result.lockHeldAfterRun, `the procedure must release the export lock before returning; ${diagnostics}`).toBe(false);
+
+    if (scenario.expected.kind === 'rejects') {
+      expect(result.signalMessage, diagnostics).toMatch(/Validation failed/);
+      expect(result.failedMeasurementRows, diagnostics).toEqual([
+        { CoreMeasurementID: incoming.CoreMeasurementID, Errors: scenario.expected.reasons.join(ERROR_REASON_SEPARATOR) }
+      ]);
+      expectCountsUnchanged(await captureDestinationCounts(destination), countsBefore);
+      expect(stemsAfter, `a rejected import must leave the stems untouched; ${diagnostics}`).toEqual(stemsBefore);
+      return;
+    }
+
+    expect(result.signalMessage, `the artifact must commit; ${diagnostics}`).toBeNull();
+    expect(result.failedMeasurementRows, diagnostics).toEqual([]);
+    expect(census2Dbh, `exactly one census-2 DBH row; ${diagnostics}`).toHaveLength(1);
+    expect(Number(census2Dbh[0].DBH), diagnostics).toBe(CENSUS_2_DBH);
+    expect(await selectAttributeTsmIdsForDbh(destination, Number(census2Dbh[0].DBHID)), `the attribute must follow the measurement; ${diagnostics}`).toEqual([
+      LIVING_TSM_ID
+    ]);
+
+    if (scenario.expected.kind === 'retains-existing-stem') {
+      expect(Number(census2Dbh[0].StemID), `census-2 DBH must attach to the existing stem; ${diagnostics}`).toBe(scenario.expected.stemId);
+      expect(stemsAfter, `existing stems, including NULL tags and quadrats, must not be rewritten and no stem may be added; ${diagnostics}`).toEqual(
+        stemsBefore
+      );
+      return;
+    }
+
+    const existingStemIds = new Set(stemsBefore.map(stem => stem.StemID));
+    const addedStems = stemsAfter.filter(stem => !existingStemIds.has(stem.StemID));
+    expect(
+      stemsAfter.filter(stem => existingStemIds.has(stem.StemID)),
+      `existing stems must not be rewritten; ${diagnostics}`
+    ).toEqual(stemsBefore);
+    expect(addedStems, `exactly one new stem; ${diagnostics}`).toHaveLength(1);
+    expect(addedStems[0], `the new stem carries the incoming tag in ${QUADRAT_A1_NAME} and the census-2 DBH; ${diagnostics}`).toMatchObject({
+      StemID: Number(census2Dbh[0].StemID),
+      StemTag: scenario.incomingStemTag,
+      QuadratID: QUADRAT_A1_ID
+    });
   });
 });

@@ -7,6 +7,7 @@ import { ROUTE_POLICIES, type RouteKey } from '@/lib/route-policy';
 import { HTTPResponses } from '@/config/macros';
 import { findSchemaQuarantine, schemaGateUnavailableResponse, schemaQuarantinedResponse } from '@/lib/schema-quarantine';
 import ailogger from '@/ailogger';
+import { toError } from '@/lib/errorhelpers';
 
 export interface RouteContext {
   params: Promise<Record<string, string | string[] | undefined>>;
@@ -127,8 +128,8 @@ export function withRouteAuthz(routeKey: RouteKey, handler: Handler, options: Au
     try {
       quarantine = await findSchemaQuarantine(schema);
     } catch (error) {
-      ailogger.error(`[route-authz] schema quarantine lookup failed for '${schema}' on '${routeKey}'`, error instanceof Error ? error : undefined);
-      return schemaGateUnavailableResponse(error);
+      ailogger.error(`[route-authz] schema quarantine lookup failed for '${schema}' on '${routeKey}'`, toError(error));
+      return schemaGateUnavailableResponse();
     }
     if (quarantine) return schemaQuarantinedResponse(quarantine);
 

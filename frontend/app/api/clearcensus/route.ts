@@ -9,6 +9,7 @@ import { requireAdmin } from '@/lib/auth-helpers';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
 import { CLEAR_CENSUS_TYPES, ClearCensusAuditMismatchError, clearCensusWithAudit, isClearCensusType } from '@/lib/census/clear-census-audit';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -167,7 +168,7 @@ export async function POST(request: NextRequest) {
         { status: HTTPResponses.CONFLICT }
       );
     }
-    return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     try {
       await connectionManager.closeConnection();

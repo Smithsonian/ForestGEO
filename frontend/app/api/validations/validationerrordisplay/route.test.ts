@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() }
@@ -97,7 +98,7 @@ describe('GET /api/validations/validationerrordisplay', () => {
     const response = await GET(request as any, emptyCtx);
 
     expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-    await expect(response.json()).resolves.toEqual({ error: 'query failed' });
+    await expect(response.json()).resolves.toEqual({ error: INTERNAL_SERVER_ERROR_MESSAGE });
     expect(close).toHaveBeenCalledTimes(1);
   });
 });
