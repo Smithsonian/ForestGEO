@@ -424,6 +424,7 @@ BEGIN
     declare vCountCensus int;
     declare vPrevForeignKeyChecks int;
     declare vPrevDisableTriggers int default null;
+    declare vCallerOwnsTransaction boolean default false;
 
     -- Issue #509: restore the caller's EXACT prior foreign_key_checks /
     -- @disable_triggers on every exit path (a caller may invoke this from
@@ -432,17 +433,28 @@ BEGIN
     -- can't leave the pooled connection poisoned for the next caller.
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        ROLLBACK;
+        -- A caller-owned transaction is rolled back by the caller (issue #507).
+        IF NOT vCallerOwnsTransaction THEN
+            ROLLBACK;
+        END IF;
         SET foreign_key_checks = vPrevForeignKeyChecks;
         SET @disable_triggers = vPrevDisableTriggers;
         RESIGNAL;
     END;
 
+    -- Issue #507: with @clearcensus_caller_owns_transaction = 1 the caller holds the
+    -- transaction (and writes the Recent Changes audit in it), so this procedure must
+    -- neither start nor commit one. The flag is read once and cleared at once so it
+    -- can never leak into the next CALL on a pooled connection.
+    SET vCallerOwnsTransaction = COALESCE(@clearcensus_caller_owns_transaction, 0) = 1;
+    SET @clearcensus_caller_owns_transaction = NULL;
     SET vPrevForeignKeyChecks = @@foreign_key_checks;
     SET vPrevDisableTriggers = @disable_triggers;
     set @disable_triggers = 1;
     set foreign_key_checks = 0;
-    START TRANSACTION;
+    IF NOT vCallerOwnsTransaction THEN
+        START TRANSACTION;
+    END IF;
     DELETE
     FROM temporarymeasurements
     WHERE CensusID = targetCensusID;
@@ -497,7 +509,9 @@ BEGIN
     WHERE CensusID = targetCensusID;
 
     -- Historical (viewfulltable) and source deletes above are complete; commit now.
-    COMMIT;
+    IF NOT vCallerOwnsTransaction THEN
+        COMMIT;
+    END IF;
     SET foreign_key_checks = vPrevForeignKeyChecks;
     SET @disable_triggers = vPrevDisableTriggers;
 END $$
@@ -507,6 +521,7 @@ SQL SECURITY DEFINER
 BEGIN
     declare vPrevForeignKeyChecks int;
     declare vPrevDisableTriggers int default null;
+    declare vCallerOwnsTransaction boolean default false;
 
     -- Issue #509: restore the caller's EXACT prior foreign_key_checks /
     -- @disable_triggers on every exit path (a caller may invoke this from
@@ -515,17 +530,28 @@ BEGIN
     -- can't leave the pooled connection poisoned for the next caller.
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        ROLLBACK;
+        -- A caller-owned transaction is rolled back by the caller (issue #507).
+        IF NOT vCallerOwnsTransaction THEN
+            ROLLBACK;
+        END IF;
         SET foreign_key_checks = vPrevForeignKeyChecks;
         SET @disable_triggers = vPrevDisableTriggers;
         RESIGNAL;
     END;
 
+    -- Issue #507: with @clearcensus_caller_owns_transaction = 1 the caller holds the
+    -- transaction (and writes the Recent Changes audit in it), so this procedure must
+    -- neither start nor commit one. The flag is read once and cleared at once so it
+    -- can never leak into the next CALL on a pooled connection.
+    SET vCallerOwnsTransaction = COALESCE(@clearcensus_caller_owns_transaction, 0) = 1;
+    SET @clearcensus_caller_owns_transaction = NULL;
     SET vPrevForeignKeyChecks = @@foreign_key_checks;
     SET vPrevDisableTriggers = @disable_triggers;
     set @disable_triggers = 1;
     set foreign_key_checks = 0;
-    START TRANSACTION;
+    IF NOT vCallerOwnsTransaction THEN
+        START TRANSACTION;
+    END IF;
 
     DELETE
     FROM temporarymeasurements
@@ -563,7 +589,9 @@ BEGIN
     WHERE CensusID = targetCensusID;
 
     -- Historical (viewfulltable) and source deletes above are complete; commit now.
-    COMMIT;
+    IF NOT vCallerOwnsTransaction THEN
+        COMMIT;
+    END IF;
     SET foreign_key_checks = vPrevForeignKeyChecks;
     SET @disable_triggers = vPrevDisableTriggers;
 END $$
