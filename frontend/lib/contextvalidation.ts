@@ -6,6 +6,7 @@ import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { hasSchemaAccess, isAdminSession } from '@/lib/authz';
 import { findSchemaQuarantine, schemaGateUnavailableResponse, schemaQuarantinedResponse } from '@/lib/schema-quarantine';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 export interface ContextValues {
   siteID?: number;
@@ -163,7 +164,7 @@ export async function validateContextualValues(
         quarantine = await findSchemaQuarantine(values.schema);
       } catch (error) {
         ailogger.error(`[contextvalidation] schema quarantine lookup failed for '${values.schema}'`, error instanceof Error ? error : undefined);
-        return { success: false, response: schemaGateUnavailableResponse(error) };
+        return { success: false, response: schemaGateUnavailableResponse() };
       }
       if (quarantine) {
         ailogger.warn(`[contextvalidation] Schema quarantined: ${values.schema}`);
@@ -259,7 +260,7 @@ export function withContextValidation(
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Handler error with context validation:', errorObj);
-      return NextResponse.json({ error: 'Internal server error', details: errorObj.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+      return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     }
   };
 }

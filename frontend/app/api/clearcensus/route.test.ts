@@ -82,6 +82,7 @@ function makeRequest(url: string) {
 // ---- Import handler AFTER mocks ----
 import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 describe('POST /api/clearcensus', () => {
   beforeEach(() => {
@@ -204,7 +205,8 @@ describe('POST /api/clearcensus', () => {
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const text = await res.text();
-    expect(text).toMatch(/boom/i);
+    expect(JSON.parse(text)).toEqual({ error: INTERNAL_SERVER_ERROR_MESSAGE });
+    expect(text).not.toMatch(/boom/i);
   });
 
   it('builds stored procedure name using `type` param (smoke check)', async () => {

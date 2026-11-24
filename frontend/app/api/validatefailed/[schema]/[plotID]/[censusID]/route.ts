@@ -5,6 +5,7 @@ import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery, refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -115,7 +116,7 @@ async function handler(_request: NextRequest, context: RouteContext) {
       await connectionManager.rollbackTransaction(transactionID);
     }
     ailogger.error('Failed to validate failed measurements:', error);
-    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

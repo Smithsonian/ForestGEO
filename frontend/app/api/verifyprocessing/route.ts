@@ -171,7 +171,6 @@ async function handler(request: NextRequest, _context: RouteContext) {
     return new NextResponse(
       JSON.stringify({
         error: 'Failed to verify processing',
-        details: error.message,
         processedCount: 0,
         failedCount: 0,
         remainingCount: -1,

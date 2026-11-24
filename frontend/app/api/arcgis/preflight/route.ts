@@ -202,6 +202,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     ailogger.error('ArcGIS pre-flight failed:', errorObj);
-    return NextResponse.json({ error: errorObj.message || 'ArcGIS pre-flight failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: 'ArcGIS pre-flight failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }

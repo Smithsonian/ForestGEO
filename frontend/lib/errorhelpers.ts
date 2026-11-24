@@ -6,6 +6,12 @@
  */
 
 /**
+ * Client-facing text for an unexpected server failure. The cause belongs in ailogger: a raw
+ * exception message can carry schema names, table names or SQL text (#574).
+ */
+export const INTERNAL_SERVER_ERROR_MESSAGE = 'The server could not complete this request. The error has been logged.';
+
+/**
  * MySQL-specific error interface
  * Extends Error with MySQL error properties
  */

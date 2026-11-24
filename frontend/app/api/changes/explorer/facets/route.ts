@@ -5,6 +5,7 @@ import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { queryRecentChangesFacets } from '../_shared';
 import { fromBody, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 export const runtime = 'nodejs';
 
@@ -34,7 +35,7 @@ async function handler(request: NextRequest, _context: RouteContext) {
   } catch (error) {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     ailogger.error('Error loading recent changes facets:', errorObj);
-    return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

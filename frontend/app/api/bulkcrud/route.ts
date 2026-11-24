@@ -15,6 +15,7 @@ import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/
 import { recordCommittedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { BULKCRUD_REJECTION_MESSAGES, findMissingBulkcrudContext, isMeasurementGridType } from '@/lib/bulkcrud/required-context';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -146,12 +147,12 @@ export async function POST(request: NextRequest) {
     }
     await connectionManager.commitTransaction(transactionID ?? '');
     return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    ailogger.error(`bulkcrud ${dataType} write failed:`, toError(e));
     await connectionManager.rollbackTransaction(transactionID ?? '');
     return new NextResponse(
       JSON.stringify({
-        responseMessage: `Failure in connecting to SQL with ${e.message}`,
-        error: e.message
+        error: INTERNAL_SERVER_ERROR_MESSAGE
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

@@ -7,7 +7,7 @@ import { HTTPResponses } from '@/config/macros';
 import { FileRow } from '@/config/macros/formdetails';
 import { generateShortBatchID } from '@/config/utils';
 import ailogger from '@/ailogger';
-import { toError } from '@/lib/errorhelpers';
+import { toError, INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 import { ACTIVE_UPLOAD_SESSION_STATES, ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS, STALE_VALIDATION_RUN_THRESHOLD_MINUTES } from '@/config/measurementscopepolicy';
@@ -1560,8 +1560,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (errorObj instanceof ChangelogWriteError) {
       return NextResponse.json({ error: 'Unable to record revision history. Please retry.' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     }
-    const status = errorObj instanceof RevisionApplyConflictError ? HTTPResponses.CONFLICT : HTTPResponses.INTERNAL_SERVER_ERROR;
-    return NextResponse.json({ error: errorObj.message }, { status });
+    if (errorObj instanceof RevisionApplyConflictError) {
+      return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.CONFLICT });
+    }
+    return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     try {
       await connectionManager.closeConnection();

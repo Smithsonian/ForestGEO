@@ -6,7 +6,7 @@ import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
-import { getErrorMessage, getErrorCode, errorMessageContains, toError } from '@/lib/errorhelpers';
+import { getErrorCode, errorMessageContains, toError, INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FETCHALL_ALLOWED_TABLES, INVALID_DATATYPE_CODE } from './constants';
 import { auth } from '@/auth';
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
     } catch (error: unknown) {
       const errorObj = toError(error);
       ailogger.error('Failed to fetch sites from catalog:', errorObj);
-      return new NextResponse(JSON.stringify({ error: getErrorMessage(error) }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+      return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     } finally {
       await connectionManager.closeConnection();
     }
@@ -180,7 +180,6 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
     ailogger.error('Error:', errorObj);
 
     // Provide user-friendly error messages for common database errors
-    const errorMessage = getErrorMessage(error);
     const errorCode = getErrorCode(error);
 
     // Check for unknown database error (ER_BAD_DB_ERROR)
@@ -219,7 +218,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
       );
     }
 
-    return new NextResponse(JSON.stringify({ error: errorMessage }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

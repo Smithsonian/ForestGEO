@@ -56,7 +56,7 @@ async function handler(request: NextRequest, context: RouteContext) {
     return new NextResponse(JSON.stringify(output), { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error(`Error fetching batches for bulk processor:`, error);
-    return new NextResponse(JSON.stringify({ error: 'Failed to fetch batches', details: error.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return new NextResponse(JSON.stringify({ error: 'Failed to fetch batches' }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }
 

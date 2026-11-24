@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { GET, POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { CALLER_OWNS_TRANSACTION_SQL, CLEAR_CALLER_TRANSACTION_SQL, FLAG_CLEAR_FAILED_REASON } from '@/lib/ingestion/bulk-ingestion-call';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 const TEST_TRANSACTION_ID = 'test-transaction-id';
 const RECONCILIATION_MAP_TABLE = 'reingestion_map';
@@ -365,9 +366,21 @@ describe('reingest API routes', () => {
 
       expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body.error).toBe('Bulk ingestion failed');
+      expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
       expect(mockConnectionManager.closeConnection).toHaveBeenCalledTimes(1);
       expectCallBracketedByFlag(mockConnectionManager.executeQuery.mock.calls);
+    });
+
+    it('returns 409 with the in-progress message when another reingestion holds the plot-census lock', async () => {
+      mockConnectionManager.acquireApplicationLock.mockResolvedValueOnce(false);
+
+      const res = await GET(makeRequest('GET'), makeParams());
+
+      const text = await res.text();
+      console.log('[reingest lock held]', res.status, text);
+      expect(res.status).toBe(409);
+      expect(JSON.parse(text).error).toBe('Another reingestion is already in progress for forestgeo_testing plot 1 census 1');
+      expect(mockConnectionManager.executeQuery, 'no rows are staged while another reingestion runs').not.toHaveBeenCalled();
     });
 
     it('returns 500 without reconciling when the CALL succeeded but the caller flag could not be cleared', async () => {
@@ -384,7 +397,7 @@ describe('reingest API routes', () => {
 
       expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body.error).toBe(clearError.message);
+      expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
       expect(mockConnectionManager.discardTransaction).toHaveBeenCalledWith(TEST_TRANSACTION_ID, FLAG_CLEAR_FAILED_REASON);
       const statements = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
       expect(statements.at(-1), 'reconciliation must not continue on a discarded transaction').toBe(CLEAR_CALLER_TRANSACTION_SQL);

@@ -20,6 +20,7 @@ import { claimReferenceTableReplacement, recordReferenceTableReplacement } from 
 import { recordMutation, ChangelogOperation } from '@/lib/changelog/record-mutation';
 import { auditHandleUpsertResult, auditCensusActivePersonnelLink } from '@/lib/changelog/reference-audit';
 import { buildInPlaceholders } from '@/lib/db/sqlsecurity';
+import { UploadRefusedError } from '@/lib/uploads/upload-refused-error';
 
 export interface FixedDataProcessingResult {
   insertedCount: number;
@@ -246,7 +247,7 @@ export async function upsertSpeciesRows(
 
   const duplicateSpeciesCodes = findDuplicateCodes(rows, row => row.spcode);
   if (duplicateSpeciesCodes.length > 0) {
-    throw new Error(`Species upload contains duplicate SpeciesCode values: ${duplicateSpeciesCodes.join(', ')}`);
+    throw new UploadRefusedError(`Species upload contains duplicate SpeciesCode values: ${duplicateSpeciesCodes.join(', ')}`);
   }
 
   const replacesExistingRows = await claimReferenceTableReplacement(connectionManager, schema, uploadMode, uploadSessionID, transactionID);
@@ -284,7 +285,7 @@ export async function upsertSpeciesRows(
     const blockingCodes = Array.isArray(blockingSpeciesRows) ? blockingSpeciesRows.map((row: any) => String(row.SpeciesCode ?? '').trim()).filter(Boolean) : [];
 
     if (blockingCodes.length > 0) {
-      throw new Error(
+      throw new UploadRefusedError(
         `Clean re-upload refused: active species rows are already referenced by trees or species limits ` +
           `for the following SpeciesCode value(s): ${formatBlockedCleanReuploadValues(blockingCodes)}. ` +
           `Deleting species would cascade-delete dependent records even if the same codes appear in the upload. ` +
@@ -361,7 +362,9 @@ export async function upsertSpeciesRows(
       const existingRows = await connectionManager.executeQuery(existingSQL, [speciesCode], transactionID);
 
       if (existingRows.length > 1) {
-        throw new Error(`Duplicate active species rows already exist for SpeciesCode "${speciesCode}". Remove the duplicates before re-uploading.`);
+        throw new UploadRefusedError(
+          `Duplicate active species rows already exist for SpeciesCode "${speciesCode}". Remove the duplicates before re-uploading.`
+        );
       }
 
       if (existingRows.length > 0) {

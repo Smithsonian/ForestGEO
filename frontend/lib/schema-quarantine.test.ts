@@ -12,6 +12,7 @@ import {
   findSchemaQuarantine,
   invalidateSchemaQuarantineCache,
   schemaGateUnavailableResponse,
+  SCHEMA_GATE_UNAVAILABLE_MESSAGE,
   schemaQuarantinedResponse,
   type QuarantineRecord
 } from '@/lib/schema-quarantine';
@@ -118,8 +119,8 @@ describe('schema-quarantine', () => {
     expect(body.error).toMatch(/quarantined/);
     expect(body.error).toMatch(/released automatically/);
 
-    const unavailable = schemaGateUnavailableResponse(new Error('boom'));
+    const unavailable = schemaGateUnavailableResponse();
     expect(unavailable.status).toBe(STATUS_SERVICE_UNAVAILABLE);
-    expect(await unavailable.json()).toMatchObject({ code: SCHEMA_GATE_UNAVAILABLE_CODE });
+    expect(await unavailable.json()).toEqual({ error: SCHEMA_GATE_UNAVAILABLE_MESSAGE, code: SCHEMA_GATE_UNAVAILABLE_CODE });
   });
 });

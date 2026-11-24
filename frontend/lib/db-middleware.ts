@@ -14,6 +14,7 @@ import { NextResponse } from 'next/server';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 export interface DbHandlerOptions {
   /**
@@ -74,7 +75,7 @@ export async function withDatabase<T = any>(
     // Default error response
     return NextResponse.json(
       {
-        error: error.message,
+        error: INTERNAL_SERVER_ERROR_MESSAGE,
         details: process.env.NODE_ENV === 'development' ? error.stack : undefined
       },
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }

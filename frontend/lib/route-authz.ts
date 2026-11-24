@@ -128,7 +128,7 @@ export function withRouteAuthz(routeKey: RouteKey, handler: Handler, options: Au
       quarantine = await findSchemaQuarantine(schema);
     } catch (error) {
       ailogger.error(`[route-authz] schema quarantine lookup failed for '${schema}' on '${routeKey}'`, error instanceof Error ? error : undefined);
-      return schemaGateUnavailableResponse(error);
+      return schemaGateUnavailableResponse();
     }
     if (quarantine) return schemaQuarantinedResponse(quarantine);
 

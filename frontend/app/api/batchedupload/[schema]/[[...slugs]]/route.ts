@@ -4,7 +4,7 @@ import { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
 import connectionmanager from '@/lib/db/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
-import { toError } from '@/lib/errorhelpers';
+import { toError, INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
 import { generateShortBatchID } from '@/config/utils';
 import { validatedSchema, type SchemaName } from '@/lib/db/sqlsecurity';
@@ -134,7 +134,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
       }
     }
     ailogger.error('Database Error:', error);
-    return new NextResponse(JSON.stringify({ message: 'Database error', error: error.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return new NextResponse(JSON.stringify({ message: 'Database error', error: INTERNAL_SERVER_ERROR_MESSAGE }), {
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
+    });
   } finally {
     try {
       await connectionManager.closeConnection();

@@ -20,6 +20,7 @@ import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writ
 // the route's recomputed hash provably the same function, not just two
 // implementations that happen to agree today.
 import { computeInvalidRowsIntegrityHash, REVISION_UPLOAD_FILE_ID } from '../shared/invalidrowintegrity';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 const REVISION_TRANSACTION_ID = 'tx-1';
 const MATCHED_PLAN_HASH = 'plan-hash-matched';
@@ -769,7 +770,7 @@ describe('POST /api/revisionupload/apply', () => {
     );
 
     expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-    await expect(response.json()).resolves.toEqual({ error: clearError.message });
+    await expect(response.json()).resolves.toEqual({ error: INTERNAL_SERVER_ERROR_MESSAGE });
     expect(mocks.discardTransaction).toHaveBeenCalledWith(REVISION_TRANSACTION_ID, FLAG_CLEAR_FAILED_REASON);
     expect(mocks.refreshMeasurementViewsForScope, 'no derived refresh may follow a discarded transaction').not.toHaveBeenCalled();
   });
@@ -1260,7 +1261,7 @@ describe('POST /api/revisionupload/apply', () => {
 
     expect(response.status).toBe(500);
     const body = await response.json();
-    expect(body.error).toBe('writer blew up on row 2');
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(2);
     expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
   });
