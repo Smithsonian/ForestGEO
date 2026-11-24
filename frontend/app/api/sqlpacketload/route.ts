@@ -913,7 +913,6 @@ export async function POST(request: NextRequest) {
         return new NextResponse(
           JSON.stringify({
             responseMessage: `Unknown processing error at row, in file ${fileName}`,
-            error: INTERNAL_SERVER_ERROR_MESSAGE,
             failingRows: Array.from(failingRows),
             retryCount
           }),
