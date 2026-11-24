@@ -21,7 +21,7 @@ import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writ
 // implementations that happen to agree today.
 import { computeInvalidRowsIntegrityHash, REVISION_UPLOAD_FILE_ID } from '../shared/invalidrowintegrity';
 import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
-import { COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE, TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
+import { TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 
 const REVISION_TRANSACTION_ID = 'tx-1';
 const MATCHED_PLAN_HASH = 'plan-hash-matched';
@@ -1221,7 +1221,7 @@ describe('POST /api/revisionupload/apply', () => {
     expect((beforeState[0].row as Record<string, unknown>).deletedDuplicateCoreMeasurementIDs).toEqual([]);
   });
 
-  it('tells the user to check the saved data before retrying when the apply COMMIT outcome is unknown', async () => {
+  it('tells the user the changes may already be saved when the apply COMMIT outcome is unknown', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
@@ -1247,7 +1247,7 @@ describe('POST /api/revisionupload/apply', () => {
     console.log('[revision apply commit outcome unknown]', response.status, text);
 
     expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-    expect(JSON.parse(text)).toEqual({ error: COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE, code: commitOutcomeUnknown.code });
+    expect(JSON.parse(text)).toEqual({ error: commitOutcomeUnknown.message });
   });
 
   it('rolls back the entire batch and surfaces 500 when the writer throws mid-loop', async () => {

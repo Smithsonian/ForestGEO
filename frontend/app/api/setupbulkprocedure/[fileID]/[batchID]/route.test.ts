@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
-import { COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE, TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
+import { TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-failure';
 import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
 
@@ -373,14 +373,15 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
 
   it('warns that changes may already be saved when a sub-batch COMMIT outcome is unknown, without the driver text', async () => {
     const cm = primeSetupBulkProcedureQueries();
-    cm.commitTransaction.mockRejectedValue(new TransactionCommitOutcomeUnknownError(SUBBATCH_TRANSACTION_ID, 'connection_lost', 1000));
+    const commitOutcomeUnknown = new TransactionCommitOutcomeUnknownError(SUBBATCH_TRANSACTION_ID, 'connection_lost', 1000);
+    cm.commitTransaction.mockRejectedValue(commitOutcomeUnknown);
 
     const res = await GET(makeRequest(), makeProps());
     const text = await res.text();
     console.log('[setupbulkprocedure commit outcome unknown]', res.status, text);
 
     expect(res.status).toBe(HTTPResponses.SERVICE_UNAVAILABLE);
-    expect(JSON.parse(text).error).toBe(COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE);
+    expect(JSON.parse(text).error).toBe(commitOutcomeUnknown.message);
   });
 
   it('rejects scope drift between upload-session authorization and setup entry', async () => {

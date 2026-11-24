@@ -22,9 +22,6 @@ export type CommitOutcomeUnknownTrigger = 'deadline_exceeded' | 'connection_lost
  * committed. Never report it as rolled back; a retrying caller may replay the work only if the replay is
  * idempotent (spec §5.2).
  */
-/** Client-facing text for an unconfirmed COMMIT: the changes may already be saved, so a blind retry can duplicate them. */
-export const COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE = 'The database did not confirm whether these changes were saved. Check the saved data before trying again.';
-
 export class TransactionCommitOutcomeUnknownError extends Error {
   readonly code = TRANSACTION_COMMIT_OUTCOME_UNKNOWN_CODE;
   readonly transactionId: string;

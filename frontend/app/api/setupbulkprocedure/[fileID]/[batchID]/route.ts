@@ -11,7 +11,7 @@ import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz'
 import { auth } from '@/auth';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { getErrorCode } from '@/lib/errorhelpers';
-import { COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE, TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
+import { TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -172,10 +172,9 @@ async function handler(request: NextRequest, context: RouteContext) {
   );
 }
 
-/** BatchFamilyScopeError names only IDs and scopes, so it stays readable; anything else may carry SQL text. */
+/** These two errors carry app-written text; any other failure may carry SQL text. */
 function ingestionFailureMessage(error: unknown): string {
-  if (error instanceof BatchFamilyScopeError) return error.message;
-  if (error instanceof TransactionCommitOutcomeUnknownError) return COMMIT_OUTCOME_UNKNOWN_CLIENT_MESSAGE;
+  if (error instanceof BatchFamilyScopeError || error instanceof TransactionCommitOutcomeUnknownError) return error.message;
   return setupFailureSummary(getErrorCode(error));
 }
 
