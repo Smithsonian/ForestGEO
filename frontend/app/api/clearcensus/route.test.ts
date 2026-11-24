@@ -269,21 +269,24 @@ describe('POST /api/clearcensus', () => {
     ['a measurement inserted after the lock', { deletedCounts: { DeletedMeasurements: 4 } }, 'msmts'],
     ['a reference row inserted after the snapshot', { referenceRows: { species: [{ SpeciesID: 1 }] }, deletedCounts: { DeletedSpecies: 2 } }, 'full'],
     ['a last-census wipe the route did not foresee', { censusCountInSchema: 2, deletedCounts: { DeletedQuadrats: 5 } }, 'full']
-  ] as const)('409 and rollback when the procedure deleted rows nobody audited: %s', async (_case, script, type) => {
-    const cm = (ConnectionManager as any).getInstance();
-    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-mismatch');
-    vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
-    scriptClearCensusQueries(vi.spyOn(cm, 'executeQuery'), script);
-    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
-    const commit = vi.spyOn(cm, 'commitTransaction');
+  ] satisfies Array<[string, ClearCensusQueryScript, string]>)(
+    '409 and rollback when the procedure deleted rows nobody audited: %s',
+    async (_case, script, type) => {
+      const cm = (ConnectionManager as any).getInstance();
+      vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-mismatch');
+      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+      scriptClearCensusQueries(vi.spyOn(cm, 'executeQuery'), script);
+      const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+      const commit = vi.spyOn(cm, 'commitTransaction');
 
-    const res = await POST(makeRequest(`http://localhost/api/clearcensus?schema=myschema&censusID=12&type=${type}`));
+      const res = await POST(makeRequest(`http://localhost/api/clearcensus?schema=myschema&censusID=12&type=${type}`));
 
-    expect(res.status).toBe(HTTPResponses.CONFLICT);
-    expect((await res.json()).error).toMatch(/Nothing was deleted/);
-    expect(rollback).toHaveBeenCalledWith('tx-mismatch');
-    expect(commit).not.toHaveBeenCalled();
-  });
+      expect(res.status).toBe(HTTPResponses.CONFLICT);
+      expect((await res.json()).error).toMatch(/Nothing was deleted/);
+      expect(rollback).toHaveBeenCalledWith('tx-mismatch');
+      expect(commit).not.toHaveBeenCalled();
+    }
+  );
 
   it('full skips the reference snapshot when other censuses remain', async () => {
     const cm = (ConnectionManager as any).getInstance();

@@ -32,13 +32,13 @@ import {
   type TestDatabaseConfig
 } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
+import { LOCK_WAIT_POLL_INTERVAL_MS } from '../setup/core-measurement-window-harness';
 
 const AUTH_USER_EMAIL = 'admin-audit-runner@forestgeo.test';
 const SIMULATED_AUDIT_FAILURE = 'SIMULATED_AUDIT_WRITE_FAILURE_507';
 const CENSUS_DELETE_BLOCKED_MESSAGE = 'SIMULATED_CENSUS_DELETE_FAILURE_507';
 const CENSUS_DELETE_BLOCKER_TRIGGER = 'test_507_block_census_delete';
 const FORGED_VALIDATION_ID = 987654;
-const LOCK_WAIT_POLL_INTERVAL_MS = 25;
 const LOCK_WAIT_DEADLINE_MS = 5000;
 const FULL_CLEAR_REFERENCE_TABLES = ['attributes', 'personnel', 'roles', 'quadrats', 'species', 'specieslimits', 'genus', 'family', 'reference'] as const;
 
