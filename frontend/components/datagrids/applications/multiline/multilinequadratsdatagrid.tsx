@@ -8,7 +8,7 @@ import { Box } from '@mui/joy';
 import RenderFormExplanations from '@/components/client/renderformexplanations';
 
 export default function MultilineQuadratsDataGrid(props: DataGridSignals) {
-  const { setChangesSubmitted } = props;
+  const { setChangesSubmitted, setIsSubmittingChanges } = props;
   const initialQuadratsRow = {
     id: 0,
     quadrat: '',
@@ -31,6 +31,7 @@ export default function MultilineQuadratsDataGrid(props: DataGridSignals) {
         setRefresh={setRefresh}
         initialRow={initialQuadratsRow}
         setChangesSubmitted={setChangesSubmitted}
+        setIsSubmittingChanges={setIsSubmittingChanges}
       />
     </Box>
   );
