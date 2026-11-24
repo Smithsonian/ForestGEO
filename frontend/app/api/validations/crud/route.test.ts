@@ -155,6 +155,46 @@ describe('/api/validations/crud auth gate', () => {
     expect(mocks.commitTransaction).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['PATCH', true],
+    ['PATCH', 1.5],
+    ['DELETE', '1 OR 1=1'],
+    ['DELETE', undefined],
+    ['DELETE', -3]
+  ] as const)('%s refuses validationID %j with 400 before opening a transaction', async (method, validationID) => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
+    const handler = method === 'PATCH' ? PATCH : DELETE;
+
+    const res = await handler(makeReq(method, undefined, { validationID, description: 'x' }));
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(mocks.beginTransaction).not.toHaveBeenCalled();
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('POST and PATCH never write a client-supplied primary key, whatever its spelling', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
+    mocks.demapData.mockImplementation((rows: any[]) => rows.map(row => ({ ...row, ValIDationID: 999, ValidationID: 999, procedureName: 'p' })));
+    mocks.executeQuery
+      .mockResolvedValueOnce({ insertId: 5 } as any)
+      .mockResolvedValueOnce([{ ValidationID: 5 }] as any)
+      .mockResolvedValueOnce({ affectedRows: 1 } as any)
+      .mockResolvedValueOnce([{ ValidationID: 5 }] as any)
+      .mockResolvedValueOnce({ affectedRows: 1 } as any)
+      .mockResolvedValueOnce([{ ValidationID: 5 }] as any)
+      .mockResolvedValueOnce({ affectedRows: 1 } as any);
+
+    await POST(makeReq('POST', undefined, { procedureName: 'p' }));
+    await PATCH(makeReq('PATCH', undefined, { validationID: 5, procedureName: 'p' }));
+
+    const writes = (mocks.executeQuery.mock.calls as unknown[][])
+      .map(call => String(call[0]))
+      .filter(sql => /^(INSERT INTO|UPDATE) `?forestgeo_testing`?\.`?sitespecificvalidations/.test(sql));
+    expect(writes, writes.join('\n')).toHaveLength(2);
+    for (const sql of writes) expect(sql.toLowerCase()).not.toMatch(/`validationid` = 999/);
+    mocks.demapData.mockImplementation((rows: any[]) => rows);
+  });
+
   it('rolls back the change when its audit row cannot be written', async () => {
     mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
     mocks.executeQuery

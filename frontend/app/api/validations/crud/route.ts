@@ -10,7 +10,7 @@ import { requireAdmin } from '@/lib/auth-helpers';
 import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { toTxExecutor } from '@/config/utils';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
-import { ChangelogOperation, recordMutation, type ChangelogRowState } from '@/lib/changelog/record-mutation';
+import { ChangelogOperation, normalizeBitColumns, recordMutation, type ChangelogRowState } from '@/lib/changelog/record-mutation';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -33,6 +33,29 @@ function getValidatedSchema(request: NextRequest): string | NextResponse {
 const VALIDATIONS_TABLE_NAME = 'sitespecificvalidations';
 const SELECT_VALIDATION_FOR_UPDATE = 'SELECT * FROM ??.sitespecificvalidations WHERE ValidationID = ? FOR UPDATE';
 
+const VALIDATION_ID_COLUMN = 'validationid';
+const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/;
+
+/** A positive integer id from the request body; anything else (true, 1.5, "1 OR 1") is refused. */
+function parseValidationID(value: unknown): number | undefined {
+  const text = typeof value === 'number' || typeof value === 'string' ? String(value) : '';
+  const parsed = POSITIVE_INTEGER_PATTERN.test(text) ? Number(text) : NaN;
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function invalidValidationID(): NextResponse {
+  return NextResponse.json({ error: 'validationID must be a positive integer' }, { status: HTTPResponses.INVALID_REQUEST });
+}
+
+/**
+ * The mapper turns `validationID` into `ValIDationID`, which MySQL matches to the
+ * ValidationID column case-insensitively; every spelling is dropped so a client can
+ * never choose or move a primary key.
+ */
+function withoutValidationID(mappedData: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(mappedData).filter(([column]) => column.toLowerCase() !== VALIDATION_ID_COLUMN));
+}
+
 function validationNotFound(validationID: unknown): NextResponse {
   return NextResponse.json({ error: `Validation ${String(validationID)} not found` }, { status: HTTPResponses.NOT_FOUND });
 }
@@ -44,7 +67,7 @@ async function readValidationRow(
   transactionID: string
 ): Promise<ChangelogRowState | undefined> {
   const rows: ChangelogRowState[] = await connectionManager.executeQuery(safeFormatQuery(schema, SELECT_VALIDATION_FOR_UPDATE), [validationID], transactionID);
-  return rows[0];
+  return rows[0] ? normalizeBitColumns(rows[0]) : undefined;
 }
 
 export async function GET(request: NextRequest) {
@@ -80,10 +103,7 @@ export async function POST(request: NextRequest) {
     const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
     const [mappedData] = mapper.demapData([validationProcedure]);
 
-    // Remove ValidationID - let the database auto-increment handle it
-    delete mappedData['ValidationID'];
-
-    const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.sitespecificvalidations`, mappedData]);
+    const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.sitespecificvalidations`, withoutValidationID(mappedData)]);
     const results = await connectionManager.executeQuery(insertQuery, [], transactionID);
     const insertID = results.insertId;
     const insertedRow = await readValidationRow(connectionManager, schema, insertID, transactionID);
@@ -116,30 +136,29 @@ export async function PATCH(request: NextRequest) {
   const validationProcedure: ValidationProceduresRDS = await request.json();
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
+  const validationID = parseValidationID(validationProcedure.validationID);
+  if (validationID === undefined) return invalidValidationID();
   const connectionManager = ConnectionManager.getInstance();
   const transactionID = await connectionManager.beginTransaction();
   try {
-    const priorRow = await readValidationRow(connectionManager, schema, validationProcedure.validationID, transactionID);
+    const priorRow = await readValidationRow(connectionManager, schema, validationID, transactionID);
     if (!priorRow) {
       await connectionManager.rollbackTransaction(transactionID);
-      return validationNotFound(validationProcedure.validationID);
+      return validationNotFound(validationID);
     }
 
     const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
     const [mappedData] = mapper.demapData([validationProcedure]);
 
-    // Remove ValidationID from the update data (it's the WHERE clause, not SET)
-    delete mappedData['ValidationID'];
-
-    const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, mappedData, validationProcedure.validationID]);
+    const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, withoutValidationID(mappedData), validationID]);
     await connectionManager.executeQuery(updateQuery, [], transactionID);
-    const updatedRow = await readValidationRow(connectionManager, schema, validationProcedure.validationID, transactionID);
-    if (!updatedRow) throw new Error(`Validation ${validationProcedure.validationID} vanished during its own update`);
+    const updatedRow = await readValidationRow(connectionManager, schema, validationID, transactionID);
+    if (!updatedRow) throw new Error(`Validation ${validationID} vanished during its own update`);
     await recordMutation({
       tx: toTxExecutor(connectionManager, transactionID),
       schema,
       tableName: VALIDATIONS_TABLE_NAME,
-      recordID: Number(priorRow.ValidationID),
+      recordID: validationID,
       operation: ChangelogOperation.UPDATE,
       oldRowState: priorRow,
       newRowState: updatedRow,
@@ -164,22 +183,24 @@ export async function DELETE(request: NextRequest) {
   const validationProcedure: ValidationProceduresRDS = await request.json();
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
+  const validationID = parseValidationID(validationProcedure.validationID);
+  if (validationID === undefined) return invalidValidationID();
   const connectionManager = ConnectionManager.getInstance();
   const transactionID = await connectionManager.beginTransaction();
   try {
-    const priorRow = await readValidationRow(connectionManager, schema, validationProcedure.validationID, transactionID);
+    const priorRow = await readValidationRow(connectionManager, schema, validationID, transactionID);
     if (!priorRow) {
       await connectionManager.rollbackTransaction(transactionID);
-      return validationNotFound(validationProcedure.validationID);
+      return validationNotFound(validationID);
     }
 
-    const deleteQuery = format('DELETE FROM ?? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, validationProcedure.validationID]);
+    const deleteQuery = format('DELETE FROM ?? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, validationID]);
     await connectionManager.executeQuery(deleteQuery, [], transactionID);
     await recordMutation({
       tx: toTxExecutor(connectionManager, transactionID),
       schema,
       tableName: VALIDATIONS_TABLE_NAME,
-      recordID: Number(priorRow.ValidationID),
+      recordID: validationID,
       operation: ChangelogOperation.DELETE,
       oldRowState: priorRow,
       changedBy: authenticatedSessionIdentity(session?.user)
