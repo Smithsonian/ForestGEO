@@ -24,9 +24,11 @@ import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/
  * Test Coverage:
  * 1. Single-row UPDATE operations create ONE changelog entry
  * 2. Single-row DELETE operations create ONE changelog entry
- * 3. Census deletions are audited in the procedure's transaction (#507)
- * 4. File uploads create ONE changelog entry per file (not per batch)
- * 5. Multiple batches from same file UPDATE the same changelog entry
+ * 3. File uploads create ONE changelog entry per file (not per batch)
+ * 4. Multiple batches from same file UPDATE the same changelog entry
+ *
+ * Census deletions are covered against real MySQL in
+ * tests/integration/recent-changes-admin-routes-audit.integration.test.ts.
  */
 
 // ========== Mocks ==========
@@ -145,7 +147,6 @@ vi.mock('@/config/uploadsessiontracker', () => ({
 
 // Import handlers AFTER mocks
 import { PATCH, DELETE } from '@/config/macros/coreapifunctions';
-import { POST as CLEARCENSUS_POST } from '../clearcensus/route';
 import { POST as SQLPACKETLOAD_POST } from '../sqlpacketload/route';
 
 // ========== Helpers ==========
@@ -324,40 +325,7 @@ describe('Unified Changelog Tracking System', () => {
     });
   });
 
-  describe('3. Census Deletion Audit (#507)', () => {
-    it('records the census and its measurements in the same transaction as the destructive CALL, before it runs', async () => {
-      const cm = (ConnectionManager as any).getInstance();
-
-      vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-4');
-      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
-      const exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ PlotID: 1 }])
-        .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
-        .mockResolvedValueOnce([{ CensusID: 7, PlotID: 1, PlotCensusNumber: 1 }]) // census row, locked
-        .mockResolvedValueOnce([{ total: 40 }]) // its measurements, locked
-        .mockResolvedValueOnce({ affectedRows: 40 }) // measurement audit rows
-        .mockResolvedValueOnce({ affectedRows: 1 }) // census audit row
-        .mockResolvedValueOnce({}) // SET caller-owns-transaction flag
-        .mockResolvedValueOnce([[{ DeletedMeasurements: 40 }], {}]) // CALL, with its delete counts
-        .mockResolvedValue({});
-
-      const req = makeRequest('http://localhost/api/clearcensus', 'POST', { schema: 'testschema', censusID: 7, type: 'msmts' });
-      const res = await CLEARCENSUS_POST(req);
-
-      expect(res.status).toBe(HTTPResponses.OK);
-      const statements = exec.mock.calls.map(call => String(call[0]));
-      const changelogIndexes = statements.flatMap((sql, index) => (sql.includes('unifiedchangelog') ? [index] : []));
-      const callIndex = statements.findIndex(sql => /CALL .*clearcensusmsmts/i.test(sql));
-      expect(changelogIndexes, statements.join('\n---\n')).toHaveLength(2);
-      expect(Math.max(...changelogIndexes)).toBeLessThan(callIndex);
-      expect(exec.mock.calls.every(call => call[2] === 'tx-4')).toBe(true);
-      expect(commit).toHaveBeenCalledWith('tx-4');
-    });
-  });
-
-  describe('4. File Upload Tracking - Single Row Per File', () => {
+  describe('3. File Upload Tracking - Single Row Per File', () => {
     it('should create ONE changelog entry for measurements file upload (first batch)', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
@@ -638,7 +606,7 @@ describe('Unified Changelog Tracking System', () => {
     });
   });
 
-  describe('5. Additional Intent-Based Test Cases', () => {
+  describe('4. Additional Intent-Based Test Cases', () => {
     it('should handle concurrent edits from multiple users without conflicts', async () => {
       // Test that multiple users editing different rows doesn't cause conflicts
       const cm = (ConnectionManager as any).getInstance();
