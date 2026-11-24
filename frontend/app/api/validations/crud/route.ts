@@ -33,8 +33,16 @@ function getValidatedSchema(request: NextRequest): string | NextResponse {
 const VALIDATIONS_TABLE_NAME = 'sitespecificvalidations';
 const SELECT_VALIDATION_FOR_UPDATE = 'SELECT * FROM ??.sitespecificvalidations WHERE ValidationID = ? FOR UPDATE';
 
-const VALIDATION_ID_COLUMN = 'validationid';
 const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/;
+/** The only columns a client may set; ValidationID is the database's to assign and never moves. */
+const WRITABLE_VALIDATION_COLUMNS: ReadonlySet<string> = new Set([
+  'ProcedureName',
+  'Description',
+  'Criteria',
+  'Definition',
+  'ChangelogDefinition',
+  'IsEnabled'
+]);
 
 /** A positive integer id from the request body; anything else (true, 1.5, "1 OR 1") is refused. */
 function parseValidationID(value: unknown): number | undefined {
@@ -43,17 +51,22 @@ function parseValidationID(value: unknown): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
-function invalidValidationID(): NextResponse {
-  return NextResponse.json({ error: 'validationID must be a positive integer' }, { status: HTTPResponses.INVALID_REQUEST });
+function invalidRequest(message: string): NextResponse {
+  return NextResponse.json({ error: message }, { status: HTTPResponses.INVALID_REQUEST });
 }
 
-/**
- * The mapper turns `validationID` into `ValIDationID`, which MySQL matches to the
- * ValidationID column case-insensitively; every spelling is dropped so a client can
- * never choose or move a primary key.
- */
-function withoutValidationID(mappedData: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(mappedData).filter(([column]) => column.toLowerCase() !== VALIDATION_ID_COLUMN));
+async function readValidationBody(request: NextRequest): Promise<ValidationProceduresRDS | undefined> {
+  try {
+    const body: unknown = await request.json();
+    return body !== null && typeof body === 'object' && !Array.isArray(body) ? (body as ValidationProceduresRDS) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Keeps only the exact writable column names the mapper produced, so no spelling of a key can reach SET. */
+function writableValidationColumns(mappedData: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(mappedData).filter(([column]) => WRITABLE_VALIDATION_COLUMNS.has(column)));
 }
 
 function validationNotFound(validationID: unknown): NextResponse {
@@ -94,16 +107,21 @@ export async function POST(request: NextRequest) {
   const authError = requireAdmin(session);
   if (authError) return authError;
 
-  const validationProcedure: ValidationProceduresRDS = await request.json();
+  const validationProcedure = await readValidationBody(request);
+  if (!validationProcedure) return invalidRequest('Request body must be a JSON object');
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
   const connectionManager = ConnectionManager.getInstance();
   const transactionID = await connectionManager.beginTransaction();
   try {
     const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
-    const [mappedData] = mapper.demapData([validationProcedure]);
+    const writableColumns = writableValidationColumns(mapper.demapData([validationProcedure])[0]);
+    if (Object.keys(writableColumns).length === 0) {
+      await connectionManager.rollbackTransaction(transactionID);
+      return invalidRequest('No writable validation fields were provided');
+    }
 
-    const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.sitespecificvalidations`, withoutValidationID(mappedData)]);
+    const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.sitespecificvalidations`, writableColumns]);
     const results = await connectionManager.executeQuery(insertQuery, [], transactionID);
     const insertID = results.insertId;
     const insertedRow = await readValidationRow(connectionManager, schema, insertID, transactionID);
@@ -133,11 +151,12 @@ export async function PATCH(request: NextRequest) {
   const authError = requireAdmin(session);
   if (authError) return authError;
 
-  const validationProcedure: ValidationProceduresRDS = await request.json();
+  const validationProcedure = await readValidationBody(request);
+  if (!validationProcedure) return invalidRequest('Request body must be a JSON object');
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
   const validationID = parseValidationID(validationProcedure.validationID);
-  if (validationID === undefined) return invalidValidationID();
+  if (validationID === undefined) return invalidRequest('validationID must be a positive integer');
   const connectionManager = ConnectionManager.getInstance();
   const transactionID = await connectionManager.beginTransaction();
   try {
@@ -148,9 +167,13 @@ export async function PATCH(request: NextRequest) {
     }
 
     const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
-    const [mappedData] = mapper.demapData([validationProcedure]);
+    const writableColumns = writableValidationColumns(mapper.demapData([validationProcedure])[0]);
+    if (Object.keys(writableColumns).length === 0) {
+      await connectionManager.rollbackTransaction(transactionID);
+      return invalidRequest('No writable validation fields were provided');
+    }
 
-    const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, withoutValidationID(mappedData), validationID]);
+    const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, writableColumns, validationID]);
     await connectionManager.executeQuery(updateQuery, [], transactionID);
     const updatedRow = await readValidationRow(connectionManager, schema, validationID, transactionID);
     if (!updatedRow) throw new Error(`Validation ${validationID} vanished during its own update`);
@@ -180,11 +203,12 @@ export async function DELETE(request: NextRequest) {
   const authError = requireAdmin(session);
   if (authError) return authError;
 
-  const validationProcedure: ValidationProceduresRDS = await request.json();
+  const validationProcedure = await readValidationBody(request);
+  if (!validationProcedure) return invalidRequest('Request body must be a JSON object');
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
   const validationID = parseValidationID(validationProcedure.validationID);
-  if (validationID === undefined) return invalidValidationID();
+  if (validationID === undefined) return invalidRequest('validationID must be a positive integer');
   const connectionManager = ConnectionManager.getInstance();
   const transactionID = await connectionManager.beginTransaction();
   try {

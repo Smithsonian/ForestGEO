@@ -8,9 +8,7 @@ const mocks = vi.hoisted(() => ({
   beginTransaction: vi.fn(async () => 'tx-1'),
   commitTransaction: vi.fn(async () => undefined),
   rollbackTransaction: vi.fn(async () => undefined),
-  closeConnection: vi.fn(async () => undefined),
-  mapData: vi.fn((rows: any[]) => rows),
-  demapData: vi.fn((rows: any[]) => rows)
+  closeConnection: vi.fn(async () => undefined)
 }));
 
 vi.mock('@/auth', () => ({ auth: mocks.auth }));
@@ -25,11 +23,10 @@ vi.mock('@/lib/db/connectionmanager', () => ({
     })
   }
 }));
-vi.mock('@/config/datamapper', () => ({
-  default: {
-    getMapper: () => ({ mapData: mocks.mapData, demapData: mocks.demapData })
-  }
-}));
+
+// The global unit setup stubs the mapper; these tests need its real key transformation,
+// which is what turns `validationID` into a column MySQL would accept.
+vi.mock('@/config/datamapper', async () => vi.importActual('@/config/datamapper'));
 
 import { GET, POST, PATCH, DELETE } from './route';
 
@@ -172,9 +169,8 @@ describe('/api/validations/crud auth gate', () => {
     expect(mocks.executeQuery).not.toHaveBeenCalled();
   });
 
-  it('POST and PATCH never write a client-supplied primary key, whatever its spelling', async () => {
+  it('POST and PATCH write only the writable columns, never a client-supplied primary key in any spelling', async () => {
     mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
-    mocks.demapData.mockImplementation((rows: any[]) => rows.map(row => ({ ...row, ValIDationID: 999, ValidationID: 999, procedureName: 'p' })));
     mocks.executeQuery
       .mockResolvedValueOnce({ insertId: 5 } as any)
       .mockResolvedValueOnce([{ ValidationID: 5 }] as any)
@@ -183,16 +179,43 @@ describe('/api/validations/crud auth gate', () => {
       .mockResolvedValueOnce({ affectedRows: 1 } as any)
       .mockResolvedValueOnce([{ ValidationID: 5 }] as any)
       .mockResolvedValueOnce({ affectedRows: 1 } as any);
+    const forgedKeys = { ValidationID: 999, 'sitespecificvalidations.ValidationID': 999, unknownColumn: 'x' };
 
-    await POST(makeReq('POST', undefined, { procedureName: 'p' }));
-    await PATCH(makeReq('PATCH', undefined, { validationID: 5, procedureName: 'p' }));
+    await POST(makeReq('POST', undefined, { validationID: 999, procedureName: 'p', ...forgedKeys }));
+    await PATCH(makeReq('PATCH', undefined, { validationID: 5, procedureName: 'p', ...forgedKeys }));
 
     const writes = (mocks.executeQuery.mock.calls as unknown[][])
       .map(call => String(call[0]))
       .filter(sql => /^(INSERT INTO|UPDATE) `?forestgeo_testing`?\.`?sitespecificvalidations/.test(sql));
     expect(writes, writes.join('\n')).toHaveLength(2);
-    for (const sql of writes) expect(sql.toLowerCase()).not.toMatch(/`validationid` = 999/);
-    mocks.demapData.mockImplementation((rows: any[]) => rows);
+    for (const sql of writes) {
+      expect(sql).toContain('`ProcedureName` = ');
+      expect(sql.toLowerCase(), sql).not.toContain('validationid` = 999');
+      expect(sql).not.toContain('unknownColumn');
+    }
+  });
+
+  it.each([
+    ['POST', POST],
+    ['PATCH', PATCH],
+    ['DELETE', DELETE]
+  ] as const)('%s answers 400, not 500, for a JSON null body', async (method, handler) => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
+
+    const res = await handler(new NextRequest('http://localhost/api/validations/crud?schema=forestgeo_testing', { method, body: 'null' }));
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(mocks.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('POST with no writable field answers 400 and writes nothing', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
+
+    const res = await POST(makeReq('POST', undefined, { validationID: 3 }));
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+    expect(mocks.rollbackTransaction).toHaveBeenCalledWith('tx-1');
   });
 
   it('rolls back the change when its audit row cannot be written', async () => {
