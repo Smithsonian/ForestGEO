@@ -144,7 +144,7 @@ describe('/api/validations/crud auth gate', () => {
     mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
     mocks.executeQuery.mockResolvedValueOnce([] as any);
 
-    const res = await handler(makeReq(method, undefined, { validationID: 404404 }));
+    const res = await handler(makeReq(method, undefined, { validationID: 404404, description: 'no such validation' }));
 
     expect(res.status).toBe(HTTPResponses.NOT_FOUND);
     expect(mocks.executeQuery).toHaveBeenCalledTimes(1);
@@ -206,6 +206,15 @@ describe('/api/validations/crud auth gate', () => {
 
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     expect(mocks.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('PATCH with no writable field answers 400 whether or not the validation exists, before reading it', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@example.com', userStatus: 'global', sites: [], allsites: [] } });
+
+    const res = await PATCH(makeReq('PATCH', undefined, { validationID: 404404 }));
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
   });
 
   it('POST with no writable field answers 400 and writes nothing', async () => {

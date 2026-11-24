@@ -160,17 +160,17 @@ export async function PATCH(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
   const transactionID = await connectionManager.beginTransaction();
   try {
-    const priorRow = await readValidationRow(connectionManager, schema, validationID, transactionID);
-    if (!priorRow) {
-      await connectionManager.rollbackTransaction(transactionID);
-      return validationNotFound(validationID);
-    }
-
     const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
     const writableColumns = writableValidationColumns(mapper.demapData([validationProcedure])[0]);
     if (Object.keys(writableColumns).length === 0) {
       await connectionManager.rollbackTransaction(transactionID);
       return invalidRequest('No writable validation fields were provided');
+    }
+
+    const priorRow = await readValidationRow(connectionManager, schema, validationID, transactionID);
+    if (!priorRow) {
+      await connectionManager.rollbackTransaction(transactionID);
+      return validationNotFound(validationID);
     }
 
     const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, writableColumns, validationID]);
