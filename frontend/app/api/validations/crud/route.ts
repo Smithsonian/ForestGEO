@@ -7,7 +7,10 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
-import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
+import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
+import { toTxExecutor } from '@/config/utils';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { ChangelogOperation, recordMutation, type ChangelogRowState } from '@/lib/changelog/record-mutation';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -25,6 +28,23 @@ function getValidatedSchema(request: NextRequest): string | NextResponse {
     return NextResponse.json({ error: message }, { status: HTTPResponses.INVALID_REQUEST });
   }
   return schema;
+}
+
+const VALIDATIONS_TABLE_NAME = 'sitespecificvalidations';
+const SELECT_VALIDATION_FOR_UPDATE = 'SELECT * FROM ??.sitespecificvalidations WHERE ValidationID = ? FOR UPDATE';
+
+function validationNotFound(validationID: unknown): NextResponse {
+  return NextResponse.json({ error: `Validation ${String(validationID)} not found` }, { status: HTTPResponses.NOT_FOUND });
+}
+
+async function readValidationRow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  validationID: unknown,
+  transactionID: string
+): Promise<ChangelogRowState | undefined> {
+  const rows: ChangelogRowState[] = await connectionManager.executeQuery(safeFormatQuery(schema, SELECT_VALIDATION_FOR_UPDATE), [validationID], transactionID);
+  return rows[0];
 }
 
 export async function GET(request: NextRequest) {
@@ -47,17 +67,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authError = requireAdmin(await auth());
+  const session = await auth();
+  const authError = requireAdmin(session);
   if (authError) return authError;
 
   const validationProcedure: ValidationProceduresRDS = await request.json();
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
   const connectionManager = ConnectionManager.getInstance();
-  let transactionID: string | undefined = undefined;
-  transactionID = await connectionManager.beginTransaction();
+  const transactionID = await connectionManager.beginTransaction();
   try {
-    // Map the validation object to database format
     const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
     const [mappedData] = mapper.demapData([validationProcedure]);
 
@@ -65,13 +84,24 @@ export async function POST(request: NextRequest) {
     delete mappedData['ValidationID'];
 
     const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.sitespecificvalidations`, mappedData]);
-    const results = await connectionManager.executeQuery(insertQuery);
+    const results = await connectionManager.executeQuery(insertQuery, [], transactionID);
     const insertID = results.insertId;
-    await connectionManager.commitTransaction(transactionID ?? '');
+    const insertedRow = await readValidationRow(connectionManager, schema, insertID, transactionID);
+    if (!insertedRow) throw new Error(`Validation ${insertID} vanished immediately after its own insert`);
+    await recordMutation({
+      tx: toTxExecutor(connectionManager, transactionID),
+      schema,
+      tableName: VALIDATIONS_TABLE_NAME,
+      recordID: insertID,
+      operation: ChangelogOperation.INSERT,
+      newRowState: insertedRow,
+      changedBy: authenticatedSessionIdentity(session?.user)
+    });
+    await connectionManager.commitTransaction(transactionID);
     return NextResponse.json({ insertID, validationID: insertID }, { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('Error:', error);
-    await connectionManager.rollbackTransaction(transactionID ?? '');
+    await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
     await connectionManager.closeConnection();
@@ -79,17 +109,22 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const authError = requireAdmin(await auth());
+  const session = await auth();
+  const authError = requireAdmin(session);
   if (authError) return authError;
 
   const validationProcedure: ValidationProceduresRDS = await request.json();
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
   const connectionManager = ConnectionManager.getInstance();
-  let transactionID: string | undefined = undefined;
-  transactionID = await connectionManager.beginTransaction();
+  const transactionID = await connectionManager.beginTransaction();
   try {
-    // Map the validation object to database format and exclude id/validationID from update
+    const priorRow = await readValidationRow(connectionManager, schema, validationProcedure.validationID, transactionID);
+    if (!priorRow) {
+      await connectionManager.rollbackTransaction(transactionID);
+      return validationNotFound(validationProcedure.validationID);
+    }
+
     const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
     const [mappedData] = mapper.demapData([validationProcedure]);
 
@@ -97,12 +132,24 @@ export async function PATCH(request: NextRequest) {
     delete mappedData['ValidationID'];
 
     const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, mappedData, validationProcedure.validationID]);
-    await connectionManager.executeQuery(updateQuery);
-    await connectionManager.commitTransaction(transactionID ?? '');
+    await connectionManager.executeQuery(updateQuery, [], transactionID);
+    const updatedRow = await readValidationRow(connectionManager, schema, validationProcedure.validationID, transactionID);
+    if (!updatedRow) throw new Error(`Validation ${validationProcedure.validationID} vanished during its own update`);
+    await recordMutation({
+      tx: toTxExecutor(connectionManager, transactionID),
+      schema,
+      tableName: VALIDATIONS_TABLE_NAME,
+      recordID: Number(priorRow.ValidationID),
+      operation: ChangelogOperation.UPDATE,
+      oldRowState: priorRow,
+      newRowState: updatedRow,
+      changedBy: authenticatedSessionIdentity(session?.user)
+    });
+    await connectionManager.commitTransaction(transactionID);
     return NextResponse.json({}, { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('Error:', error);
-    await connectionManager.rollbackTransaction(transactionID ?? '');
+    await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
     await connectionManager.closeConnection();
@@ -110,23 +157,38 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const authError = requireAdmin(await auth());
+  const session = await auth();
+  const authError = requireAdmin(session);
   if (authError) return authError;
 
   const validationProcedure: ValidationProceduresRDS = await request.json();
   const schema = getValidatedSchema(request);
   if (typeof schema !== 'string') return schema;
   const connectionManager = ConnectionManager.getInstance();
-  let transactionID: string | undefined = undefined;
-  transactionID = await connectionManager.beginTransaction();
+  const transactionID = await connectionManager.beginTransaction();
   try {
+    const priorRow = await readValidationRow(connectionManager, schema, validationProcedure.validationID, transactionID);
+    if (!priorRow) {
+      await connectionManager.rollbackTransaction(transactionID);
+      return validationNotFound(validationProcedure.validationID);
+    }
+
     const deleteQuery = format('DELETE FROM ?? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, validationProcedure.validationID]);
-    await connectionManager.executeQuery(deleteQuery);
-    await connectionManager.commitTransaction(transactionID ?? '');
+    await connectionManager.executeQuery(deleteQuery, [], transactionID);
+    await recordMutation({
+      tx: toTxExecutor(connectionManager, transactionID),
+      schema,
+      tableName: VALIDATIONS_TABLE_NAME,
+      recordID: Number(priorRow.ValidationID),
+      operation: ChangelogOperation.DELETE,
+      oldRowState: priorRow,
+      changedBy: authenticatedSessionIdentity(session?.user)
+    });
+    await connectionManager.commitTransaction(transactionID);
     return NextResponse.json({}, { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('Error:', error);
-    await connectionManager.rollbackTransaction(transactionID ?? '');
+    await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
     await connectionManager.closeConnection();
