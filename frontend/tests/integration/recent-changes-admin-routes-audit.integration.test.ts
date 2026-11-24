@@ -32,6 +32,7 @@ import {
   type TestDatabaseConfig
 } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 import { LOCK_WAIT_POLL_INTERVAL_MS } from '../setup/core-measurement-window-harness';
 
 const AUTH_USER_EMAIL = 'admin-audit-runner@forestgeo.test';
@@ -49,7 +50,8 @@ const sharedState = vi.hoisted(() => ({
   /** Fails only the changelog INSERT this predicate picks, e.g. one table's rows after the CALL. */
   failAuditInsertWhen: null as ((params: unknown[] | undefined) => boolean) | null,
   /** Runs, on the test's own schedule, just before the route's CALL statement reaches MySQL. */
-  beforeProcedureCall: null as (() => Promise<void>) | null
+  beforeProcedureCall: null as (() => Promise<void>) | null,
+  loggedErrors: vi.fn()
 }));
 
 vi.mock('@/auth', () => ({
@@ -57,7 +59,7 @@ vi.mock('@/auth', () => ({
 }));
 
 vi.mock('@/ailogger', () => ({
-  default: { info: () => undefined, warn: () => undefined, error: () => undefined }
+  default: { info: () => undefined, warn: () => undefined, error: sharedState.loggedErrors }
 }));
 
 vi.mock('@/lib/contextvalidation', () => ({
@@ -287,11 +289,18 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
          SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '${CENSUS_DELETE_BLOCKED_MESSAGE}'`
       );
 
+      sharedState.loggedErrors.mockClear();
       const response = await clearCensusPost(clearCensusRequest(censusID, 'msmts'));
       await connection.query(`DROP TRIGGER IF EXISTS ${CENSUS_DELETE_BLOCKER_TRIGGER}`);
 
-      expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-      expect(await response.text()).toContain(CENSUS_DELETE_BLOCKED_MESSAGE);
+      const responseText = await response.text();
+      expect(response.status, responseText).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+      expect(JSON.parse(responseText), 'the procedure error must stay out of the response body (#574)').toEqual({ error: INTERNAL_SERVER_ERROR_MESSAGE });
+      const loggedErrorMessages = sharedState.loggedErrors.mock.calls.flat().map(logged => (logged instanceof Error ? logged.message : String(logged)));
+      expect(
+        loggedErrorMessages.some(message => message.includes(CENSUS_DELETE_BLOCKED_MESSAGE)),
+        `the 500 must come from the simulated census delete failure; logged: ${JSON.stringify(loggedErrorMessages)}`
+      ).toBe(true);
       expect(await countRows('SELECT COUNT(*) AS total FROM census WHERE CensusID = ?', [censusID])).toBe(1);
       expect(await countRows('SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [measurementIDs])).toBe(2);
       expect(await countRows("SELECT COUNT(*) AS total FROM unifiedchangelog WHERE TableName IN ('census', 'coremeasurements')")).toBe(0);
