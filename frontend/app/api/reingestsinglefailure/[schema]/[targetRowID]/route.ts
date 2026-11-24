@@ -205,6 +205,12 @@ async function handler(_request: NextRequest, context: RouteContext) {
     // row (issue #507).
     const auditTx = transactionExecutorFor(connectionManager, transactionID);
     const originalRowBefore = await snapshotCoreMeasurementsByIDs(auditTx, schema, [targetMeasurementID]);
+    if (!originalRowBefore.has(targetMeasurementID)) {
+      await connectionManager.rollbackTransaction(transactionID);
+      return new NextResponse(JSON.stringify({ error: `No failed measurement row found for CoreMeasurementID ${targetMeasurementID}` }), {
+        status: HTTPResponses.NOT_FOUND
+      });
+    }
 
     const shiftResult: any = await connectionManager.executeQuery(
       shiftQuery,

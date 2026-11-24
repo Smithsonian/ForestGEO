@@ -4,6 +4,16 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { CALLER_OWNS_TRANSACTION_SQL, CLEAR_CALLER_TRANSACTION_SQL, FLAG_CLEAR_FAILED_REASON } from '@/lib/ingestion/bulk-ingestion-call';
 
 const ROUTE_TRANSACTION_ID = 'txn-1';
+const TARGET_MEASUREMENT_ID = 123;
+const ORIGINAL_ROW_BEFORE = {
+  CoreMeasurementID: TARGET_MEASUREMENT_ID,
+  StemGUID: null,
+  CensusID: 1,
+  UploadBatchID: 'b1',
+  UserDefinedFields: null,
+  RawPublishedStemID: null
+};
+const ORIGINAL_ROW_AFTER = { ...ORIGINAL_ROW_BEFORE, StemGUID: 77 };
 
 // Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
 // A 'global' admin passes the per-site access gate; 'forestgeo_testing' is a
@@ -87,9 +97,21 @@ describe('reingestsinglefailure API route', () => {
     expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
   });
 
+  it('returns 404 and stages nothing when the locked read finds no row, so nothing can be rewritten unaudited (#507)', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([]); // audit: lock and snapshot the original row before staging
+
+    const res = await GET(new Request('http://localhost/api/reingestsinglefailure/forestgeo_testing/123') as any, makeParams('forestgeo_testing', '123'));
+
+    expect(res.status).toBe(404);
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expect(String(mockConnectionManager.executeQuery.mock.calls[0][0])).toMatch(/FOR UPDATE/);
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith(ROUTE_TRANSACTION_ID);
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+  });
+
   it('reconciles onto original row without overwriting upload metadata fields', async () => {
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([]) // audit: lock and snapshot the original row before staging
+      .mockResolvedValueOnce([ORIGINAL_ROW_BEFORE]) // audit: lock and snapshot the original row before staging
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
       .mockResolvedValueOnce([{ PlotID: 1, CensusID: 1 }]) // audit: target row's plot and census
       .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
@@ -125,7 +147,9 @@ describe('reingestsinglefailure API route', () => {
       .mockResolvedValueOnce(undefined) // delete transient row
       .mockResolvedValueOnce(undefined) // sync original row
       .mockResolvedValueOnce(undefined) // clear original attributes
-      .mockResolvedValueOnce(undefined); // restore original attributes
+      .mockResolvedValueOnce(undefined) // restore original attributes
+      .mockResolvedValueOnce([ORIGINAL_ROW_AFTER]) // audit: re-read the original row after the sync
+      .mockResolvedValueOnce({ affectedRows: 1 }); // audit: changelog UPDATE
 
     const req = new Request('http://localhost/api/reingestsinglefailure/forestgeo_testing/123') as any;
     const res = await GET(req, makeParams('forestgeo_testing', '123'));
@@ -133,6 +157,10 @@ describe('reingestsinglefailure API route', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.message).toBe('Success');
+    const auditCall = mockConnectionManager.executeQuery.mock.calls.at(-1);
+    expect(String(auditCall[0])).toContain('unifiedchangelog');
+    expect((auditCall[1] as unknown[]).slice(0, 3)).toEqual(['coremeasurements', TARGET_MEASUREMENT_ID, 'UPDATE']);
+    expect(auditCall[2]).toBe(ROUTE_TRANSACTION_ID);
 
     const calls = mockConnectionManager.executeQuery.mock.calls;
     const statements = calls.map((call: any[]) => String(call[0]));
@@ -162,7 +190,7 @@ describe('reingestsinglefailure API route', () => {
   it('threads RawPlotX/RawPlotY through restaging, the snapshot SELECT, and back onto the original CoreMeasurementID', async () => {
     const TARGET_MEASUREMENT_ID = 123;
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([]) // audit: lock and snapshot the original row before staging
+      .mockResolvedValueOnce([ORIGINAL_ROW_BEFORE]) // audit: lock and snapshot the original row before staging
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
       .mockResolvedValueOnce([{ PlotID: 1, CensusID: 1 }]) // audit: target row's plot and census
       .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
@@ -198,7 +226,9 @@ describe('reingestsinglefailure API route', () => {
       .mockResolvedValueOnce(undefined) // delete transient row
       .mockResolvedValueOnce(undefined) // sync original row
       .mockResolvedValueOnce(undefined) // clear original attributes
-      .mockResolvedValueOnce(undefined); // restore original attributes
+      .mockResolvedValueOnce(undefined) // restore original attributes
+      .mockResolvedValueOnce([ORIGINAL_ROW_AFTER]) // audit: re-read the original row after the sync
+      .mockResolvedValueOnce({ affectedRows: 1 }); // audit: changelog UPDATE
 
     const req = new Request(`http://localhost/api/reingestsinglefailure/forestgeo_testing/${TARGET_MEASUREMENT_ID}`) as any;
     const res = await GET(req, makeParams('forestgeo_testing', String(TARGET_MEASUREMENT_ID)));
@@ -247,7 +277,7 @@ describe('reingestsinglefailure API route', () => {
   it('returns 500 and rolls back without reconciling when the CALL succeeded but the caller flag could not be cleared', async () => {
     const clearError = new Error('connection lost while clearing the caller flag');
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([]) // audit: lock and snapshot the original row before staging
+      .mockResolvedValueOnce([ORIGINAL_ROW_BEFORE]) // audit: lock and snapshot the original row before staging
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
       .mockResolvedValueOnce([{ PlotID: 1, CensusID: 1 }]) // audit: target row's plot and census
       .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
