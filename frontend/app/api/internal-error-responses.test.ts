@@ -80,7 +80,7 @@ interface RouteCase {
   body?: Record<string, unknown>;
   headers?: Record<string, string>;
   expectedStatus: number;
-  expectedError?: string;
+  expectedError: string;
 }
 
 const ROUTE_CASES: RouteCase[] = [
@@ -311,9 +311,7 @@ describe('#574 API routes keep database error text out of failure responses', ()
     for (const fragment of SECRET_FRAGMENTS) {
       expect(text, `the response must not contain "${fragment}"`).not.toContain(fragment);
     }
-    if (routeCase.expectedError !== undefined) {
-      expect(JSON.parse(text).error).toBe(routeCase.expectedError);
-    }
+    expect(JSON.parse(text).error).toBe(routeCase.expectedError);
     expect(loggedTextContainsTheDatabaseMessage(), 'the database message is still logged for the team').toBe(true);
   });
 });

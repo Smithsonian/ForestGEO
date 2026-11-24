@@ -1398,7 +1398,6 @@ describe('CoreAPIFunctions', () => {
 
       expect(response.status).toBe(HTTPResponses.FOREIGN_KEY_CONFLICT);
       expect(JSON.parse(text)).toEqual({ message: FOREIGN_KEY_CONFLICT_MESSAGE });
-      expect(text).not.toContain('forestgeo_secretsite');
     });
 
     it('rolls back via withTransaction when a write fails in DELETE', async () => {

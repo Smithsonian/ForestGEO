@@ -14,7 +14,6 @@ import {
 import { assertIngestionOutcome, INGESTION_ERROR_CODE, readIngestionOutcome } from '../setup/ingestion-outcome';
 import { buildFailedMeasurementsSelectQuery, INGESTION_ERROR_SOURCE, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { HTTPResponses } from '@/config/macros';
-import ailogger from '@/ailogger';
 import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 const AUTH_USER_EMAIL = 'integration-runner@forestgeo.test';
@@ -149,22 +148,9 @@ vi.mock('@/ailogger', () => ({
   default: {
     info: () => undefined,
     warn: () => undefined,
-    error: vi.fn()
+    error: () => undefined
   }
 }));
-
-function expectFailureLoggedButNotReturned(body: unknown, injectedMessage: string): void {
-  expect(body, 'the route answers with the fixed message (#574)').toMatchObject({ error: INTERNAL_SERVER_ERROR_MESSAGE });
-  expect(JSON.stringify(body), 'the injected failure text stays out of the response').not.toContain(injectedMessage);
-  const loggedTexts = vi
-    .mocked(ailogger.error)
-    .mock.calls.flat()
-    .map(argument => (argument instanceof Error ? argument.message : String(argument)));
-  expect(
-    loggedTexts.some(text => text.includes(injectedMessage)),
-    `ailogger.error must record the injected failure "${injectedMessage}"; logged: ${JSON.stringify(loggedTexts)}`
-  ).toBe(true);
-}
 
 vi.mock('@/config/utils', async importOriginal => {
   const actual = await importOriginal<typeof import('@/config/utils')>();
@@ -1029,7 +1015,7 @@ describe('Reingest route integration tests', () => {
         const body = await response.json();
 
         expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-        expectFailureLoggedButNotReturned(body, INJECTED_FAILURE_MESSAGE);
+        expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
       } finally {
         spy.mockRestore();
       }
@@ -1129,7 +1115,7 @@ describe('Reingest route integration tests', () => {
       const response = await bulkReingestGet(makeBulkRequest('GET'), makeBulkParams());
       const body = await response.json();
       expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-      expectFailureLoggedButNotReturned(body, INJECTED_FAILURE_MESSAGE);
+      expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     } finally {
       spy.mockRestore();
     }

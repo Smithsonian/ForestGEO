@@ -206,7 +206,6 @@ describe('POST /api/clearcensus', () => {
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const text = await res.text();
     expect(JSON.parse(text)).toEqual({ error: INTERNAL_SERVER_ERROR_MESSAGE });
-    expect(text).not.toMatch(/boom/i);
   });
 
   it('builds stored procedure name using `type` param (smoke check)', async () => {

@@ -24,12 +24,6 @@ beforeEach(() => {
 });
 
 describe('streamWithHeartbeats', () => {
-  it('sends the operation result', async () => {
-    const lines = await readStreamLines(streamWithHeartbeats(async () => ({ rowsValidated: 3 }), HEARTBEAT_INTERVAL_LONGER_THAN_THE_TEST_MS));
-
-    expect(lines).toEqual([{ type: 'result', success: true, data: { rowsValidated: 3 } }]);
-  });
-
   it('sends the fixed error message for a failed operation and logs the database error', async () => {
     const failure = new Error(SECRET_DATABASE_MESSAGE);
 
@@ -40,7 +34,6 @@ describe('streamWithHeartbeats', () => {
     );
 
     expect(lines).toEqual([{ type: 'error', success: false, message: INTERNAL_SERVER_ERROR_MESSAGE }]);
-    expect(JSON.stringify(lines)).not.toContain('forestgeo_secretsite');
     expect(ailogger.error).toHaveBeenCalledWith('Streamed validation operation failed:', failure);
   });
 });

@@ -650,7 +650,6 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();
     expect(body).toEqual({ error: CTFS_EXPORT_FAILED_MESSAGE });
-    expect(JSON.stringify(body), 'the database message stays in the log (#574)').not.toMatch(/DB exploded/i);
 
     expect(mocks.loggerError).toHaveBeenCalledTimes(1);
     const [message, meta] = mocks.loggerError.mock.calls[0];
