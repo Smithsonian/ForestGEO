@@ -38,7 +38,8 @@ const SIMULATED_AUDIT_FAILURE = 'SIMULATED_AUDIT_WRITE_FAILURE_507';
 const CENSUS_DELETE_BLOCKED_MESSAGE = 'SIMULATED_CENSUS_DELETE_FAILURE_507';
 const CENSUS_DELETE_BLOCKER_TRIGGER = 'test_507_block_census_delete';
 const FORGED_VALIDATION_ID = 987654;
-const RACE_SETTLE_MS = 300;
+const LOCK_WAIT_POLL_INTERVAL_MS = 25;
+const LOCK_WAIT_DEADLINE_MS = 5000;
 const FULL_CLEAR_REFERENCE_TABLES = ['attributes', 'personnel', 'roles', 'quadrats', 'species', 'specieslimits', 'genus', 'family', 'reference'] as const;
 
 const sharedState = vi.hoisted(() => ({
@@ -171,6 +172,20 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       [tableName]
     );
     return rows as AuditRow[];
+  }
+
+  /** Resolves once InnoDB reports `threadID`'s transaction waiting on a row lock; fails the test otherwise. */
+  async function waitUntilSessionIsBlocked(threadID: number): Promise<void> {
+    const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+    while (Date.now() < deadline) {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        "SELECT COUNT(*) AS total FROM information_schema.innodb_trx WHERE trx_mysql_thread_id = ? AND trx_state = 'LOCK WAIT'",
+        [threadID]
+      );
+      if (Number(rows[0].total) > 0) return;
+      await new Promise(resolve => setTimeout(resolve, LOCK_WAIT_POLL_INTERVAL_MS));
+    }
+    throw new Error(`Session ${threadID} never waited on a lock within ${LOCK_WAIT_DEADLINE_MS} ms: the row it edits was not locked by the clear.`);
   }
 
   async function countRows(sql: string, params: unknown[] = []): Promise<number> {
@@ -336,7 +351,7 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
         concurrentEdit = concurrentSession
           .query<mysql.ResultSetHeader>('UPDATE coremeasurements SET MeasuredDBH = 999 WHERE CoreMeasurementID = ?', [measurementID])
           .then(([result]) => result.affectedRows);
-        await new Promise(resolve => setTimeout(resolve, RACE_SETTLE_MS));
+        await waitUntilSessionIsBlocked(concurrentSession.threadId);
       };
 
       const response = await clearCensusPost(clearCensusRequest(censusID, 'msmts'));
