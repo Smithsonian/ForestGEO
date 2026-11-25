@@ -33,6 +33,7 @@ vi.mock('@/lib/db/definitions/timekeeping', () => ({
 
 import HubLayout from './layout';
 import { useAppStore } from '@/config/store/appstore';
+import { submitCookie } from '@/app/actions/cookiemanager';
 
 const siteA = { siteID: 1, siteName: 'A', schemaName: 'a' };
 const siteB = { siteID: 2, siteName: 'B', schemaName: 'b' };
@@ -67,6 +68,20 @@ describe('HubLayout scope-aware list loading', () => {
       quadratList: [],
       hasHydrated: true
     });
+  });
+
+  it('re-establishes the census cookie from the restored selection after a reload, with no census change (#516)', async () => {
+    vi.mocked(global.fetch).mockImplementation(() => Promise.resolve(ok([])));
+    vi.mocked(submitCookie).mockClear();
+    const restoredCensus = { plotID: 1, plotCensusNumber: 3, censusIDs: [71], dateRanges: [{ censusID: 71 }], description: '' };
+    useAppStore.setState({ currentSite: siteA as any, currentPlot: plot1 as any, currentCensus: restoredCensus as any });
+
+    render(<HubLayout>child</HubLayout>);
+
+    await waitFor(() => expect(submitCookie).toHaveBeenCalledWith('censusID', '71'));
+    console.log(`[#516] layout cookie writes: ${JSON.stringify(vi.mocked(submitCookie).mock.calls)}`);
+    expect(submitCookie).toHaveBeenCalledWith('schema', 'a');
+    expect(submitCookie).toHaveBeenCalledWith('plotID', '1');
   });
 
   it('ignores a delayed plot-list response for the old site after a new site is selected, and still starts the new load', async () => {

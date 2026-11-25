@@ -5,9 +5,9 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useAppStore } from '@/config/store/appstore';
-import { usePlotDispatch, useSiteDispatch } from './compat-hooks';
+import { useOrgCensusDispatch, usePlotDispatch, useRestoreSelectionCookies, useSiteDispatch } from './compat-hooks';
 import { submitCookie } from '@/app/actions/cookiemanager';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 
@@ -100,6 +100,57 @@ describe('selection dispatch hooks', () => {
       .mock.calls.filter(([name]) => name === 'plotID')
       .map(([, value]) => value);
     expect(plotWrites).toEqual(['1']);
+  });
+
+  describe('after a reload (#516)', () => {
+    const censusWithID = { ...census, plotCensusNumber: 3, dateRanges: [{ censusID: 71 }] } as OrgCensus;
+    const quadrat = { quadratID: 9, quadratName: 'Q9' };
+    const cookieWrites = () => vi.mocked(submitCookie).mock.calls.map(([name, value]) => `${name}=${value}`);
+
+    it('writes the rehydrated selection back to the cookies the unload beacon deleted', async () => {
+      useAppStore.setState({ hasHydrated: true, currentCensus: censusWithID, currentQuadrat: quadrat as never });
+
+      renderHook(() => useRestoreSelectionCookies());
+
+      await waitFor(() => expect(submitCookie).toHaveBeenCalledTimes(4));
+      console.log(`[#516] cookie writes after rehydration: ${JSON.stringify(cookieWrites())}`);
+      expect(cookieWrites()).toEqual(expect.arrayContaining(['schema=a', 'plotID=1', 'censusID=71', 'quadratID=9']));
+    });
+
+    it('waits for rehydration, so the pre-hydration empty store never blanks the cookies', async () => {
+      useAppStore.setState({ hasHydrated: false, currentSite: undefined, currentPlot: undefined, currentCensus: undefined });
+      const { rerender } = renderHook(() => useRestoreSelectionCookies());
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(cookieWrites(), 'nothing is written before the store has rehydrated').toEqual([]);
+
+      act(() => useAppStore.setState({ hasHydrated: true, currentSite: siteA, currentPlot: plot1, currentCensus: censusWithID, currentQuadrat: undefined }));
+      rerender();
+
+      await waitFor(() => expect(cookieWrites()).toContain('censusID=71'));
+      expect(cookieWrites()).toEqual(expect.arrayContaining(['schema=a', 'plotID=1', 'censusID=71', 'quadratID=']));
+    });
+
+    it('lets a census picked right after the reload win over the restored one', async () => {
+      useAppStore.setState({ hasHydrated: true, currentCensus: censusWithID });
+      let releaseRestore!: () => void;
+      vi.mocked(submitCookie).mockImplementation(async (name: string) => {
+        if (name === 'censusID' && !releaseRestore) await new Promise<void>(resolve => (releaseRestore = resolve));
+      });
+      renderHook(() => useRestoreSelectionCookies());
+      const { result } = renderHook(() => useOrgCensusDispatch());
+      await waitFor(() => expect(releaseRestore).toBeDefined());
+
+      const picked = result.current!({ census: { ...censusWithID, plotCensusNumber: 4, dateRanges: [{ censusID: 72 }] } as OrgCensus });
+      releaseRestore();
+      await picked;
+
+      const censusWrites = vi
+        .mocked(submitCookie)
+        .mock.calls.filter(([name]) => name === 'censusID')
+        .map(([, value]) => value);
+      console.log(`[#516] censusID writes when a pick follows the restore: ${JSON.stringify(censusWrites)}`);
+      expect(censusWrites.at(-1)).toBe('72');
+    });
   });
 
   it('re-selecting the same site leaves plot/census and their cookies alone', async () => {

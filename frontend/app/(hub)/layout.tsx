@@ -16,6 +16,7 @@ import {
   useOrgCensusListDispatch,
   usePlotListDispatch,
   useQuadratListDispatch,
+  useRestoreSelectionCookies,
   useSiteListDispatch
 } from '@/app/contexts/compat-hooks';
 import { useAppStore, useHasHydrated } from '@/config/store/appstore';
@@ -65,6 +66,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const hasHydrated = useHasHydrated();
   const censusDispatch = useOrgCensusDispatch();
   const { data: session } = useSession();
+  useRestoreSelectionCookies();
 
   // Load states for each data resource - provides idle/loading/loaded/error states
   const siteListLoad = useLoadState();
