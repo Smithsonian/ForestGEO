@@ -681,7 +681,14 @@ describe('IsolatedDataGridCommons', () => {
 
   it('keeps an administrative row editable after creation by using the identifier the admin route returns', async () => {
     const originalRow = { id: 1, userID: 7, firstName: 'Original', lastName: 'Admin' };
+    const insertedRow = { id: 2, userID: 99, firstName: 'Original', lastName: 'Admin' };
     let postCount = 0;
+    let releaseRereadAfterInsert: () => void = () => undefined;
+    const listResponse = (output: unknown[]) =>
+      new Response(JSON.stringify({ output, totalCount: output.length, finishedQuery: 'SELECT 1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
     mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') {
         postCount += 1;
@@ -690,9 +697,10 @@ describe('IsolatedDataGridCommons', () => {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      return new Response(JSON.stringify({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' }
+      if (postCount === 0) return listResponse([originalRow]);
+      // Hold the reread that follows the insert, so the row state below is the local commit.
+      return new Promise<Response>(resolve => {
+        releaseRereadAfterInsert = () => resolve(listResponse([originalRow, insertedRow]));
       });
     });
 
@@ -728,6 +736,9 @@ describe('IsolatedDataGridCommons', () => {
     await expect(capturedProcessPromises[0]).resolves.toMatchObject({ userID: 99 });
     const savedRows = JSON.parse(screen.getByTestId('row-state').textContent ?? '[]');
     expect(savedRows.some((row: any) => row.userID === 99 && row.creationNeedsRefresh === undefined)).toBe(true);
+
+    await act(async () => releaseRereadAfterInsert());
+    await waitFor(() => expect(JSON.parse(screen.getByTestId('row-state').textContent ?? '[]')).toEqual([originalRow, insertedRow]));
   });
 
   it('blocks editing a created row until refresh supplies its missing server ID', async () => {
