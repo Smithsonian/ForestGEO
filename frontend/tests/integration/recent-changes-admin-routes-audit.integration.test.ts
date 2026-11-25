@@ -2,8 +2,9 @@
  * Recent Changes audit for the admin mutation routes #507 left uncovered, proven against real MySQL:
  *
  *   - POST /api/clearcensus runs the REAL clearcensusmsmts / clearcensusfull procedures (loaded from
- *     db/sql/storedprocedures.sql by local-db-setup) in caller-owned mode, so its audit rows and the
- *     deletes they describe commit or roll back together — including when the procedure itself fails.
+ *     db/sql/storedprocedures.sql by local-db-setup) in caller-owned mode and records one summary row
+ *     with the delete counts they report; the summary and the deletes commit or roll back together —
+ *     including when the procedure itself fails.
  *   - DELETE /api/admin/clear/failedmeasurements audits every failed row it removes.
  *   - POST/PATCH/DELETE /api/validations/crud audit every site-specific validation change, and their
  *     writes now actually run on the route transaction.
@@ -41,6 +42,8 @@ const CENSUS_DELETE_BLOCKED_MESSAGE = 'SIMULATED_CENSUS_DELETE_FAILURE_507';
 const CENSUS_DELETE_BLOCKER_TRIGGER = 'test_507_block_census_delete';
 const FORGED_VALIDATION_ID = 987654;
 const LOCK_WAIT_DEADLINE_MS = 5000;
+const MYSQL_NO_REFERENCED_ROW = 'ER_NO_REFERENCED_ROW_2';
+const MYSQL_LOCK_DEADLOCK = 'ER_LOCK_DEADLOCK';
 const FULL_CLEAR_REFERENCE_TABLES = ['attributes', 'personnel', 'roles', 'quadrats', 'species', 'specieslimits', 'genus', 'family', 'reference'] as const;
 
 const sharedState = vi.hoisted(() => ({
@@ -187,7 +190,7 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       if (Number(rows[0].total) > 0) return;
       await new Promise(resolve => setTimeout(resolve, LOCK_WAIT_POLL_INTERVAL_MS));
     }
-    throw new Error(`Session ${threadID} never waited on a lock within ${LOCK_WAIT_DEADLINE_MS} ms: the row it edits was not locked by the clear.`);
+    throw new Error(`Session ${threadID} never waited on a lock within ${LOCK_WAIT_DEADLINE_MS} ms: the row it references was not locked by the clear.`);
   }
 
   async function countRows(sql: string, params: unknown[] = []): Promise<number> {
@@ -242,13 +245,9 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
   }
 
   describe('POST /api/clearcensus', () => {
-    it('msmts: deletes the census and audits it and each of its measurements in the ingestion-snapshot shape, as the session user', async () => {
+    it('msmts: deletes the census and records one summary row with its last state and the measurement count, as the session user', async () => {
       const censusID = await createLatestCensus();
-      const measurementIDs = await seedMeasurementsInCensus(censusID, 3, 'CLR');
-      const [measurementsBefore] = await connection.query<RowDataPacket[]>(
-        'SELECT CoreMeasurementID, MeasuredDBH, RawTreeTag FROM coremeasurements WHERE CensusID = ? ORDER BY CoreMeasurementID',
-        [censusID]
-      );
+      await seedMeasurementsInCensus(censusID, 3, 'CLR');
 
       const response = await clearCensusPost(clearCensusRequest(censusID, 'msmts'));
       expect(response.status, await response.clone().text()).toBe(HTTPResponses.OK);
@@ -256,32 +255,31 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       expect(await countRows('SELECT COUNT(*) AS total FROM census WHERE CensusID = ?', [censusID])).toBe(0);
       expect(await countRows('SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ?', [censusID])).toBe(0);
 
-      const measurementAudits = await loadAuditRows('coremeasurements');
-      const dump = JSON.stringify(measurementAudits, null, 2);
-      expect(measurementAudits.map(row => [Number(row.RecordID), row.Operation]).sort(), dump).toEqual(measurementIDs.map(id => [id, 'DELETE']).sort());
-      for (const audit of measurementAudits) {
-        const before = measurementsBefore.find(row => row.CoreMeasurementID === Number(audit.RecordID))!;
-        expect(audit.NewRowState, dump).toBeNull();
-        expect(Number(audit.OldRowState?.MeasuredDBH), dump).toBe(Number(before.MeasuredDBH));
-        expect(audit.OldRowState?.RawTreeTag, dump).toBe(before.RawTreeTag);
-        expect(audit.OldRowState, 'the #592 export rolls up only ingestion-snapshot rows').toHaveProperty('UploadBatchID');
-        expect(audit.OldRowState).not.toHaveProperty('UserDefinedFields');
-        expect([audit.ChangedBy, audit.PlotID, audit.CensusID]).toEqual([AUTH_USER_EMAIL, testData.plots[0].plotID, censusID]);
-      }
-
-      const censusAudits = await loadAuditRows('census');
-      expect(
-        censusAudits.map(row => [row.RecordID, row.Operation, row.ChangedBy]),
-        JSON.stringify(censusAudits)
-      ).toEqual([[String(censusID), 'DELETE', AUTH_USER_EMAIL]]);
-      expect(censusAudits[0].OldRowState).toMatchObject({ CensusID: censusID, PlotID: testData.plots[0].plotID });
-      expect(await loadAuditRows('species'), 'msmts leaves reference data alone').toEqual([]);
+      const allAudits = await connection.query<RowDataPacket[]>('SELECT TableName, RecordID FROM unifiedchangelog').then(([rows]) => rows);
+      expect(allAudits, 'one row for the whole clear, none per measurement').toEqual([{ TableName: 'census', RecordID: String(censusID) }]);
+      const [summary] = await loadAuditRows('census');
+      console.log('[clearcensus msmts] summary row:', JSON.stringify(summary));
+      expect([summary.Operation, summary.NewRowState, summary.ChangedBy, summary.PlotID, summary.CensusID]).toEqual([
+        'DELETE',
+        null,
+        AUTH_USER_EMAIL,
+        testData.plots[0].plotID,
+        censusID
+      ]);
+      expect(summary.OldRowState).toMatchObject({
+        CensusID: censusID,
+        PlotID: testData.plots[0].plotID,
+        summaryKind: 'census-delete',
+        clearType: 'msmts',
+        deletedRowCounts: { coremeasurements: 3 }
+      });
+      expect(summary.OldRowState?.IsActive, 'BIT columns are recorded as 0/1, not a Buffer').toBe(1);
 
       const [[flagRow]] = await connection.query<RowDataPacket[]>('SELECT @clearcensus_caller_owns_transaction AS flag, @@foreign_key_checks AS fkChecks');
       expect(flagRow, 'the caller flag and foreign_key_checks must not leak onto the pooled connection').toEqual({ flag: null, fkChecks: 1 });
     });
 
-    it('rolls back the audit rows and every delete when the procedure fails mid-way in caller-owned mode', async () => {
+    it('rolls back the summary row and every delete when the procedure fails mid-way in caller-owned mode', async () => {
       const censusID = await createLatestCensus();
       const measurementIDs = await seedMeasurementsInCensus(censusID, 2, 'FAIL');
       await connection.query(
@@ -303,12 +301,12 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       ).toBe(true);
       expect(await countRows('SELECT COUNT(*) AS total FROM census WHERE CensusID = ?', [censusID])).toBe(1);
       expect(await countRows('SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [measurementIDs])).toBe(2);
-      expect(await countRows("SELECT COUNT(*) AS total FROM unifiedchangelog WHERE TableName IN ('census', 'coremeasurements')")).toBe(0);
+      expect(await countRows('SELECT COUNT(*) AS total FROM unifiedchangelog')).toBe(0);
       const [[flagRow]] = await connection.query<RowDataPacket[]>('SELECT @clearcensus_caller_owns_transaction AS flag, @@foreign_key_checks AS fkChecks');
       expect(flagRow).toEqual({ flag: null, fkChecks: 1 });
     });
 
-    it('leaves the census and its measurements untouched when its audit rows cannot be written', async () => {
+    it('leaves the census and its measurements untouched when its summary row cannot be written', async () => {
       const censusID = await createLatestCensus();
       const measurementIDs = await seedMeasurementsInCensus(censusID, 2, 'NOAUD');
       sharedState.failAuditInserts = true;
@@ -319,16 +317,14 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       expect(await countRows('SELECT COUNT(*) AS total FROM census WHERE CensusID = ?', [censusID])).toBe(1);
       expect(await countRows('SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [measurementIDs])).toBe(2);
     });
-  });
 
-  describe('POST /api/clearcensus racing other sessions at READ COMMITTED', () => {
-    it('refuses with 409 and deletes nothing when a measurement is added to the census after the audit', async () => {
+    it('refuses with 409 and deletes nothing when a measurement is added to the census after the lock', async () => {
       const censusID = await createLatestCensus();
       const measurementIDs = await seedMeasurementsInCensus(censusID, 2, 'RACEINS');
       let latecomerID = 0;
-      // An ordinary insert waits on the census row the clear holds (its FK check takes a
-      // shared lock on the parent). Writers that run with foreign_key_checks = 0, as several
-      // procedures do, are not held back; the delete-count check must catch them.
+      // An ordinary insert waits on the census row the clear holds (its FK check takes a shared lock on
+      // the parent). Writers that run with foreign_key_checks = 0, as several procedures do, are not held
+      // back; the procedure would delete the unlocked row, so the delete count exposes it.
       sharedState.beforeProcedureCall = async () => {
         await concurrentSession.query('SET foreign_key_checks = 0');
         const [result] = await concurrentSession.query<mysql.ResultSetHeader>(
@@ -349,26 +345,28 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       expect(await countRows('SELECT COUNT(*) AS total FROM unifiedchangelog')).toBe(0);
     });
 
-    it('holds an edit made between the audit and the delete until the clear commits, so the audited image is the deleted state', async () => {
+    it('holds an attribute insert on an existing measurement until the clear commits, so it never outlives the measurement', async () => {
       const censusID = await createLatestCensus();
-      const [measurementID] = await seedMeasurementsInCensus(censusID, 1, 'RACEUPD');
-      const [[{ MeasuredDBH: dbhBefore }]] = await connection.query<RowDataPacket[]>('SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?', [
-        measurementID
-      ]);
-      let concurrentEdit: Promise<number> | undefined;
+      const [measurementID] = await seedMeasurementsInCensus(censusID, 1, 'RACEATTR');
+      // The procedure deletes cmattributes before coremeasurements with foreign_key_checks off. Without
+      // the measurement locked, this insert could land between those deletes and leave an orphan.
+      let concurrentInsert: Promise<unknown> | undefined;
       sharedState.beforeProcedureCall = async () => {
-        concurrentEdit = concurrentSession
-          .query<mysql.ResultSetHeader>('UPDATE coremeasurements SET MeasuredDBH = 999 WHERE CoreMeasurementID = ?', [measurementID])
-          .then(([result]) => result.affectedRows);
+        concurrentInsert = concurrentSession.query("INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, 'LATE')", [measurementID]).then(
+          () => 'inserted',
+          (error: { code?: string }) => error.code
+        );
         await waitUntilSessionIsBlocked(concurrentSession.threadId);
       };
 
       const response = await clearCensusPost(clearCensusRequest(censusID, 'msmts'));
       expect(response.status, await response.clone().text()).toBe(HTTPResponses.OK);
 
-      expect(await concurrentEdit, 'the edit must wait on the lock and then find the row gone').toBe(0);
-      const [audit] = await loadAuditRows('coremeasurements');
-      expect(Number(audit.OldRowState?.MeasuredDBH), JSON.stringify(audit)).toBe(Number(dbhBefore));
+      const insertOutcome = await concurrentInsert;
+      console.log(`[msmts clear] concurrent attribute insert outcome: ${String(insertOutcome)}`);
+      expect([MYSQL_NO_REFERENCED_ROW, MYSQL_LOCK_DEADLOCK], 'the insert waited on the locked measurement and was refused').toContain(insertOutcome);
+      expect(await countRows('SELECT COUNT(*) AS total FROM cmattributes WHERE CoreMeasurementID = ?', [measurementID])).toBe(0);
+      expect(await countRows('SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID = ?', [measurementID])).toBe(0);
     });
   });
 
@@ -514,15 +512,20 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       return censusID;
     }
 
-    it('rolls back the census, its measurements and every reference table when a reference audit row fails after the CALL', async () => {
+    it('rolls back the census, its measurements and every reference table when the summary row fails after the CALL', async () => {
       const censusID = await prepareLastCensusWithEveryReferenceTable();
       const measurementIDs = await seedMeasurementsInCensus(censusID, 1, 'FULLRB');
       const countsBefore = new Map<string, number>();
       for (const table of FULL_CLEAR_REFERENCE_TABLES) countsBefore.set(table, await countRows(`SELECT COUNT(*) AS total FROM ${table}`));
-      sharedState.failAuditInsertWhen = params => params?.[0] === 'genus';
+      let procedureRan = false;
+      sharedState.beforeProcedureCall = async () => {
+        procedureRan = true;
+      };
+      sharedState.failAuditInsertWhen = params => params?.[0] === 'census';
 
       const response = await clearCensusPost(clearCensusRequest(censusID, 'full'));
 
+      expect(procedureRan, 'the summary fails after the procedure deleted everything').toBe(true);
       expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
       for (const table of FULL_CLEAR_REFERENCE_TABLES) {
         expect(await countRows(`SELECT COUNT(*) AS total FROM ${table}`), `${table} must be restored`).toBe(countsBefore.get(table));
@@ -532,7 +535,7 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       expect(await countRows('SELECT COUNT(*) AS total FROM unifiedchangelog')).toBe(0);
     });
 
-    it('refuses with 409 and deletes nothing when a reference row is added after the snapshot', async () => {
+    it('refuses with 409 and deletes nothing when a fixed-data row is added after the lock', async () => {
       const censusID = await prepareLastCensusWithEveryReferenceTable();
       sharedState.beforeProcedureCall = async () => {
         await concurrentSession.query("INSERT INTO attributes (Code, Description, IsActive) VALUES ('LATE7', 'added mid-clear', 1)");
@@ -543,47 +546,50 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
 
       expect(response.status, await response.clone().text()).toBe(HTTPResponses.CONFLICT);
       expect(await countRows('SELECT COUNT(*) AS total FROM census WHERE CensusID = ?', [censusID])).toBe(1);
+      for (const table of FULL_CLEAR_REFERENCE_TABLES) {
+        expect(await countRows(`SELECT COUNT(*) AS total FROM ${table}`), `${table} must be untouched`).toBeGreaterThan(0);
+      }
       expect(await countRows('SELECT COUNT(*) AS total FROM unifiedchangelog')).toBe(0);
     });
 
-    it('audits every reference row the procedure removes, schema-wide, alongside the census and its measurements', async () => {
+    // One test, because a committed full clear empties the census and every fixed-data table for the rest of the file.
+    it('records one summary row with every count it emptied, and holds a species insert naming an existing genus until it fails', async () => {
       const censusID = await prepareLastCensusWithEveryReferenceTable();
       const measurementIDs = await seedMeasurementsInCensus(censusID, 2, 'FULL');
-      const referenceCountsBefore = new Map<string, number>();
-      for (const table of FULL_CLEAR_REFERENCE_TABLES) {
-        referenceCountsBefore.set(table, await countRows(`SELECT COUNT(*) AS total FROM ${table}`));
-      }
+      const expectedCounts: Record<string, number> = { coremeasurements: measurementIDs.length };
+      for (const table of FULL_CLEAR_REFERENCE_TABLES) expectedCounts[table] = await countRows(`SELECT COUNT(*) AS total FROM ${table}`);
+      const [[{ GenusID: genusID }]] = await connection.query<RowDataPacket[]>('SELECT GenusID FROM genus LIMIT 1');
+      // The procedure deletes species before genus with foreign_key_checks off. Without the genus row
+      // locked, this insert could land between those deletes and leave a species without its genus.
+      let concurrentInsert: Promise<unknown> | undefined;
+      sharedState.beforeProcedureCall = async () => {
+        concurrentInsert = concurrentSession
+          .query("INSERT INTO species (GenusID, SpeciesCode, SpeciesName) VALUES (?, 'LATESP', 'added mid-clear')", [genusID])
+          .then(
+            () => 'inserted',
+            (error: { code?: string }) => error.code
+          );
+        await waitUntilSessionIsBlocked(concurrentSession.threadId);
+      };
 
       const response = await clearCensusPost(clearCensusRequest(censusID, 'full'));
       expect(response.status, await response.clone().text()).toBe(HTTPResponses.OK);
 
+      const insertOutcome = await concurrentInsert;
+      console.log(`[full clear] concurrent species insert outcome: ${String(insertOutcome)}`);
+      // InnoDB either lets the insert finish waiting and fail its foreign-key check, or picks it as the victim of a
+      // deadlock with the clear's species DELETE. Both refuse it; what must never happen is a committed species.
+      expect([MYSQL_NO_REFERENCED_ROW, MYSQL_LOCK_DEADLOCK], 'the insert waited on the locked genus and was refused').toContain(insertOutcome);
       for (const table of FULL_CLEAR_REFERENCE_TABLES) {
         expect(await countRows(`SELECT COUNT(*) AS total FROM ${table}`), `${table} should be empty`).toBe(0);
-        const audits = await loadAuditRows(table);
-        const dump = JSON.stringify(audits.slice(0, 3), null, 2);
-        expect(audits, `${table}: one DELETE per removed row\n${dump}`).toHaveLength(referenceCountsBefore.get(table)!);
-        for (const audit of audits) {
-          expect([audit.Operation, audit.ChangedBy, audit.PlotID, audit.CensusID, audit.NewRowState], dump).toEqual([
-            'DELETE',
-            AUTH_USER_EMAIL,
-            null,
-            null,
-            null
-          ]);
-          expect(audit.OldRowState, dump).not.toBeNull();
-        }
       }
-      const speciesAudit = (await loadAuditRows('species'))[0];
-      expect(speciesAudit.RecordID).toBe(String(speciesAudit.OldRowState?.SpeciesID));
-      const attributeAudits = await loadAuditRows('attributes');
-      for (const audit of attributeAudits) expect(audit.RecordID).toBe(audit.OldRowState?.Code);
-      expect(
-        attributeAudits.filter(audit => audit.RecordID === 'AUD7').map(audit => audit.OldRowState?.IsActive),
-        'both rows of a code, active and retired, are audited'
-      ).toEqual(expect.arrayContaining([0, 1]));
-
-      expect((await loadAuditRows('coremeasurements')).map(row => Number(row.RecordID)).sort()).toEqual([...measurementIDs].sort());
-      expect((await loadAuditRows('census')).map(row => row.RecordID)).toEqual([String(censusID)]);
+      const [allAudits] = await connection.query<RowDataPacket[]>('SELECT TableName, RecordID FROM unifiedchangelog');
+      expect(allAudits, 'one row for the whole clear, none per deleted row').toEqual([{ TableName: 'census', RecordID: String(censusID) }]);
+      const [summary] = await loadAuditRows('census');
+      console.log('[clearcensus full] summary row:', JSON.stringify(summary));
+      expect(summary.OldRowState).toMatchObject({ CensusID: censusID, summaryKind: 'census-delete', clearType: 'full' });
+      expect(summary.OldRowState?.deletedRowCounts).toEqual(expectedCounts);
+      expect([summary.ChangedBy, summary.PlotID, summary.CensusID]).toEqual([AUTH_USER_EMAIL, testData.plots[0].plotID, censusID]);
     });
   });
 });

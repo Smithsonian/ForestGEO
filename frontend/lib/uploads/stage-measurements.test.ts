@@ -137,8 +137,9 @@ const STATEMENT = {
   SESSION_LOCK: 'sessionLock',
   MEASUREMENT_ID_SELECT: 'measurementIdSelect',
   ERROR_LINK_DELETE: 'errorLinkDelete',
-  DELETE_AUDIT: 'deleteAudit',
   MEASUREMENT_DELETE: 'measurementDelete',
+  SUMMARY_READ: 'summaryRead',
+  SUMMARY_WRITE: 'summaryWrite',
   LEGACY_DELETE: 'legacyDelete',
   METRICS_DELETE: 'metricsDelete',
   MARKER_UPDATE: 'markerUpdate'
@@ -153,8 +154,9 @@ const STATEMENT_PATTERNS: ReadonlyArray<[StatementKind, RegExp]> = [
   [STATEMENT.FAMILY_PROBE, CENSUS_REPLACEMENT_STATEMENT.FAMILY_PROBE],
   [STATEMENT.MEASUREMENT_ID_SELECT, CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_ID_SELECT],
   [STATEMENT.ERROR_LINK_DELETE, CENSUS_REPLACEMENT_STATEMENT.ERROR_LINK_DELETE],
-  [STATEMENT.DELETE_AUDIT, CENSUS_REPLACEMENT_STATEMENT.DELETE_AUDIT],
   [STATEMENT.MEASUREMENT_DELETE, CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE],
+  [STATEMENT.SUMMARY_READ, CENSUS_REPLACEMENT_STATEMENT.REPLACEMENT_SUMMARY_READ],
+  [STATEMENT.SUMMARY_WRITE, CENSUS_REPLACEMENT_STATEMENT.REPLACEMENT_SUMMARY_WRITE],
   [STATEMENT.LEGACY_DELETE, CENSUS_REPLACEMENT_STATEMENT.LEGACY_DELETE],
   [STATEMENT.METRICS_DELETE, CENSUS_REPLACEMENT_STATEMENT.METRICS_DELETE]
 ];
@@ -217,6 +219,7 @@ function makeReplacementConnectionManager(script: ReplacementScript) {
   let lockIndex = 0;
   let legacyIndex = 0;
   let metricsIndex = 0;
+  let storedSummary: string | null = null;
   const occurrences = new Map<StatementKind, number>();
 
   const executeQuery = async (sql: string, params: unknown[] = [], transactionID?: string) => {
@@ -255,9 +258,13 @@ function makeReplacementConnectionManager(script: ReplacementScript) {
         return lastIDs.map(id => ({ CoreMeasurementID: id }));
       }
       case STATEMENT.ERROR_LINK_DELETE:
-      case STATEMENT.DELETE_AUDIT:
       case STATEMENT.MEASUREMENT_DELETE:
         return { affectedRows: lastIDs.length };
+      case STATEMENT.SUMMARY_READ:
+        return storedSummary === null ? [] : [{ ChangeID: 1, OldRowState: storedSummary }];
+      case STATEMENT.SUMMARY_WRITE:
+        storedSummary = String(/^\s*INSERT/.test(String(sql)) ? params[1] : params[0]);
+        return { affectedRows: 1 };
       case STATEMENT.LEGACY_DELETE: {
         if (script.legacy === 'missing') throw missingTableError('failedmeasurements');
         const affectedRows = script.legacy[legacyIndex++];
@@ -293,7 +300,8 @@ function makeReplacementConnectionManager(script: ReplacementScript) {
     }
   };
 
-  return { connectionManager: { executeQuery, withTransaction } as unknown as ConnectionManager, transactions, outsideTransactions };
+  const readSummary = () => (storedSummary === null ? null : (JSON.parse(storedSummary) as Record<string, unknown>));
+  return { connectionManager: { executeQuery, withTransaction } as unknown as ConnectionManager, transactions, outsideTransactions, readSummary };
 }
 
 type TransactionKind = 'measurement_window' | 'legacy_pass' | 'metrics_window' | 'completion' | 'session_check_only';
@@ -341,8 +349,9 @@ const SINGLE_SHORT_WINDOW_SCRIPT: ReplacementScript = {
 const REPLACEMENT_UNIT_OF_STATEMENT: Partial<Record<StatementKind, 'A' | 'B' | 'C' | 'D'>> = {
   [STATEMENT.MEASUREMENT_ID_SELECT]: 'A',
   [STATEMENT.ERROR_LINK_DELETE]: 'A',
-  [STATEMENT.DELETE_AUDIT]: 'A',
   [STATEMENT.MEASUREMENT_DELETE]: 'A',
+  [STATEMENT.SUMMARY_READ]: 'A',
+  [STATEMENT.SUMMARY_WRITE]: 'A',
   [STATEMENT.LEGACY_DELETE]: 'B',
   [STATEMENT.METRICS_DELETE]: 'C',
   [STATEMENT.MARKER_UPDATE]: 'D'
@@ -377,7 +386,7 @@ const loggedEvents = (event: string) => vi.mocked(ailogger.info).mock.calls.filt
 
 describe('replaceCensusForCleanReupload', () => {
   it('U3: commits each unit in its own transaction, marker last (catches: one transaction for everything; marker in an earlier transaction; no confirming window; metrics inside a measurement window; session lock taken with a plain read)', async () => {
-    const { result, error, transactions } = await runReplacement({
+    const { result, error, transactions, readSummary } = await runReplacement({
       measurementPages: [
         { cursor: 'zero', rows: W },
         { cursor: 'previous_last_id', rows: W },
@@ -390,6 +399,15 @@ describe('replaceCensusForCleanReupload', () => {
 
     expect(error).toBeUndefined();
     expect(result).toEqual({ outcome: 'replaced', deletedRows: 3 * W - 1, windowCount: 4 });
+    console.log('[U3] census-replacement summary row', JSON.stringify(readSummary()));
+    expect(readSummary()?.deletedRowCounts, 'one summary row holds every window').toEqual({ coremeasurements: 3 * W - 1 });
+    for (const transaction of transactions.filter(candidate => candidate.statements.some(statement => statement.kind === STATEMENT.MEASUREMENT_DELETE))) {
+      const kinds = transaction.statements.map(statement => statement.kind);
+      expect(kinds.slice(-2), `${transaction.id} adds its count to the summary after its delete, in the same transaction`).toEqual([
+        STATEMENT.SUMMARY_READ,
+        STATEMENT.SUMMARY_WRITE
+      ]);
+    }
     expect(transactions.map(transactionKind)).toEqual([MEASUREMENT, MEASUREMENT, MEASUREMENT, MEASUREMENT, LEGACY, METRICS, COMPLETION]);
     expect(transactions.map(transaction => transaction.outcome)).toEqual(Array(7).fill('committed'));
     for (const transaction of transactions) {

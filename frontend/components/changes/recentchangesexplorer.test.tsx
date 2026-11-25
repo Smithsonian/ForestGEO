@@ -2,8 +2,9 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import RecentChangesExplorer, { summarizeChange } from './recentchangesexplorer';
+import RecentChangesExplorer, { describeDeletedRowCounts, summarizeChange } from './recentchangesexplorer';
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
+import { CENSUS_REPLACEMENT_TABLE_NAME, DELETION_SUMMARY_KIND } from '@/lib/changelog/deletion-summary';
 
 vi.mock('@/app/contexts/compat-hooks', () => ({
   usePlotContext: () => ({ plotID: 1 }),
@@ -115,6 +116,36 @@ async function renderBulkRevisionSummaryCard(newRowStateOverrides: Record<string
   await waitFor(() => {
     expect(screen.getByText('Applied a bulk revision')).toBeInTheDocument();
   });
+}
+
+// Renders RecentChangesExplorer with one DELETE entry, the way the query route returns it.
+async function renderSingleDeleteEntry(entry: { tableName: string; recordID: string; oldRowState: Record<string, unknown> }) {
+  const deleteEntry = {
+    changeID: 20,
+    operation: 'DELETE' as const,
+    newRowState: null,
+    changeTimestamp: '2026-11-25T12:00:00.000Z',
+    changedBy: 'mason@si.edu',
+    ...entry
+  };
+  global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === '/api/changes/explorer/facets') {
+      return Promise.resolve(jsonResponse({ users: [], tables: [], operationCounts: { INSERT: 0, UPDATE: 0, DELETE: 1 } }));
+    }
+    if (url === '/api/changes/explorer/query') {
+      return Promise.resolve(
+        jsonResponse({
+          items: [{ type: 'single', entry: deleteEntry }],
+          totalItems: 1,
+          summary: { total: 1, updates: 0, inserts: 0, deletes: 1 },
+          hasMore: false
+        })
+      );
+    }
+    return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+  }) as any;
+  render(<RecentChangesExplorer />);
 }
 
 describe('RecentChangesExplorer', () => {
@@ -319,6 +350,65 @@ describe('RecentChangesExplorer', () => {
     } finally {
       restoreInnerText();
     }
+  });
+});
+
+describe('RecentChangesExplorer deletion summaries', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('renders a census delete as one card with its delete counts, not the census row fields', async () => {
+    await renderSingleDeleteEntry({
+      tableName: 'census',
+      recordID: '12',
+      oldRowState: {
+        CensusID: 12,
+        PlotCensusNumber: 3,
+        Description: 'third census',
+        summaryKind: DELETION_SUMMARY_KIND.censusDelete,
+        clearType: 'full',
+        deletedRowCounts: { coremeasurements: 1204, species: 3, family: 0 }
+      }
+    });
+
+    expect(await screen.findByText('Removed 1,204 coremeasurements, 3 species')).toBeInTheDocument();
+    expect(screen.getByText('Deleted a census')).toBeInTheDocument();
+    expect(screen.queryByText(/Description: third census/)).not.toBeInTheDocument();
+  });
+
+  it('renders a Clean Re-Upload census replacement with its file name and measurement count', async () => {
+    await renderSingleDeleteEntry({
+      tableName: CENSUS_REPLACEMENT_TABLE_NAME,
+      recordID: 'upload-session:session-1',
+      oldRowState: {
+        summaryKind: DELETION_SUMMARY_KIND.censusReplacement,
+        fileName: 'census3.csv',
+        batchID: 'batch-1',
+        deletedRowCounts: { coremeasurements: 52000 }
+      }
+    });
+
+    expect(await screen.findByText('Clean Re-Upload of census3.csv')).toBeInTheDocument();
+    expect(screen.getByText('Removed 52,000 coremeasurements')).toBeInTheDocument();
+  });
+
+  it('keeps the field view for an ordinary census delete that is not a summary', async () => {
+    await renderSingleDeleteEntry({ tableName: 'census', recordID: '9', oldRowState: { CensusID: 9, Description: 'grid delete' } });
+
+    expect(await screen.findByText(/Description: grid delete/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Removed /)).not.toBeInTheDocument();
+  });
+});
+
+describe('describeDeletedRowCounts', () => {
+  it('lists only the tables that lost rows, in recorded order', () => {
+    expect(describeDeletedRowCounts({ coremeasurements: 2, quadrats: 0, species: 1 })).toBe('Removed 2 coremeasurements, 1 species');
+  });
+
+  it('says so when nothing was removed, rather than rendering an empty line', () => {
+    expect(describeDeletedRowCounts({ coremeasurements: 0 })).toBe('No measurements removed');
+    expect(describeDeletedRowCounts(undefined)).toBe('No measurements removed');
   });
 });
 

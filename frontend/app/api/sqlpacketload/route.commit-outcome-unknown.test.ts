@@ -287,7 +287,7 @@ function primeMeasurementQueries(manager: any, session: FakeUploadSession = fres
       priorIDsStillToServe = [];
       return servedIDs.map(id => ({ CoreMeasurementID: id }));
     }
-    if (CENSUS_REPLACEMENT_STATEMENT.DELETE_AUDIT.test(text) || CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE.test(text)) {
+    if (CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE.test(text)) {
       return { affectedRows: priorCoreMeasurementIDs.length };
     }
     // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.

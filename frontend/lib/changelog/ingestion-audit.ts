@@ -160,9 +160,10 @@ export interface RecordDeletedCoreMeasurementsAuditParams {
 
 /**
  * Inserts one DELETE-operation `unifiedchangelog` row per coremeasurements
- * row about to be removed by Clean Re-Upload's census-replacement cleanup
- * (lib/ingestion/temporary-measurements.ts cleanupPreviousFileUploads,
- * issue #507) — set-based over an explicit ID list, not a per-row loop.
+ * row about to be removed by a failed-row cleanup or a revision's duplicate
+ * removal (issue #507) — set-based over an explicit ID list, not a per-row
+ * loop. Clean Re-Upload's census replacement records a single summary row
+ * instead (lib/changelog/deletion-summary.ts).
  *
  * Callers MUST run this in the SAME transaction as, and BEFORE, the DELETE
  * that removes `coreMeasurementIDs`: the SELECT that produced the ID list and
@@ -567,24 +568,6 @@ export async function auditCoreMeasurementsKeyedDiff(params: AuditCoreMeasuremen
   }
 
   return { insertedCount, updatedCount, unchangedCount, after };
-}
-
-/** The census-wide form of recordDeletedCoreMeasurementsAudit, for a whole-census clear. */
-export async function recordDeletedCensusCoreMeasurementsAudit(params: {
-  tx: Pick<BulkIngestionExecutor, 'query'>;
-  schema: string;
-  censusID: number;
-  changedBy: string | null;
-  plotID: number;
-}): Promise<number> {
-  const { tx, schema, censusID, changedBy, plotID } = params;
-  const sql = safeFormatQuery(schema, buildDeleteAuditRowsSQL('cm.CensusID = ?'));
-  try {
-    const result = await tx.query(sql, [changedBy, plotID, censusID, censusID]);
-    return Number((result as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
-  } catch (error: unknown) {
-    throw new ChangelogWriteError(ChangelogOperation.DELETE, COREMEASUREMENTS_TABLE_NAME, `census:${censusID}`, error);
-  }
 }
 
 /**

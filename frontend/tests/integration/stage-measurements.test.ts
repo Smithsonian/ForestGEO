@@ -1453,15 +1453,17 @@ describe('stageMeasurementChunk — integration', () => {
   describe('I6: a staging rollback does not undo the replacement', () => {
     const PRIOR_ROW_COUNT = 3;
 
-    async function countDeleteAudits(): Promise<number> {
+    /** The measurement count the census-replacement summary rows record for this census. */
+    async function countSummarizedDeletes(): Promise<number> {
       const [rows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(*) AS count FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND Operation = 'DELETE' AND PlotID = ? AND CensusID = ?`,
+        `SELECT COALESCE(SUM(JSON_EXTRACT(OldRowState, '$.deletedRowCounts.coremeasurements')), 0) AS count
+         FROM unifiedchangelog WHERE TableName = 'census_replacement' AND Operation = 'DELETE' AND PlotID = ? AND CensusID = ?`,
         [plotID, censusID]
       );
       return Number(rows[0].count);
     }
 
-    it('a retry with the same session replaces nothing again, stages, and adds no DELETE audits (catches: a replacement that re-runs, or a marker rolled back with staging)', async () => {
+    it('a retry with the same session replaces nothing again, stages, and counts no further deletes (catches: a replacement that re-runs, or a marker rolled back with staging)', async () => {
       await seedUploadSession(UPLOAD_SESSION_ID);
       for (let priorRow = 0; priorRow < PRIOR_ROW_COUNT; priorRow++) await seedEarlierFileFailureRow(`previous-upload-batch-${priorRow}`);
       expect(await countCensusMeasurements()).toBe(PRIOR_ROW_COUNT);
@@ -1470,14 +1472,14 @@ describe('stageMeasurementChunk — integration', () => {
       await stageMeasurementChunk(connectionManager, baseParams(abortedTransactionID));
       await connectionManager.rollbackTransaction(abortedTransactionID);
 
-      const auditsAfterReplacement = await countDeleteAudits();
+      const summarizedAfterReplacement = await countSummarizedDeletes();
       console.log(
         `[staging-rollback] marker=${await censusReplacementMarker(UPLOAD_SESSION_ID)} priorRows=${await countCensusMeasurements()} ` +
-          `deleteAudits=${auditsAfterReplacement} staged=${await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID)}`
+          `summarizedDeletes=${summarizedAfterReplacement} staged=${await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID)}`
       );
       expect(await censusReplacementMarker(UPLOAD_SESSION_ID), 'the replacement committed on its own; rolling back staging must not unset it').not.toBeNull();
       expect(await countCensusMeasurements(), 'the committed replacement stays applied').toBe(0);
-      expect(auditsAfterReplacement, 'every removed row was audited').toBe(PRIOR_ROW_COUNT);
+      expect(summarizedAfterReplacement, 'the summary counts every removed row').toBe(PRIOR_ROW_COUNT);
       expect(await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID)).toBe(0);
 
       const retryReplacement = await replaceCensusForCleanReupload(connectionManager, baseReplacementParams());
@@ -1489,7 +1491,7 @@ describe('stageMeasurementChunk — integration', () => {
       await connectionManager.commitTransaction(retryTransactionID);
 
       expect(retryResult.insertedCount).toBe(EXPECTED_STAGED_ROW_COUNT);
-      expect(await countDeleteAudits(), 'the retry must not delete or audit anything again').toBe(auditsAfterReplacement);
+      expect(await countSummarizedDeletes(), 'the retry must not delete or count anything again').toBe(summarizedAfterReplacement);
     });
   });
 

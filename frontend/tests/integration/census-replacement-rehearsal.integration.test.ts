@@ -5,7 +5,7 @@
  * BEFORE the staging transaction opens (replaceCensusForCleanReupload: measurement
  * windows of CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE ids, legacy failedmeasurements passes,
  * uploadmetrics windows, then the session marker). For Mpala census 3 that is 412,427
- * parked rows with their error links and DELETE-audit rows. ConnectionManager.cleanupStaleTransactions
+ * parked rows with their error links, counted in one Recent Changes summary row. ConnectionManager.cleanupStaleTransactions
  * rolls back ANY transaction in the process older than 240 s, and any user can trigger it through
  * "reingest all" on any site, so no single transaction may get near that. This rehearsal drives the
  * production sequence on the real ConnectionManager singleton, on a seeded Mpala shape:
@@ -18,8 +18,8 @@
  *   1 replacementRun      replacement + first chunk; every transaction within LOCAL_TRANSACTION_BUDGET_MS,
  *                         exact replaced state, controls untouched, the window statements EXPLAIN as range on PRIMARY
  *   2 interruptedRun      fresh seed; failure injected at the coremeasurements DELETE of the middle window;
- *                         the committed windows stay deleted and audited, the marker stays unset, nothing is staged
- *   3 resumedRun          retry of run 2 with the same batch and session; finishes the replacement, no double audit
+ *                         the committed windows stay deleted and counted, the marker stays unset, nothing is staged
+ *   3 resumedRun          retry of run 2 with the same batch and session; finishes the replacement, no double count
  *   4 stagingRollbackRun  fresh seed; failure injected at the staging insert after the replacement; staging rolls back,
  *                         the marker stays set, the census stays replaced; the retry runs no replacement transaction
  *   5 recoveryRun         ingestBatch on a failed-first census (the #562 recovery, 412,427 rows at the full profile): bounded
@@ -68,6 +68,7 @@ import {
 } from '@/lib/uploads/stage-measurements';
 import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
 import { CENSUS_REPLACEMENT_STATEMENT } from '../setup/census-replacement-statement-patterns';
+import { CENSUS_REPLACEMENT_TABLE_NAME } from '@/lib/changelog/deletion-summary';
 import { captureCensusReplacementWindowStatements } from '../setup/census-replacement-statement-capture';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { CENSUS_REPLACEMENT_MARKER_COLUMN, resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
@@ -221,6 +222,7 @@ const STATEMENT_PHASE = {
   COREMEASUREMENT_SELECT_FOR_UPDATE: 'coreMeasurementSelectForUpdate',
   COREMEASUREMENT_DELETE_AUDIT: 'coreMeasurementDeleteAudit',
   COREMEASUREMENT_DELETE: 'coreMeasurementDelete',
+  REPLACEMENT_SUMMARY_WRITE: 'replacementSummaryWrite',
   LEGACY_DELETE: 'legacyDelete',
   UPLOADMETRICS_DELETE: 'uploadMetricsDelete',
   MARKER_UPDATE: 'markerUpdate',
@@ -237,13 +239,16 @@ const STATEMENT_PHASE = {
 } as const;
 type StatementPhase = (typeof STATEMENT_PHASE)[keyof typeof STATEMENT_PHASE];
 
+const DELETE_RECORDING = { SUMMARY: 'summary', PER_ROW: 'perRow' } as const;
+type DeleteRecording = (typeof DELETE_RECORDING)[keyof typeof DELETE_RECORDING];
+
 /** Runs 1-4: every one of these must match at least one statement in a run that finishes the replacement and commits its staging. */
 const REPLACEMENT_RUN_PHASES: readonly StatementPhase[] = [
   STATEMENT_PHASE.SESSION_LOCK,
   STATEMENT_PHASE.ERROR_LINK_DELETE,
   STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE,
-  STATEMENT_PHASE.COREMEASUREMENT_DELETE_AUDIT,
   STATEMENT_PHASE.COREMEASUREMENT_DELETE,
+  STATEMENT_PHASE.REPLACEMENT_SUMMARY_WRITE,
   STATEMENT_PHASE.LEGACY_DELETE,
   STATEMENT_PHASE.UPLOADMETRICS_DELETE,
   STATEMENT_PHASE.MARKER_UPDATE,
@@ -296,6 +301,7 @@ const STATEMENT_PHASE_PATTERNS: ReadonlyArray<{ phase: StatementPhase; pattern: 
   { phase: STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE, pattern: COREMEASUREMENT_SELECT_FOR_UPDATE_PATTERN },
   { phase: STATEMENT_PHASE.COREMEASUREMENT_DELETE_AUDIT, pattern: CENSUS_REPLACEMENT_STATEMENT.DELETE_AUDIT },
   { phase: STATEMENT_PHASE.COREMEASUREMENT_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE },
+  { phase: STATEMENT_PHASE.REPLACEMENT_SUMMARY_WRITE, pattern: CENSUS_REPLACEMENT_STATEMENT.REPLACEMENT_SUMMARY_WRITE },
   { phase: STATEMENT_PHASE.LEGACY_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.LEGACY_DELETE },
   { phase: STATEMENT_PHASE.UPLOADMETRICS_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.METRICS_DELETE },
   { phase: STATEMENT_PHASE.MARKER_UPDATE, pattern: CENSUS_REPLACEMENT_STATEMENT.MARKER_UPDATE },
@@ -626,6 +632,8 @@ interface CensusThreeState {
   censusThreeMeasurementRows: number;
   deleteAuditRows: number;
   distinctDeleteAuditRecords: number;
+  /** Measurements the census_replacement summary rows count; a replacement writes no per-row DELETE audit. */
+  summarizedDeleteRows: number;
   insertAuditRows: number;
   uploadMetricsRows: number;
   failedUploadMetricsRows: number;
@@ -654,6 +662,7 @@ function expectedSeedState(profile: RehearsalProfile): CensusThreeState {
     censusThreeMeasurementRows: total,
     deleteAuditRows: 0,
     distinctDeleteAuditRecords: 0,
+    summarizedDeleteRows: 0,
     insertAuditRows: total,
     uploadMetricsRows: MPALA_FAILED_SUB_BATCH_COUNT,
     failedUploadMetricsRows: MPALA_FAILED_SUB_BATCH_COUNT,
@@ -668,8 +677,9 @@ function expectedReplacedState(profile: RehearsalProfile): CensusThreeState {
     failedFamilyRows: 0,
     failedFamilyErrorLinks: { MISSING_FIELD_SPECIESCODE: 0, SQL_EXCEPTION: 0 },
     censusThreeMeasurementRows: 0,
-    deleteAuditRows: total,
-    distinctDeleteAuditRecords: total,
+    deleteAuditRows: 0,
+    distinctDeleteAuditRecords: 0,
+    summarizedDeleteRows: total,
     insertAuditRows: total,
     uploadMetricsRows: 0,
     failedUploadMetricsRows: 0,
@@ -1103,6 +1113,7 @@ function expectedRecoveredState(profile: RehearsalProfile): CensusThreeState {
     censusThreeMeasurementRows: RECOVERY_INCOMING_ROWS,
     deleteAuditRows: total,
     distinctDeleteAuditRecords: total,
+    summarizedDeleteRows: 0,
     insertAuditRows: total + RECOVERY_INCOMING_ROWS,
     uploadMetricsRows: SINGLE_TRANSACTION,
     failedUploadMetricsRows: 0,
@@ -1304,6 +1315,11 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
        FROM unifiedchangelog WHERE TableName = ? AND CensusID = ?`,
       [CHANGELOG_OPERATION.DELETE, CHANGELOG_OPERATION.DELETE, CHANGELOG_OPERATION.INSERT, CHANGELOG_TABLE_COREMEASUREMENTS, census]
     );
+    const summarizedDeleteRows = await countOf(
+      `SELECT COALESCE(SUM(JSON_EXTRACT(OldRowState, '$.deletedRowCounts.coremeasurements')), 0) AS total
+       FROM unifiedchangelog WHERE TableName = ? AND Operation = ? AND CensusID = ?`,
+      [CENSUS_REPLACEMENT_TABLE_NAME, CHANGELOG_OPERATION.DELETE, census]
+    );
     const metricsRows = await query(`SELECT COUNT(*) AS total, SUM(status = ?) AS failedTotal FROM uploadmetrics WHERE plotID = ? AND censusID = ?`, [
       UPLOAD_STATUS_FAILED,
       plotID,
@@ -1321,6 +1337,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       censusThreeMeasurementRows: await countOf(`SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ?`, [census]),
       deleteAuditRows: Number(auditRows[0].deleteAuditRows ?? 0),
       distinctDeleteAuditRecords: Number(auditRows[0].distinctDeleteAuditRecords ?? 0),
+      summarizedDeleteRows,
       insertAuditRows: Number(auditRows[0].insertAuditRows ?? 0),
       uploadMetricsRows: Number(metricsRows[0].total),
       failedUploadMetricsRows: Number(metricsRows[0].failedTotal ?? 0),
@@ -1768,10 +1785,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       windowIDs
     );
     const mismatches: string[] = [];
-    for (const [label, statement] of [
-      ['window DELETE', statements.coreMeasurementDelete],
-      ['window audit INSERT', statements.deleteAudit]
-    ] as const) {
+    for (const [label, statement] of [['window DELETE', statements.coreMeasurementDelete]] as const) {
       const planRows = await query(`EXPLAIN ${statement.sql}`, statement.params);
       const warningCodes = (await query('SHOW WARNINGS')).map(warning => Number(warning.Code));
       console.log(
@@ -1821,8 +1835,10 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     };
   }
 
-  function expectedInterruptedState(prefix: InterruptionPrefix): CensusThreeState {
+  /** A replacement counts its deletes in a summary row; the failed-census recovery audits each one. */
+  function expectedInterruptedState(prefix: InterruptionPrefix, deletesRecordedAs: DeleteRecording): CensusThreeState {
     const seed = expectedSeedState(profile);
+    const perRowAudits = deletesRecordedAs === DELETE_RECORDING.PER_ROW ? prefix.deletedRows : 0;
     return {
       ...seed,
       failedFamilyRows: seed.failedFamilyRows - prefix.deletedRows,
@@ -1831,13 +1847,14 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
         SQL_EXCEPTION: seed.failedFamilyErrorLinks.SQL_EXCEPTION - prefix.deletedErrorLinks.SQL_EXCEPTION
       },
       censusThreeMeasurementRows: seed.censusThreeMeasurementRows - prefix.deletedRows,
-      deleteAuditRows: prefix.deletedRows,
-      distinctDeleteAuditRecords: prefix.deletedRows
+      deleteAuditRows: perRowAudits,
+      distinctDeleteAuditRecords: perRowAudits,
+      summarizedDeleteRows: deletesRecordedAs === DELETE_RECORDING.SUMMARY ? prefix.deletedRows : 0
     };
   }
 
-  /** The deleted rows must be the first ones by id, not merely as many: nothing at or below the cursor survives, and each is audited. */
-  async function describePrefixMismatches(prefix: InterruptionPrefix): Promise<string[]> {
+  /** The deleted rows must be the first ones by id, not merely as many: nothing at or below the cursor survives, and each per-row audit names one of them. */
+  async function describePrefixMismatches(prefix: InterruptionPrefix, deletesRecordedAs: DeleteRecording): Promise<string[]> {
     const survivorsInPrefix = await countOf(`SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ? AND CoreMeasurementID <= ?`, [
       censusIDs.three,
       prefix.lastDeletedID
@@ -1848,7 +1865,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     );
     const mismatches: string[] = [];
     if (survivorsInPrefix !== 0) mismatches.push(`${survivorsInPrefix} rows at or below id ${prefix.lastDeletedID} survived the interrupted replacement`);
-    if (auditedInPrefix !== prefix.deletedRows)
+    if (deletesRecordedAs === DELETE_RECORDING.PER_ROW && auditedInPrefix !== prefix.deletedRows)
       mismatches.push(`${auditedInPrefix} audited ids at or below ${prefix.lastDeletedID}, expected ${prefix.deletedRows}`);
     return mismatches;
   }
@@ -1907,7 +1924,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   );
 
   it(
-    '(2) interrupted run: a failure at the middle window leaves exactly the committed windows deleted and audited, the marker unset (catches: a replacement that rolls back or over-deletes)',
+    '(2) interrupted run: a failure at the middle window leaves exactly the committed windows deleted and counted, the marker unset (catches: a replacement that rolls back or over-deletes)',
     async () => {
       const expectation = runExpectations.interruptedRun;
       const preRunMismatches = await reseedCensusThree(interruptedRunBatchID, SESSION_ID.INTERRUPTED_RUN);
@@ -1920,15 +1937,15 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       const { state, controls } = await verifyRun(
         'interruptedRun',
         run,
-        expectedInterruptedState(prefix),
+        expectedInterruptedState(prefix, DELETE_RECORDING.SUMMARY),
         interruptedRunBatchID,
         SESSION_ID.INTERRUPTED_RUN,
         preRunMismatches
       );
-      run.verification!.countMismatches.push(...(await describePrefixMismatches(prefix)));
+      run.verification!.countMismatches.push(...(await describePrefixMismatches(prefix, DELETE_RECORDING.SUMMARY)));
 
       expect(runFailedChecks('interruptedRun', run, expectation), 'every interrupted-run check (the same list feeds SUMMARY.passed)').toEqual([]);
-      expect(state).toEqual(expectedInterruptedState(prefix));
+      expect(state).toEqual(expectedInterruptedState(prefix, DELETE_RECORDING.SUMMARY));
       expect(controls).toEqual(controlBaseline);
     },
     RUN_TIMEOUT_MS
@@ -1944,7 +1961,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       const { state, controls } = await verifyRun('resumedRun', run, expectedReplacedState(profile), interruptedRunBatchID, SESSION_ID.INTERRUPTED_RUN, []);
 
       expect(runFailedChecks('resumedRun', run, expectation), 'every resumed-run check (the same list feeds SUMMARY.passed)').toEqual([]);
-      expect(state, 'DELETE-audit rows equal the failed-row total and are all distinct').toEqual(expectedReplacedState(profile));
+      expect(state, 'the summary counts the failed-row total once, with no per-row DELETE audit').toEqual(expectedReplacedState(profile));
       expect(controls).toEqual(controlBaseline);
     },
     RUN_TIMEOUT_MS
@@ -2018,8 +2035,11 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       run.verification = {
         preRunMismatches,
         stateMismatches: [
-          ...describeMismatches({ ...expectedInterruptedState(prefix), stagedReplacementRows: RECOVERY_INCOMING_ROWS }, interruptedState),
-          ...(await describePrefixMismatches(prefix))
+          ...describeMismatches(
+            { ...expectedInterruptedState(prefix, DELETE_RECORDING.PER_ROW), stagedReplacementRows: RECOVERY_INCOMING_ROWS },
+            interruptedState
+          ),
+          ...(await describePrefixMismatches(prefix, DELETE_RECORDING.PER_ROW))
         ],
         controlCensusMismatches: describeMismatches(controlBaseline, await readControlFingerprints())
       };

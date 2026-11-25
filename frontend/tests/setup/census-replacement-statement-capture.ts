@@ -1,5 +1,12 @@
 import type ConnectionManager from '@/lib/db/connectionmanager';
+import type { TxExecutor } from '@/lib/db/connectionmanager';
 import { deleteCensusReplacementChunk, lockAuditAndDeleteCoreMeasurementWindow, type CoreMeasurementDeleteScope } from '@/lib/ingestion/temporary-measurements';
+import { recordDeletedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
+import {
+  buildCensusReplacementSummaryRecordID,
+  CENSUS_REPLACEMENT_UPLOAD_SCOPE,
+  type CensusReplacementSummaryIdentity
+} from '@/lib/changelog/deletion-summary';
 
 export interface CapturedStatement {
   sql: string;
@@ -9,8 +16,9 @@ export interface CapturedStatement {
 export interface CensusReplacementWindowStatements {
   idSelect: CapturedStatement;
   errorLinkDelete: CapturedStatement;
-  deleteAudit: CapturedStatement;
   coreMeasurementDelete: CapturedStatement;
+  summaryRead: CapturedStatement;
+  summaryWrite: CapturedStatement;
 }
 
 export interface CensusReplacementWindowScope {
@@ -23,7 +31,8 @@ export interface CensusReplacementWindowScope {
 }
 
 const CAPTURE_TRANSACTION_ID = 'statement-capture';
-const WINDOW_STATEMENT_COUNT = 4;
+const CAPTURE_FILE_NAME = 'statement-capture.csv';
+const WINDOW_STATEMENT_COUNT = 5;
 const DESCRIBED_STATEMENT_LENGTH = 80;
 
 /**
@@ -38,9 +47,17 @@ export async function captureCensusReplacementWindowStatements(
   const recorder = {
     executeQuery: async (sql: string, params: unknown[] = []) => {
       captured.push({ sql, params });
-      return captured.length === 1 ? windowIDs.map(id => ({ CoreMeasurementID: id })) : { affectedRows: windowIDs.length };
+      if (captured.length === 1) return windowIDs.map(id => ({ CoreMeasurementID: id }));
+      if (/^\s*SELECT\b[\s\S]*\.unifiedchangelog\b/.test(sql)) return [];
+      return { affectedRows: windowIDs.length };
     }
   } as unknown as ConnectionManager;
+  const summary: CensusReplacementSummaryIdentity = {
+    recordID: buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.uploadSession, CAPTURE_TRANSACTION_ID),
+    fileName: CAPTURE_FILE_NAME,
+    batchID: scope.incomingBatchID,
+    changedBy: scope.changedBy
+  };
 
   await deleteCensusReplacementChunk(
     recorder,
@@ -49,7 +66,7 @@ export async function captureCensusReplacementWindowStatements(
     scope.plotID,
     scope.censusID,
     scope.afterCoreMeasurementID,
-    scope.changedBy,
+    summary,
     CAPTURE_TRANSACTION_ID
   );
 
@@ -59,8 +76,24 @@ export async function captureCensusReplacementWindowStatements(
         captured.map(statement => statement.sql.replace(/\s+/g, ' ').trim().slice(0, DESCRIBED_STATEMENT_LENGTH)).join(' | ')
     );
   }
-  const [idSelect, errorLinkDelete, deleteAudit, coreMeasurementDelete] = captured;
-  return { idSelect, errorLinkDelete, deleteAudit, coreMeasurementDelete };
+  const [idSelect, errorLinkDelete, coreMeasurementDelete, summaryRead, summaryWrite] = captured;
+  return { idSelect, errorLinkDelete, coreMeasurementDelete, summaryRead, summaryWrite };
+}
+
+/**
+ * The per-row DELETE audit INSERT the failed-row cleanups issue for `ids` (recordDeletedCoreMeasurementsAudit),
+ * captured without a database. Called directly, not through a window, so a test can size `ids` past the window limit.
+ */
+export async function captureDeleteAuditStatement(schema: string, ids: number[], plotID: number, censusID: number): Promise<CapturedStatement> {
+  const captured: CapturedStatement[] = [];
+  const recorder: Pick<TxExecutor, 'query'> = {
+    query: async <T>(sql: string, params: unknown[] = []): Promise<T> => {
+      captured.push({ sql, params });
+      return { affectedRows: ids.length } as T;
+    }
+  };
+  await recordDeletedCoreMeasurementsAudit({ tx: recorder, schema, coreMeasurementIDs: ids, changedBy: null, plotID, censusID });
+  return captured[0];
 }
 
 /** The exact lock statement production issues for one window of `scope`, captured without a database. */

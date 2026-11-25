@@ -1,4 +1,5 @@
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
+import { buildCensusReplacementSummaryRecordID, CENSUS_REPLACEMENT_UPLOAD_SCOPE } from '@/lib/changelog/deletion-summary';
 /**
  * In-process background upload worker (async-upload remediation Task 10).
  *
@@ -945,7 +946,9 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
         // running totals, so a worker retry of this exact chunk replaces
         // its prior contribution instead of a second, different chunk
         // overwriting it.
-        chunkIdentity: `${batchID}:chunk${chunkIndex}`
+        chunkIdentity: `${batchID}:chunk${chunkIndex}`,
+        // A retry runs under a new upload session; the job file names the upload across attempts.
+        censusReplacementSummaryRecordID: buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.backgroundJobFile, file.jobFileID)
       };
       try {
         await replaceCensusForCleanReupload(connectionManager, chunkParams);

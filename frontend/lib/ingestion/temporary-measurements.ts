@@ -5,6 +5,7 @@ import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-fa
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
 import { recordDeletedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
+import { addToCensusReplacementSummary, type CensusReplacementSummaryIdentity } from '@/lib/changelog/deletion-summary';
 import ailogger from '@/ailogger';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
 import { toFiniteNumber } from '@/config/measurementerrors';
@@ -387,12 +388,15 @@ async function auditAndDeleteCoreMeasurements(
         `audited ${auditedCount}. Refusing to delete — the audit trail and the data would disagree.`
     );
   }
+  return deleteLockedCoreMeasurements(connectionManager, schema, ids, transactionID);
+}
+
+/** Deletes exactly `ids`, which the caller holds locked, and refuses a count that says otherwise. */
+async function deleteLockedCoreMeasurements(connectionManager: ConnectionManager, schema: string, ids: number[], transactionID: string): Promise<number> {
   const deleteSQL = safeFormatQuery(schema, `DELETE FROM ??.coremeasurements WHERE CoreMeasurementID IN (${buildInPlaceholders(ids.length)})`);
   const deletedRows = requireAffectedRows(await connectionManager.executeQuery(deleteSQL, ids, transactionID), deleteSQL);
   if (deletedRows !== ids.length) {
-    throw new Error(
-      `Audited delete removed ${deletedRows} coremeasurements row(s) but audited ${ids.length} — ` + `the audit trail and the data would disagree.`
-    );
+    throw new Error(`Deleted ${deletedRows} coremeasurements row(s) but locked ${ids.length} — the audit trail and the data would disagree.`);
   }
   return deletedRows;
 }
@@ -609,8 +613,8 @@ export interface CensusReplacementChunkResult {
 /**
  * One measurement window of a census replacement, in the caller's transaction:
  * lock at most CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE prior ids above
- * `afterCoreMeasurementID`, delete their error links, audit them, delete them.
- * Knows nothing about upload sessions.
+ * `afterCoreMeasurementID`, delete their error links, delete them, and add the
+ * count to the upload's census-replacement summary row in Recent Changes.
  */
 export async function deleteCensusReplacementChunk(
   connectionManager: ConnectionManager,
@@ -619,7 +623,7 @@ export async function deleteCensusReplacementChunk(
   plotID: number,
   censusID: number,
   afterCoreMeasurementID: number,
-  changedBy: string | null,
+  summary: CensusReplacementSummaryIdentity,
   transactionID: string
 ): Promise<CensusReplacementChunkResult> {
   const selectIdsSQL = safeFormatQuery(
@@ -638,7 +642,15 @@ export async function deleteCensusReplacementChunk(
   );
   if (ids.length === 0) return { deletedRows: 0, lastCoreMeasurementID: afterCoreMeasurementID };
   await deleteErrorLinksForMeasurements(connectionManager, schema, ids, transactionID);
-  const deletedRows = await auditAndDeleteCoreMeasurements(connectionManager, schema, ids, changedBy, plotID, censusID, transactionID);
+  const deletedRows = await deleteLockedCoreMeasurements(connectionManager, schema, ids, transactionID);
+  await addToCensusReplacementSummary({
+    tx: transactionExecutorFor(connectionManager, transactionID),
+    schema,
+    identity: summary,
+    deletedMeasurements: deletedRows,
+    plotID,
+    censusID
+  });
   return { deletedRows, lastCoreMeasurementID: ids[ids.length - 1] };
 }
 
@@ -715,12 +727,10 @@ export async function deleteCensusReplacementMetricsWindow(
  * windows are held until that transaction ends. replaceCensusForCleanReupload
  * is the bounded, separately committed form of the same windows.
  *
- * `changedBy` attributes the coremeasurements DELETE audit rows this writes
- * to `unifiedchangelog` (#507). `null` records an unattributed cleanup rather
- * than throwing — see recordDeletedCoreMeasurementsAudit. The derivative
- * measurement_error_log/failedmeasurements/uploadmetrics deletes below are
- * deliberately NOT audited; see deleteCoreMeasurementsInBoundedChunksWithAudit's
- * doc comment for why.
+ * `summary` names the census-replacement summary row this records in Recent
+ * Changes: one row for the upload with the number of measurements removed. The
+ * derivative measurement_error_log/failedmeasurements/uploadmetrics deletes are
+ * not counted.
  */
 export async function cleanupPreviousFileUploads(
   connectionManager: ConnectionManager,
@@ -729,7 +739,7 @@ export async function cleanupPreviousFileUploads(
   currentBatchID: string,
   plotID: number,
   censusID: number,
-  changedBy: string | null,
+  summary: CensusReplacementSummaryIdentity,
   transactionID: string
 ): Promise<number> {
   // SCOPE: the whole target census, minus the incoming batch family.
@@ -759,7 +769,7 @@ export async function cleanupPreviousFileUploads(
       plotID,
       censusID,
       cursor,
-      changedBy,
+      summary,
       transactionID
     );
     deletedCmRows += window.deletedRows;

@@ -2089,15 +2089,27 @@ describe('runJobIfClaimable — integration', () => {
       return Number(rows[0].total);
     }
 
-    /** Only the replacement's DELETE audits: ingesting the job's own files can write unrelated ones. */
-    async function readPriorBatchDeleteAudits(): Promise<{ audits: number; distinctRecords: number }> {
-      const [rows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(*) AS audits, COUNT(DISTINCT RecordID) AS distinctRecords FROM unifiedchangelog
+    /**
+     * The replacement's Recent Changes record: one census_replacement summary row per upload, retries included,
+     * the measurements they count, and any per-row DELETE audit of a prior-batch row (there must be none).
+     */
+    async function readReplacementRecord(): Promise<{ summaryRows: number; summarizedDeletes: number; perRowAudits: number }> {
+      const [summaries] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS summaryRows, COALESCE(SUM(JSON_EXTRACT(OldRowState, '$.deletedRowCounts.coremeasurements')), 0) AS summarizedDeletes
+         FROM unifiedchangelog WHERE TableName = 'census_replacement' AND Operation = 'DELETE' AND CensusID = ?`,
+        [censusID]
+      );
+      const [perRow] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS total FROM unifiedchangelog
          WHERE TableName = 'coremeasurements' AND Operation = 'DELETE' AND CensusID = ?
            AND JSON_UNQUOTE(JSON_EXTRACT(OldRowState, ?)) = ?`,
         [censusID, PRIOR_BATCH_AUDIT_JSON_PATH, PRIOR_CENSUS_BATCH_ID]
       );
-      return { audits: Number(rows[0].audits), distinctRecords: Number(rows[0].distinctRecords) };
+      return {
+        summaryRows: Number(summaries[0].summaryRows),
+        summarizedDeletes: Number(summaries[0].summarizedDeletes),
+        perRowAudits: Number(perRow[0].total)
+      };
     }
 
     async function readWorkerSessionMarkers(jobID: number): Promise<Array<{ state: string; markerSet: boolean }>> {
@@ -2124,7 +2136,7 @@ describe('runJobIfClaimable — integration', () => {
       const replacementWritesInStagingTransaction = stagingStatements.filter(entry =>
         CENSUS_REPLACEMENT_WRITE_PATTERNS.some(pattern => pattern.test(entry.sql))
       );
-      const priorAudits = await readPriorBatchDeleteAudits();
+      const priorAudits = await readReplacementRecord();
       const controlAfter = await fingerprintCensus(controlCensusID);
       console.log(
         `[#555 W1] job=${job?.status} stagingTransaction=${stagingTransactionID} statementsInIt=${stagingStatements.length} ` +
@@ -2137,12 +2149,12 @@ describe('runJobIfClaimable — integration', () => {
 
       expect(job!.status).toBe(JOB_STATUS_COMPLETED);
       expect(await countPriorRows()).toBe(0);
-      expect(priorAudits).toEqual({ audits: PRIOR_ROW_COUNT, distinctRecords: PRIOR_ROW_COUNT });
+      expect(priorAudits).toEqual({ summaryRows: 1, summarizedDeletes: PRIOR_ROW_COUNT, perRowAudits: 0 });
       expect(replacementWritesInStagingTransaction.map(entry => entry.sql)).toEqual([]);
       expect(controlAfter).toEqual(controlBefore);
     }, 180000);
 
-    it('an attempt that fails mid-replacement keeps its finished windows and the retry finishes the rest (catches: non-resumable retry; double audit; marker on the failed session)', async () => {
+    it('an attempt that fails mid-replacement keeps its finished windows and the retry finishes the rest (catches: non-resumable retry; double count; marker on the failed session)', async () => {
       await seedPriorCensusRows(PRIOR_ROW_COUNT);
       await seedControlCensusRows();
       const controlBefore = await fingerprintCensus(controlCensusID);
@@ -2158,7 +2170,7 @@ describe('runJobIfClaimable — integration', () => {
       sharedState.onSchemaQuery = null;
 
       const parked = await getBackgroundJob(catalogPool, jobID);
-      const auditsAfterFailure = await readPriorBatchDeleteAudits();
+      const auditsAfterFailure = await readReplacementRecord();
       const sessionsAfterFailure = await readWorkerSessionMarkers(jobID);
       console.log(
         `[#555 W2] after attempt 1: job=${parked?.status} lastError=${parked?.lastError} priorRowsLeft=${await countPriorRows()} ` +
@@ -2167,7 +2179,11 @@ describe('runJobIfClaimable — integration', () => {
       expect(parked!.status).toBe(JOB_STATUS_WAITING_RETRY);
       expect(parked!.lastError).toContain(INJECTED_FAULT_MESSAGE);
       expect(await countPriorRows()).toBe(PRIOR_ROWS_BEYOND_ONE_WINDOW);
-      expect(auditsAfterFailure).toEqual({ audits: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE, distinctRecords: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE });
+      expect(auditsAfterFailure, 'the committed window is counted, the failed one is not').toEqual({
+        summaryRows: 1,
+        summarizedDeletes: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
+        perRowAudits: 0
+      });
       expect(sessionsAfterFailure).toEqual([{ state: SESSION_STATE_FAILED, markerSet: false }]);
       expect(await countTempRows(FILE1_NAME)).toBe(0);
 
@@ -2175,7 +2191,7 @@ describe('runJobIfClaimable — integration', () => {
       await runJobIfClaimable(jobID, healthyDeps());
 
       const completed = await getBackgroundJob(catalogPool, jobID);
-      const auditsAfterRetry = await readPriorBatchDeleteAudits();
+      const auditsAfterRetry = await readReplacementRecord();
       const controlAfter = await fingerprintCensus(controlCensusID);
       console.log(
         `[#555 W2] after attempt 2: job=${completed?.status} priorRowsLeft=${await countPriorRows()} audits=${JSON.stringify(auditsAfterRetry)} ` +
@@ -2183,7 +2199,11 @@ describe('runJobIfClaimable — integration', () => {
       );
       expect(completed!.status).toBe(JOB_STATUS_COMPLETED);
       expect(await countPriorRows()).toBe(0);
-      expect(auditsAfterRetry).toEqual({ audits: PRIOR_ROW_COUNT, distinctRecords: PRIOR_ROW_COUNT });
+      expect(auditsAfterRetry, 'the retry keeps its batch, so it adds to the same summary row; every row counted once').toEqual({
+        summaryRows: 1,
+        summarizedDeletes: PRIOR_ROW_COUNT,
+        perRowAudits: 0
+      });
       expect(controlAfter).toEqual(controlBefore);
     }, 180000);
   });

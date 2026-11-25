@@ -45,6 +45,11 @@ import {
 } from '@/lib/ingestion/temporary-measurements';
 import { buildFileUploadChangelogRecordID, measurementFileIDValidationError, mergeFileUploadChunkIntoMetadata } from '@/lib/uploads/file-names';
 import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
+import {
+  buildCensusReplacementSummaryRecordID,
+  CENSUS_REPLACEMENT_UPLOAD_SCOPE,
+  type CensusReplacementSummaryIdentity
+} from '@/lib/changelog/deletion-summary';
 import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
 import {
@@ -277,7 +282,10 @@ function buildIngestionFailurePayload(droppedRows: DroppedMeasurementRow[], plot
   }));
 }
 
-export type CensusReplacementParams = Omit<StageMeasurementChunkParams, 'transactionID'>;
+export type CensusReplacementParams = Omit<StageMeasurementChunkParams, 'transactionID'> & {
+  /** Names the upload's Recent Changes summary row; defaults to the upload session (buildCensusReplacementSummaryRecordID). */
+  censusReplacementSummaryRecordID?: string;
+};
 export type { CensusReplacementSessionScope };
 
 export interface PreparedMeasurementChunk {
@@ -710,20 +718,18 @@ async function deleteMeasurementWindows(
   scope: CensusReplacementSessionScope,
   progress: CensusReplacementProgress
 ): Promise<CensusReplacementLoopEnd> {
+  const summary: CensusReplacementSummaryIdentity = {
+    recordID:
+      params.censusReplacementSummaryRecordID ?? buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.uploadSession, scope.uploadSessionID),
+    fileName: params.fileName,
+    batchID: params.batchID,
+    changedBy: params.changedBy ?? null
+  };
   let cursor: number | null = 0;
   while (cursor !== null) {
     const windowCursor: number = cursor;
     const unit = await runCensusReplacementUnit(connectionManager, scope, progress, transactionID =>
-      deleteCensusReplacementChunk(
-        connectionManager,
-        scope.schema,
-        params.batchID,
-        scope.plotID,
-        scope.censusID,
-        windowCursor,
-        params.changedBy ?? null,
-        transactionID
-      )
+      deleteCensusReplacementChunk(connectionManager, scope.schema, params.batchID, scope.plotID, scope.censusID, windowCursor, summary, transactionID)
     );
     if (unit.completedByPeer) return 'completed_by_peer';
     progress.windowCount += 1;

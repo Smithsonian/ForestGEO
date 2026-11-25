@@ -87,17 +87,26 @@ import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 interface ClearCensusQueryScript {
   censusCountInSchema?: number;
+  /** The census's measurements when the route locks them; defaults to the procedure's DeletedMeasurements. */
+  lockedMeasurements?: number;
+  /** Rows each fixed-data table holds when the route locks it (`SELECT COUNT(*) ... FOR UPDATE`). */
+  lockedCounts?: Record<string, number>;
   deletedCounts?: Record<string, number>;
 }
 
-/** Answers the census reads and the CALL; every other statement (locks, audits, flags) finds nothing to do. */
+/** Answers the census reads, the fixed-data locks and the CALL; every other statement (flags, the summary row) finds nothing to do. */
 function scriptClearCensusQueries(exec: ReturnType<typeof vi.spyOn>, script: ClearCensusQueryScript = {}) {
   exec.mockImplementation(async (rawSQL: unknown) => {
     const sql = String(rawSQL);
     if (/SELECT PlotID FROM/i.test(sql)) return [{ PlotID: 1 }];
     if (/MAX\(PlotCensusNumber\)/i.test(sql)) return [{ PlotID: 1, PlotCensusNumber: 2, MaxPlotCensusNumber: 2 }];
     if (/SELECT \* FROM \?\?\.census WHERE CensusID/i.test(sql)) return [{ CensusID: 12, PlotID: 1 }];
-    if (/COUNT\(\*\) AS total FROM \?\?\.census$/.test(sql)) return [{ total: script.censusCountInSchema ?? 1 }];
+    if (/COUNT\(\*\) AS total FROM \?\?\.census$/.test(sql)) return [{ total: script.censusCountInSchema ?? 2 }];
+    if (/COUNT\(\*\) AS total FROM \?\?\.coremeasurements WHERE CensusID = \? FOR UPDATE$/.test(sql)) {
+      return [{ total: script.lockedMeasurements ?? script.deletedCounts?.DeletedMeasurements ?? 0 }];
+    }
+    const lockedTable = /COUNT\(\*\) AS total FROM \?\?\.`(\w+)` FOR UPDATE$/.exec(sql)?.[1];
+    if (lockedTable) return [{ total: script.lockedCounts?.[lockedTable] ?? 0 }];
     if (/^CALL /i.test(sql)) return [[{ DeletedMeasurements: 0, ...script.deletedCounts }], {}];
     return [];
   });
@@ -182,28 +191,69 @@ describe('POST /api/clearcensus', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('409 and rollback when the procedure wipes reference data the route did not foresee as a last-census clear', async () => {
+  function changelogInserts(exec: ReturnType<typeof vi.spyOn>): unknown[][] {
+    return exec.mock.calls.filter(call => /INSERT INTO \?\?\.unifiedchangelog/.test(String(call[0]))).map(call => call[1] as unknown[]);
+  }
+
+  it('full on the last census locks its measurements and every fixed-data table, then records one census DELETE summary row with every count, after the CALL', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-mismatch');
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-full');
     vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
-    scriptClearCensusQueries(vi.spyOn(cm, 'executeQuery'), { censusCountInSchema: 2, deletedCounts: { DeletedQuadrats: 5 } });
-    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
-    const commit = vi.spyOn(cm, 'commitTransaction');
+    const exec = vi.spyOn(cm, 'executeQuery');
+    scriptClearCensusQueries(exec, {
+      censusCountInSchema: 1,
+      lockedCounts: { quadrats: 5, species: 3 },
+      deletedCounts: { DeletedMeasurements: 40, DeletedQuadrats: 5, DeletedSpecies: 3, DeletedFamily: 0 }
+    });
+    const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
     const res = await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=full'));
 
-    expect(res.status).toBe(HTTPResponses.CONFLICT);
-    expect((await res.json()).error).toMatch(/Nothing was deleted/);
-    expect(rollback).toHaveBeenCalledWith('tx-mismatch');
-    expect(commit).not.toHaveBeenCalled();
+    expect(res.status, await res.clone().text()).toBe(HTTPResponses.OK);
+    expect(commit).toHaveBeenCalledWith('tx-full');
+    const statements = exec.mock.calls.map(call => String(call[0]));
+    console.log(
+      '[clearcensus full] statements:',
+      statements.map(sql => sql.replace(/\s+/g, ' ').slice(0, 90))
+    );
+    const callIndex = statements.findIndex(sql => /^CALL /.test(sql));
+    const lockedTables = statements.flatMap((sql, index) => {
+      const table = /^SELECT COUNT\(\*\) AS total FROM \?\?\.`?(\w+)`?( WHERE CensusID = \?)? FOR UPDATE$/.exec(sql)?.[1];
+      return table && index < callIndex ? [table] : [];
+    });
+    expect(lockedTables, 'the measurements and every fixed-data table are locked before the procedure empties them').toEqual([
+      'coremeasurements',
+      'attributes',
+      'personnel',
+      'roles',
+      'quadrats',
+      'species',
+      'specieslimits',
+      'genus',
+      'family',
+      'reference'
+    ]);
+    const inserts = changelogInserts(exec);
+    expect(inserts, 'one summary row, not one per deleted row').toHaveLength(1);
+    const [tableName, recordID, operation, oldRowState, newRowState, changedBy, plotID, censusID] = inserts[0];
+    expect([tableName, recordID, operation, newRowState, changedBy, plotID, censusID]).toEqual(['census', '12', 'DELETE', null, 'admin-user', 1, 12]);
+    expect(JSON.parse(String(oldRowState))).toEqual({
+      CensusID: 12,
+      PlotID: 1,
+      summaryKind: 'census-delete',
+      clearType: 'full',
+      deletedRowCounts: { coremeasurements: 40, quadrats: 5, species: 3, family: 0 }
+    });
+    const summaryIndex = statements.findIndex(sql => /INSERT INTO \?\?\.unifiedchangelog/.test(sql));
+    expect(summaryIndex, 'the counts come from the CALL, so the summary follows it').toBeGreaterThan(callIndex);
   });
 
-  it('full skips the reference snapshot when other censuses remain', async () => {
+  it('full with other censuses left locks no fixed data', async () => {
     const cm = (ConnectionManager as any).getInstance();
     vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-not-last');
     vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
     const exec = vi.spyOn(cm, 'executeQuery');
-    scriptClearCensusQueries(exec, { censusCountInSchema: 3 });
+    scriptClearCensusQueries(exec, { censusCountInSchema: 3, deletedCounts: { DeletedMeasurements: 2 } });
     vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
     const res = await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=full'));
@@ -211,9 +261,68 @@ describe('POST /api/clearcensus', () => {
     expect(res.status).toBe(HTTPResponses.OK);
     const statements = exec.mock.calls.map(call => String(call[0]));
     expect(
-      statements.some(sql => /FROM \?\?\.`species`/.test(sql)),
+      statements.filter(sql => /FOR UPDATE$/.test(sql) && /FROM \?\?\.`/.test(sql)),
       statements.join('\n')
-    ).toBe(false);
+    ).toEqual([]);
+  });
+
+  it.each([
+    ['a measurement was added to the census after the lock', { lockedMeasurements: 2, deletedCounts: { DeletedMeasurements: 3 } }, 'msmts'],
+    ['a fixed-data row was added after the lock', { censusCountInSchema: 1, lockedCounts: { attributes: 2 }, deletedCounts: { DeletedAttributes: 3 } }, 'full'],
+    ['the procedure emptied fixed data the route did not see as a last-census clear', { censusCountInSchema: 2, deletedCounts: { DeletedQuadrats: 5 } }, 'full']
+  ])('409 and rollback, with no summary row, when %s', async (_case, script, type) => {
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-changed');
+    vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+    const exec = vi.spyOn(cm, 'executeQuery');
+    scriptClearCensusQueries(exec, script);
+    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+    const commit = vi.spyOn(cm, 'commitTransaction');
+
+    const res = await POST(makeRequest(`http://localhost/api/clearcensus?schema=myschema&censusID=12&type=${type}`));
+
+    expect(res.status).toBe(HTTPResponses.CONFLICT);
+    expect((await res.json()).error).toMatch(/Nothing was deleted/);
+    expect(rollback).toHaveBeenCalledWith('tx-changed');
+    expect(commit).not.toHaveBeenCalled();
+    expect(changelogInserts(exec)).toHaveLength(0);
+  });
+
+  it('msmts records the measurement count alone', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-msmts');
+    vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+    const exec = vi.spyOn(cm, 'executeQuery');
+    scriptClearCensusQueries(exec, { deletedCounts: { DeletedMeasurements: 7 } });
+    vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+
+    const res = await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=msmts'));
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    const inserts = changelogInserts(exec);
+    expect(inserts).toHaveLength(1);
+    const summary = JSON.parse(String(inserts[0][3]));
+    expect(summary.clearType).toBe('msmts');
+    expect(summary.deletedRowCounts).toEqual({ coremeasurements: 7 });
+  });
+
+  it('500 and rollback, with no summary row, when the procedure reports no delete counts', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-old-procedure');
+    vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+    const exec = vi.spyOn(cm, 'executeQuery');
+    scriptClearCensusQueries(exec);
+    const defaultAnswer = exec.getMockImplementation()!;
+    exec.mockImplementation(async (rawSQL: unknown, ...rest: unknown[]) => (/^CALL /i.test(String(rawSQL)) ? [{}] : defaultAnswer(rawSQL, ...rest)));
+    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+    const commit = vi.spyOn(cm, 'commitTransaction');
+
+    const res = await POST(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=msmts'));
+
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(rollback).toHaveBeenCalledWith('tx-old-procedure');
+    expect(commit).not.toHaveBeenCalled();
+    expect(changelogInserts(exec)).toHaveLength(0);
   });
 
   it('500 on DB error: rolls back with transaction id and returns error text', async () => {

@@ -74,6 +74,7 @@ vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: v
 
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { cleanupPreviousFileUploads } from '@/lib/ingestion/temporary-measurements';
+import { buildCensusReplacementSummaryRecordID, CENSUS_REPLACEMENT_UPLOAD_SCOPE } from '@/lib/changelog/deletion-summary';
 
 type MeasurementRow = Parameters<typeof insertTestMeasurements>[2][number];
 
@@ -146,7 +147,21 @@ describe('CLEAN_REUPLOAD leftover stems and trees (#489) — integration', () =>
   async function cleanReupload(rows: MeasurementRow[], targetCensusID = censusID): Promise<void> {
     const incomingBatchID = `batch-${batchCounter + 1}`;
     const transactionID = await connectionManager.beginTransaction();
-    await cleanupPreviousFileUploads(connectionManager, schema, REPLACEMENT_FILE, incomingBatchID, plotID, targetCensusID, TEST_CHANGED_BY, transactionID);
+    await cleanupPreviousFileUploads(
+      connectionManager,
+      schema,
+      REPLACEMENT_FILE,
+      incomingBatchID,
+      plotID,
+      targetCensusID,
+      {
+        recordID: buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.arcgisImport, `import-${incomingBatchID}`),
+        fileName: REPLACEMENT_FILE,
+        batchID: incomingBatchID,
+        changedBy: TEST_CHANGED_BY
+      },
+      transactionID
+    );
     await connectionManager.commitTransaction(transactionID);
     await ingest(REPLACEMENT_FILE, rows, targetCensusID);
   }
