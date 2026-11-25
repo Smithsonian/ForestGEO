@@ -7,12 +7,14 @@
  * each delete removed, and records one summary row: the census's last state plus those
  * counts. The summary and the deletes commit or roll back together.
  *
- * clearcensusfull empties the fixed-data tables one at a time with foreign_key_checks off.
- * Before it runs on the last census, every fixed-data row is locked: a concurrent insert that
- * references one (a species naming an existing genus) then waits and fails its foreign-key
- * check, instead of landing between two deletes and outliving its deleted parent. READ
- * COMMITTED takes no gap locks, so a brand-new row can still be inserted; the procedure then
- * deletes more rows than were locked, and the clear is refused.
+ * Both procedures delete child rows before their parents with foreign_key_checks off: a
+ * measurement's attributes and error links before the measurement, and, for clearcensusfull on
+ * the last census, species before genus and the other fixed-data tables in turn. Every parent
+ * the procedure will delete is locked first, so a concurrent insert that references one (an
+ * attribute on an existing measurement, a species naming an existing genus) waits and is then
+ * refused, instead of landing between two deletes and outliving its parent. READ COMMITTED takes
+ * no gap locks, so a brand-new parent can still be inserted; the procedure then deletes more rows
+ * than were locked, and the clear is refused.
  */
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { callProcedureInCallerTransaction, type CallerOwnedTransactionFlag, type CallerTransactionExecutor } from '@/lib/db/caller-owned-procedure-call';
@@ -53,7 +55,7 @@ const CLEAR_CENSUS_DELETED_COUNT_COLUMNS: Readonly<Record<string, string>> = {
 
 const FIXED_DATA_TABLES = Object.keys(CLEAR_CENSUS_DELETED_COUNT_COLUMNS).filter(tableName => tableName !== COREMEASUREMENTS_TABLE_NAME);
 
-/** The procedure deleted fixed-data rows the clear had not locked; nothing has been committed. */
+/** The procedure deleted rows the clear had not locked; nothing has been committed. */
 export class ClearCensusConcurrentChangeError extends Error {
   readonly tableName: string;
   readonly lockedCount: number;
@@ -78,25 +80,38 @@ export function isClearCensusType(value: string): value is ClearCensusType {
   return (CLEAR_CENSUS_TYPES as readonly string[]).includes(value);
 }
 
-async function countRows(tx: CallerTransactionExecutor, sql: string): Promise<number> {
-  const rows = await tx.query<Array<{ total: number | string }>>(sql);
+async function countRows(tx: CallerTransactionExecutor, sql: string, params: unknown[] = []): Promise<number> {
+  const rows = await tx.query<Array<{ total: number | string }>>(sql, params);
   return Number(rows[0]?.total ?? 0);
 }
 
-/** Locks every fixed-data row when this is the schema's last census, the only time clearcensusfull empties them; empty counts otherwise. */
-async function lockFixedDataForLastCensus(tx: CallerTransactionExecutor, schema: string): Promise<DeletedRowCounts> {
-  const locked: DeletedRowCounts = Object.fromEntries(FIXED_DATA_TABLES.map(tableName => [tableName, 0]));
-  if ((await countRows(tx, safeFormatQuery(schema, 'SELECT COUNT(*) AS total FROM ??.census'))) !== 1) return locked;
+/**
+ * Locks the parents the procedure will delete and returns how many of each it holds: the census's measurements, and,
+ * for a full clear, every fixed-data row when this is the schema's last census (the only time clearcensusfull empties
+ * them; zero counts otherwise).
+ */
+async function lockRowsTheClearDeletes(tx: CallerTransactionExecutor, schema: string, type: ClearCensusType, censusID: number): Promise<DeletedRowCounts> {
+  const locked: DeletedRowCounts = {
+    [COREMEASUREMENTS_TABLE_NAME]: await countRows(
+      tx,
+      safeFormatQuery(schema, 'SELECT COUNT(*) AS total FROM ??.coremeasurements WHERE CensusID = ? FOR UPDATE'),
+      [censusID]
+    )
+  };
+  if (type !== CLEAR_CENSUS_FULL_TYPE) return locked;
+  const isLastCensus = (await countRows(tx, safeFormatQuery(schema, 'SELECT COUNT(*) AS total FROM ??.census'))) === 1;
   for (const tableName of FIXED_DATA_TABLES) {
-    locked[tableName] = await countRows(tx, safeFormatQuery(schema, `SELECT COUNT(*) AS total FROM ??.${safeEscapeId(tableName)} FOR UPDATE`));
+    locked[tableName] = isLastCensus
+      ? await countRows(tx, safeFormatQuery(schema, `SELECT COUNT(*) AS total FROM ??.${safeEscapeId(tableName)} FOR UPDATE`))
+      : 0;
   }
   return locked;
 }
 
-function assertDeletedOnlyLockedFixedData(locked: DeletedRowCounts, deleted: DeletedRowCounts): void {
-  for (const tableName of FIXED_DATA_TABLES) {
+function assertDeletedOnlyLockedRows(locked: DeletedRowCounts, deleted: DeletedRowCounts): void {
+  for (const [tableName, lockedCount] of Object.entries(locked)) {
     const deletedCount = deleted[tableName] ?? 0;
-    if (deletedCount !== locked[tableName]) throw new ClearCensusConcurrentChangeError(tableName, locked[tableName], deletedCount);
+    if (deletedCount !== lockedCount) throw new ClearCensusConcurrentChangeError(tableName, lockedCount, deletedCount);
   }
 }
 
@@ -129,7 +144,7 @@ async function callClearCensusInCallerTransaction(
 
 /**
  * Deletes the census through its procedure and records one summary row; the caller commits or rolls back both.
- * Throws ClearCensusConcurrentChangeError when a full clear removed fixed data it had not locked.
+ * Throws ClearCensusConcurrentChangeError when the procedure removed rows the clear had not locked.
  */
 export async function clearCensusWithAudit(params: {
   tx: CallerTransactionExecutor;
@@ -142,9 +157,9 @@ export async function clearCensusWithAudit(params: {
   const { tx, schema, type, censusID, plotID, changedBy } = params;
   const [censusRow] = await tx.query<ChangelogRowState[]>(safeFormatQuery(schema, 'SELECT * FROM ??.census WHERE CensusID = ? FOR UPDATE'), [censusID]);
   if (!censusRow) throw new Error(`Census ${censusID} was not found under lock; the caller must lock it before clearing.`);
-  const lockedFixedData = type === CLEAR_CENSUS_FULL_TYPE ? await lockFixedDataForLastCensus(tx, schema) : null;
+  const lockedRows = await lockRowsTheClearDeletes(tx, schema, type, censusID);
   const deletedRowCounts = await callClearCensusInCallerTransaction(tx, schema, type, censusID);
-  if (lockedFixedData) assertDeletedOnlyLockedFixedData(lockedFixedData, deletedRowCounts);
+  assertDeletedOnlyLockedRows(lockedRows, deletedRowCounts);
   const summary: CensusDeleteSummaryState = {
     ...normalizeBitColumns(censusRow),
     summaryKind: DELETION_SUMMARY_KIND.censusDelete,

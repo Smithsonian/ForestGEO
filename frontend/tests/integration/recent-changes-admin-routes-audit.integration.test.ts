@@ -318,13 +318,13 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       expect(await countRows('SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [measurementIDs])).toBe(2);
     });
 
-    it('counts a measurement another session adds just before the delete, because the count comes from the delete itself', async () => {
+    it('refuses with 409 and deletes nothing when a measurement is added to the census after the lock', async () => {
       const censusID = await createLatestCensus();
       const measurementIDs = await seedMeasurementsInCensus(censusID, 2, 'RACEINS');
       let latecomerID = 0;
-      // An ordinary insert waits on the census row the clear holds (its FK check takes a shared
-      // lock on the parent). Writers that run with foreign_key_checks = 0, as several procedures
-      // do, are not held back, and the procedure deletes their rows too.
+      // An ordinary insert waits on the census row the clear holds (its FK check takes a shared lock on
+      // the parent). Writers that run with foreign_key_checks = 0, as several procedures do, are not held
+      // back; the procedure would delete the unlocked row, so the delete count exposes it.
       sharedState.beforeProcedureCall = async () => {
         await concurrentSession.query('SET foreign_key_checks = 0');
         const [result] = await concurrentSession.query<mysql.ResultSetHeader>(
@@ -337,11 +337,36 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
 
       const response = await clearCensusPost(clearCensusRequest(censusID, 'msmts'));
 
-      expect(response.status, await response.clone().text()).toBe(HTTPResponses.OK);
+      const body = await response.json();
+      expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.CONFLICT);
       expect(latecomerID, 'the racing insert must have committed for this test to mean anything').toBeGreaterThan(0);
-      expect(await countRows('SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [[...measurementIDs, latecomerID]])).toBe(0);
-      const [summary] = await loadAuditRows('census');
-      expect(summary.OldRowState?.deletedRowCounts, JSON.stringify(summary)).toEqual({ coremeasurements: measurementIDs.length + 1 });
+      expect(await countRows('SELECT COUNT(*) AS total FROM census WHERE CensusID = ?', [censusID])).toBe(1);
+      expect(await countRows('SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID IN (?)', [[...measurementIDs, latecomerID]])).toBe(3);
+      expect(await countRows('SELECT COUNT(*) AS total FROM unifiedchangelog')).toBe(0);
+    });
+
+    it('holds an attribute insert on an existing measurement until the clear commits, so it never outlives the measurement', async () => {
+      const censusID = await createLatestCensus();
+      const [measurementID] = await seedMeasurementsInCensus(censusID, 1, 'RACEATTR');
+      // The procedure deletes cmattributes before coremeasurements with foreign_key_checks off. Without
+      // the measurement locked, this insert could land between those deletes and leave an orphan.
+      let concurrentInsert: Promise<unknown> | undefined;
+      sharedState.beforeProcedureCall = async () => {
+        concurrentInsert = concurrentSession.query("INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, 'LATE')", [measurementID]).then(
+          () => 'inserted',
+          (error: { code?: string }) => error.code
+        );
+        await waitUntilSessionIsBlocked(concurrentSession.threadId);
+      };
+
+      const response = await clearCensusPost(clearCensusRequest(censusID, 'msmts'));
+      expect(response.status, await response.clone().text()).toBe(HTTPResponses.OK);
+
+      const insertOutcome = await concurrentInsert;
+      console.log(`[msmts clear] concurrent attribute insert outcome: ${String(insertOutcome)}`);
+      expect([MYSQL_NO_REFERENCED_ROW, MYSQL_LOCK_DEADLOCK], 'the insert waited on the locked measurement and was refused').toContain(insertOutcome);
+      expect(await countRows('SELECT COUNT(*) AS total FROM cmattributes WHERE CoreMeasurementID = ?', [measurementID])).toBe(0);
+      expect(await countRows('SELECT COUNT(*) AS total FROM coremeasurements WHERE CoreMeasurementID = ?', [measurementID])).toBe(0);
     });
   });
 
