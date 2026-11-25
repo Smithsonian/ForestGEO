@@ -5,11 +5,13 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery, safeEscapeId } from '@/lib/db/sqlsecurity';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
 import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
 import type { UpsertOperation } from '@/config/utils';
 import { recordMutation, ChangelogOperation, type ChangelogRowState } from '@/lib/changelog/record-mutation';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
 import { trimReferenceTextFields } from '@/lib/reference-text';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
 
 // need to try integrating this into validation system:
 
@@ -414,6 +416,10 @@ function isRetryableValidationLockError(error: any) {
 }
 
 function isRetryableValidationConnectionError(error: any) {
+  // A rerun converges: prepareValidationRun resets this validation's flags and links under locking statements
+  // before re-inserting with ON DUPLICATE KEY UPDATE, so replaying after an unknown COMMIT outcome is safe (#563).
+  if (error instanceof TransactionCommitOutcomeUnknownError) return true;
+
   const message = String(error?.message ?? '');
 
   return (
@@ -726,13 +732,13 @@ export async function runCombinedDBHValidations(schema: string, params: Validati
         await new Promise(resolve => setTimeout(resolve, delay));
         delay = Math.min(delay * 2, 5000);
       } else {
-        ailogger.error(`Combined DBH validations failed with non-deadlock error:`, e.message, e.code);
+        ailogger.error(`Combined DBH validations failed with non-deadlock error:`, toError(e), { code: e.code });
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
           ailogger.error('Rollback error:', rollbackError);
         }
-        return { success: false, ranGrowth: false, ranShrinkage: false, error: e.message };
+        return { success: false, ranGrowth: false, ranShrinkage: false, error: INTERNAL_SERVER_ERROR_MESSAGE };
       }
     }
   }
@@ -857,7 +863,7 @@ export async function runCombinedCrossCensusLocationValidations(
         await new Promise(resolve => setTimeout(resolve, delay));
         delay = Math.min(delay * 2, 5000);
       } else {
-        ailogger.error(`Combined cross-census location validations failed with non-deadlock error:`, e.message, e.code);
+        ailogger.error(`Combined cross-census location validations failed with non-deadlock error:`, toError(e), { code: e.code });
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
@@ -867,7 +873,7 @@ export async function runCombinedCrossCensusLocationValidations(
           success: false,
           ranQuadratMismatch: false,
           ranCoordinateDrift: false,
-          error: e.message
+          error: INTERNAL_SERVER_ERROR_MESSAGE
         };
       }
     }

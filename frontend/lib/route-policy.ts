@@ -114,7 +114,6 @@ export const ROUTE_POLICIES = {
   'formvalidation/[dataType]/[[...slugs]]': 'site-scoped',
   'details/cmid': 'site-scoped',
   'specieslimits/[plotID]/[plotCensusNumber]': 'site-scoped',
-  'resettableview/[gridType]/[plotID]/[censusID]': 'site-scoped',
   // Changelog
   'changelog/overview/[changelogType]/[[...options]]': 'site-scoped',
   // Recent changes explorer
@@ -134,6 +133,7 @@ export const ROUTE_POLICIES = {
   'validations/procedures/[validationType]': 'site-scoped',
   'validations/procedures/shared-cross-census-location': 'site-scoped',
   'validations/procedures/shared-dbh': 'site-scoped',
+  'validations/clearmeasurementerrors': 'site-scoped',
   'validations/run': 'site-scoped',
   'validations/updatepassedvalidations': 'site-scoped',
   'validations/validate-query': 'site-scoped',

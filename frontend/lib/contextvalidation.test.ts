@@ -31,6 +31,7 @@ const AUTHORIZED_SCHEMA = 'forestgeo_testing';
 const STATUS_UNAUTHENTICATED = 401;
 const STATUS_FORBIDDEN = 403;
 const STATUS_SERVICE_UNAVAILABLE = 503;
+const CATALOG_FAILURE_MESSAGE = "Table 'catalog.schema_quarantine' doesn't exist";
 const STATUS_OK = 200;
 
 function makeRequest(schema?: string) {
@@ -168,12 +169,15 @@ describe('validateContextualValues — per-site schema authorization', () => {
 
   it('fails closed with 503 SCHEMA_GATE_UNAVAILABLE when the lookup throws', async () => {
     authMock.mockResolvedValueOnce(sessionWithSites([AUTHORIZED_SCHEMA]));
-    vi.mocked(findSchemaQuarantine).mockRejectedValueOnce(new Error('catalog unreachable'));
+    vi.mocked(findSchemaQuarantine).mockRejectedValueOnce(new Error(CATALOG_FAILURE_MESSAGE));
 
     const result = await validateContextualValues(makeRequest(AUTHORIZED_SCHEMA), { requireSchema: true });
 
     expect(result.response?.status).toBe(STATUS_SERVICE_UNAVAILABLE);
-    expect((await result.response!.json()).code).toBe('SCHEMA_GATE_UNAVAILABLE');
+    const text = await result.response!.text();
+    console.log('[schema gate unavailable body]', text);
+    expect(JSON.parse(text).code).toBe('SCHEMA_GATE_UNAVAILABLE');
+    expect(text, 'the catalog error stays in the log').not.toContain(CATALOG_FAILURE_MESSAGE);
   });
 });
 

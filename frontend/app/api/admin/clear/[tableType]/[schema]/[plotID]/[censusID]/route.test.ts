@@ -9,7 +9,8 @@ const {
   mockBeginTransaction,
   mockCommitTransaction,
   mockRollbackTransaction,
-  mockCloseConnection
+  mockCloseConnection,
+  deleteWithAuditMock
 } = vi.hoisted(() => ({
   authMock: vi.fn(),
   validateContextualValuesMock: vi.fn(),
@@ -18,7 +19,8 @@ const {
   mockBeginTransaction: vi.fn(),
   mockCommitTransaction: vi.fn(),
   mockRollbackTransaction: vi.fn(),
-  mockCloseConnection: vi.fn()
+  mockCloseConnection: vi.fn(),
+  deleteWithAuditMock: vi.fn()
 }));
 
 vi.mock('@/auth', () => ({
@@ -43,6 +45,11 @@ vi.mock('@/lib/db/connectionmanager', () => ({
       closeConnection: mockCloseConnection
     })
   }
+}));
+
+vi.mock('@/lib/ingestion/temporary-measurements', () => ({
+  COREMEASUREMENTS_JOIN_ALIAS: 'cm',
+  deleteCoreMeasurementsInBoundedChunksWithAudit: deleteWithAuditMock
 }));
 
 vi.mock('@/ailogger', () => ({
@@ -100,8 +107,10 @@ describe('admin clear failedmeasurements route', () => {
     expect(mockCloseConnection).toHaveBeenCalledTimes(1);
   });
 
-  it('DELETE clears failed measurements across all censusIDs for the selected logical census', async () => {
-    mockExecuteQuery.mockResolvedValueOnce([{ total: 3 }]).mockResolvedValueOnce(undefined);
+  it('DELETE clears failed measurements across all censusIDs for the selected logical census, auditing each row as the session user (#507)', async () => {
+    const adminEmail = 'clear-admin@forestgeo.test';
+    authMock.mockResolvedValue({ user: { email: adminEmail, userStatus: 'global' } });
+    deleteWithAuditMock.mockResolvedValueOnce(3);
 
     const response = await DELETE(
       new Request('http://localhost/api/admin/clear/failedmeasurements/forestgeo_testing/1/2', { method: 'DELETE' }) as any,
@@ -110,28 +119,71 @@ describe('admin clear failedmeasurements route', () => {
 
     expect(response.status).toBe(200);
     expect(mockBeginTransaction).toHaveBeenCalledTimes(1);
-    expect(mockExecuteQuery).toHaveBeenCalledTimes(2);
+    expect(deleteWithAuditMock).toHaveBeenCalledTimes(1);
 
-    const [countSQL, countParams, countTx] = mockExecuteQuery.mock.calls[0]!;
-    expect(String(countSQL)).toContain('c.PlotCensusNumber = (');
-    expect(String(countSQL)).not.toContain('AND cm.CensusID = ?');
-    expect(countParams).toEqual([1, 2, 1, INGESTION_ERROR_SOURCE]);
-    expect(countTx).toBe('tx-admin-clear');
-
-    const [deleteSQL, deleteParams, deleteTx] = mockExecuteQuery.mock.calls[1]!;
-    expect(String(deleteSQL)).toContain('DELETE cm');
-    expect(String(deleteSQL)).toContain('c.PlotCensusNumber = (');
-    expect(String(deleteSQL)).toContain('selected_census.CensusID = ?');
-    expect(String(deleteSQL)).toContain('selected_census.PlotID = ?');
-    expect(String(deleteSQL)).not.toContain('AND cm.CensusID = ?');
-    expect(deleteParams).toEqual([1, 2, 1, INGESTION_ERROR_SOURCE]);
-    expect(deleteTx).toBe('tx-admin-clear');
+    const [, schema, whereSQL, whereParams, changedBy, plotID, censusID, transactionID, fromSQL, lockedAliases] = deleteWithAuditMock.mock.calls[0]!;
+    expect(schema).toBe('forestgeo_testing');
+    expect(String(whereSQL)).toContain('c.PlotCensusNumber = (');
+    expect(String(whereSQL)).toContain('selected_census.CensusID = ?');
+    expect(String(whereSQL)).toContain('selected_census.PlotID = ?');
+    expect(String(whereSQL)).not.toContain('AND cm.CensusID = ?');
+    expect(whereParams).toEqual([1, 2, 1, INGESTION_ERROR_SOURCE]);
+    expect(changedBy, 'the audit row must name the authenticated admin, never a client value').toBe(adminEmail);
+    expect([plotID, censusID, transactionID]).toEqual([1, 2, 'tx-admin-clear']);
+    expect(String(fromSQL)).toMatch(/coremeasurements cm JOIN \?\?\.census c/);
+    expect(lockedAliases).toEqual(['cm']);
 
     const body = await response.json();
     expect(body.recordsCleared).toBe(3);
     expect(mockCommitTransaction).toHaveBeenCalledWith('tx-admin-clear');
     expect(mockRollbackTransaction).not.toHaveBeenCalled();
     expect(mockCloseConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it('DELETE rolls back and reports 500 when the audited delete fails, so no row is removed without its audit row', async () => {
+    deleteWithAuditMock.mockRejectedValueOnce(new Error('audit write failed'));
+
+    const response = await DELETE(
+      new Request('http://localhost/api/admin/clear/failedmeasurements/forestgeo_testing/1/2', { method: 'DELETE' }) as any,
+      makeParams()
+    );
+
+    expect(response.status).toBe(500);
+    expect(mockRollbackTransaction).toHaveBeenCalledWith('tx-admin-clear');
+    expect(mockCommitTransaction).not.toHaveBeenCalled();
+  });
+
+  it('DELETE re-runs the whole transaction once when the audited walk deadlocks, and commits only the retry', async () => {
+    const deadlock = Object.assign(new Error('Deadlock found when trying to get lock'), { code: 'ER_LOCK_DEADLOCK', errno: 1213 });
+    deleteWithAuditMock.mockRejectedValueOnce(deadlock).mockResolvedValueOnce(2);
+    mockBeginTransaction.mockResolvedValueOnce('tx-attempt-1').mockResolvedValueOnce('tx-attempt-2');
+
+    const response = await DELETE(
+      new Request('http://localhost/api/admin/clear/failedmeasurements/forestgeo_testing/1/2', { method: 'DELETE' }) as any,
+      makeParams()
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).recordsCleared).toBe(2);
+    expect(deleteWithAuditMock.mock.calls.map(call => call[7])).toEqual(['tx-attempt-1', 'tx-attempt-2']);
+    expect(mockRollbackTransaction.mock.calls).toEqual([['tx-attempt-1']]);
+    expect(mockCommitTransaction.mock.calls).toEqual([['tx-attempt-2']]);
+  });
+
+  it('DELETE of staging rows deletes them unaudited and reports the affected-row count', async () => {
+    mockExecuteQuery.mockResolvedValueOnce({ affectedRows: 4 });
+
+    const response = await DELETE(
+      new Request('http://localhost/api/admin/clear/temporarymeasurements/forestgeo_testing/1/2', { method: 'DELETE' }) as any,
+      makeParams('temporarymeasurements')
+    );
+
+    expect(response.status).toBe(200);
+    expect(deleteWithAuditMock).not.toHaveBeenCalled();
+    expect(mockExecuteQuery).toHaveBeenCalledTimes(1);
+    expect(String(mockExecuteQuery.mock.calls[0]![0])).toMatch(/^DELETE FROM `?forestgeo_testing`?\.`?temporarymeasurements`?/);
+    expect(mockExecuteQuery.mock.calls[0]![2]).toBe('tx-admin-clear');
+    expect((await response.json()).recordsCleared).toBe(4);
   });
 
   it('DELETE rejects authenticated non-admin users', async () => {

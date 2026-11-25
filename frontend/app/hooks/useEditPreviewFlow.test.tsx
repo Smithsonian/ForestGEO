@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApplyResult, EditPlan } from '@/config/editplan/types';
-import { useEditPreviewFlow, UseEditPreviewFlowArgs } from './useEditPreviewFlow';
+import { EditOperationCancelledError, useEditPreviewFlow, UseEditPreviewFlowArgs } from './useEditPreviewFlow';
 
 const BASE_ARGS: UseEditPreviewFlowArgs = {
   schema: 'forestgeo_testing',
@@ -218,5 +218,206 @@ describe('useEditPreviewFlow', () => {
       result.current.cancelDialog();
     });
     await expect(editPromise).rejects.toThrow('cancelled');
+  });
+});
+
+const WARN_PLAN: EditPlan = { ...FRESH_PLAN, planHash: 'c'.repeat(64) };
+const ROW_CENSUS_ID = 7;
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(settle => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+describe('useEditPreviewFlow — per-call census and cancellation (spec Editing, P2-8, P2-13)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function applyCalls() {
+    return fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/edits/apply'));
+  }
+
+  it('sends the per-call census on preview, apply and the confirmed apply after a 409', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(INFO_PLAN))
+      .mockResolvedValueOnce(jsonResponse({ freshPlan: FRESH_PLAN }, 409))
+      .mockResolvedValueOnce(jsonResponse(APPLY_RESULT));
+    const { result } = renderHook(() => useEditPreviewFlow(BASE_ARGS));
+    let editPromise!: Promise<ApplyResult>;
+    act(() => {
+      editPromise = result.current.beginEdit(42, { MeasuredDBH: 12 }, { censusID: ROW_CENSUS_ID });
+    });
+    await waitFor(() => expect(result.current.dialogState.open).toBe(true));
+    await act(async () => {
+      await result.current.confirmDialog();
+    });
+    await expect(editPromise).resolves.toEqual(APPLY_RESULT);
+    const censusIDs = fetchMock.mock.calls.map((_call, index) => requestBody(fetchMock, index).censusID);
+    console.log('[view-errors per-call census]', JSON.stringify(censusIDs));
+    expect(censusIDs).toEqual([ROW_CENSUS_ID, ROW_CENSUS_ID, ROW_CENSUS_ID]);
+  });
+
+  it('returns none when nothing is pending', () => {
+    const { result } = renderHook(() => useEditPreviewFlow(BASE_ARGS));
+    expect(result.current.cancelPendingOperation()).toBe('none');
+  });
+
+  it('closes an open dialog, rejects with EditOperationCancelledError and sends no apply', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(WARN_PLAN));
+    const { result } = renderHook(() => useEditPreviewFlow(BASE_ARGS));
+    let editPromise!: Promise<ApplyResult>;
+    act(() => {
+      editPromise = result.current.beginEdit(42, { MeasuredDBH: 12 });
+    });
+    await waitFor(() => expect(result.current.dialogState.open).toBe(true));
+    let outcome = '';
+    act(() => {
+      outcome = result.current.cancelPendingOperation();
+    });
+    await expect(editPromise).rejects.toBeInstanceOf(EditOperationCancelledError);
+    expect(outcome).toBe('cancelled-before-apply');
+    expect(result.current.dialogState.open).toBe(false);
+    expect(applyCalls()).toHaveLength(0);
+  });
+
+  it('aborts a preview in flight: no dialog, no apply, no onError', async () => {
+    let previewSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          previewSignal = init.signal ?? undefined;
+          init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        })
+    );
+    const onError = vi.fn();
+    const { result } = renderHook(() => useEditPreviewFlow({ ...BASE_ARGS, onError }));
+    let editPromise!: Promise<ApplyResult>;
+    act(() => {
+      editPromise = result.current.beginEdit(42, { MeasuredDBH: 12 });
+    });
+    await waitFor(() => expect(previewSignal).toBeDefined());
+    act(() => {
+      expect(result.current.cancelPendingOperation()).toBe('cancelled-before-apply');
+    });
+    await expect(editPromise).rejects.toBeInstanceOf(EditOperationCancelledError);
+    expect(previewSignal?.aborted).toBe(true);
+    expect(result.current.dialogState.open).toBe(false);
+    expect(applyCalls()).toHaveLength(0);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  async function startConfirmedApply(onSuccess = vi.fn(), onError = vi.fn()) {
+    const apply = deferred<Response>();
+    fetchMock.mockResolvedValueOnce(jsonResponse(WARN_PLAN)).mockImplementationOnce(() => apply.promise);
+    const hook = renderHook(() => useEditPreviewFlow({ ...BASE_ARGS, onSuccess, onError }));
+    let editPromise!: Promise<ApplyResult>;
+    act(() => {
+      editPromise = hook.result.current.beginEdit(42, { MeasuredDBH: 12 });
+    });
+    await waitFor(() => expect(hook.result.current.dialogState.open).toBe(true));
+    let confirm!: Promise<void>;
+    act(() => {
+      confirm = hook.result.current.confirmDialog();
+    });
+    await waitFor(() => expect(applyCalls()).toHaveLength(1));
+    return { hook, apply, editPromise, confirm, onSuccess, onError };
+  }
+
+  async function startAutoApply(onSuccess = vi.fn(), onError = vi.fn()) {
+    const apply = deferred<Response>();
+    fetchMock.mockResolvedValueOnce(jsonResponse(INFO_PLAN)).mockImplementationOnce(() => apply.promise);
+    const hook = renderHook(() => useEditPreviewFlow({ ...BASE_ARGS, onSuccess, onError }));
+    let editPromise!: Promise<ApplyResult>;
+    act(() => {
+      editPromise = hook.result.current.beginEdit(42, { MeasuredDBH: 12 });
+    });
+    await waitFor(() => expect(applyCalls()).toHaveLength(1));
+    return { hook, apply, editPromise, onSuccess, onError };
+  }
+
+  it.each([
+    ['a confirmed apply', startConfirmedApply],
+    ['an auto-apply', startAutoApply]
+  ])('drops a late 409 after %s was detached: no dialog, rejection, one apply', async (_label, start) => {
+    const { hook, apply, editPromise } = await start();
+    act(() => {
+      expect(hook.result.current.cancelPendingOperation()).toBe('detached-apply');
+    });
+    await act(async () => {
+      apply.resolve(jsonResponse({ freshPlan: FRESH_PLAN }, 409));
+      await editPromise.catch(() => undefined);
+    });
+    await expect(editPromise).rejects.toBeInstanceOf(EditOperationCancelledError);
+    expect(hook.result.current.dialogState.open).toBe(false);
+    expect(applyCalls()).toHaveLength(1);
+  });
+
+  it.each([
+    ['a confirmed apply', startConfirmedApply],
+    ['an auto-apply', startAutoApply]
+  ])('resolves a late success after %s was detached, opens nothing and skips onSuccess', async (_label, start) => {
+    const { hook, apply, editPromise, onSuccess } = await start();
+    act(() => {
+      hook.result.current.cancelPendingOperation();
+    });
+    await act(async () => {
+      apply.resolve(jsonResponse(APPLY_RESULT));
+      await editPromise;
+    });
+    await expect(editPromise).resolves.toEqual(APPLY_RESULT);
+    expect(hook.result.current.dialogState.open).toBe(false);
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects a late failure after detaching without calling onError', async () => {
+    const { hook, apply, editPromise, onError } = await startConfirmedApply();
+    act(() => {
+      hook.result.current.cancelPendingOperation();
+    });
+    await act(async () => {
+      apply.resolve(new Response('boom', { status: 500 }));
+      await editPromise.catch(() => undefined);
+    });
+    await expect(editPromise).rejects.toThrow('boom');
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('refuses a new edit while the detached apply is in flight, then runs one untouched by the old response', async () => {
+    const { hook, apply, editPromise } = await startConfirmedApply();
+    act(() => {
+      hook.result.current.cancelPendingOperation();
+    });
+    await expect(hook.result.current.beginEdit(43, { MeasuredDBH: 13 })).rejects.toThrow('an edit is already pending');
+    await act(async () => {
+      apply.resolve(jsonResponse(APPLY_RESULT));
+      await editPromise;
+    });
+    fetchMock.mockResolvedValueOnce(jsonResponse(FRESH_PLAN));
+    let second!: Promise<ApplyResult>;
+    act(() => {
+      second = hook.result.current.beginEdit(43, { MeasuredDBH: 13 });
+    });
+    await waitFor(() => expect(hook.result.current.dialogState.plan?.planHash).toBe(FRESH_PLAN.planHash));
+    expect(hook.result.current.dialogState.open).toBe(true);
+    act(() => {
+      hook.result.current.cancelDialog();
+    });
+    await expect(second).rejects.toThrow('cancelled');
   });
 });

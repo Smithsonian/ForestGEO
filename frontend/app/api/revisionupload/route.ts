@@ -29,6 +29,7 @@ import {
 } from './shared/matchdiff';
 import { computeInvalidRowsIntegrityHash, isValidUploadAttemptID, REVISION_UPLOAD_FILE_ID } from './shared/invalidrowintegrity';
 import { requireSession } from '@/lib/auth-helpers';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 export const runtime = 'nodejs';
 
@@ -674,7 +675,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'invalid field value', field: errorObj.field }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
     ailogger.error('[revisionupload API] Error classifying rows:', errorObj);
-    return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

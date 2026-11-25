@@ -51,10 +51,15 @@ import {
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
 import { ReferenceReplacementInProgressError } from '@/lib/uploads/upload-session-replacement-marker';
 import { referenceUploadRowLimitError } from '@/lib/uploads/reference-upload-limits';
+import { TransactionCommitOutcomeUnknownError } from '@/lib/db/transactionerrors';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
+import { UploadRefusedError } from '@/lib/uploads/upload-refused-error';
 
 const REFERENCE_REPLACEMENT_IN_PROGRESS_CODE = 'REFERENCE_REPLACEMENT_IN_PROGRESS';
 const UPLOAD_SCOPE_REQUIRED_CODE = 'UPLOAD_SCOPE_REQUIRED';
 const UPLOAD_SESSION_CONFLICT_MESSAGE = 'Upload session conflict';
+const COMMIT_OUTCOME_UNKNOWN_MESSAGE =
+  'The database did not confirm whether the last part of this file was saved. Check the uploaded data before sending this file again.';
 const CENSUS_REPLACEMENT_INCOMPLETE_MESSAGE = 'The previous data for this census has not finished being replaced. Please retry the upload.';
 
 /**
@@ -177,6 +182,7 @@ async function rollbackPreservingOriginalError(connectionManager: ConnectionMana
 }
 
 function isRetryableUploadError(error: unknown): boolean {
+  if (error instanceof TransactionCommitOutcomeUnknownError) return false;
   if (!(error instanceof Error)) return false;
 
   const candidate = error as Error & { code?: string };
@@ -452,7 +458,7 @@ export async function POST(request: NextRequest) {
       return new NextResponse(
         JSON.stringify({
           responseMessage: 'Failed to validate measurement upload scope',
-          error: error.message,
+          error: INTERNAL_SERVER_ERROR_MESSAGE,
           fileName,
           batchID
         }),
@@ -599,6 +605,11 @@ export async function POST(request: NextRequest) {
           });
         }
 
+        if (e instanceof TransactionCommitOutcomeUnknownError) {
+          ailogger.error(`COMMIT outcome unknown while staging ${fileName}-${batchID}; not retrying a non-idempotent chunk`, e);
+          return NextResponse.json({ code: e.code, responseMessage: COMMIT_OUTCOME_UNKNOWN_MESSAGE, fileName, batchID }, { status: HTTPResponses.CONFLICT });
+        }
+
         if (e instanceof UploadSessionOwnershipError) {
           ailogger.warn(`Rejected measurement upload for ${fileName}-${batchID} during the census replacement: ${e.message}`);
           return new NextResponse(JSON.stringify({ responseMessage: UPLOAD_SESSION_CONFLICT_MESSAGE, error: e.message, fileName, batchID }), {
@@ -644,10 +655,11 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        ailogger.error(`Error processing file ${fileName} after ${retryCount} attempts:`, e.message);
+        ailogger.error(`Error processing file ${fileName} after ${retryCount} attempts:`, toError(e));
         return new NextResponse(
           JSON.stringify({
-            responseMessage: `Error processing file ${fileName}: ${e.message}`,
+            responseMessage: `Error processing file ${fileName}`,
+            error: INTERNAL_SERVER_ERROR_MESSAGE,
             failingRows: resolutionInvalidRows,
             retryCount
           }),
@@ -827,6 +839,11 @@ export async function POST(request: NextRequest) {
           });
         }
 
+        if (error instanceof TransactionCommitOutcomeUnknownError) {
+          ailogger.error(`COMMIT outcome unknown for ${formType} upload ${fileName}; not retrying a non-idempotent write`, error);
+          return NextResponse.json({ code: error.code, responseMessage: COMMIT_OUTCOME_UNKNOWN_MESSAGE, fileName }, { status: HTTPResponses.CONFLICT });
+        }
+
         // Unacknowledged overlaps are a confirm-and-retry condition, not a data error: the
         // client re-submits the same file with the acknowledgment flag once the uploader
         // confirms the overlaps reflect field measurements. Distinct code so the UI can react.
@@ -885,7 +902,7 @@ export async function POST(request: NextRequest) {
           return new NextResponse(
             JSON.stringify({
               responseMessage: `Error processing row in file ${fileName}`,
-              error: error.message,
+              error: error instanceof UploadRefusedError ? error.message : INTERNAL_SERVER_ERROR_MESSAGE,
               failingRows: Array.from(failingRows),
               retryCount
             }),

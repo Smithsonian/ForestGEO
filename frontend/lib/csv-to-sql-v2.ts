@@ -49,6 +49,22 @@ export const TREE_TAG_MAX_WIDTH = 20;
 export const TAXON_RANK_SUBSPECIES = 1;
 export const TAXON_RANK_SPECIES = 2;
 
+// Inline key names for the Stage 2 lookup temp tables, shared with tests so the
+// rendered DDL is asserted, not retyped.
+export const STEM_LOOKUP_INDEX_NAME = 'idxTreeStemTag';
+export const TEMP_ID_INDEX_NAME = 'idxTempID';
+export const TREE_LOOKUP_AMBIGUITY_INDEX_NAME = 'idxTreeCount';
+
+// Stage 5 check 1b reason. The operator manual quotes this text verbatim.
+export const EMPTY_STEMTAG_COLLISION_REASON = 'Empty StemTag collides with another stem under same Tree+Quadrat';
+
+// Destinations store an untagged stem as '' or NULL (#577), and a PAD SPACE destination groups a
+// spaces-only tag with them while a NO PAD staging table would not, so all three fold to ''. Other tags
+// stay as stored; OCTET_LENGTH keeps a collation that ignores a character from calling a tag blank.
+export function stemTagMatchKey(stemTagColumn: string): string {
+  return `CASE WHEN ${stemTagColumn} IS NULL OR OCTET_LENGTH(TRIM(TRAILING ' ' FROM ${stemTagColumn})) = 0 THEN '' ELSE ${stemTagColumn} END`;
+}
+
 // Live scalars only — resprout/cursor scratch removed with the pivot.
 // `_viewfulltable_installed` is populated by the Stage 0 ViewFullTable probe.
 // `_tag_col_width` is populated by the Stage 0 Tree.Tag width probe.
@@ -435,8 +451,9 @@ export interface Stage2Options {
  *      Groups by (Tag, SpeciesID, SubSpeciesID)
  *   6. UPDATE measurementsTable JOIN tree_lookup (TreeCount = 1) with NULL-safe <=> on SubSpeciesID
  *      to write back TreeID
- *   7. CREATE TEMPORARY TABLE stem_lookup — scoped via Stem → Quadrat → @target_plot_id
- *   8. UPDATE measurementsTable JOIN stem_lookup with NULL-safe StemTag (<=>) and StemCount = 1
+ *   7. CREATE TEMPORARY TABLE stem_lookup — its (TreeID, StemTagKey) key declared inline in the CREATE
+ *      (never ALTER TABLE, which would commit the load transaction); scoped via Stem → Quadrat → @target_plot_id
+ *   8. UPDATE measurementsTable JOIN stem_lookup on the same StemTagKey and StemCount = 1
  *      to write back StemID
  *   9. UPDATE attributesTable JOIN TSMAttributes to resolve TSMID
  *
@@ -483,13 +500,13 @@ export function renderStage2(opts: Stage2Options): string {
       ) r ON r.Mnemonic = t.Mnemonic;
 
   DROP TEMPORARY TABLE IF EXISTS taxonomy_best_rank;
-  CREATE TEMPORARY TABLE taxonomy_best_rank AS
+  CREATE TEMPORARY TABLE taxonomy_best_rank (KEY ${TEMP_ID_INDEX_NAME} (TempID)) AS
     SELECT TempID, MIN(MatchRank) AS BestRank
       FROM taxonomy_candidates
      GROUP BY TempID;
 
   DROP TEMPORARY TABLE IF EXISTS taxonomy_lookup;
-  CREATE TEMPORARY TABLE taxonomy_lookup AS
+  CREATE TEMPORARY TABLE taxonomy_lookup (KEY ${TEMP_ID_INDEX_NAME} (TempID)) AS
     SELECT c.TempID,
            MIN(CASE WHEN c.MatchRank = b.BestRank THEN c.SpeciesID END)    AS SpeciesID,
            MIN(CASE WHEN c.MatchRank = b.BestRank THEN c.SubSpeciesID END) AS SubSpeciesID,
@@ -517,8 +534,10 @@ export function renderStage2(opts: Stage2Options): string {
         t.SubSpeciesID = tx.SubSpeciesID;
 
   -- Tree lookup (CTFS Tree has no PlotID; scope via Stem -> Quadrat -> Plot)
+  -- Keyed on TreeCount: check 3 probes only ambiguous keys, and a Tag-led key is
+  -- unusable when staging and the destination Tree.Tag differ in charset.
   DROP TEMPORARY TABLE IF EXISTS tree_lookup;
-  CREATE TEMPORARY TABLE tree_lookup AS
+  CREATE TEMPORARY TABLE tree_lookup (KEY ${TREE_LOOKUP_AMBIGUITY_INDEX_NAME} (TreeCount)) AS
     SELECT tr.Tag,
            tr.SpeciesID,
            tr.SubSpeciesID,
@@ -537,21 +556,22 @@ export function renderStage2(opts: Stage2Options): string {
                        AND tl.TreeCount = 1
     SET t.TreeID = tl.TreeID;
 
-  -- Stem lookup (also plot-scoped)
+  -- Stem lookup (also plot-scoped). The key is declared here because ALTER TABLE or
+  -- CREATE INDEX on a temporary table would implicitly commit the load transaction.
   DROP TEMPORARY TABLE IF EXISTS stem_lookup;
-  CREATE TEMPORARY TABLE stem_lookup AS
+  CREATE TEMPORARY TABLE stem_lookup (KEY ${STEM_LOOKUP_INDEX_NAME} (TreeID, StemTagKey)) AS
     SELECT s.TreeID,
-           s.StemTag,
+           ${stemTagMatchKey('s.StemTag')} AS StemTagKey,
            MIN(s.StemID) AS StemID,
            COUNT(*)      AS StemCount
       FROM Stem s
       JOIN Quadrat q ON q.QuadratID = s.QuadratID
      WHERE q.PlotID = @target_plot_id
-     GROUP BY s.TreeID, s.StemTag;
+     GROUP BY s.TreeID, StemTagKey;
 
   UPDATE ${m} t
     JOIN stem_lookup sl ON sl.TreeID = t.TreeID
-                       AND sl.StemTag <=> t.StemTag
+                       AND sl.StemTagKey = ${stemTagMatchKey('t.StemTag')}
                        AND sl.StemCount = 1
     SET t.StemID = sl.StemID;
 
@@ -633,11 +653,12 @@ ${appendErr(
        OR QuadratName IS NULL OR QuadratName = '' OR ExactDate IS NULL`
 )}
 
-  -- Stage 5 check 1b: empty StemTag is a destination contract failure when the
-  -- destination tree already has another stem with the same empty tag. The app
-  -- stores stems.StemTag with default '' NOT NULL, so legitimate "no stem tag"
-  -- rows arrive here as empty strings; reject duplicates explicitly rather than
-  -- silently colliding on the <=> match in Stage 2/7.
+  -- Stage 5 check 1b: an untagged row that Stage 2 could not match is a destination
+  -- contract failure when its tree and quadrat already hold an untagged stem ('' or
+  -- NULL), or when the batch stages two untagged stems there. The app stores
+  -- stems.StemTag with default '' NOT NULL, so legitimate "no stem tag" rows arrive
+  -- here as empty strings; reject these explicitly rather than let Stage 7 insert a
+  -- second untagged identity.
   DROP TEMPORARY TABLE IF EXISTS _stage5_empty_stemtag;
   CREATE TEMPORARY TABLE _stage5_empty_stemtag AS
     SELECT TreeID, QuadratID, COUNT(*) AS cnt
@@ -650,18 +671,20 @@ ${appendErr(
     HAVING COUNT(*) > 1
        OR EXISTS (
             SELECT 1 FROM Stem s
-             WHERE s.TreeID = TreeID
-               AND s.QuadratID = QuadratID
+             WHERE s.TreeID = ${m}.TreeID
+               AND s.QuadratID = ${m}.QuadratID
                AND (s.StemTag IS NULL OR s.StemTag = '')
           );
 
-  UPDATE ${m}
-    SET Errors = CONCAT(COALESCE(Errors, ''), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END, 'Empty StemTag collides with another stem under same Tree+Quadrat')
-    WHERE StemID IS NULL
+${appendErr(
+  m,
+  EMPTY_STEMTAG_COLLISION_REASON,
+  `StemID IS NULL
       AND (StemTag IS NULL OR StemTag = '')
       AND TreeID IS NOT NULL
       AND QuadratID IS NOT NULL
-      AND EXISTS (SELECT 1 FROM _stage5_empty_stemtag e WHERE e.TreeID = ${m}.TreeID AND e.QuadratID = ${m}.QuadratID);
+      AND EXISTS (SELECT 1 FROM _stage5_empty_stemtag e WHERE e.TreeID = ${m}.TreeID AND e.QuadratID = ${m}.QuadratID)`
+)}
 
   DROP TEMPORARY TABLE IF EXISTS _stage5_empty_stemtag;
 
@@ -696,7 +719,7 @@ ${appendErr(
   'Ambiguous stem key',
   `TreeID IS NOT NULL AND EXISTS (
        SELECT 1 FROM stem_lookup sl
-       WHERE sl.TreeID = ${m}.TreeID AND sl.StemTag <=> ${m}.StemTag AND sl.StemCount > 1
+       WHERE sl.TreeID = ${m}.TreeID AND sl.StemTagKey = ${stemTagMatchKey(`${m}.StemTag`)} AND sl.StemCount > 1
      )`
 )}
 

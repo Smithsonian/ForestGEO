@@ -5,6 +5,9 @@
  * balancer (which kills idle connections at ~230 s) from dropping the request.
  */
 
+import ailogger from '@/ailogger';
+import { INTERNAL_SERVER_ERROR_MESSAGE, toError } from '@/lib/errorhelpers';
+
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 
 export interface HeartbeatMessage {
@@ -50,8 +53,8 @@ export function streamWithHeartbeats<T>(operation: () => Promise<T>, heartbeatIn
           controller.enqueue(encoder.encode(JSON.stringify(result) + '\n'));
         })
         .catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          const error: ErrorMessage = { type: 'error', success: false, message };
+          ailogger.error('Streamed validation operation failed:', toError(err));
+          const error: ErrorMessage = { type: 'error', success: false, message: INTERNAL_SERVER_ERROR_MESSAGE };
           controller.enqueue(encoder.encode(JSON.stringify(error) + '\n'));
         })
         .finally(() => {

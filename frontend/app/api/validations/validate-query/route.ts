@@ -3,6 +3,9 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
+import { toError } from '@/lib/errorhelpers';
+
+const QUERY_VALIDATION_UNAVAILABLE_MESSAGE = 'The query could not be checked right now. Try again, or contact the ForestGEO team if this continues.';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -47,7 +50,6 @@ async function handler(request: NextRequest, _context: RouteContext) {
     } catch (error: any) {
       validationResult.isValid = false;
 
-      // Parse MySQL error messages for better user feedback
       const errorMessage = error.message || 'Unknown SQL error';
 
       if (errorMessage.includes('Table') && errorMessage.includes("doesn't exist")) {
@@ -67,7 +69,9 @@ async function handler(request: NextRequest, _context: RouteContext) {
       } else if (errorMessage.includes('syntax error')) {
         validationResult.errors.push('SQL syntax error - please check your query syntax');
       } else {
-        validationResult.errors.push(`SQL Error: ${errorMessage}`);
+        // Any other failure, such as a permission denial naming the database user and host, stays in the log.
+        ailogger.error('Query validation failed:', toError(error));
+        validationResult.errors.push(QUERY_VALIDATION_UNAVAILABLE_MESSAGE);
       }
     }
 

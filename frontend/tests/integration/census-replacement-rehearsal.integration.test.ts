@@ -22,6 +22,13 @@
  *   3 resumedRun          retry of run 2 with the same batch and session; finishes the replacement, no double audit
  *   4 stagingRollbackRun  fresh seed; failure injected at the staging insert after the replacement; staging rolls back,
  *                         the marker stays set, the census stays replaced; the retry runs no replacement transaction
+ *   5 recoveryRun         ingestBatch on a failed-first census (the #562 recovery, 412,427 rows at the full profile): bounded
+ *                         recovery_window transactions then one recovery_final, all outside setup and within budget, flat window
+ *                         locks, one scope read, exact recovered state, setup issues no coremeasurements DELETE
+ *   6 interruptedRecoveryRun  fresh seed; failure injected at the coremeasurements DELETE of the middle recovery window; exactly
+ *                         the committed windows' lowest ids are gone and audited, setup never starts; the retry meets run 5's bar
+ *   7 residualRecoveryRun run 5 plus the supported legacy residue (residual trees and stems, stale staged rows); the final
+ *                         transaction stays within budget and the residue is gone
  *   8 arcgisCommitRun     (#561) fresh seed plus an ArcGIS import session of the profile's replacement row count; commitArcgisImport
  *                         CLEAN; every transaction within budget, exact kind counts, census replaced, import `committed`
  *   9 arcgisInterruptedRun fresh seed; failure injected at the finalize transaction's file_upload changelog INSERT; census replaced and
@@ -70,7 +77,8 @@ import { CENSUS_REPLACEMENT_STATEMENT } from '../setup/census-replacement-statem
 import { captureCensusReplacementWindowStatements } from '../setup/census-replacement-statement-capture';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { CENSUS_REPLACEMENT_MARKER_COLUMN, resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
-import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE, SUB_BATCH_ORDINAL_WIDTH, SUB_BATCH_SEPARATOR } from '@/lib/uploads/batch-family';
+import { buildSubBatchPattern, getIngestionBatchSize, LIKE_ESCAPE_CLAUSE, SUB_BATCH_ORDINAL_WIDTH, SUB_BATCH_SEPARATOR } from '@/lib/uploads/batch-family';
+import { ingestBatch, type IngestBatchResult, type SetupDiagnostic } from '@/lib/uploads/ingest-batch';
 import { generateShortBatchID } from '@/config/utils';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
@@ -91,16 +99,38 @@ interface RehearsalProfile {
   censusTwoRows: number;
   failedSubBatchRows: number;
   subBatchRows: number;
+  /** Run 7 (spec #562 Goal 3): legacy residual trees (one stem each) and stale staged rows of census 3. */
+  residualTreeRows: number;
+  residualStagedRows: number;
 }
 
 /** Measured on forestgeo_mpala, 2026-10-26: 6 parse rejects + 412,421 SQL_EXCEPTION rows over 42 sub-batches of 10,000. */
 const MPALA_SUB_BATCH_ROWS = 10_000;
 const MPALA_PARSE_REJECT_ROWS = 6;
 const MPALA_FAILED_SUB_BATCH_COUNT = 42;
+/** Spec #562 Goal 3: the supported legacy residue per census (trees, stems and stale staged rows each), lowered from 100,000 after run 7 measured 0.138 ms per residual row at that size. */
+const SUPPORTED_RESIDUAL_ROWS = 30_000;
+const SMOKE_RESIDUAL_ROWS = 5_000;
 
 const REHEARSAL_PROFILES: Record<RehearsalProfile['name'], RehearsalProfile> = {
-  full: { name: 'full', censusOneRows: 363_983, censusTwoRows: 156_492, failedSubBatchRows: 412_421, subBatchRows: MPALA_SUB_BATCH_ROWS },
-  smoke: { name: 'smoke', censusOneRows: 3_640, censusTwoRows: 1_565, failedSubBatchRows: 20_521, subBatchRows: 500 }
+  full: {
+    name: 'full',
+    censusOneRows: 363_983,
+    censusTwoRows: 156_492,
+    failedSubBatchRows: 412_421,
+    subBatchRows: MPALA_SUB_BATCH_ROWS,
+    residualTreeRows: SUPPORTED_RESIDUAL_ROWS,
+    residualStagedRows: SUPPORTED_RESIDUAL_ROWS
+  },
+  smoke: {
+    name: 'smoke',
+    censusOneRows: 3_640,
+    censusTwoRows: 1_565,
+    failedSubBatchRows: 20_521,
+    subBatchRows: 500,
+    residualTreeRows: SMOKE_RESIDUAL_ROWS,
+    residualStagedRows: SMOKE_RESIDUAL_ROWS
+  }
 };
 
 class UnknownRehearsalProfileError extends Error {
@@ -143,6 +173,15 @@ const FAILED_UPLOAD_ID_PREFIX = 'rehearsal-';
 const FAILED_BATCH_ERROR_MESSAGE = "Error 1054: Unknown column 'sp.StemID' in 'where clause'";
 const REPLACEMENT_FILE = 'mpala_census3_replacement.csv';
 const REPLACEMENT_TAG_PREFIX = 'R3T';
+const RECOVERY_INCOMING_ROWS = 100;
+const RECOVERY_INCOMING_FILE = 'mpala_census3_recovery.csv';
+const RECOVERY_INCOMING_TAG_PREFIX = 'RC3T';
+const RECOVERY_STALE_FILE = 'mpala_census3_stale_staging.csv';
+const RECOVERY_STALE_BATCH = 'rehearsal-stale-family';
+const RESIDUAL_TREE_TAG_PREFIX = 'RES3T';
+const WINDOW_FLATNESS_RATIO_LIMIT = 3;
+const WINDOW_FLATNESS_NOISE_FLOOR_MS = 10;
+const DECILE_COUNT = 10;
 const CONTROL_TAG_PREFIX = { CENSUS_ONE: 'C1T', CENSUS_TWO: 'C2T' } as const;
 const FAILED_TAG_PREFIX = 'C3T';
 const REHEARSAL_CHANGED_BY = 'census-replacement-rehearsal';
@@ -213,9 +252,44 @@ const STATEMENT_PHASE = {
   IMPORT_MARKER_UPDATE: 'importMarkerUpdate',
   FINALIZE_UPDATE: 'finalizeUpdate',
   FILE_UPLOAD_CHANGELOG_INSERT: 'fileUploadChangelogInsert',
+  RECOVERY_SCOPE_READ: 'recoveryScopeRead',
+  CENSUS_LOCK: 'censusLock',
+  RECOVERY_GUARD: 'recoveryGuard',
+  WINDOW_LOCK: 'windowLock',
+  RECOVERY_FINAL_READ: 'recoveryFinalRead',
+  RECOVERY_FINAL: 'recoveryFinal',
+  SETUP_DISCOVERY: 'setupDiscovery',
+  SUB_BATCH_CALL: 'subBatchCall',
   OTHER: 'other'
 } as const;
 type StatementPhase = (typeof STATEMENT_PHASE)[keyof typeof STATEMENT_PHASE];
+
+/** Runs 1-4: every one of these must match at least one statement in a run that finishes the replacement and commits its staging. */
+const REPLACEMENT_RUN_PHASES: readonly StatementPhase[] = [
+  STATEMENT_PHASE.SESSION_LOCK,
+  STATEMENT_PHASE.ERROR_LINK_DELETE,
+  STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE,
+  STATEMENT_PHASE.COREMEASUREMENT_DELETE_AUDIT,
+  STATEMENT_PHASE.COREMEASUREMENT_DELETE,
+  STATEMENT_PHASE.LEGACY_DELETE,
+  STATEMENT_PHASE.UPLOADMETRICS_DELETE,
+  STATEMENT_PHASE.MARKER_UPDATE,
+  STATEMENT_PHASE.STAGING_INSERT
+];
+
+/** Runs 5-7: the recovery's own statements plus the setup and sub-batch work that follows it. */
+const RECOVERY_RUN_PHASES: readonly StatementPhase[] = [
+  STATEMENT_PHASE.RECOVERY_SCOPE_READ,
+  STATEMENT_PHASE.CENSUS_LOCK,
+  STATEMENT_PHASE.RECOVERY_GUARD,
+  STATEMENT_PHASE.WINDOW_LOCK,
+  STATEMENT_PHASE.RECOVERY_FINAL_READ,
+  STATEMENT_PHASE.RECOVERY_FINAL,
+  STATEMENT_PHASE.COREMEASUREMENT_DELETE_AUDIT,
+  STATEMENT_PHASE.COREMEASUREMENT_DELETE,
+  STATEMENT_PHASE.SETUP_DISCOVERY,
+  STATEMENT_PHASE.SUB_BATCH_CALL
+];
 
 /** Statements only an ArcGIS commit (#561) issues; the CSV runs never match them. */
 const ARCGIS_STATEMENT_PHASES: readonly StatementPhase[] = [
@@ -227,14 +301,9 @@ const ARCGIS_STATEMENT_PHASES: readonly StatementPhase[] = [
   STATEMENT_PHASE.FINALIZE_UPDATE
 ];
 
-/** Every CSV-path phase must match at least one statement in a run that finishes the replacement and commits its staging. */
-const NAMED_STATEMENT_PHASES: readonly StatementPhase[] = Object.values(STATEMENT_PHASE).filter(
-  phase => phase !== STATEMENT_PHASE.OTHER && phase !== STATEMENT_PHASE.FILE_UPLOAD_CHANGELOG_INSERT && !ARCGIS_STATEMENT_PHASES.includes(phase)
-);
-
 /** An ArcGIS commit that deletes a prior census: the CSV replacement phases, minus the upload-session marker (the import row carries it), plus its own. */
 const ARCGIS_COMMIT_REQUIRED_PHASES: readonly StatementPhase[] = [
-  ...NAMED_STATEMENT_PHASES.filter(phase => phase !== STATEMENT_PHASE.MARKER_UPDATE),
+  ...REPLACEMENT_RUN_PHASES.filter(phase => phase !== STATEMENT_PHASE.MARKER_UPDATE),
   ...ARCGIS_STATEMENT_PHASES,
   STATEMENT_PHASE.FILE_UPLOAD_CHANGELOG_INSERT
 ];
@@ -250,6 +319,19 @@ const COREMEASUREMENT_SELECT_FOR_UPDATE_PATTERN =
   /^\s*SELECT\s+(\/\*\+[^*]*\*\/\s+)?(DISTINCT\s+)?\S*CoreMeasurementID\s+FROM\s+\S+\.coremeasurements[\s\S]*FOR UPDATE\s*$/i;
 const STAGING_INSERT_PATTERN = /^\s*INSERT IGNORE INTO\s+\S+\.temporarymeasurements\b/i;
 
+const RECOVERY_SCOPE_READ_PATTERN = /^\s*SELECT\s+CoreMeasurementID\s+FROM\s+\S+\.coremeasurements\s+WHERE\s+CensusID = \?\s+ORDER BY\s+CoreMeasurementID\s*$/;
+const CENSUS_LOCK_PATTERN = /^\s*SELECT CensusID FROM\s+\S+\.census WHERE CensusID = \? FOR UPDATE\s*$/;
+const RECOVERY_GUARD_PATTERN = /^\s*SELECT COUNT\(\*\) AS completedUploads FROM\s+\S+\.uploadmetrics/;
+/** The statement that locks a recovery window's ids: on the base code today's census-wide `LIMIT … FOR UPDATE`, after #562 the PRIMARY lock. */
+const RECOVERY_WINDOW_LOCK_PATTERN =
+  /^\s*SELECT\s+(\/\*\+\s+INDEX\(coremeasurements PRIMARY\)\s+\*\/\s+)?CoreMeasurementID\s+FROM\s+\S+\.coremeasurements\s+WHERE\s+(\(CensusID = \?\)\s+AND\s+CoreMeasurementID\s+IN|CensusID = \?\s+ORDER BY\s+CoreMeasurementID\s+LIMIT)[\s\S]*FOR UPDATE\s*$/;
+const RECOVERY_FINAL_READ_PATTERN = /^\s*SELECT CoreMeasurementID FROM\s+\S+\.coremeasurements WHERE CensusID = \? ORDER BY CoreMeasurementID LIMIT \d+\s*$/;
+/** The final transaction's residue statements (the metrics DELETE is classified with the replacement's METRICS_DELETE pattern below it, so it is listed here first). */
+const RECOVERY_FINAL_PATTERN =
+  /^\s*DELETE (FROM\s+\S+\.(measurementssummary|stems|trees|uploadintegrityalerts)\s+WHERE\s+(PlotID = \? AND )?CensusID = \?|tm\s+FROM\s+\S+\.temporarymeasurements tm\s+INNER JOIN\s+\S+\.uploadmetrics um|FROM\s+\S+\.uploadmetrics WHERE PlotID = \? AND CensusID = \? AND status IN)/;
+const SETUP_DISCOVERY_PATTERN = /GROUP BY BatchID\s+ORDER BY BatchID FOR UPDATE\s*$/;
+const SUB_BATCH_CALL_PATTERN = /CALL\s+\S*bulkingestionprocess/i;
+
 /** The ArcGIS statements go before the CSV ones: the family-id select would otherwise be taken for a window cursor SELECT. */
 const STATEMENT_PHASE_PATTERNS: ReadonlyArray<{ phase: StatementPhase; pattern: RegExp }> = [
   { phase: STATEMENT_PHASE.ARCGIS_CLAIM_UPDATE, pattern: ARCGIS_COMMIT_STATEMENT.CLAIM_UPDATE },
@@ -258,6 +340,14 @@ const STATEMENT_PHASE_PATTERNS: ReadonlyArray<{ phase: StatementPhase; pattern: 
   { phase: STATEMENT_PHASE.CURSOR_CAS, pattern: ARCGIS_COMMIT_STATEMENT.CURSOR_CAS },
   { phase: STATEMENT_PHASE.IMPORT_MARKER_UPDATE, pattern: ARCGIS_COMMIT_STATEMENT.IMPORT_MARKER_UPDATE },
   { phase: STATEMENT_PHASE.FINALIZE_UPDATE, pattern: ARCGIS_COMMIT_STATEMENT.FINALIZE_UPDATE },
+  { phase: STATEMENT_PHASE.RECOVERY_SCOPE_READ, pattern: RECOVERY_SCOPE_READ_PATTERN },
+  { phase: STATEMENT_PHASE.CENSUS_LOCK, pattern: CENSUS_LOCK_PATTERN },
+  { phase: STATEMENT_PHASE.RECOVERY_GUARD, pattern: RECOVERY_GUARD_PATTERN },
+  { phase: STATEMENT_PHASE.WINDOW_LOCK, pattern: RECOVERY_WINDOW_LOCK_PATTERN },
+  { phase: STATEMENT_PHASE.RECOVERY_FINAL_READ, pattern: RECOVERY_FINAL_READ_PATTERN },
+  { phase: STATEMENT_PHASE.RECOVERY_FINAL, pattern: RECOVERY_FINAL_PATTERN },
+  { phase: STATEMENT_PHASE.SETUP_DISCOVERY, pattern: SETUP_DISCOVERY_PATTERN },
+  { phase: STATEMENT_PHASE.SUB_BATCH_CALL, pattern: SUB_BATCH_CALL_PATTERN },
   { phase: STATEMENT_PHASE.SESSION_LOCK, pattern: CENSUS_REPLACEMENT_STATEMENT.SESSION_LOCK },
   { phase: STATEMENT_PHASE.ERROR_LINK_DELETE, pattern: CENSUS_REPLACEMENT_STATEMENT.ERROR_LINK_DELETE },
   { phase: STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE, pattern: COREMEASUREMENT_SELECT_FOR_UPDATE_PATTERN },
@@ -278,6 +368,8 @@ interface TimedStatement {
   phase: StatementPhase;
   /** Null for statements run outside any transaction (the preliminary probes). */
   transactionID: string | null;
+  /** performance.now() before the statement ran. */
+  startedAtMs: number;
   durationMs: number;
   preview: string;
 }
@@ -322,7 +414,7 @@ function installStatementTimer(connectionManager: ConnectionManager, injection: 
       seenInInjectedPhase += 1;
       if (seenInInjectedPhase === injection.occurrence) {
         fired = true;
-        statements.push({ phase, transactionID, durationMs: 0, preview: previewOf(query) });
+        statements.push({ phase, transactionID, startedAtMs: performance.now(), durationMs: 0, preview: previewOf(query) });
         throw new InjectedRehearsalFailureError(injection);
       }
     }
@@ -330,7 +422,7 @@ function installStatementTimer(connectionManager: ConnectionManager, injection: 
     try {
       return await originalExecuteQuery.call(connectionManager, query, params, transactionId);
     } finally {
-      statements.push({ phase, transactionID, durationMs: performance.now() - startedAt, preview: previewOf(query) });
+      statements.push({ phase, transactionID, startedAtMs: startedAt, durationMs: performance.now() - startedAt, preview: previewOf(query) });
     }
   };
   return {
@@ -353,6 +445,10 @@ const TRANSACTION_KIND = {
   CLEAR_FAMILY_WINDOW: 'clear_family_window',
   STAGING_WINDOW: 'staging_window',
   ARCGIS_FINALIZE: 'arcgis_finalize',
+  RECOVERY_WINDOW: 'recovery_window',
+  RECOVERY_FINAL: 'recovery_final',
+  SETUP: 'setup',
+  SUB_BATCH: 'sub_batch',
   UNCLASSIFIED: 'unclassified'
 } as const;
 type TransactionKind = (typeof TRANSACTION_KIND)[keyof typeof TRANSACTION_KIND];
@@ -368,6 +464,11 @@ const TRANSACTION_KIND_BY_PHASE: ReadonlyArray<{ phase: StatementPhase; kind: Tr
   { phase: STATEMENT_PHASE.STAGED_CLEAR_DELETE, kind: TRANSACTION_KIND.CLEAR_STAGED_WINDOW },
   { phase: STATEMENT_PHASE.FAMILY_ID_SELECT, kind: TRANSACTION_KIND.CLEAR_FAMILY_WINDOW },
   { phase: STATEMENT_PHASE.CURSOR_CAS, kind: TRANSACTION_KIND.STAGING_WINDOW },
+  { phase: STATEMENT_PHASE.RECOVERY_FINAL_READ, kind: TRANSACTION_KIND.RECOVERY_FINAL },
+  // On the base code the recovery runs inside setup, so its window locks then count toward 'setup'.
+  { phase: STATEMENT_PHASE.SETUP_DISCOVERY, kind: TRANSACTION_KIND.SETUP },
+  { phase: STATEMENT_PHASE.CENSUS_LOCK, kind: TRANSACTION_KIND.RECOVERY_WINDOW },
+  { phase: STATEMENT_PHASE.SUB_BATCH_CALL, kind: TRANSACTION_KIND.SUB_BATCH },
   { phase: STATEMENT_PHASE.STAGING_INSERT, kind: TRANSACTION_KIND.STAGING },
   { phase: STATEMENT_PHASE.COREMEASUREMENT_SELECT_FOR_UPDATE, kind: TRANSACTION_KIND.MEASUREMENT_WINDOW },
   { phase: STATEMENT_PHASE.LEGACY_DELETE, kind: TRANSACTION_KIND.LEGACY_PASS },
@@ -390,6 +491,8 @@ interface TransactionRecord {
   end: TransactionEnd;
   /** BEGIN to the end of COMMIT or ROLLBACK. */
   durationMs: number;
+  /** performance.now() at the end of COMMIT or ROLLBACK. */
+  endedAtMs: number;
 }
 
 interface TransactionTimer {
@@ -403,12 +506,13 @@ function installTransactionTimer(connectionManager: ConnectionManager): Transact
   const originalCommit = connectionManager.commitTransaction;
   const originalRollback = connectionManager.rollbackTransaction;
   const beganAtByTransaction = new Map<string, number>();
-  const finished: Array<{ transactionID: string; end: TransactionEnd; durationMs: number }> = [];
+  const finished: Array<{ transactionID: string; end: TransactionEnd; durationMs: number; endedAtMs: number }> = [];
 
   const finish = (transactionID: string, end: TransactionEnd) => {
     const beganAt = beganAtByTransaction.get(transactionID);
     if (beganAt === undefined) return;
-    finished.push({ transactionID, end, durationMs: performance.now() - beganAt });
+    const endedAtMs = performance.now();
+    finished.push({ transactionID, end, durationMs: endedAtMs - beganAt, endedAtMs });
     beganAtByTransaction.delete(transactionID);
   };
 
@@ -577,6 +681,55 @@ function rowsDeletedBeforeWindow(windowIndex: number): number {
   return (windowIndex - FIRST_WINDOW_ORDINAL) * CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE;
 }
 
+interface RecoveryShape {
+  slices: number;
+  recoveryWindows: number;
+  recoveryFinals: number;
+  interruptedWindow: number;
+  rowsGoneWhenInterrupted: number;
+}
+
+class InterruptedWindowNotCommittedError extends Error {
+  constructor(window: number, windows: number) {
+    super(`interrupted window ${window} is not one of the ${windows} committed recovery windows; run 6 would interrupt the final transaction`);
+    this.name = 'InterruptedWindowNotCommittedError';
+  }
+}
+
+/** Spec #562 rehearsal table: every slice but the last is a window transaction; the last slice is held back into the final transaction. */
+function expectedRecoveryShape(rows: number, windowSize: number): RecoveryShape {
+  const slices = Math.ceil(rows / windowSize);
+  const recoveryWindows = slices - 1;
+  const interruptedWindow = interruptedWindowIndex(rows, windowSize);
+  if (interruptedWindow > recoveryWindows) throw new InterruptedWindowNotCommittedError(interruptedWindow, recoveryWindows);
+  return {
+    slices,
+    recoveryWindows,
+    recoveryFinals: SINGLE_TRANSACTION,
+    interruptedWindow,
+    rowsGoneWhenInterrupted: rowsDeletedBeforeWindow(interruptedWindow)
+  };
+}
+
+/** Spec #562 rehearsal table, the reference the derivation is checked against. */
+const SPEC_RECOVERY_SHAPES: Record<RehearsalProfile['name'], RecoveryShape> = {
+  full: { slices: 413, recoveryWindows: 412, recoveryFinals: 1, interruptedWindow: 207, rowsGoneWhenInterrupted: 206_000 },
+  smoke: { slices: 21, recoveryWindows: 20, recoveryFinals: 1, interruptedWindow: 11, rowsGoneWhenInterrupted: 10_000 }
+};
+
+function decileMeansMs(durations: number[]): number[] {
+  if (durations.length < DECILE_COUNT) return [];
+  const size = Math.floor(durations.length / DECILE_COUNT);
+  return Array.from({ length: DECILE_COUNT }, (_, decile) => {
+    const slice = durations.slice(decile * size, decile === DECILE_COUNT - 1 ? durations.length : (decile + 1) * size);
+    return Math.round((slice.reduce((sum, value) => sum + value, 0) / slice.length) * 100) / 100;
+  });
+}
+
+function windowLockIsFlat(deciles: number[]): boolean {
+  return deciles.length === DECILE_COUNT && deciles[DECILE_COUNT - 1] <= WINDOW_FLATNESS_RATIO_LIMIT * deciles[0] + WINDOW_FLATNESS_NOISE_FLOOR_MS;
+}
+
 // ---------------------------------------------------------------------------
 // State snapshots
 // ---------------------------------------------------------------------------
@@ -728,6 +881,7 @@ interface RehearsalSummary {
   measurementWindowSize: number;
   seed: { censusOneRows: number; censusTwoRows: number; censusThreeFailedRows: number; failedSubBatches: number; seedMs: number; mismatches: string[] } | null;
   runs: Partial<Record<RunKey, RunSummary>>;
+  recoveryRuns: Partial<Record<RecoveryRunKey, RecoveryRunSummary>>;
   failedChecks: string[];
   passed: boolean;
 }
@@ -743,6 +897,7 @@ const rehearsalSummary: RehearsalSummary = {
   measurementWindowSize: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   seed: null,
   runs: {},
+  recoveryRuns: {},
   failedChecks: [],
   passed: false
 };
@@ -954,11 +1109,218 @@ function retryAfterRollbackFailedChecks(key: RunKey, retry: RetryAfterRollbackSu
   return failed;
 }
 
-function rehearsalFailedChecks(summary: RehearsalSummary, expectations: Record<RunKey, RunExpectation>): string[] {
+// ---------------------------------------------------------------------------
+// Recovery runs (#562): summary, expectations and checks
+// ---------------------------------------------------------------------------
+
+type RecoveryRunKey = 'recoveryRun' | 'interruptedRecoveryRun' | 'residualRecoveryRun';
+const RECOVERY_RUN_KEYS: readonly RecoveryRunKey[] = ['recoveryRun', 'interruptedRecoveryRun', 'residualRecoveryRun'];
+type RecoveryRunOutcome = 'recovered' | 'recovery_interrupted' | 'failed';
+const RECOVERY_DIAGNOSTIC_STEP = 'recovery';
+const BUDGETED_RECOVERY_KINDS: readonly TransactionKind[] = [TRANSACTION_KIND.RECOVERY_WINDOW, TRANSACTION_KIND.RECOVERY_FINAL, TRANSACTION_KIND.SETUP];
+
+interface RecoveryRunVerification {
+  preRunMismatches: string[];
+  stateMismatches: string[];
+  controlCensusMismatches: string[];
+}
+
+interface RecoveryRunSummary {
+  outcome: RecoveryRunOutcome;
+  recovered: boolean | null;
+  endToEndMs: number;
+  /** First recovery statement to the end of the recovery_final COMMIT; null when no final transaction committed (always on the base code). */
+  recoveryEndToEndMs: number | null;
+  /** The 'recovery' SetupDiagnostic's completed/failed elapsedMs minus its started elapsedMs. */
+  recoveryDiagnosticMs: number | null;
+  transactionKindCounts: Record<TransactionKind, number>;
+  transactionMsByKind: Partial<Record<TransactionKind, { p50: number; p95: number; max: number }>>;
+  rolledBackTransactions: number;
+  overBudgetTransactions: OverBudgetTransaction[];
+  scopeReadCount: number;
+  windowLockCount: number;
+  windowLockDecileMeansMs: number[];
+  windowLockFlat: boolean;
+  finalTransactionMs: number | null;
+  /** Run 7: final transaction ms ÷ (residual trees + stems + staged rows). */
+  residualRowCostMs: number | null;
+  setupMeasurementDeletes: number;
+  injection: FailureInjection | null;
+  injectionFired: boolean;
+  error: string | null;
+  phases: Record<StatementPhase, PhaseTotals>;
+  unmatchedPhases: StatementPhase[];
+  verification: RecoveryRunVerification | null;
+  retry: RecoveryRunSummary | null;
+}
+
+interface RecoveryIngestionResult {
+  outcome: RecoveryRunOutcome;
+  ingestion: IngestBatchResult | null;
+  endToEndMs: number;
+  injection: FailureInjection | null;
+  injectionFired: boolean;
+  error: string | null;
+  statements: TimedStatement[];
+  transactions: TransactionRecord[];
+  diagnostics: SetupDiagnostic[];
+}
+
+function millisecondSpread(durations: number[]): { p50: number; p95: number; max: number } {
+  const sorted = [...durations].sort((first, second) => first - second);
+  return {
+    p50: Math.round(percentileOf(sorted, MEDIAN_FRACTION)),
+    p95: Math.round(percentileOf(sorted, P95_FRACTION)),
+    max: Math.round(sorted[sorted.length - 1])
+  };
+}
+
+function summarizeRecoveryRun(result: RecoveryIngestionResult, residualRows: number | null): RecoveryRunSummary {
+  const kindByTransaction = new Map(result.transactions.map(transaction => [transaction.transactionID, transaction.kind]));
+  const transactionMsByKind: RecoveryRunSummary['transactionMsByKind'] = {};
+  for (const kind of Object.values(TRANSACTION_KIND)) {
+    const durations = result.transactions.filter(transaction => transaction.kind === kind).map(transaction => transaction.durationMs);
+    if (durations.length > 0) transactionMsByKind[kind] = millisecondSpread(durations);
+  }
+  const windowLocks = result.statements.filter(statement => statement.phase === STATEMENT_PHASE.WINDOW_LOCK);
+  const windowLockDecileMeansMs = decileMeansMs(windowLocks.map(statement => statement.durationMs));
+  const finalTransaction =
+    result.transactions.find(transaction => transaction.kind === TRANSACTION_KIND.RECOVERY_FINAL && transaction.end === 'committed') ?? null;
+  const firstRecoveryStatement =
+    result.statements.find(statement => statement.phase === STATEMENT_PHASE.RECOVERY_SCOPE_READ || statement.phase === STATEMENT_PHASE.WINDOW_LOCK) ?? null;
+  const recoveryStarted = result.diagnostics.find(diagnostic => diagnostic.step === RECOVERY_DIAGNOSTIC_STEP && diagnostic.outcome === 'started');
+  const recoveryEnded = result.diagnostics.find(
+    diagnostic => diagnostic.step === RECOVERY_DIAGNOSTIC_STEP && (diagnostic.outcome === 'completed' || diagnostic.outcome === 'failed')
+  );
+  const phases = summarizePhases(result.statements);
+  const finalTransactionMs = finalTransaction ? Math.round(finalTransaction.durationMs) : null;
+  return {
+    outcome: result.outcome,
+    recovered: result.ingestion?.recovered ?? null,
+    endToEndMs: Math.round(result.endToEndMs),
+    recoveryEndToEndMs: finalTransaction && firstRecoveryStatement ? Math.round(finalTransaction.endedAtMs - firstRecoveryStatement.startedAtMs) : null,
+    recoveryDiagnosticMs: recoveryStarted && recoveryEnded ? Math.round(recoveryEnded.elapsedMs - recoveryStarted.elapsedMs) : null,
+    transactionKindCounts: countKinds(result.transactions),
+    transactionMsByKind,
+    rolledBackTransactions: result.transactions.filter(transaction => transaction.end === 'rolled_back').length,
+    overBudgetTransactions: result.transactions
+      .filter(transaction => BUDGETED_RECOVERY_KINDS.includes(transaction.kind) && transaction.durationMs > LOCAL_TRANSACTION_BUDGET_MS)
+      .map(transaction => ({ kind: transaction.kind, end: transaction.end, durationMs: Math.round(transaction.durationMs) })),
+    scopeReadCount: phases[STATEMENT_PHASE.RECOVERY_SCOPE_READ].statements,
+    windowLockCount: windowLocks.length,
+    windowLockDecileMeansMs,
+    windowLockFlat: windowLockIsFlat(windowLockDecileMeansMs),
+    finalTransactionMs,
+    residualRowCostMs: residualRows !== null && finalTransactionMs !== null ? finalTransactionMs / residualRows : null,
+    setupMeasurementDeletes: result.statements.filter(
+      statement =>
+        statement.phase === STATEMENT_PHASE.COREMEASUREMENT_DELETE &&
+        statement.transactionID !== null &&
+        kindByTransaction.get(statement.transactionID) === TRANSACTION_KIND.SETUP
+    ).length,
+    injection: result.injection,
+    injectionFired: result.injectionFired,
+    error: result.error,
+    phases,
+    unmatchedPhases: RECOVERY_RUN_PHASES.filter(phase => phases[phase].statements === 0),
+    verification: null,
+    retry: null
+  };
+}
+
+/** Records a recovery run in the SUMMARY immediately, before any verification query can fail. */
+function recordRecoveryRun(key: RecoveryRunKey, result: RecoveryIngestionResult, residualRows: number | null): RecoveryRunSummary {
+  const run = summarizeRecoveryRun(result, residualRows);
+  rehearsalSummary.recoveryRuns[key] = run;
+  console.log(`[census-replacement-rehearsal] ${key} ${JSON.stringify(run)}`);
+  return run;
+}
+
+/** The checks every completed recovery shares (runs 5 and 7, and run 6's retry): the spec's run-5 bar. */
+function completedRecoveryFailedChecks(label: string, run: RecoveryRunSummary, recoveryWindows: number, windowLocks: number): string[] {
+  const failed: string[] = [];
+  if (run.outcome !== 'recovered') failed.push(`${label}: outcome ${run.outcome}${run.error ? ` (${run.error})` : ''}, expected recovered`);
+  if (run.recovered !== true) failed.push(`${label}: ingestBatch reported recovered=${run.recovered}`);
+  const kinds = run.transactionKindCounts;
+  if (kinds[TRANSACTION_KIND.RECOVERY_WINDOW] !== recoveryWindows)
+    failed.push(`${label}: ${kinds[TRANSACTION_KIND.RECOVERY_WINDOW]} recovery_window transactions, expected ${recoveryWindows}`);
+  if (kinds[TRANSACTION_KIND.RECOVERY_FINAL] !== SINGLE_TRANSACTION)
+    failed.push(`${label}: ${kinds[TRANSACTION_KIND.RECOVERY_FINAL]} recovery_final transactions, expected ${SINGLE_TRANSACTION}`);
+  if (kinds[TRANSACTION_KIND.SETUP] !== SINGLE_TRANSACTION)
+    failed.push(`${label}: ${kinds[TRANSACTION_KIND.SETUP]} setup transactions, expected ${SINGLE_TRANSACTION}`);
+  if (kinds[TRANSACTION_KIND.SUB_BATCH] < SINGLE_TRANSACTION) failed.push(`${label}: the incoming family was never ingested`);
+  if (run.rolledBackTransactions !== 0) failed.push(`${label}: ${run.rolledBackTransactions} rolled-back transactions`);
+  if (run.scopeReadCount !== SINGLE_TRANSACTION) failed.push(`${label}: ${run.scopeReadCount} scope reads, expected ${SINGLE_TRANSACTION}`);
+  if (run.windowLockCount !== windowLocks) failed.push(`${label}: ${run.windowLockCount} window locks, expected ${windowLocks}`);
+  if (!run.windowLockFlat)
+    failed.push(
+      `${label}: window locks grow (deciles ${JSON.stringify(run.windowLockDecileMeansMs)}; limit ${WINDOW_FLATNESS_RATIO_LIMIT}× first + ${WINDOW_FLATNESS_NOISE_FLOOR_MS} ms)`
+    );
+  if (run.overBudgetTransactions.length > 0)
+    failed.push(`${label}: over the ${LOCAL_TRANSACTION_BUDGET_MS} ms budget: ${JSON.stringify(run.overBudgetTransactions)}`);
+  if (run.setupMeasurementDeletes !== 0) failed.push(`${label}: the setup transaction issued ${run.setupMeasurementDeletes} coremeasurements DELETEs`);
+  if (run.unmatchedPhases.length > 0) failed.push(`${label}: phases matched no statement: ${run.unmatchedPhases.join(', ')}`);
+  failed.push(...verificationFailedChecks(label, run.verification));
+  return failed;
+}
+
+function verificationFailedChecks(label: string, verification: RecoveryRunVerification | null): string[] {
+  if (verification === null) return [`${label}: state verification did not complete`];
+  return Object.entries(verification)
+    .filter(([, mismatches]) => mismatches.length > 0)
+    .map(([part, mismatches]) => `${label}: ${part}: ${mismatches.join('; ')}`);
+}
+
+/** The single definition of "this recovery run passed", used by each test and by SUMMARY.passed. */
+function recoveryRunFailedChecks(key: RecoveryRunKey, run: RecoveryRunSummary | undefined, shape: RecoveryShape): string[] {
+  if (!run) return [`${key}: never attempted`];
+  if (key !== 'interruptedRecoveryRun') return completedRecoveryFailedChecks(key, run, shape.recoveryWindows, shape.slices);
+  const failed: string[] = [];
+  const injection: FailureInjection = { phase: STATEMENT_PHASE.COREMEASUREMENT_DELETE, occurrence: shape.interruptedWindow };
+  if (run.outcome !== 'recovery_interrupted') failed.push(`${key}: outcome ${run.outcome}${run.error ? ` (${run.error})` : ''}, expected recovery_interrupted`);
+  if (!sameInjection(run.injection, injection) || !run.injectionFired)
+    failed.push(`${key}: injection ${describeInjection(run.injection)} fired=${run.injectionFired}, expected ${describeInjection(injection)}`);
+  if (run.transactionKindCounts[TRANSACTION_KIND.RECOVERY_WINDOW] !== shape.interruptedWindow)
+    failed.push(
+      `${key}: ${run.transactionKindCounts[TRANSACTION_KIND.RECOVERY_WINDOW]} recovery_window transactions, expected ${shape.interruptedWindow} (the last rolled back)`
+    );
+  if (run.rolledBackTransactions !== SINGLE_TRANSACTION)
+    failed.push(`${key}: ${run.rolledBackTransactions} rolled-back transactions, expected ${SINGLE_TRANSACTION}`);
+  if (run.transactionKindCounts[TRANSACTION_KIND.SETUP] !== 0) failed.push(`${key}: setup began after an interrupted recovery`);
+  failed.push(...verificationFailedChecks(key, run.verification));
+  if (run.retry === null) failed.push(`${key}: the retry never ran`);
+  else {
+    const windowsAlreadyCommitted = shape.interruptedWindow - FIRST_WINDOW_ORDINAL;
+    failed.push(
+      ...completedRecoveryFailedChecks(`${key} retry`, run.retry, shape.recoveryWindows - windowsAlreadyCommitted, shape.slices - windowsAlreadyCommitted)
+    );
+  }
+  return failed;
+}
+
+/** Census 3 after a completed recovery and the incoming family's ingestion. */
+function expectedRecoveredState(profile: RehearsalProfile): CensusThreeState {
+  const total = failedRowTotal(profile);
+  return {
+    failedFamilyRows: 0,
+    failedFamilyErrorLinks: { MISSING_FIELD_SPECIESCODE: 0, SQL_EXCEPTION: 0 },
+    censusThreeMeasurementRows: RECOVERY_INCOMING_ROWS,
+    deleteAuditRows: total,
+    distinctDeleteAuditRecords: total,
+    insertAuditRows: total + RECOVERY_INCOMING_ROWS,
+    uploadMetricsRows: SINGLE_TRANSACTION,
+    failedUploadMetricsRows: 0,
+    stagedReplacementRows: 0,
+    sessionMarkerSet: false
+  };
+}
+
+function rehearsalFailedChecks(summary: RehearsalSummary, expectations: Record<RunKey, RunExpectation>, recoveryShape: RecoveryShape): string[] {
   const failed: string[] = [];
   if (summary.seed === null) failed.push('seed: did not complete');
   else if (summary.seed.mismatches.length > 0) failed.push(`seed: ${summary.seed.mismatches.join('; ')}`);
   for (const key of RUN_KEYS) failed.push(...runFailedChecks(key, summary.runs[key], expectations[key]));
+  for (const key of RECOVERY_RUN_KEYS) failed.push(...recoveryRunFailedChecks(key, summary.recoveryRuns[key], recoveryShape));
   return failed;
 }
 
@@ -982,6 +1344,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   let connectionManagerPoolOpened = false;
   /** Built in beforeAll: describe.skipIf still runs this callback with a null profile when the flag is unset. */
   let runExpectations: Record<RunKey, RunExpectation>;
+  let recoveryShape: RecoveryShape;
   const interruptedRunBatchID = generateShortBatchID();
   const stagingRollbackRunBatchID = generateShortBatchID();
   /** Run 9's import, which run 10 retries. */
@@ -1104,6 +1467,10 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       census
     ]);
     await query(`DELETE FROM coremeasurements WHERE CensusID = ?`, [census]);
+    await query(`DELETE FROM stems WHERE CensusID = ?`, [census]);
+    await query(`DELETE FROM trees WHERE CensusID = ?`, [census]);
+    await query(`DELETE FROM uploadintegrityalerts WHERE censusID = ?`, [census]);
+    await query(`DELETE FROM measurementssummary WHERE CensusID = ?`, [census]);
     await query(`DELETE FROM uploadmetrics WHERE censusID = ?`, [census]);
     await query(`DELETE FROM unifiedchangelog WHERE CensusID = ?`, [census]);
     await query(`DELETE FROM upload_sessions`);
@@ -1120,7 +1487,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     ]);
   }
 
-  async function readCensusThreeState(incomingBatchID: string, sessionID: string): Promise<CensusThreeState> {
+  async function readCensusThreeState(incomingBatchID: string, sessionID: string, stagedFileName: string = REPLACEMENT_FILE): Promise<CensusThreeState> {
     const census = censusIDs.three;
     const familyPattern = buildSubBatchPattern(FAILED_FAMILY_ROOT);
     const failedFamilyRows = await countOf(
@@ -1165,7 +1532,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       failedUploadMetricsRows: Number(metricsRows[0].failedTotal ?? 0),
       stagedReplacementRows: await countOf(
         `SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ? AND CensusID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`,
-        [REPLACEMENT_FILE, census, incomingBatchID, buildSubBatchPattern(incomingBatchID)]
+        [stagedFileName, census, incomingBatchID, buildSubBatchPattern(incomingBatchID)]
       ),
       sessionMarkerSet: markerRows.length === 1 && Number(markerRows[0].markerSet) === 1
     };
@@ -1196,10 +1563,10 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     return fingerprints;
   }
 
-  function buildReplacementChunk(): Record<string, string>[] {
+  function buildMeasurementChunk(rowCount: number, tagPrefix: string): Record<string, string>[] {
     // Key order mirrors CSV_HEADERS: the resolution plan keys values positionally, like a parsed CSV.
-    return Array.from({ length: WORKER_FIRST_CHUNK_ROWS }, (_, index) => ({
-      treetag: `${REPLACEMENT_TAG_PREFIX}${index}`,
+    return Array.from({ length: rowCount }, (_, index) => ({
+      treetag: `${tagPrefix}${index}`,
       stemtag: STEM_TAG,
       speciescode: SPECIES_CODE,
       quadrat: QUADRAT_NAME,
@@ -1212,6 +1579,144 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     }));
   }
 
+  const RECOVERY_NO_SESSION = 'rehearsal-recovery-no-session';
+  const RESIDUAL_STEM_TAG = 'R';
+
+  async function stageRecoveryIncomingFamily(batchID: string): Promise<void> {
+    const transactionID = await connectionManager.beginTransaction();
+    try {
+      const staged = await stageMeasurementChunk(connectionManager, {
+        schema,
+        fileName: RECOVERY_INCOMING_FILE,
+        batchID,
+        plotID,
+        censusID: censusIDs.three,
+        uploadMode: UploadMode.REVISIONS,
+        sourceFormat: SourceFormat.csv,
+        rawRows: buildMeasurementChunk(RECOVERY_INCOMING_ROWS, RECOVERY_INCOMING_TAG_PREFIX),
+        csvHeaders: [...CSV_HEADERS],
+        delimiter: CSV_DELIMITER,
+        storedMapping: undefined,
+        uploadSessionID: null,
+        firstRowOrdinal: FIRST_CHUNK_ROW_ORDINAL,
+        changedBy: REHEARSAL_CHANGED_BY,
+        transactionID
+      });
+      await connectionManager.commitTransaction(transactionID);
+      expect(staged.insertedCount, 'the incoming family stages whole').toBe(RECOVERY_INCOMING_ROWS);
+      expect(RECOVERY_INCOMING_ROWS, 'the incoming family fits one sub-batch').toBeLessThanOrEqual(getIngestionBatchSize());
+    } catch (stagingError) {
+      await connectionManager.rollbackTransaction(transactionID);
+      throw stagingError;
+    }
+  }
+
+  /** Run 7: legacy residue of the trees/stems branch: residual trees with one stem each, and a stale staged family with its failed metric. */
+  async function seedResidualCensusThree(): Promise<void> {
+    const census = censusIDs.three;
+    await query(`INSERT INTO trees (TreeTag, SpeciesID, CensusID) SELECT CONCAT(?, n), ?, ? FROM ${SEQUENCE_TABLE} WHERE n < ?`, [
+      RESIDUAL_TREE_TAG_PREFIX,
+      speciesID,
+      census,
+      profile.residualTreeRows
+    ]);
+    await query(
+      `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY)
+       SELECT TreeID, ?, CensusID, ?, 0, 0 FROM trees WHERE CensusID = ? AND TreeTag LIKE CONCAT(?, '%')`,
+      [quadratID, RESIDUAL_STEM_TAG, census, RESIDUAL_TREE_TAG_PREFIX]
+    );
+    await query(
+      `INSERT INTO temporarymeasurements (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate)
+       SELECT ?, ?, ?, ?, CONCAT(?, n), ?, ?, ?, ? FROM ${SEQUENCE_TABLE} WHERE n < ?`,
+      [
+        RECOVERY_STALE_FILE,
+        RECOVERY_STALE_BATCH,
+        plotID,
+        census,
+        RESIDUAL_TREE_TAG_PREFIX,
+        STEM_TAG,
+        SPECIES_CODE,
+        QUADRAT_NAME,
+        MEASUREMENT_DATE.CENSUS_THREE,
+        profile.residualStagedRows
+      ]
+    );
+    await query(
+      `INSERT INTO uploadmetrics (uploadId, fileID, batchID, schema_name, plotID, censusID, sourceRecords, failedRecords, status, errorMessage, startTime, endTime)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        `${FAILED_UPLOAD_ID_PREFIX}${RECOVERY_STALE_BATCH}`,
+        RECOVERY_STALE_FILE,
+        RECOVERY_STALE_BATCH,
+        schema,
+        plotID,
+        census,
+        profile.residualStagedRows,
+        profile.residualStagedRows,
+        UPLOAD_STATUS_FAILED,
+        FAILED_BATCH_ERROR_MESSAGE
+      ]
+    );
+  }
+
+  async function readResidualCounts(): Promise<{ trees: number; stems: number; staleStaged: number }> {
+    const census = censusIDs.three;
+    return {
+      trees: await countOf(`SELECT COUNT(*) AS total FROM trees WHERE CensusID = ? AND TreeTag LIKE CONCAT(?, '%')`, [census, RESIDUAL_TREE_TAG_PREFIX]),
+      stems: await countOf(`SELECT COUNT(*) AS total FROM stems WHERE CensusID = ? AND StemTag = ?`, [census, RESIDUAL_STEM_TAG]),
+      staleStaged: await countOf(`SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ?`, [RECOVERY_STALE_FILE])
+    };
+  }
+
+  /** Fresh census 3 (failed family, 42 failed metrics) plus the staged incoming family; returns pre-run mismatches. */
+  async function reseedForRecovery(batchID: string): Promise<string[]> {
+    await clearCensusThreeScope();
+    await seedFailedCensusThreeFamily();
+    await stageRecoveryIncomingFamily(batchID);
+    const seeded = await readCensusThreeState(batchID, RECOVERY_NO_SESSION, RECOVERY_INCOMING_FILE);
+    return describeMismatches({ ...expectedSeedState(profile), stagedReplacementRows: RECOVERY_INCOMING_ROWS }, seeded);
+  }
+
+  /** Never throws: an unexpected error is recorded in `error` so the caller can write the SUMMARY before any assertion runs. */
+  async function runRecoveryIngestion(batchID: string, injection: FailureInjection | null): Promise<RecoveryIngestionResult> {
+    const statementTimer = installStatementTimer(connectionManager, injection);
+    const transactionTimer = installTransactionTimer(connectionManager);
+    const diagnostics: SetupDiagnostic[] = [];
+    const startedAt = performance.now();
+    let ingestion: IngestBatchResult | null = null;
+    let failure: unknown = null;
+    try {
+      ingestion = await ingestBatch(connectionManager, {
+        schema,
+        fileID: RECOVERY_INCOMING_FILE,
+        batchID,
+        expectedScope: { plotID, censusID: censusIDs.three },
+        changedBy: REHEARSAL_CHANGED_BY,
+        onSetupProgress: diagnostic => {
+          diagnostics.push(diagnostic);
+        }
+      });
+    } catch (error) {
+      failure = error;
+      if (!(error instanceof InjectedRehearsalFailureError)) console.error('[census-replacement-rehearsal] unexpected error in a recovery run', error);
+    } finally {
+      statementTimer.restore();
+      transactionTimer.restore();
+    }
+    const outcome: RecoveryRunOutcome = failure === null ? 'recovered' : failure instanceof InjectedRehearsalFailureError ? 'recovery_interrupted' : 'failed';
+    return {
+      outcome,
+      ingestion,
+      endToEndMs: performance.now() - startedAt,
+      injection,
+      injectionFired: statementTimer.injectionFired(),
+      error: outcome === 'failed' ? errorMessageOf(failure) : null,
+      statements: statementTimer.statements,
+      transactions: transactionTimer.records(statementTimer.statements),
+      diagnostics
+    };
+  }
+
   function buildReplacementParams(batchID: string, sessionID: string): CensusReplacementParams {
     return {
       schema,
@@ -1221,7 +1726,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
       censusID: censusIDs.three,
       uploadMode: UploadMode.CLEAN_REUPLOAD,
       sourceFormat: SourceFormat.csv,
-      rawRows: buildReplacementChunk(),
+      rawRows: buildMeasurementChunk(WORKER_FIRST_CHUNK_ROWS, REPLACEMENT_TAG_PREFIX),
       csvHeaders: [...CSV_HEADERS],
       delimiter: CSV_DELIMITER,
       storedMapping: undefined,
@@ -1307,7 +1812,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   }
 
   /** Records a run's timings in the summary immediately, before any verification query can fail. */
-  function recordRun(key: RunKey, result: ReplacementAndFirstChunkResult, requiredPhases: readonly StatementPhase[] = NAMED_STATEMENT_PHASES): RunSummary {
+  function recordRun(key: RunKey, result: ReplacementAndFirstChunkResult, requiredPhases: readonly StatementPhase[] = REPLACEMENT_RUN_PHASES): RunSummary {
     const phases = summarizePhases(result.statements);
     const transactionKindCounts = countKinds(result.transactions);
     const run: RunSummary = {
@@ -1372,6 +1877,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     }
 
     runExpectations = buildRunExpectations(profile);
+    recoveryShape = expectedRecoveryShape(failedRowTotal(profile), CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
     const seedStartedAt = performance.now();
     const setup = await setupTestDatabase({ ...DEFAULT_TEST_CONFIG, database: `${DEFAULT_TEST_CONFIG.database}${REHEARSAL_SCHEMA_SUFFIX}` });
     setupConnection = setup.connection;
@@ -1436,7 +1942,7 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
   }, SEED_TIMEOUT_MS);
 
   afterAll(async () => {
-    rehearsalSummary.failedChecks = rehearsalFailedChecks(rehearsalSummary, runExpectations);
+    rehearsalSummary.failedChecks = rehearsalFailedChecks(rehearsalSummary, runExpectations, recoveryShape);
     rehearsalSummary.passed = rehearsalSummary.failedChecks.length === 0;
     console.log(`${SUMMARY_LOG_PREFIX} ${JSON.stringify(rehearsalSummary)}`);
     try {
@@ -1698,6 +2204,23 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     return { state, controls };
   }
 
+  async function verifyRecoveredRun(batchID: string, preRunMismatches: string[], extraStateMismatches: string[]): Promise<RecoveryRunVerification> {
+    const state = await readCensusThreeState(batchID, RECOVERY_NO_SESSION, RECOVERY_INCOMING_FILE);
+    const verification = {
+      preRunMismatches,
+      stateMismatches: [...describeMismatches(expectedRecoveredState(profile), state), ...extraStateMismatches],
+      controlCensusMismatches: describeMismatches(controlBaseline, await readControlFingerprints())
+    };
+    console.log(`[census-replacement-rehearsal] recovery verification ${JSON.stringify(verification)} state=${JSON.stringify(state)}`);
+    return verification;
+  }
+
+  it('(0) recovery shapes derive from the profile exactly as the #562 spec tabulates them (catches: a drifted derivation)', () => {
+    const derived = expectedRecoveryShape(failedRowTotal(profile), CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
+    console.log(`[census-replacement-rehearsal] recovery shape ${profile.name}: ${JSON.stringify(derived)}`);
+    expect(derived).toEqual(SPEC_RECOVERY_SHAPES[profile.name]);
+  });
+
   it(
     '(1) replacement run: every transaction commits within budget with exact counts (catches: a replacement transaction that grows with the census)',
     async () => {
@@ -1806,6 +2329,75 @@ describe.skipIf(rehearsalProfile === null)('census replacement rehearsal at Mpal
     },
     RUN_TIMEOUT_MS
   );
+
+  it(
+    '(5) recovery run: the failed-first-census recovery commits bounded windows outside setup within budget, flat per window, with exact state (catches: recovery inside setup; a window cost that grows with the census)',
+    async () => {
+      const batchID = generateShortBatchID();
+      const preRunMismatches = await reseedForRecovery(batchID);
+      const result = await runRecoveryIngestion(batchID, null);
+      const run = recordRecoveryRun('recoveryRun', result, null);
+      run.verification = await verifyRecoveredRun(batchID, preRunMismatches, []);
+      expect(recoveryRunFailedChecks('recoveryRun', run, recoveryShape), 'every recovery-run check (the same list feeds SUMMARY.passed)').toEqual([]);
+    },
+    RUN_TIMEOUT_MS
+  );
+
+  it(
+    '(6) interrupted recovery run: a failure at the middle window leaves exactly the committed windows deleted and audited and setup unstarted; the retry finishes within budget with no double audit (catches: a recovery that rolls back or over-deletes; a resume that starts over)',
+    async () => {
+      const batchID = generateShortBatchID();
+      const preRunMismatches = await reseedForRecovery(batchID);
+      const prefix = await readInterruptionPrefix(recoveryShape.rowsGoneWhenInterrupted);
+      const injection: FailureInjection = { phase: STATEMENT_PHASE.COREMEASUREMENT_DELETE, occurrence: recoveryShape.interruptedWindow };
+      console.log(
+        `[census-replacement-rehearsal] interruptedRecoveryRun expects prefix ${JSON.stringify(prefix)} (window ${recoveryShape.interruptedWindow} fails)`
+      );
+
+      const result = await runRecoveryIngestion(batchID, injection);
+      const run = recordRecoveryRun('interruptedRecoveryRun', result, null);
+      const interruptedState = await readCensusThreeState(batchID, RECOVERY_NO_SESSION, RECOVERY_INCOMING_FILE);
+      run.verification = {
+        preRunMismatches,
+        stateMismatches: [
+          ...describeMismatches({ ...expectedInterruptedState(prefix), stagedReplacementRows: RECOVERY_INCOMING_ROWS }, interruptedState),
+          ...(await describePrefixMismatches(prefix))
+        ],
+        controlCensusMismatches: describeMismatches(controlBaseline, await readControlFingerprints())
+      };
+
+      const retryResult = await runRecoveryIngestion(batchID, null);
+      run.retry = summarizeRecoveryRun(retryResult, null);
+      run.retry.verification = await verifyRecoveredRun(batchID, [], []);
+      console.log(`[census-replacement-rehearsal] interruptedRecoveryRun retry ${JSON.stringify(run.retry)}`);
+
+      expect(
+        recoveryRunFailedChecks('interruptedRecoveryRun', run, recoveryShape),
+        'every interrupted-recovery check (the same list feeds SUMMARY.passed)'
+      ).toEqual([]);
+    },
+    RUN_TIMEOUT_MS
+  );
+
+  it(
+    '(7) residual recovery run: legacy residual trees, stems and stale staged rows of the supported size go in a final transaction within budget (catches: a census-sized final transaction past the Goal 3 limit)',
+    async () => {
+      const batchID = generateShortBatchID();
+      const preRunMismatches = await reseedForRecovery(batchID);
+      await seedResidualCensusThree();
+      const residualRows = 2 * profile.residualTreeRows + profile.residualStagedRows;
+      const result = await runRecoveryIngestion(batchID, null);
+      const run = recordRecoveryRun('residualRecoveryRun', result, residualRows);
+      const residualMismatches = describeMismatches({ trees: 0, stems: 0, staleStaged: 0 }, await readResidualCounts());
+      run.verification = await verifyRecoveredRun(batchID, preRunMismatches, residualMismatches);
+      console.log(`[census-replacement-rehearsal] residualRecoveryRun finalTransactionMs=${run.finalTransactionMs} perResidualRowMs=${run.residualRowCostMs}`);
+      expect(recoveryRunFailedChecks('residualRecoveryRun', run, recoveryShape), 'every residual-recovery check (the same list feeds SUMMARY.passed)').toEqual(
+        []
+      );
+    },
+    RUN_TIMEOUT_MS
+  );
+
   it(
     '(8) ArcGIS commit run: every transaction commits within budget with exact kind counts and the census replaced (catches: an ArcGIS unit that grows with the import)',
     async () => {

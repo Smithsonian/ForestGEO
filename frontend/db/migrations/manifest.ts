@@ -114,6 +114,10 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
     failureCleanup: ['DROP PROCEDURE IF EXISTS mig_2026_10_26_01_raise_contract_conflict']
   },
   {
+    id: '2026-11-11-01-add-measurementssummary-plot-census-scope-index',
+    file: 'schema-contract-repair/2026-11-11-01-add-measurementssummary-plot-census-scope-index.sql'
+  },
+  {
     id: '2026-10-28-02-add-arcgis-import-commit-progress',
     file: 'schema-contract-repair/2026-10-28-02-add-arcgis-import-commit-progress.sql'
   }

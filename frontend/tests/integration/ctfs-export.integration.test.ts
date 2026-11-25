@@ -82,6 +82,22 @@ const FLOAT_LOSSY_QUADRAT_START_X = 991.09567;
 const FLOAT_ROUNDING_MIN_DRIFT = 1e-6;
 const FLOAT_ROUNDING_MAX_DRIFT = 1e-3;
 
+// #577 reproduction: app-db-seed.sql's stem (tree tag '1', species FOO, quadrat A1)
+// published as census 2 against a destination whose matching tree holds one
+// historical stem with a NULL StemTag.
+const APP_SEED_STEM_GUID = 1;
+const UNTAGGED_APP_STEM_TAG = '';
+const SECOND_PLOT_CENSUS_NUMBER = '2';
+const DESTINATION_CENSUS_2_ID = 2;
+const DESTINATION_CENSUS_1_ID = 1;
+const DESTINATION_QUADRAT_A1_ID = 1;
+const DESTINATION_FOO_SPECIES_ID = 1;
+const HISTORICAL_TREE_ID = 101;
+const HISTORICAL_TREE_TAG = '1';
+const HISTORICAL_NULL_TAG_STEM_ID = 201;
+const HISTORICAL_CENSUS_1_DBH = 10;
+const DESTINATION_LIVING_TSM_ID = 3;
+
 // ---------------------------------------------------------------------------
 // CTFS DDL + app schema helpers
 // ---------------------------------------------------------------------------
@@ -546,6 +562,58 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     expect(after.stem, 'Stem count must be unchanged after dry-run').toBe(before.stem);
     expect(after.dbh, 'DBH count must be unchanged after dry-run').toBe(before.dbh);
     expect(after.dbhAttributes, 'DBHAttributes count must be unchanged after dry-run').toBe(before.dbhAttributes);
+  });
+
+  // -------------------------------------------------------------------------
+  // #577: an untagged app stem keeps the identity of a historical NULL-tag stem
+  // -------------------------------------------------------------------------
+
+  it('#577: an untagged app stem published as census 2 attaches its measurement and attribute to the historical NULL-tag stem', async () => {
+    await seedCtfsCensus(ctfsConn);
+    await appConn.query(`UPDATE \`${appSchema}\`.stems SET StemTag = ? WHERE StemGUID = ?`, [UNTAGGED_APP_STEM_TAG, APP_SEED_STEM_GUID]);
+    await appConn.query(`UPDATE \`${appSchema}\`.census SET PlotCensusNumber = ? WHERE CensusID = ?`, [SECOND_PLOT_CENSUS_NUMBER, APP_CENSUS_ID]);
+    await ctfsConn.query("INSERT INTO Census (CensusID, PlotID, PlotCensusNumber, StartDate, EndDate) VALUES (?, ?, ?, '2025-01-01', '2025-12-31')", [
+      DESTINATION_CENSUS_2_ID,
+      DESTINATION_PLOT_ID,
+      SECOND_PLOT_CENSUS_NUMBER
+    ]);
+    await ctfsConn.query('INSERT INTO Tree (TreeID, Tag, SpeciesID, SubSpeciesID) VALUES (?, ?, ?, NULL)', [
+      HISTORICAL_TREE_ID,
+      HISTORICAL_TREE_TAG,
+      DESTINATION_FOO_SPECIES_ID
+    ]);
+    await ctfsConn.query('INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber) VALUES (?, ?, NULL, ?, 0)', [
+      HISTORICAL_NULL_TAG_STEM_ID,
+      HISTORICAL_TREE_ID,
+      DESTINATION_QUADRAT_A1_ID
+    ]);
+    await ctfsConn.query("INSERT INTO DBH (MeasureID, CensusID, StemID, DBH, HOM, ExactDate) VALUES (0, ?, ?, ?, '1.3', '2024-01-15')", [
+      DESTINATION_CENSUS_1_ID,
+      HISTORICAL_NULL_TAG_STEM_ID,
+      HISTORICAL_CENSUS_1_DBH
+    ]);
+    const before = await captureCtfsCounts(ctfsConn);
+
+    const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: SECOND_PLOT_CENSUS_NUMBER });
+    await executeCtfsSql(ctfsConn, artifact.sql);
+
+    const after = await captureCtfsCounts(ctfsConn);
+    expect(after, `no tree or stem may be created; before ${JSON.stringify(before)}`).toEqual({
+      tree: before.tree,
+      stem: before.stem,
+      dbh: before.dbh + 1,
+      dbhAttributes: before.dbhAttributes + 1
+    });
+    const [census2Dbh] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT DBHID, StemID FROM DBH WHERE CensusID = ?', [DESTINATION_CENSUS_2_ID]);
+    expect(
+      census2Dbh.map(row => Number(row.StemID)),
+      `census-2 DBH must attach to the historical NULL-tag stem; ${JSON.stringify(census2Dbh)}`
+    ).toEqual([HISTORICAL_NULL_TAG_STEM_ID]);
+    const [attributes] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT TSMID FROM DBHAttributes WHERE DBHID = ?', [census2Dbh[0].DBHID]);
+    expect(
+      attributes.map(row => Number(row.TSMID)),
+      'the LI attribute must follow the census-2 measurement'
+    ).toEqual([DESTINATION_LIVING_TSM_ID]);
   });
 
   // -------------------------------------------------------------------------

@@ -24,13 +24,13 @@ vi.mock('@/auth', () => ({
   }))
 }));
 
-vi.mock('@/lib/db/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const { runQueryDispatch } = await vi.importActual<typeof import('../setup/runquerydispatch')>('../setup/runquerydispatch');
   const executeQuery = vi.fn(async (query: string, params?: unknown[]) => {
     if (!sharedState.connection) {
       throw new Error('Test DB connection not initialized');
     }
-    const [rows] = await sharedState.connection.query(query, params as any[]);
-    return rows;
+    return runQueryDispatch(sharedState.connection, query, params);
   });
   const manager = { executeQuery, closeConnection: async () => undefined };
   return { default: { getInstance: () => manager } };

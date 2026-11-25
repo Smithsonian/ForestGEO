@@ -27,9 +27,17 @@
  *      never ran, so it may still hold an open transaction.
  *   7. Ordinary query errors and successes do NOT kill or destroy anything.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PoolConnection } from 'mysql2/promise';
-import { isKilledConnectionError, isKilledStatementError, killQueryOnThread, QueryTimeoutError, runQuery } from '@/lib/db/primitives';
+import {
+  isKilledConnectionError,
+  isKilledStatementError,
+  KILL_STATEMENT_DEADLINE_MS,
+  killQueryOnThread,
+  QueryTimeoutError,
+  runQuery
+} from '@/lib/db/primitives';
+import { ConnectionQuarantinedError, isConnectionQuarantined, quarantineConnection } from '@/lib/db/connectionquarantine';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import ailogger from '@/ailogger';
 
@@ -47,7 +55,7 @@ const MYSQL_ERRNO_CONNECTION_KILLED = 1927;
 const NEVER_SETTLES = () => new Promise<never>(() => {});
 const flushMicrotasks = () => new Promise(resolve => setTimeout(resolve, 0));
 
-type MockKillConnection = { query: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn> };
+type MockKillConnection = { query: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn>; destroy: ReturnType<typeof vi.fn> };
 type MockTargetConnection = PoolConnection & {
   query: ReturnType<typeof vi.fn>;
   execute: ReturnType<typeof vi.fn>;
@@ -76,7 +84,8 @@ function mysqlError(message: string, extra: { code?: string; errno?: number }): 
 beforeEach(() => {
   killConnection = {
     query: vi.fn().mockResolvedValue([[], []]),
-    release: vi.fn()
+    release: vi.fn(),
+    destroy: vi.fn()
   };
   tryAcquireConnection = vi.fn().mockResolvedValue({ status: 'acquired', connection: killConnection });
   getConnection = vi.fn();
@@ -310,5 +319,119 @@ describe('killQueryOnThread', () => {
 
     expect(outcome).toMatchObject({ status: 'no_kill_connection', reason: 'failed' });
     expect(tryAcquireConnection).not.toHaveBeenCalled();
+  });
+});
+
+const SECOND_STATEMENT_SQL = 'SELECT 2 AS queued_behind';
+
+describe('runQuery cancellation by quarantine (U26, U27, R-8)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('U26: quarantining the connection rejects the pending wrapper with ConnectionQuarantinedError and clears its 660 s timer, without a KILL', async () => {
+    const connection = makeTargetConnection(STUCK_THREAD_ID, NEVER_SETTLES);
+    const timersBefore = vi.getTimerCount();
+
+    const outcome = runQuery(connection, 'SELECT * FROM plots WHERE PlotID = ?', [1]).then(
+      () => 'resolved',
+      (error: unknown) => error
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    console.log('[U26] timers while pending:', vi.getTimerCount(), 'baseline:', timersBefore);
+    expect(vi.getTimerCount(), 'runQuery arms exactly one timer per statement').toBe(timersBefore + 1);
+
+    quarantineConnection(connection, 'unit test quarantine');
+    const settled = await outcome;
+    console.log('[U26] outcome after quarantine:', settled, 'timers:', vi.getTimerCount());
+
+    expect(settled).toBeInstanceOf(ConnectionQuarantinedError);
+    expect((settled as ConnectionQuarantinedError).threadId).toBe(STUCK_THREAD_ID);
+    expect(vi.getTimerCount(), 'the 660 s timer must be cleared by the cancellation, not left armed').toBe(timersBefore);
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(tryAcquireConnection, 'whoever quarantined owns the KILL decision; runQuery must not KILL on cancellation').not.toHaveBeenCalled();
+  });
+
+  it('U27: runQuery’s own timeout cancels a second statement queued on the same connection at that moment', async () => {
+    const connection = makeTargetConnection(STUCK_THREAD_ID, NEVER_SETTLES);
+    const timersBefore = vi.getTimerCount();
+
+    const first = runQuery(connection, 'CALL slow_procedure()', [], SHORT_TIMEOUT_MS).then(
+      () => 'resolved',
+      (error: unknown) => error
+    );
+    const second = runQuery(connection, SECOND_STATEMENT_SQL, []).then(
+      () => 'resolved',
+      (error: unknown) => error
+    );
+
+    await vi.advanceTimersByTimeAsync(SHORT_TIMEOUT_MS);
+    const [firstOutcome, secondOutcome] = await Promise.all([first, second]);
+    console.log('[U27] first:', firstOutcome, 'second:', secondOutcome, 'timers:', vi.getTimerCount());
+
+    expect(firstOutcome).toBeInstanceOf(QueryTimeoutError);
+    expect(secondOutcome, 'the queued statement must be cancelled with the connection, not wait for its own 660 s timer').toBeInstanceOf(
+      ConnectionQuarantinedError
+    );
+    expect(vi.getTimerCount()).toBe(timersBefore);
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('R-8: rejects at once without issuing the statement when the connection is already quarantined', async () => {
+    const connection = makeTargetConnection(STUCK_THREAD_ID, NEVER_SETTLES);
+    quarantineConnection(connection, 'quarantined earlier');
+    const timersBefore = vi.getTimerCount();
+
+    await expect(runQuery(connection, 'SELECT 1', [])).rejects.toBeInstanceOf(ConnectionQuarantinedError);
+
+    expect(connection.query).not.toHaveBeenCalled();
+    expect(connection.execute).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(timersBefore);
+  });
+});
+
+describe('runQuery protocol choice for session commands (U28)', () => {
+  it.each(['USE `forestgeo_testing`', 'START TRANSACTION', '  start transaction'])('sends %s over the text protocol (not preparable, E6)', async sql => {
+    const connection = makeTargetConnection(STUCK_THREAD_ID, () => Promise.resolve([[], []]));
+    await runQuery(connection, sql);
+    console.log(`[U28] ${sql}: query calls=${connection.query.mock.calls.length} execute calls=${connection.execute.mock.calls.length}`);
+    expect(connection.query).toHaveBeenCalledTimes(1);
+    expect(connection.execute).not.toHaveBeenCalled();
+  });
+
+  // Parameterless on purpose: a `?`-bound session variable fails over the prepared protocol (rule 12, ER_WRONG_TYPE_FOR_VAR).
+  it('keeps a parameterless SET SESSION on the prepared protocol', async () => {
+    const connection = makeTargetConnection(STUCK_THREAD_ID, () => Promise.resolve([[], []]));
+    await runQuery(connection, 'SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
+    expect(connection.execute).toHaveBeenCalledTimes(1);
+    expect(connection.query).not.toHaveBeenCalled();
+  });
+});
+
+describe('killQueryOnThread KILL statement deadline (U29)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('returns kill_deadline_exceeded at the deadline, quarantines the kill connection and never releases it', async () => {
+    killConnection.query.mockImplementation(NEVER_SETTLES);
+    let outcome: unknown = 'pending';
+    const killing = killQueryOnThread(STUCK_THREAD_ID, 'unit test').then(value => (outcome = value));
+
+    await vi.advanceTimersByTimeAsync(KILL_STATEMENT_DEADLINE_MS - 1);
+    expect(outcome, 'must not give up before the KILL deadline').toBe('pending');
+    await vi.advanceTimersByTimeAsync(1);
+    await killing;
+    console.log('[U29] outcome:', outcome);
+
+    expect(outcome).toMatchObject({ status: 'kill_deadline_exceeded' });
+    expect(killConnection.destroy, 'a kill connection with an unanswered KILL is quarantined').toHaveBeenCalledTimes(1);
+    expect(killConnection.release, 'and never returned to the pool').not.toHaveBeenCalled();
+  });
+});
+
+describe('runQuery timeout quarantines through the registry', () => {
+  it('a timed-out connection is reported as quarantined', async () => {
+    const connection = makeTargetConnection(STUCK_THREAD_ID, NEVER_SETTLES);
+    await expect(runQuery(connection, 'CALL anything()', [], SHORT_TIMEOUT_MS)).rejects.toBeInstanceOf(QueryTimeoutError);
+    expect(isConnectionQuarantined(connection)).toBe(true);
   });
 });

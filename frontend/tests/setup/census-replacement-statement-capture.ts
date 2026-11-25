@@ -1,5 +1,5 @@
 import type ConnectionManager from '@/lib/db/connectionmanager';
-import { deleteCensusReplacementChunk } from '@/lib/ingestion/temporary-measurements';
+import { deleteCensusReplacementChunk, lockAuditAndDeleteCoreMeasurementWindow, type CoreMeasurementDeleteScope } from '@/lib/ingestion/temporary-measurements';
 
 export interface CapturedStatement {
   sql: string;
@@ -61,4 +61,23 @@ export async function captureCensusReplacementWindowStatements(
   }
   const [idSelect, errorLinkDelete, deleteAudit, coreMeasurementDelete] = captured;
   return { idSelect, errorLinkDelete, deleteAudit, coreMeasurementDelete };
+}
+
+/** The exact lock statement production issues for one window of `scope`, captured without a database. */
+export async function captureCoreMeasurementWindowLockStatement(
+  schema: string,
+  scope: CoreMeasurementDeleteScope,
+  windowIDs: number[],
+  plotID: number,
+  censusID: number
+): Promise<CapturedStatement> {
+  const captured: CapturedStatement[] = [];
+  const recorder = {
+    executeQuery: async (sql: string, params: unknown[] = []) => {
+      captured.push({ sql, params });
+      return captured.length === 1 ? windowIDs.map(id => ({ CoreMeasurementID: id })) : { affectedRows: windowIDs.length };
+    }
+  } as unknown as ConnectionManager;
+  await lockAuditAndDeleteCoreMeasurementWindow(recorder, schema, scope, windowIDs, null, plotID, censusID, CAPTURE_TRANSACTION_ID);
+  return captured[0];
 }

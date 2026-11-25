@@ -94,6 +94,7 @@ import {
   writeMeasurementsSummary,
   SPECIES_CORRECTION_GROUP_MEMBER_WRITE_KIND,
   SpeciesCorrectionGroupMemberContextError,
+  UncorrectedSpeciesChangeError,
   loadLockedEditedFieldValuesForSpeciesCorrection,
   type SpeciesCorrectionGroupMemberWriteContext
 } from './measurementssummary';
@@ -765,6 +766,31 @@ describe('writeMeasurementsSummary — F11 sparse Raw*/stems/coremeasurements sy
       refreshIngestionErrorsForMeasurementMock,
       "expected this writer's own refreshIngestionErrorsForMeasurement call to still fire exactly once on the legacy (non-correction) path"
     ).toHaveBeenCalledTimes(1);
+  });
+
+  it('legacy (non-correction) edit that changes the resolved species throws UncorrectedSpeciesChangeError and never INSERTs a tree or re-points the measurement', async () => {
+    const rows: unknown[][] = [
+      [coreMeasurementRow()], // 1: before core
+      [stemRow()], // 2: before stem
+      [treeRow()], // 3: before tree
+      [], // 4: before cmattributes
+      [joinedRow()], // 5: current joined (SpeciesID 1)
+      [{ SpeciesID: NEW_SPECIES_ID }] // 6: species lookup resolves to a DIFFERENT species
+    ];
+    const { cm, calls } = makeRecordingConnectionManager(rows);
+    const plan = buildPlan([makeFieldChange('SpeciesCode', 'AA', 'BB')]); // no speciesCorrection -> legacy path
+
+    await expect(writeMeasurementsSummary(cm, buildInput(), plan, TX_ID)).rejects.toBeInstanceOf(UncorrectedSpeciesChangeError);
+
+    const issuedSql = calls.map(c => c.sql);
+    expect(
+      calls.filter(c => /INSERT\s+INTO/i.test(c.sql) && c.sql.includes('trees')),
+      `SQL issued:\n${issuedSql.join('\n')}`
+    ).toHaveLength(0);
+    expect(
+      calls.filter(c => UPDATE_STATEMENT_PATTERN.test(c.sql)),
+      `SQL issued:\n${issuedSql.join('\n')}`
+    ).toHaveLength(0);
   });
 
   it('legacy (non-correction) MeasuredDBH-only edit: the measurement-column UPDATE writes MeasuredDBH alone, never rewriting MeasuredHOM or MeasurementDate', async () => {

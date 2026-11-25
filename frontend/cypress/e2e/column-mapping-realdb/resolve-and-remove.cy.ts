@@ -75,6 +75,7 @@ const DESTRUCTIVE_CONFIRM_TOKEN = 'APPLY';
 
 const ERRORS_HARNESS_ROUTE = '/e2e-errors-harness';
 const ERRORS_HARNESS_TESTID = '[data-testid="e2e-errors-harness"]';
+const ERRORS_TITLE_TESTID = '[data-testid="errors-explorer-title"]';
 const PREVIEW_APPLY = '[data-testid="edit-preview-apply"]';
 const PREVIEW_TYPED_CONFIRM = '[data-testid="edit-preview-typed-confirm-input"]';
 const PREVIEW_DESTRUCTIVE_SEVERITY = '[data-testid="edit-preview-severity-destructive"]';
@@ -256,7 +257,7 @@ describe('Tier B: error correction removes the validation link, materializes the
     // --- 3. Correct the code through the REAL Errors Explorer edit flow --------------------
     cy.visit(ERRORS_HARNESS_ROUTE);
     cy.get(ERRORS_HARNESS_TESTID).should('exist');
-    cy.contains('Errors Explorer').should('be.visible');
+    cy.get(ERRORS_TITLE_TESTID).should('have.text', 'View Errors');
 
     // The real /api/errors/explorer/query surfaces the bad row (it has an unresolved error);
     // the valid row 201 has none and never appears. Anchor on the tag cell, then the row.

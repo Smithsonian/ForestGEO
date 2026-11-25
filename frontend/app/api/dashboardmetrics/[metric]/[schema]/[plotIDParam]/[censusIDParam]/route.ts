@@ -241,7 +241,7 @@ async function processMetrics(metric: string, schema: SchemaName, plotID: number
     }
   } catch (e: any) {
     ailogger.error('Dashboard metrics error:', e);
-    return NextResponse.json({ error: 'Failed to retrieve metrics', details: e.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: 'Failed to retrieve metrics' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

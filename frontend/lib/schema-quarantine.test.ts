@@ -12,6 +12,7 @@ import {
   findSchemaQuarantine,
   invalidateSchemaQuarantineCache,
   schemaGateUnavailableResponse,
+  SCHEMA_GATE_UNAVAILABLE_MESSAGE,
   schemaQuarantinedResponse,
   type QuarantineRecord
 } from '@/lib/schema-quarantine';
@@ -104,7 +105,8 @@ describe('schema-quarantine', () => {
   });
 
   it('builds the 503 responses with their codes', async () => {
-    const quarantined = schemaQuarantinedResponse(record());
+    const migrationFailureReason = "MIGRATION FAILED: Table 'forestgeo_new.stems' doesn't exist";
+    const quarantined = schemaQuarantinedResponse(record({ reason: migrationFailureReason }));
     expect(quarantined.status).toBe(STATUS_SERVICE_UNAVAILABLE);
 
     const body = await quarantined.json();
@@ -117,9 +119,11 @@ describe('schema-quarantine', () => {
     });
     expect(body.error).toMatch(/quarantined/);
     expect(body.error).toMatch(/released automatically/);
+    expect(body, 'the diagnostic reason stays in the catalog and deploy logs (#574)').not.toHaveProperty('reason');
+    expect(JSON.stringify(body)).not.toContain("doesn't exist");
 
-    const unavailable = schemaGateUnavailableResponse(new Error('boom'));
+    const unavailable = schemaGateUnavailableResponse();
     expect(unavailable.status).toBe(STATUS_SERVICE_UNAVAILABLE);
-    expect(await unavailable.json()).toMatchObject({ code: SCHEMA_GATE_UNAVAILABLE_CODE });
+    expect(await unavailable.json()).toEqual({ error: SCHEMA_GATE_UNAVAILABLE_MESSAGE, code: SCHEMA_GATE_UNAVAILABLE_CODE });
   });
 });

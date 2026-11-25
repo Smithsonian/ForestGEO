@@ -546,6 +546,7 @@ export interface UploadedFileData {
 
 export interface DataGridSignals {
   setChangesSubmitted: Dispatch<SetStateAction<boolean>>;
+  setIsSubmittingChanges: Dispatch<SetStateAction<boolean>>;
 }
 
 // CONSTANT MACROS

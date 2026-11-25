@@ -5,6 +5,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { fromBody, fromQuery, withRouteAuthz } from '@/lib/route-authz';
 import { createValidationRunRecord, EmptyValidationRunUpdateError, updateValidationRunRecord } from '@/lib/validations/run-records';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 export const runtime = 'nodejs';
 
@@ -43,7 +44,7 @@ async function postHandler(request: NextRequest) {
     return NextResponse.json({ runID: result.runID, conflict: false }, { status: HTTPResponses.OK });
   } catch (e: any) {
     ailogger.error('Error creating validation run:', e);
-    return NextResponse.json({ error: e.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }
@@ -82,7 +83,7 @@ async function getHandler(request: NextRequest) {
     return NextResponse.json({ run }, { status: HTTPResponses.OK });
   } catch (e: any) {
     ailogger.error('Error fetching validation run:', e);
-    return NextResponse.json({ error: e.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }
@@ -111,7 +112,7 @@ async function patchHandler(request: NextRequest) {
       return NextResponse.json({ error: 'No fields to update' }, { status: HTTPResponses.INVALID_REQUEST });
     }
     ailogger.error('Error updating validation run:', e);
-    return NextResponse.json({ error: e.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return NextResponse.json({ error: INTERNAL_SERVER_ERROR_MESSAGE }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

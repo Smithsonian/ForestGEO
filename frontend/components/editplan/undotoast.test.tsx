@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import UndoToast, { UndoRevertOutcome } from './undotoast';
 import { EditPlan } from '@/config/editplan/types';
 import { UNCONFIRMED_OUTCOME_MESSAGE } from '@/lib/editplan/requestrevert';
@@ -490,5 +490,71 @@ describe('UndoToast', () => {
     });
     expect(onUndo).toHaveBeenCalledTimes(2);
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+});
+
+const LOCK_REASON = "Save or cancel the row you're editing first";
+const SHORT_TIMEOUT_MS = 1000;
+
+describe('UndoToast disabledReason (D-i)', () => {
+  it('disables Undo with the reason as its tooltip and sends nothing on click', async () => {
+    const onUndo = vi.fn(async () => ({ status: 'reverted' as const }));
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+    render(<UndoToast editOperationID={9} onUndo={onUndo} onDismiss={vi.fn()} timeoutMs={0} disabledReason={LOCK_REASON} />);
+    const undo = screen.getByTestId('undo-toast-undo');
+    expect(undo).toBeDisabled();
+    await user.hover(undo.parentElement as HTMLElement);
+    const tooltip = await screen.findByRole('tooltip');
+    console.log('[view-errors undo toast lock] tooltip =', tooltip.textContent);
+    expect(tooltip).toHaveTextContent(LOCK_REASON);
+    await user.click(undo);
+    expect(onUndo).not.toHaveBeenCalled();
+  });
+
+  it('holds the dismiss timer while Undo is locked and restarts it when the lock releases', () => {
+    vi.useFakeTimers();
+    const onDismiss = vi.fn();
+    const props = { editOperationID: 9, onUndo: vi.fn(), onDismiss, timeoutMs: SHORT_TIMEOUT_MS };
+    try {
+      const { rerender } = render(<UndoToast {...props} disabledReason={LOCK_REASON} />);
+      act(() => {
+        vi.advanceTimersByTime(SHORT_TIMEOUT_MS * 3);
+      });
+      console.log('[view-errors undo toast lock] onDismiss calls while locked, after three timeouts =', onDismiss.mock.calls.length);
+      expect(onDismiss, 'locked: the window must not burn down').not.toHaveBeenCalled();
+      expect(screen.getByTestId('undo-toast-undo'), 'the toast is still on screen, with Undo locked').toBeDisabled();
+
+      rerender(<UndoToast {...props} disabledReason={null} />);
+      act(() => {
+        vi.advanceTimersByTime(SHORT_TIMEOUT_MS - 1);
+      });
+      expect(onDismiss, 'unlocked: a full window starts over').not.toHaveBeenCalled();
+      expect(screen.getByTestId('undo-toast-undo')).toBeEnabled();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      console.log('[view-errors undo toast lock] onDismiss calls one full timeout after the lock released =', onDismiss.mock.calls.length);
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dismisses after one timeout when Undo was never locked', () => {
+    vi.useFakeTimers();
+    const onDismiss = vi.fn();
+    try {
+      render(<UndoToast editOperationID={9} onUndo={vi.fn()} onDismiss={onDismiss} timeoutMs={SHORT_TIMEOUT_MS} />);
+      act(() => {
+        vi.advanceTimersByTime(SHORT_TIMEOUT_MS - 1);
+      });
+      expect(onDismiss).not.toHaveBeenCalled();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

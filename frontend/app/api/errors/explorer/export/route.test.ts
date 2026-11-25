@@ -3,6 +3,7 @@ import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { ERROR_EXPLORER_STATEMENT_LABELS, readStatementLabel, SQL_FALSE, SQL_TRUE } from '@/app/api/errors/explorer/errorsetsql';
 
 const ROUTE_CONTEXT = { params: Promise.resolve({}) };
 const EXPORT_CSV_HEADER =
@@ -87,6 +88,18 @@ function baseRawRow(overrides: Record<string, unknown>) {
   };
 }
 
+/** Answers each statement by its label, as the real database would: the scope raw rows carry the two contradiction flags, nothing else is expected. */
+function answerScopeRawRows(cm: { executeQuery: ReturnType<typeof vi.fn> }, rawRows: Record<string, unknown>[]) {
+  cm.executeQuery.mockImplementation(async (sql: string) => {
+    const label = readStatementLabel(sql);
+    if (label === ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows) {
+      return rawRows.map(rawRow => ({ HasDuplicate: SQL_FALSE, HasSameBatch: SQL_FALSE, ...rawRow }));
+    }
+    throw new Error(`Unexpected statement in test: ${label}`);
+  });
+  return cm.executeQuery;
+}
+
 async function readCsvLines(response: Response): Promise<string[]> {
   const text = await response.text();
   return text.split('\r\n').filter(line => line.length > 0);
@@ -102,38 +115,35 @@ describe('POST /api/errors/explorer/export', () => {
 
   it('exports one CSV row per error occurrence, not per measurement', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    vi.spyOn(cm, 'executeQuery')
-      .mockResolvedValueOnce([
-        // Measurement 101 carries three unresolved errors: two DBH-change
-        // validations (each with its own prior-census snapshot) plus one
-        // ingestion error with no comparison context.
-        baseRawRow({
-          ErrorSource: 'validation',
-          ErrorCode: '1',
-          DisplayMessage: 'DBH change exceeds threshold',
-          PriorCensusID: 6,
-          PriorDBH: '10.50',
-          PriorHOM: '1.30'
-        }),
-        baseRawRow({
-          ErrorSource: 'validation',
-          ErrorCode: '2',
-          DisplayMessage: 'DBH change flagged for review',
-          PriorCensusID: 6,
-          PriorDBH: '11.20',
-          PriorHOM: '1.30'
-        }),
-        baseRawRow({
-          ErrorSource: 'ingestion',
-          ErrorCode: 'NEGATIVE_DBH',
-          DisplayMessage: 'Measured DBH is negative',
-          PriorCensusID: null,
-          PriorDBH: null,
-          PriorHOM: null
-        })
-      ])
-      .mockResolvedValueOnce([]) // duplicate-tag groups
-      .mockResolvedValueOnce([]); // same-batch conflict groups
+    answerScopeRawRows(cm, [
+      // Measurement 101 carries three unresolved errors: two DBH-change
+      // validations (each with its own prior-census snapshot) plus one
+      // ingestion error with no comparison context.
+      baseRawRow({
+        ErrorSource: 'validation',
+        ErrorCode: '1',
+        DisplayMessage: 'DBH change exceeds threshold',
+        PriorCensusID: 6,
+        PriorDBH: '10.50',
+        PriorHOM: '1.30'
+      }),
+      baseRawRow({
+        ErrorSource: 'validation',
+        ErrorCode: '2',
+        DisplayMessage: 'DBH change flagged for review',
+        PriorCensusID: 6,
+        PriorDBH: '11.20',
+        PriorHOM: '1.30'
+      }),
+      baseRawRow({
+        ErrorSource: 'ingestion',
+        ErrorCode: 'NEGATIVE_DBH',
+        DisplayMessage: 'Measured DBH is negative',
+        PriorCensusID: null,
+        PriorDBH: null,
+        PriorHOM: null
+      })
+    ]);
 
     const response = await POST(
       buildRequest({
@@ -155,27 +165,24 @@ describe('POST /api/errors/explorer/export', () => {
 
   it('preserves distinct prior-census contexts for the same CoreMeasurementID', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    vi.spyOn(cm, 'executeQuery')
-      .mockResolvedValueOnce([
-        baseRawRow({
-          ErrorSource: 'validation',
-          ErrorCode: '1',
-          DisplayMessage: 'DBH change exceeds threshold',
-          PriorCensusID: 6,
-          PriorDBH: '10.50',
-          PriorHOM: '1.30'
-        }),
-        baseRawRow({
-          ErrorSource: 'validation',
-          ErrorCode: '2',
-          DisplayMessage: 'DBH change flagged for review',
-          PriorCensusID: 6,
-          PriorDBH: '11.20',
-          PriorHOM: '1.30'
-        })
-      ])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+    answerScopeRawRows(cm, [
+      baseRawRow({
+        ErrorSource: 'validation',
+        ErrorCode: '1',
+        DisplayMessage: 'DBH change exceeds threshold',
+        PriorCensusID: 6,
+        PriorDBH: '10.50',
+        PriorHOM: '1.30'
+      }),
+      baseRawRow({
+        ErrorSource: 'validation',
+        ErrorCode: '2',
+        DisplayMessage: 'DBH change flagged for review',
+        PriorCensusID: 6,
+        PriorDBH: '11.20',
+        PriorHOM: '1.30'
+      })
+    ]);
 
     const response = await POST(
       buildRequest({
@@ -211,7 +218,7 @@ describe('POST /api/errors/explorer/export', () => {
         PriorHOM: null
       })
     );
-    vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce(rawRows).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    answerScopeRawRows(cm, rawRows);
 
     const response = await POST(
       buildRequest({
@@ -228,9 +235,42 @@ describe('POST /api/errors/explorer/export', () => {
     expect(lines).toHaveLength(measurementCount + 1);
   });
 
+  it('exports only the rows the SQL flagged when contradictions are requested, from one scope statement and no member-group statements', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const flaggedMeasurementID = 202;
+    const unflaggedMeasurementID = 201;
+    const executeQuery = answerScopeRawRows(cm, [
+      baseRawRow({
+        CoreMeasurementID: unflaggedMeasurementID,
+        ErrorSource: 'ingestion',
+        ErrorCode: 'NEGATIVE_DBH',
+        DisplayMessage: 'Measured DBH is negative'
+      }),
+      baseRawRow({
+        CoreMeasurementID: flaggedMeasurementID,
+        HasDuplicate: SQL_TRUE,
+        ErrorSource: 'ingestion',
+        ErrorCode: 'NEGATIVE_DBH',
+        DisplayMessage: 'Measured DBH is negative'
+      })
+    ]);
+
+    const response = await POST(
+      buildRequest({ schema: 'forestgeo_testing', plotID: 5, censusID: 7, filters: { ...baseFilters(), contradictionOnly: true } }),
+      ROUTE_CONTEXT
+    );
+
+    expect(response.status).toBe(HTTPResponses.OK);
+    const dataLines = (await readCsvLines(response)).slice(1);
+    console.log(`[export] contradiction-only data lines: ${JSON.stringify(dataLines)}`);
+    expect(dataLines).toHaveLength(1);
+    expect(dataLines[0].startsWith(`${flaggedMeasurementID},`)).toBe(true);
+    expect(executeQuery.mock.calls.map(([sql]) => readStatementLabel(sql as string))).toEqual([ERROR_EXPLORER_STATEMENT_LABELS.scopeRawRows]);
+  });
+
   it('scopes the download filename to the schema, plot, and census', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    answerScopeRawRows(cm, []);
 
     const response = await POST(
       buildRequest({
@@ -247,6 +287,41 @@ describe('POST /api/errors/explorer/export', () => {
     const disposition = response.headers.get('Content-Disposition') ?? '';
     expect(disposition).toContain('attachment; filename="errors-forestgeo_testing-plot5-census7-');
     expect(disposition).toContain('.csv"');
+  });
+
+  it('exports one error type and names the file after its source and code, reduced to filename-safe characters', async () => {
+    const REQUESTED_CODE = 'BAD"CODE/1';
+    const FILENAME_SAFE_CODE = 'BAD_CODE_1';
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'executeQuery')
+      .mockResolvedValueOnce([
+        baseRawRow({ ErrorSource: 'ingestion', ErrorCode: REQUESTED_CODE, DisplayMessage: 'Requested type' }),
+        baseRawRow({ ErrorSource: 'validation', ErrorCode: '2', DisplayMessage: 'Another type on the same measurement' }),
+        baseRawRow({ CoreMeasurementID: 102, ErrorSource: 'validation', ErrorCode: '2', DisplayMessage: 'Another type on the same measurement' })
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const response = await POST(
+      buildRequest({
+        schema: 'forestgeo_testing',
+        plotID: 5,
+        censusID: 7,
+        filters: baseFilters(),
+        errorType: { source: 'ingestion', code: REQUESTED_CODE, message: 'Requested type' }
+      }),
+      ROUTE_CONTEXT
+    );
+
+    expect(response.status).toBe(HTTPResponses.OK);
+    const disposition = response.headers.get('Content-Disposition') ?? '';
+    const lines = await readCsvLines(response);
+    console.log('[view-errors export one type]', JSON.stringify({ disposition, lines }));
+    expect(disposition).toContain(`attachment; filename="errors-forestgeo_testing-plot5-census7-ingestion-${FILENAME_SAFE_CODE}-`);
+    expect(disposition).toMatch(/\.csv"$/);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('Requested type');
+    expect(lines[1]).not.toContain('Another type');
   });
 
   it('rejects an invalid schema before ever querying the database', async () => {
@@ -302,10 +377,7 @@ describe('POST /api/errors/explorer/export', () => {
 
   it('escapes spreadsheet formulas in user-controlled CSV fields', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    cm.executeQuery
-      .mockResolvedValueOnce([baseRawRow({ ErrorSource: 'ingestion', ErrorCode: 'SQL_EXCEPTION', DisplayMessage: '=HYPERLINK("https://example.invalid")' })])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+    answerScopeRawRows(cm, [baseRawRow({ ErrorSource: 'ingestion', ErrorCode: 'SQL_EXCEPTION', DisplayMessage: '=HYPERLINK("https://example.invalid")' })]);
 
     const response = await POST(buildRequest({ schema: 'forestgeo_testing', plotID: 5, censusID: 7, filters: baseFilters() }), ROUTE_CONTEXT);
     expect(response.status).toBe(HTTPResponses.OK);

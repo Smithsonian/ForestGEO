@@ -62,3 +62,15 @@ export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
     padding: '4px 0'
   }
 }));
+
+/**
+ * D-b: every header's column-menu button stays visible at rest (MUI hides it until hover,
+ * GridRootStyles.js:582-588). CSS can only show a button MUI renders, so an `actions` column must also
+ * set disableColumnMenu: false. Spread into a grid's sx.
+ */
+export const ALWAYS_VISIBLE_COLUMN_MENU_SX = {
+  '& .MuiDataGrid-columnHeader .MuiDataGrid-menuIcon': {
+    width: 'auto',
+    visibility: 'visible'
+  }
+} as const;

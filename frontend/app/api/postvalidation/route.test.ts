@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ---- Import the route under test AFTER mocks ----
 import { GET } from './route';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 import ConnectionManager from '@/lib/db/connectionmanager'; // ---- Helpers ----
 
 // ---- Mocks (must be declared before importing the route) ----
@@ -133,7 +134,7 @@ describe('GET /api/postvalidation', () => {
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();
-    expect(body.error).toMatch(/boom/i);
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);

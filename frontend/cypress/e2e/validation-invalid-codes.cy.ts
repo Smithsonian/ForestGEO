@@ -8,12 +8,15 @@ import { buildErrorsExplorerRow, mockErrorsExplorerApi } from '../support/errors
  *
  * The validation RULES (thresholds, attribute-code resolution, boundaries) are
  * covered by the integration suite; this e2e covers only the display path —
- * that the explorer lists these validation errors and exposes their source,
- * code, affected field, and message in row details.
+ * that View Errors lists these validation errors and exposes their source
+ * and message in the row details sheet.
  */
 
 const INVALID_ATTRIBUTE_MESSAGE = 'Attribute code does not exist in attributes table';
 const ABNORMAL_DBH_MESSAGE = 'Measured DBH is abnormally high';
+const MISSING_MEASUREMENT_MESSAGE = 'Missing measurement data';
+const TITLE_SELECTOR = '[data-testid="errors-explorer-title"]';
+const DETAILS_SHEET_SELECTOR = '[data-testid="error-row-details-sheet"]';
 
 const invalidAttributeCodeRow = buildErrorsExplorerRow({
   id: 123,
@@ -56,14 +59,26 @@ const multiErrorRow = buildErrorsExplorerRow({
   description: INVALID_ATTRIBUTE_MESSAGE
 });
 
+const ingestionOnlyRow = buildErrorsExplorerRow({
+  id: 126,
+  coreMeasurementID: 126,
+  treeTag: 'TREE-000126',
+  primaryErrorMessage: MISSING_MEASUREMENT_MESSAGE,
+  errorMessages: [MISSING_MEASUREMENT_MESSAGE],
+  errorSources: ['ingestion'],
+  errorFields: ['measuredDBH'],
+  errorCodes: ['MISSING_MEASUREMENT_DATA'],
+  description: MISSING_MEASUREMENT_MESSAGE
+});
+
 function openErrorsExplorer() {
   cy.visitAuthenticatedPage('/dashboard');
   cy.contains('Welcome back').should('be.visible');
   cy.selectSitePlotAndCensus('Luquillo', 'Luquillo Main Plot', 5);
   cy.openCensusHubLink('View Errors');
-  cy.wait('@fetchErrorsExplorerRows');
   cy.wait('@fetchErrorFacets');
-  cy.contains('Errors Explorer').should('be.visible');
+  cy.wait('@fetchErrorsExplorerRows');
+  cy.get(TITLE_SELECTOR).should('have.text', 'View Errors');
 }
 
 function getExplorerRow(text: string) {
@@ -71,7 +86,8 @@ function getExplorerRow(text: string) {
 }
 
 function openRowDetails(text: string) {
-  getExplorerRow(text).find('[data-field="primaryErrorMessage"]').click({ force: true });
+  getExplorerRow(text).find('[aria-label="Details"]').click();
+  cy.wait('@fetchErrorDetails');
 }
 
 describe('Upload System - Invalid Code Validations', () => {
@@ -88,12 +104,12 @@ describe('Upload System - Invalid Code Validations', () => {
     getExplorerRow(INVALID_ATTRIBUTE_MESSAGE).should('be.visible').and('contain', 'TREE-011380');
 
     openRowDetails(INVALID_ATTRIBUTE_MESSAGE);
-    cy.wait('@fetchErrorDetails');
 
-    cy.contains('Row Details').should('be.visible');
-    cy.contains('Row 123').should('be.visible');
-    cy.contains('validation:INVALID_ATTRIBUTE_CODE').should('be.visible');
-    cy.contains(INVALID_ATTRIBUTE_MESSAGE).should('be.visible');
+    cy.get(DETAILS_SHEET_SELECTOR).within(() => {
+      cy.contains('Measurement 123').should('be.visible');
+      cy.contains(INVALID_ATTRIBUTE_MESSAGE).should('be.visible');
+      cy.get('[data-testid="error-source-chip-validation"]').should('be.visible').and('have.text', 'Validation');
+    });
   });
 
   it('surfaces an abnormally high DBH as a validation error', () => {
@@ -104,11 +120,12 @@ describe('Upload System - Invalid Code Validations', () => {
     getExplorerRow(ABNORMAL_DBH_MESSAGE).should('be.visible').and('contain', 'TREE-026600');
 
     openRowDetails(ABNORMAL_DBH_MESSAGE);
-    cy.wait('@fetchErrorDetails');
 
-    cy.contains('Row 124').should('be.visible');
-    cy.contains('validation:ABNORMAL_HIGH_DBH').should('be.visible');
-    cy.contains(ABNORMAL_DBH_MESSAGE).should('be.visible');
+    cy.get(DETAILS_SHEET_SELECTOR).within(() => {
+      cy.contains('Measurement 124').should('be.visible');
+      cy.contains(ABNORMAL_DBH_MESSAGE).should('be.visible');
+      cy.get('[data-testid="error-source-chip-validation"]').should('be.visible').and('have.text', 'Validation');
+    });
   });
 
   it('reports both validation errors on a single measurement', () => {
@@ -117,27 +134,26 @@ describe('Upload System - Invalid Code Validations', () => {
     openErrorsExplorer();
 
     openRowDetails(INVALID_ATTRIBUTE_MESSAGE);
-    cy.wait('@fetchErrorDetails');
 
     // Both validation errors for the same measurement are listed in its details.
-    cy.contains('validation:INVALID_ATTRIBUTE_CODE').should('be.visible');
-    cy.contains('validation:ABNORMAL_HIGH_DBH').should('be.visible');
-    cy.contains(ABNORMAL_DBH_MESSAGE).should('be.visible');
+    cy.get(DETAILS_SHEET_SELECTOR).within(() => {
+      cy.get('[data-testid="error-row-details-error-card"]').should('have.length', 2);
+      cy.get('[data-testid="error-row-details-error-card"]').eq(0).should('contain', INVALID_ATTRIBUTE_MESSAGE).and('contain', 'Validation');
+      cy.get('[data-testid="error-row-details-error-card"]').eq(1).should('contain', ABNORMAL_DBH_MESSAGE).and('contain', 'Validation');
+    });
   });
 
-  it('filters the explorer to validation-sourced errors only', () => {
-    mockErrorsExplorerApi({ rows: [invalidAttributeCodeRow, abnormalDbhRow] });
+  it('filters View Errors to validation-sourced errors only', () => {
+    mockErrorsExplorerApi({ rows: [invalidAttributeCodeRow, abnormalDbhRow, ingestionOnlyRow] });
 
     openErrorsExplorer();
+    cy.contains('button[aria-expanded]', MISSING_MEASUREMENT_MESSAGE).should('be.visible');
 
-    cy.get('#errors-explorer-source').click();
-    cy.get('[role="listbox"]')
-      .filter(':visible')
-      .within(() => {
-        cy.contains('[role="option"]', 'Validation only').click();
-      });
+    cy.get('[role="group"][aria-label="Show"] button[value="validation"]').click();
 
+    cy.contains('button[aria-expanded]', INVALID_ATTRIBUTE_MESSAGE).should('be.visible');
+    cy.contains('button[aria-expanded]', ABNORMAL_DBH_MESSAGE).should('be.visible');
+    cy.contains('button[aria-expanded]', MISSING_MEASUREMENT_MESSAGE).should('not.exist');
     getExplorerRow(INVALID_ATTRIBUTE_MESSAGE).should('be.visible');
-    getExplorerRow(ABNORMAL_DBH_MESSAGE).should('be.visible');
   });
 });

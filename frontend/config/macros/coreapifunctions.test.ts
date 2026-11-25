@@ -6,6 +6,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import MapperFactory from '@/config/datamapper';
 import { applyEdit } from '@/config/editplan/apply';
 import { getCookie } from '@/app/actions/cookiemanager';
+import { FOREIGN_KEY_CONFLICT_MESSAGE } from '@/lib/errorhelpers';
 // Keep measurementerrors mocked even though no test reads the mock directly; it
 // prevents the module from hitting the real DB stack when imported transitively.
 
@@ -32,8 +33,9 @@ vi.mock('@/app/actions/cookiemanager', () => ({
 }));
 // The CRUD handlers read the session for unifiedchangelog.ChangedBy. withRouteAuthz
 // has already validated it upstream; this models a resolved session.
+const authSession = vi.hoisted(() => ({ current: { user: { email: 'grid-editor@si.edu', userStatus: 'field crew' } } as { user: Record<string, unknown> } }));
 vi.mock('@/auth', () => ({
-  auth: vi.fn(async () => ({ user: { email: TEST_SESSION_EMAIL } }))
+  auth: vi.fn(async () => authSession.current)
 }));
 vi.mock('@/ailogger', () => ({
   default: {
@@ -1377,6 +1379,27 @@ describe('CoreAPIFunctions', () => {
       expect(response.status).toBe(200);
     });
 
+    it('answers a foreign-key refusal with fixed guidance instead of a table name parsed from the MySQL message', async () => {
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'DELETE',
+        body: JSON.stringify({ newRow: { QuadratID: 7 } })
+      });
+      const foreignKeyRefusal = Object.assign(
+        new Error(
+          'Cannot delete or update a parent row: a foreign key constraint fails (`forestgeo_secretsite`.`stems`, CONSTRAINT `stems_quadrats` FOREIGN KEY (`QuadratID`) REFERENCES `quadrats` (`QuadratID`))'
+        ),
+        { code: 'ER_ROW_IS_REFERENCED_2' }
+      );
+      mockConnectionManager.executeQuery.mockRejectedValue(foreignKeyRefusal);
+
+      const response = await DELETE(mockRequest, { params: Promise.resolve({ dataType: 'quadrats', slugs: [TEST_SCHEMA, 'quadratID', '7'] }) });
+      const text = await response.text();
+      console.log('[DELETE foreign key refusal]', response.status, text);
+
+      expect(response.status).toBe(HTTPResponses.FOREIGN_KEY_CONFLICT);
+      expect(JSON.parse(text)).toEqual({ message: FOREIGN_KEY_CONFLICT_MESSAGE });
+    });
+
     it('rolls back via withTransaction when a write fails in DELETE', async () => {
       const mockRequest = new NextRequest('http://localhost/api/test', {
         method: 'DELETE',
@@ -1825,6 +1848,44 @@ describe('CoreAPIFunctions', () => {
           expect(mapping.primaryKey).not.toBe('');
         });
       });
+    });
+  });
+
+  describe('DELETE rejects pending users before any transaction (D6)', () => {
+    const PENDING_FORBIDDEN_MESSAGE = 'pending users cannot edit measurements';
+    const DELETE_TYPES = [
+      'alltaxonomiesview',
+      'attributes',
+      'census',
+      'personnel',
+      'plots',
+      'quadratpersonnel',
+      'quadrats',
+      'roles',
+      'sitespecificvalidations',
+      'species',
+      'specieslimits',
+      'viewfulltable',
+      'measurementssummary',
+      'failedmeasurements'
+    ];
+
+    afterEach(() => {
+      authSession.current = { user: { email: TEST_SESSION_EMAIL, userStatus: 'field crew' } };
+    });
+
+    it.each(DELETE_TYPES)('answers 403 for a pending user deleting %s and starts no transaction', async dataType => {
+      authSession.current = { user: { email: 'pending@si.edu', userStatus: 'pending' } };
+      const withTransaction = vi.fn();
+      vi.mocked(ConnectionManager.getInstance).mockReturnValue({ withTransaction } as unknown as ConnectionManager);
+      const request = new NextRequest('http://localhost/api/fixeddata', { method: 'DELETE', body: JSON.stringify({ newRow: { id: 1 } }) });
+      const response = await DELETE(request, { params: Promise.resolve({ dataType, slugs: [TEST_SCHEMA, 'id'] }) });
+      const json = await response.json();
+      // eslint-disable-next-line no-console
+      console.log('[DELETE pending]', dataType, response.status, JSON.stringify(json));
+      expect(response.status).toBe(HTTPResponses.FORBIDDEN);
+      expect(json).toEqual({ error: PENDING_FORBIDDEN_MESSAGE });
+      expect(withTransaction).not.toHaveBeenCalled();
     });
   });
 });

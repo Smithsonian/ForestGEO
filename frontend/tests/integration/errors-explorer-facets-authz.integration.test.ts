@@ -32,15 +32,15 @@ vi.mock('@/auth', () => ({
 
 // Route the route's ConnectionManager.executeQuery at the shared test connection
 // and count invocations so denial tests can prove NO SQL ran.
-vi.mock('@/lib/db/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const { runQueryDispatch } = await vi.importActual<typeof import('../setup/runquerydispatch')>('../setup/runquerydispatch');
   const manager = {
     executeQuery: async (query: string, params?: unknown[]) => {
       sharedState.executeQueryCalls += 1;
       if (!sharedState.connection) {
         throw new Error('Test DB connection not initialized');
       }
-      const [rows] = await sharedState.connection.query(query, params as any[]);
-      return rows;
+      return runQueryDispatch(sharedState.connection, query, params);
     },
     closeConnection: async () => undefined
   };
@@ -131,8 +131,7 @@ describe('POST /api/errors/explorer/facets per-site authz', () => {
     // The handler read schema/plotID/censusID from the (post-clone) body and issued queries.
     expect(sharedState.executeQueryCalls).toBeGreaterThan(0);
     const body = await res.json();
-    expect(body).toHaveProperty('messages');
-    expect(body).toHaveProperty('fields');
-    expect(body).toHaveProperty('sourceCounts');
+    expect(body).toHaveProperty('errorTypes');
+    expect(body).toHaveProperty('censusTotals');
   });
 });

@@ -29,6 +29,7 @@ export default function MultilineModal(props: MultilineModalProps) {
   const referenceGridType = getDataGridForForm(formType as FormType);
 
   const [changesSubmitted, setChangesSubmitted] = useState(false);
+  const [isSubmittingChanges, setIsSubmittingChanges] = useState(false);
   const [openValidations, setOpenValidations] = useState(false);
   const [openUpdateValidations, setOpenUpdateValidations] = useState(false);
   const [tempReviewState, setTempReviewState] = useState<ReviewStates>(ReviewStates.VALIDATE);
@@ -39,40 +40,62 @@ export default function MultilineModal(props: MultilineModalProps) {
     if (openValidations || openUpdateValidations) return null;
     switch (formType) {
       case 'species':
-        return <MultilineSpeciesDataGrid setChangesSubmitted={setChangesSubmitted} />;
+        return <MultilineSpeciesDataGrid setChangesSubmitted={setChangesSubmitted} setIsSubmittingChanges={setIsSubmittingChanges} />;
       case 'attributes':
-        return <MultilineAttributesDataGrid setChangesSubmitted={setChangesSubmitted} />;
+        return <MultilineAttributesDataGrid setChangesSubmitted={setChangesSubmitted} setIsSubmittingChanges={setIsSubmittingChanges} />;
       case 'quadrats':
-        return <MultilineQuadratsDataGrid setChangesSubmitted={setChangesSubmitted} />;
+        return <MultilineQuadratsDataGrid setChangesSubmitted={setChangesSubmitted} setIsSubmittingChanges={setIsSubmittingChanges} />;
       case 'personnel':
-        return <MultilinePersonnelDataGrid setChangesSubmitted={setChangesSubmitted} />;
+        return <MultilinePersonnelDataGrid setChangesSubmitted={setChangesSubmitted} setIsSubmittingChanges={setIsSubmittingChanges} />;
       case 'measurements':
-        return <MultilineMeasurementsDataGrid setChangesSubmitted={setChangesSubmitted} />;
+        return <MultilineMeasurementsDataGrid setChangesSubmitted={setChangesSubmitted} setIsSubmittingChanges={setIsSubmittingChanges} />;
     }
   }
 
-  useEffect(() => {
-    if (changesSubmitted) {
-      if (formType === 'measurements' && tempReviewState === ReviewStates.VALIDATE) {
-        setOpenValidations(true);
-        setOpenUpdateValidations(false);
-      } else {
-        handleCloseManualEntryForm();
-      }
-      triggerRefresh();
-      if (onSubmitComplete) {
-        onSubmitComplete();
-      }
-    }
-  }, [changesSubmitted, formType, tempReviewState, handleCloseManualEntryForm, triggerRefresh, onSubmitComplete]);
+  const [hasRequestedClose, setHasRequestedClose] = useState(false);
+  const isValidationStepOpen = openValidations || openUpdateValidations;
+  const hasValidationFinished = tempReviewState !== ReviewStates.VALIDATE && tempReviewState !== ReviewStates.UPDATE;
 
   useEffect(() => {
-    // monitor changes in tempReviewState and trigger update once they're done
+    if (isManualEntryFormOpen) return;
+    setOpenValidations(false);
+    setOpenUpdateValidations(false);
+    setTempReviewState(ReviewStates.VALIDATE);
+    setHasRequestedClose(false);
+  }, [isManualEntryFormOpen]);
+
+  function requestCloseManualEntryForm() {
+    setHasRequestedClose(true);
+    handleCloseManualEntryForm();
+  }
+
+  useEffect(() => {
+    if (!changesSubmitted) return;
+    setChangesSubmitted(false);
+    triggerRefresh();
+    onSubmitComplete?.();
+    if (formType === 'measurements') {
+      setTempReviewState(ReviewStates.VALIDATE);
+      setOpenValidations(true);
+      setOpenUpdateValidations(false);
+    } else {
+      handleCloseManualEntryForm();
+    }
+  }, [changesSubmitted, formType, triggerRefresh, onSubmitComplete, handleCloseManualEntryForm]);
+
+  useEffect(() => {
     if (openValidations && tempReviewState === ReviewStates.UPDATE) {
       setOpenValidations(false);
       setOpenUpdateValidations(true);
     }
   }, [tempReviewState, openValidations]);
+
+  useEffect(() => {
+    if (isValidationStepOpen && hasValidationFinished && !hasRequestedClose) {
+      setHasRequestedClose(true);
+      handleCloseManualEntryForm();
+    }
+  }, [isValidationStepOpen, hasValidationFinished, hasRequestedClose, handleCloseManualEntryForm]);
 
   return (
     <Modal
@@ -82,7 +105,7 @@ export default function MultilineModal(props: MultilineModalProps) {
       sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
     >
       <ModalDialog size="lg" sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }} role="alertdialog" variant={'plain'}>
-        <IconButton aria-label="close" onClick={handleCloseManualEntryForm} sx={{ position: 'absolute', top: 8, right: 8 }}>
+        <IconButton aria-label="close" onClick={requestCloseManualEntryForm} disabled={isSubmittingChanges} sx={{ position: 'absolute', top: 8, right: 8 }}>
           <CloseIcon />
         </IconButton>
         <DialogTitle sx={{ alignSelf: 'center', justifyContent: 'center' }} level={'h3'} color={'primary'}>

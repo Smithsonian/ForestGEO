@@ -6,28 +6,50 @@ import {
   buildMeasurementHasUnresolvedErrorsSql,
   buildMeasurementStateCountsSql,
   buildMeasurementVisibleClauseSql,
-  buildMeasurementVisibleConditionSql
+  buildMeasurementVisibleConditionSql,
+  buildMeasurementRowSummaryProjectionSql,
+  buildMeasurementStatusRankSql,
+  buildStemStatusFilterClauseSql,
+  MEASUREMENT_STATUS_RANK,
+  MEASUREMENT_STATUS_RANK_COLUMN,
+  MEASUREMENT_STATUS_VISIBLE_BUCKET,
+  MEASUREMENT_STATUSES,
+  measurementStatusFromRank,
+  UnknownAttributeStatusError,
+  UNRESOLVED_ERROR_MESSAGES_SEPARATOR
 } from './measurementstatefilters';
 
 describe('measurementstatefilters', () => {
-  it('builds the unresolved-error EXISTS clause against measurement_error_log', () => {
-    expect(buildMeasurementHasUnresolvedErrorsSql('myschema', 'vft')).toContain('FROM myschema.measurement_error_log mel');
-    expect(buildMeasurementHasUnresolvedErrorsSql('myschema', 'vft')).toContain('mel.MeasurementID = vft.CoreMeasurementID');
+  it('builds the unresolved-error list once per statement from measurement_error_log, not a correlated EXISTS', () => {
+    const sql = buildMeasurementHasUnresolvedErrorsSql('myschema', 'vft');
+    console.log('[unresolved errors sql]', sql);
+    expect(sql).toContain('vft.CoreMeasurementID IN (');
+    expect(sql).toContain('SELECT /*+ SUBQUERY(MATERIALIZATION) */ mel.MeasurementID');
+    expect(sql).toContain('FROM myschema.measurement_error_log mel');
+    expect(sql).toContain('COALESCE(mel.IsResolved, FALSE) = FALSE');
+    expect(sql).not.toContain('EXISTS');
+    expect(sql).not.toContain('mel.MeasurementID = vft');
   });
 
   it('treats unresolved error-log rows as invalid for visible filters', () => {
-    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'errors')).toContain('vft.StemGUID IS NULL OR vft.IsValidated = FALSE OR EXISTS');
-    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'valid')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT EXISTS');
-    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'pending')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT EXISTS');
+    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'errors')).toContain(
+      'vft.StemGUID IS NULL OR vft.IsValidated = FALSE OR (vft.CoreMeasurementID IN ('
+    );
+    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'valid')).toContain(
+      'vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT (vft.CoreMeasurementID IN ('
+    );
+    expect(buildMeasurementVisibleConditionSql('myschema', 'vft', 'pending')).toContain(
+      'vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT (vft.CoreMeasurementID IN ('
+    );
   });
 
   it('builds an OR clause when visible filters are present', () => {
     expect(buildMeasurementVisibleClauseSql('myschema', 'vft', ['valid', 'pending'])).toContain(' AND (');
     expect(buildMeasurementVisibleClauseSql('myschema', 'vft', ['valid', 'pending'])).toContain(
-      'vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT EXISTS'
+      'vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT (vft.CoreMeasurementID IN ('
     );
     expect(buildMeasurementVisibleClauseSql('myschema', 'vft', ['valid', 'pending'])).toContain(
-      'vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT EXISTS'
+      'vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT (vft.CoreMeasurementID IN ('
     );
   });
 
@@ -90,7 +112,7 @@ describe('measurementstatefilters', () => {
   describe('missing-stem rows (StemGUID NULL) are always unresolved', () => {
     it('counts them as unresolved and excludes them from failed-no-log, pending and valid buckets', () => {
       const countsSql = buildMeasurementStateCountsSql('myschema', 'vft');
-      expect(countsSql).toContain('WHEN vft.StemGUID IS NULL OR EXISTS');
+      expect(countsSql).toContain('WHEN vft.StemGUID IS NULL OR (vft.CoreMeasurementID IN (');
       for (const alias of ['CountFailedNoLog', 'CountPending', 'CountValid']) {
         const projection = countsSql.split(/,(?=\s*SUM\()/).find(candidate => candidate.includes(`AS ${alias}`))!;
         expect(projection).toContain('vft.StemGUID IS NOT NULL AND');
@@ -130,28 +152,28 @@ describe('measurementstatefilters', () => {
     });
 
     it('counts failed-no-log as IsValidated = FALSE rows WITHOUT an unresolved log entry (disjoint from CountUnresolvedLogged)', () => {
-      expect(statePredicate('CountFailedNoLog')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated = FALSE AND NOT (EXISTS');
+      expect(statePredicate('CountFailedNoLog')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated = FALSE AND NOT ((vft.CoreMeasurementID IN (');
     });
 
-    it('counts unresolved logged errors via the measurement_error_log EXISTS clause', () => {
+    it('counts unresolved logged errors via the measurement_error_log IN list', () => {
       const unresolvedLoggedPredicate = statePredicate('CountUnresolvedLogged');
-      expect(unresolvedLoggedPredicate).toContain('EXISTS');
+      expect(unresolvedLoggedPredicate).toContain('vft.CoreMeasurementID IN (');
       expect(unresolvedLoggedPredicate).toContain('FROM myschema.measurement_error_log mel');
       expect(unresolvedLoggedPredicate).toContain('COALESCE(mel.IsResolved, FALSE) = FALSE');
     });
 
     it('counts pending as not-yet-validated rows without unresolved logged errors', () => {
-      expect(statePredicate('CountPending')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT (EXISTS');
+      expect(statePredicate('CountPending')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated IS NULL AND NOT ((vft.CoreMeasurementID IN (');
     });
 
     it('counts valid as validated rows without unresolved logged errors', () => {
-      expect(statePredicate('CountValid')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT (EXISTS');
+      expect(statePredicate('CountValid')).toContain('vft.StemGUID IS NOT NULL AND vft.IsValidated = TRUE AND NOT ((vft.CoreMeasurementID IN (');
     });
 
     it('keeps every non-unresolved bucket disjoint from the unresolved-log bucket via AND NOT (EXISTS', () => {
-      expect(statePredicate('CountFailedNoLog')).toContain('AND NOT (EXISTS');
-      expect(statePredicate('CountPending')).toContain('AND NOT (EXISTS');
-      expect(statePredicate('CountValid')).toContain('AND NOT (EXISTS');
+      expect(statePredicate('CountFailedNoLog')).toContain('AND NOT ((vft.CoreMeasurementID IN (');
+      expect(statePredicate('CountPending')).toContain('AND NOT ((vft.CoreMeasurementID IN (');
+      expect(statePredicate('CountValid')).toContain('AND NOT ((vft.CoreMeasurementID IN (');
     });
 
     it('counts overridable rows with exactly the shared override-eligibility predicate', () => {
@@ -165,5 +187,139 @@ describe('measurementstatefilters', () => {
       expect(revalidatablePredicate).toContain("me.ErrorSource = 'validation'");
       expect(revalidatablePredicate).toContain('COALESCE(mel.IsResolved, FALSE) = FALSE');
     });
+  });
+});
+
+const SCHEMA = 'myschema';
+const ALIAS = 'vft';
+const STATUS_ORDER_IN_SPEC = ['ingestionFailed', 'unresolvedErrors', 'invalidNoLog', 'pending', 'passed'];
+
+describe('measurement status rank (View Data Validation column)', () => {
+  it('lists the five statuses in the spec order with ranks 0-4', () => {
+    console.log('[status rank]', JSON.stringify(MEASUREMENT_STATUS_RANK));
+    expect([...MEASUREMENT_STATUSES]).toEqual(STATUS_ORDER_IN_SPEC);
+    expect(STATUS_ORDER_IN_SPEC.map(status => MEASUREMENT_STATUS_RANK[status as keyof typeof MEASUREMENT_STATUS_RANK])).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('builds a CASE whose WHEN branches test, in order, StemGUID NULL, an unresolved log entry, FALSE and NULL, with passed as ELSE', () => {
+    const sql = buildMeasurementStatusRankSql(SCHEMA, ALIAS);
+    console.log('[status rank] sql', sql);
+    const positions = [
+      sql.indexOf(`WHEN ${ALIAS}.StemGUID IS NULL THEN 0`),
+      sql.indexOf(`WHEN ${buildMeasurementHasUnresolvedErrorsSql(SCHEMA, ALIAS)} THEN 1`),
+      sql.indexOf(`WHEN ${ALIAS}.IsValidated = FALSE THEN 2`),
+      sql.indexOf(`WHEN ${ALIAS}.IsValidated IS NULL THEN 3`),
+      sql.indexOf('ELSE 4')
+    ];
+    expect(positions.every(position => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
+  it('maps every status to exactly one Show bucket, matching the counts buckets', () => {
+    console.log('[status buckets]', JSON.stringify(MEASUREMENT_STATUS_VISIBLE_BUCKET));
+    expect(MEASUREMENT_STATUS_VISIBLE_BUCKET).toEqual({
+      ingestionFailed: 'errors',
+      unresolvedErrors: 'errors',
+      invalidNoLog: 'errors',
+      pending: 'pending',
+      passed: 'valid'
+    });
+  });
+
+  it.each([
+    [0, 'ingestionFailed'],
+    [4, 'passed'],
+    ['2', 'invalidNoLog'],
+    [null, null],
+    [undefined, null],
+    ['', null],
+    [5, null],
+    [-1, null],
+    ['x', null],
+    [1.5, null]
+  ])('measurementStatusFromRank(%j) → %j', (rank, expected) => {
+    expect(measurementStatusFromRank(rank)).toBe(expected);
+  });
+});
+
+describe('row summary projection', () => {
+  const sql = buildMeasurementRowSummaryProjectionSql(SCHEMA, ALIAS);
+
+  it('selects every projected column under its documented alias and binds no placeholder', () => {
+    const aliases = [
+      MEASUREMENT_STATUS_RANK_COLUMN,
+      'UnresolvedErrorCount',
+      'PrimaryErrorMessage',
+      'PrimaryErrorSource',
+      'UnresolvedErrorCodes',
+      'UnresolvedErrorMessages',
+      'HasContradiction',
+      'StemStatuses'
+    ];
+    const observed = Object.fromEntries(aliases.map(alias => [alias, sql.includes(`AS ${alias}`)]));
+    console.log('[projection] aliases', JSON.stringify(observed), 'placeholders', (sql.match(/\?/g) ?? []).length);
+    expect(Object.values(observed).every(Boolean)).toBe(true);
+    expect(sql).not.toContain('?');
+  });
+
+  it('orders the primary error, codes and messages by ErrorSource then ErrorCode, as View Errors does', () => {
+    const orderClauses = sql.match(/ORDER BY \w+\.ErrorSource ASC, \w+\.ErrorCode ASC/g) ?? [];
+    console.log('[projection] order clauses', orderClauses.length);
+    expect(orderClauses.length).toBe(4);
+    expect(sql).toMatch(/COALESCE\(NULLIF\(\w+\.Description, ''\), \w+\.ErrorMessage\)/);
+    expect(sql).toContain(`SEPARATOR '${UNRESOLVED_ERROR_MESSAGES_SEPARATOR}'`);
+  });
+
+  it('orders stem statuses by AttributeStatusOptions and prefers the active attribute row', () => {
+    expect(sql).toContain("FIELD(rs_attr.Status, 'alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing')");
+    expect(sql).toContain('IsActive = (SELECT MAX(effective_attr.IsActive)');
+  });
+
+  it('flags contradictions with the two View Errors rules scoped to the row plot and census', () => {
+    expect(sql).toContain(`rs_dup.PlotID = ${ALIAS}.PlotID AND rs_dup.CensusID = ${ALIAS}.CensusID`);
+    expect(sql).toContain(`COALESCE(rs_other_ms.SpeciesCode, '') <> COALESCE(${ALIAS}.SpeciesCode, '')`);
+    expect(sql).toContain('rs_self.UploadFileID IS NOT NULL AND rs_self.UploadBatchID IS NOT NULL');
+  });
+});
+
+describe('buildStemStatusFilterClauseSql', () => {
+  it('adds no clause when no status is selected', () => {
+    expect(buildStemStatusFilterClauseSql(SCHEMA, ALIAS, [])).toBe('');
+  });
+
+  it('matches rows where any effective code carries the status', () => {
+    const clause = buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead']);
+    console.log('[stem status clause]', clause);
+    expect(clause).toMatch(new RegExp(`^ AND ${ALIAS}\\.CoreMeasurementID IN \\(`));
+    expect(clause).toContain("sf_attr.Status IN ('dead')");
+  });
+
+  it('materialises the measurement list once and keeps it NULL-free, with no correlated lookup per row', () => {
+    const clause = buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead']);
+    expect(clause).toContain('SELECT /*+ SEMIJOIN(MATERIALIZATION) */ sf_ca.CoreMeasurementID FROM');
+    expect(clause).toContain('sf_ca.CoreMeasurementID IS NOT NULL');
+    expect(clause).not.toMatch(/\bEXISTS\s*\(/);
+    expect(clause).not.toContain(`sf_ca.CoreMeasurementID = ${ALIAS}`);
+  });
+
+  it('resolves the status codes once, not through a per-row join to attributes', () => {
+    const clause = buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead']);
+    expect(clause).toContain('sf_ca.Code IN (');
+    expect(clause).not.toMatch(/\bJOIN\b/);
+  });
+
+  it('keeps the active-row-wins rule on the code list', () => {
+    const clause = buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead']);
+    expect(clause).toContain(
+      `sf_attr.IsActive = (SELECT MAX(effective_attr.IsActive) FROM ${SCHEMA}.attributes effective_attr WHERE effective_attr.Code = sf_attr.Code)`
+    );
+  });
+
+  it('lists every requested status in the IN list', () => {
+    expect(buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ['dead', 'alive'])).toContain("sf_attr.Status IN ('dead', 'alive')");
+  });
+
+  it('rejects a value outside AttributeStatusOptions', () => {
+    expect(() => buildStemStatusFilterClauseSql(SCHEMA, ALIAS, ["dead') OR 1=1 --"])).toThrow(UnknownAttributeStatusError);
   });
 });

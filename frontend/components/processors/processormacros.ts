@@ -27,6 +27,53 @@ export type Operator =
   | 'isNotEmpty'
   | 'isAnyOf';
 
+export const UNSUPPORTED_LOGIC_OPERATOR_MESSAGE = 'Unsupported filter logic operator';
+const DEFAULT_LOGIC_OPERATOR_SQL = 'AND';
+const LOGIC_OPERATOR_SQL: Readonly<Record<string, 'AND' | 'OR'>> = { and: 'AND', or: 'OR' };
+
+/** Every operator buildCondition implements; a filter item with any other operator is dropped by buildFilterModelStub. */
+export const SUPPORTED_FILTER_OPERATORS: ReadonlySet<string> = new Set<Operator>([
+  'contains',
+  'doesNotContain',
+  'equals',
+  'is',
+  '=',
+  'doesNotEqual',
+  'isNot',
+  '!=',
+  'startsWith',
+  'endsWith',
+  'isAfter',
+  '>',
+  'isOnOrAfter',
+  '>=',
+  'isBefore',
+  '<',
+  'isOnOrBefore',
+  '<=',
+  'isEmpty',
+  'isNotEmpty',
+  'isAnyOf'
+]);
+
+export class UnsupportedFilterLogicOperatorError extends Error {
+  constructor(readonly logicOperator: unknown) {
+    super(UNSUPPORTED_LOGIC_OPERATOR_MESSAGE);
+    this.name = 'UnsupportedFilterLogicOperatorError';
+  }
+}
+
+/** The request's logicOperator becomes SQL text, so only the two keywords are allowed (missing or empty means AND, as before). */
+export function resolveFilterLogicOperatorSql(logicOperator: unknown): 'AND' | 'OR' {
+  if (logicOperator === undefined || logicOperator === null || logicOperator === '') return DEFAULT_LOGIC_OPERATOR_SQL;
+  if (typeof logicOperator !== 'string') throw new UnsupportedFilterLogicOperatorError(logicOperator);
+  const keyword = Object.prototype.hasOwnProperty.call(LOGIC_OPERATOR_SQL, logicOperator.toLowerCase())
+    ? LOGIC_OPERATOR_SQL[logicOperator.toLowerCase()]
+    : undefined;
+  if (!keyword) throw new UnsupportedFilterLogicOperatorError(logicOperator);
+  return keyword;
+}
+
 // Escape wildcard characters for LIKE queries (Bug #2 fix)
 function escapeLikeWildcards(value: string): string {
   return value.replace(/[%_\\]/g, '\\$&');
@@ -82,6 +129,7 @@ function buildCondition({ operator, column, value }: { operator: Operator; colum
 }
 
 export const buildFilterModelStub = (filterModel: GridFilterModel, alias?: string) => {
+  const logicOperatorSql = resolveFilterLogicOperatorSql(filterModel?.logicOperator);
   if (!filterModel.items || filterModel.items.length === 0) {
     return '';
   }
@@ -110,7 +158,7 @@ export const buildFilterModelStub = (filterModel: GridFilterModel, alias?: strin
     return '';
   }
 
-  return conditions.join(` ${filterModel?.logicOperator?.toUpperCase() || 'AND'} `);
+  return conditions.join(` ${logicOperatorSql} `);
 };
 
 export const buildSearchStub = (columns: string[], quickFilter: string[], alias?: string) => {

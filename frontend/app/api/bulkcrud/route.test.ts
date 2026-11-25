@@ -20,6 +20,8 @@ import { insertOrUpdate } from '@/components/processors/processorhelperfunctions
 import { HTTPResponses } from '@/config/macros';
 import { BULKCRUD_REJECTION_MESSAGES } from '@/lib/bulkcrud/required-context';
 import { CALLER_OWNS_TRANSACTION_SQL, CLEAR_CALLER_TRANSACTION_SQL, FLAG_CLEAR_FAILED_REASON } from '@/lib/ingestion/bulk-ingestion-call';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
+import ailogger from '@/ailogger';
 
 vi.mock('@/lib/db/connectionmanager', async () => {
   // Pull whatever the environment currently exports
@@ -178,7 +180,7 @@ describe('bulkcrud POST route', () => {
   ])('accepts site-level $gridType rows with no plot or census selected (#502)', async ({ gridType, rows }) => {
     const instance = (ConnectionManager as any).getInstance();
     vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-site-level');
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
     const res = await POST(makeRequest({ gridType, schema: 'forestgeo_testing', fileRowSet: rows }));
 
     expect(res.status, `body: ${await res.clone().text()}`).toBe(HTTPResponses.OK);
@@ -211,8 +213,8 @@ describe('bulkcrud POST route', () => {
 
     const beginSpy = vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-1');
     const execSpy = vi.spyOn(instance, 'executeQuery');
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
-    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
     const closeSpy = vi.spyOn(instance, 'closeConnection');
 
     // ✅ Make both DB calls succeed
@@ -310,6 +312,8 @@ describe('bulkcrud POST route', () => {
   it('measurementssummary path: audits with the authenticated session identity, ignoring a forged body.user field', async () => {
     const instance = (ConnectionManager as any).getInstance();
     vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-forge');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
+    vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
     const execSpy = vi.spyOn(instance, 'executeQuery');
     execSpy.mockResolvedValueOnce({ affectedRows: 1 }); // INSERT into temporarymeasurements
     execSpy.mockResolvedValueOnce([]); // SET caller-owns-transaction flag
@@ -335,6 +339,7 @@ describe('bulkcrud POST route', () => {
     const [, auditParams] = execSpy.mock.calls[4];
     expect(auditParams[0]).toBe('bulkcrud-test@forestgeo.test');
     expect(auditParams[0]).not.toBe('attacker@evil.test');
+    expect(commitSpy).toHaveBeenCalledWith('tx-forge');
   });
 
   /**
@@ -347,8 +352,8 @@ describe('bulkcrud POST route', () => {
     const instance = (ConnectionManager as any).getInstance();
     vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-audit-fail');
     const execSpy = vi.spyOn(instance, 'executeQuery');
-    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValueOnce(undefined);
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
     const closeSpy = vi.spyOn(instance, 'closeConnection');
 
     execSpy.mockResolvedValueOnce({ affectedRows: 1 }); // INSERT into temporarymeasurements
@@ -371,8 +376,8 @@ describe('bulkcrud POST route', () => {
 
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toMatch(/Failed to record INSERT audit for coremeasurements/i);
-    expect(body.error).toMatch(/unifiedchangelog deadlock/i);
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
+    expect(JSON.stringify(body)).not.toMatch(/unifiedchangelog deadlock/i);
 
     expect(commitSpy).not.toHaveBeenCalled();
     expect(rollbackSpy).toHaveBeenCalledWith('tx-audit-fail');
@@ -421,8 +426,8 @@ describe('bulkcrud POST route', () => {
     const instance = (ConnectionManager as any).getInstance();
     const beginSpy = vi.spyOn(instance, 'beginTransaction');
     const execSpy = vi.spyOn(instance, 'executeQuery');
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
-    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
     const closeSpy = vi.spyOn(instance, 'closeConnection');
 
     beginSpy.mockResolvedValueOnce('tx-2');
@@ -433,7 +438,7 @@ describe('bulkcrud POST route', () => {
     };
 
     const req = makeRequest({
-      gridType: 'quadrats', // anything not in ['measurementssummary','measurementssummaryview']
+      gridType: 'quadrats', // any grid type isMeasurementGridType rejects
       schema: 'forestgeo_testing',
       plot: { plotID: 99 },
       census: { dateRanges: [{ censusID: 5 }] },
@@ -484,6 +489,8 @@ describe('bulkcrud POST route', () => {
   it('generic path: ignores a forged body field and uses the authenticated session identity for fullName', async () => {
     const instance = (ConnectionManager as any).getInstance();
     vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-generic-forge');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
+    vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
 
     const req = makeRequest({
       gridType: 'species',
@@ -500,6 +507,7 @@ describe('bulkcrud POST route', () => {
     const [props] = (insertOrUpdate as any).mock.calls[0];
     expect(props.fullName).toBe('bulkcrud-test@forestgeo.test');
     expect(props.fullName).not.toBe('attacker@evil.test');
+    expect(commitSpy).toHaveBeenCalledWith('tx-generic-forge');
   });
 
   /**
@@ -517,10 +525,11 @@ describe('bulkcrud POST route', () => {
     const instance = (ConnectionManager as any).getInstance();
     const beginSpy = vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-err');
     const execSpy = vi.spyOn(instance, 'executeQuery').mockRejectedValueOnce(new Error('kaboom'));
-    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction');
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
     const closeSpy = vi.spyOn(instance, 'closeConnection');
 
+    const loggedError = vi.spyOn(ailogger, 'error').mockImplementation(() => undefined);
     // Force the summary path so we hit executeQuery early
     const req = makeRequest({
       gridType: 'measurementssummary',
@@ -547,8 +556,8 @@ describe('bulkcrud POST route', () => {
     const res = await POST(req);
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.responseMessage).toMatch(/Failure in connecting to SQL/i);
-    expect(body.error).toMatch(/kaboom/i);
+    expect(body).toEqual({ error: INTERNAL_SERVER_ERROR_MESSAGE });
+    expect(loggedError).toHaveBeenCalledWith(expect.stringContaining('bulkcrud'), expect.objectContaining({ message: expect.stringMatching(/kaboom/i) }));
 
     expect(beginSpy).toHaveBeenCalledTimes(1);
     expect(execSpy).toHaveBeenCalled(); // failed on first insert exec
@@ -567,8 +576,8 @@ describe('bulkcrud POST route', () => {
     execSpy.mockResolvedValueOnce({}); // CALL bulkingestionprocess
     execSpy.mockRejectedValueOnce(clearError); // helper: CLEAR caller-owns-transaction flag
     const discardSpy = vi.spyOn(instance, 'discardTransaction').mockImplementation(() => undefined);
-    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValueOnce(undefined);
-    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValue(undefined);
+    const commitSpy = vi.spyOn(instance, 'commitTransaction').mockResolvedValue(undefined);
 
     const res = await POST(
       makeRequest({
@@ -583,7 +592,7 @@ describe('bulkcrud POST route', () => {
     );
 
     expect(res.status).toBe(500);
-    expect((await res.json()).error).toBe(clearError.message);
+    expect((await res.json()).error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     expect(discardSpy).toHaveBeenCalledWith('tx-flag', FLAG_CLEAR_FAILED_REASON);
     expect(rollbackSpy).toHaveBeenCalledWith('tx-flag');
     expect(commitSpy).not.toHaveBeenCalled();

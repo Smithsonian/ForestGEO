@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import Sidebar, { isProgrammaticSelectClear } from './sidebar';
+import Sidebar, { isProgrammaticSelectClear, SIDEBAR_WIDTH } from './sidebar';
 import { useSession } from 'next-auth/react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAppStore } from '@/config/store/appstore';
@@ -110,6 +110,30 @@ describe('Sidebar - Functional Tests', () => {
       const censusSelect = screen.queryByRole('combobox', { name: /select a census/i });
       // Census dropdown only appears after plot selection - this is expected behavior
       expect(censusSelect).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Width', () => {
+    const renderedStyles = () =>
+      Array.from(document.querySelectorAll('style'))
+        .map(style => style.textContent)
+        .join('');
+
+    it('sizes itself from the viewport in CSS so it shrinks with the window and the browser zoom', () => {
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const styles = renderedStyles();
+      const declaredWidth = styles.match(/--Sidebar-width:\s*([^;}]+)/)?.[1];
+      console.log('[sidebar width] declared', declaredWidth);
+
+      expect(declaredWidth, `the page layout reads this variable; styles were: ${styles.slice(0, 300)}`).toBe(SIDEBAR_WIDTH);
+      expect(SIDEBAR_WIDTH).toMatch(/^clamp\(\d+px, \d+vw, \d+px\)$/);
+    });
+
+    it('does not measure its content, which is what pinned it at its widest', () => {
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      expect(global.ResizeObserver).not.toHaveBeenCalled();
     });
   });
 

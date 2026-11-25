@@ -14,6 +14,7 @@ import {
 import { assertIngestionOutcome, INGESTION_ERROR_CODE, readIngestionOutcome } from '../setup/ingestion-outcome';
 import { buildFailedMeasurementsSelectQuery, INGESTION_ERROR_SOURCE, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { HTTPResponses } from '@/config/macros';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 const AUTH_USER_EMAIL = 'integration-runner@forestgeo.test';
 
@@ -198,7 +199,7 @@ describe('Reingest route integration tests', () => {
     sharedState.batchCounter = 0;
     sharedState.activeTransactionID = null;
     await cleanupTestMeasurements(connection, testData, {
-      additionalTables: ['uploadintegrityalerts', 'uploadmetrics']
+      additionalTables: ['uploadintegrityalerts', 'uploadmetrics', 'unifiedchangelog']
     });
     vi.clearAllMocks();
   });
@@ -320,6 +321,47 @@ describe('Reingest route integration tests', () => {
     }
 
     return attributeMap;
+  }
+
+  interface MeasurementAuditRow {
+    RecordID: string;
+    Operation: string;
+    OldRowState: Record<string, unknown> | null;
+    NewRowState: Record<string, unknown> | null;
+    ChangedBy: string | null;
+    PlotID: number | null;
+    CensusID: number | null;
+  }
+
+  async function loadMeasurementAuditRows(): Promise<MeasurementAuditRow[]> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT RecordID, Operation, OldRowState, NewRowState, ChangedBy, PlotID, CensusID
+       FROM unifiedchangelog
+       WHERE TableName = 'coremeasurements'
+       ORDER BY CAST(RecordID AS UNSIGNED), ChangeID`
+    );
+    return rows as MeasurementAuditRow[];
+  }
+
+  /**
+   * Reingestion rewrites original rows in place (#507): each one whose state changed gets exactly
+   * one UPDATE row naming the session user, in the #592 ingestion-snapshot shape (UploadBatchID
+   * present, UserDefinedFields absent) so the change-log export rolls it up under its upload file.
+   */
+  function expectReingestionAudit(auditRows: MeasurementAuditRow[], expectedChangedIDs: number[], afterRows: FailedRowSnapshot[]): void {
+    const dump = JSON.stringify(auditRows, null, 2);
+    expect(
+      auditRows.map(row => [Number(row.RecordID), row.Operation]),
+      `audit rows:\n${dump}`
+    ).toEqual([...expectedChangedIDs].sort((a, b) => a - b).map(id => [id, 'UPDATE']));
+    for (const auditRow of auditRows) {
+      const after = afterRows.find(row => row.CoreMeasurementID === Number(auditRow.RecordID))!;
+      expect(auditRow.OldRowState?.StemGUID, dump).toBeNull();
+      expect(auditRow.NewRowState?.StemGUID, dump).toBe(after.StemGUID);
+      expect(auditRow.NewRowState).toHaveProperty('UploadBatchID', after.UploadBatchID);
+      expect(auditRow.NewRowState).not.toHaveProperty('UserDefinedFields');
+      expect([auditRow.ChangedBy, auditRow.PlotID, auditRow.CensusID]).toEqual([AUTH_USER_EMAIL, testData.plots[0].plotID, testData.census[0].censusID]);
+    }
   }
 
   interface ErrorLogSnapshotRow {
@@ -444,6 +486,9 @@ describe('Reingest route integration tests', () => {
     const before = await getCoreMeasurementSnapshots(originalIDs);
 
     await connection.query('UPDATE coremeasurements SET RawSpCode = ? WHERE CoreMeasurementID IN (?, ?)', [validSpeciesCode, originalIDs[0], originalIDs[1]]);
+    // The row that stays failed changes only in UserDefinedFields, which the audit image
+    // leaves out; it must still be recorded as an UPDATE (#507).
+    await connection.query(`UPDATE coremeasurements SET UserDefinedFields = '{"note":"field crew remark"}' WHERE CoreMeasurementID = ?`, [originalIDs[2]]);
 
     const response = await bulkReingestGet(makeBulkRequest('GET'), makeBulkParams());
     const body = await response.json();
@@ -496,6 +541,12 @@ describe('Reingest route integration tests', () => {
 
     const remainingFailed = await getFailedMeasurements(connection, { fileID, batchID });
     expect(remainingFailed).toHaveLength(1);
+
+    const [[unresolvedAfter]] = await connection.query<RowDataPacket[]>('SELECT UserDefinedFields FROM coremeasurements WHERE CoreMeasurementID = ?', [
+      originalIDs[2]
+    ]);
+    expect(unresolvedAfter.UserDefinedFields, 'precondition: reconciliation rewrote UserDefinedFields').toBeNull();
+    expectReingestionAudit(await loadMeasurementAuditRows(), originalIDs, after);
   });
 
   it('single-row reingest updates the original row in place and leaves no transient rows behind', async () => {
@@ -540,6 +591,8 @@ describe('Reingest route integration tests', () => {
 
     const remainingFailed = await getFailedMeasurements(connection, { fileID, batchID });
     expect(remainingFailed).toHaveLength(0);
+
+    expectReingestionAudit(await loadMeasurementAuditRows(), [targetRowID], [after]);
   });
 
   describe('validatefailed route integration tests (issue #307: retention contract)', () => {
@@ -1014,7 +1067,7 @@ describe('Reingest route integration tests', () => {
         const body = await response.json();
 
         expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-        expect(body.error).toContain(INJECTED_FAILURE_MESSAGE);
+        expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
       } finally {
         spy.mockRestore();
       }
@@ -1114,7 +1167,7 @@ describe('Reingest route integration tests', () => {
       const response = await bulkReingestGet(makeBulkRequest('GET'), makeBulkParams());
       const body = await response.json();
       expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-      expect(body.error).toContain(INJECTED_FAILURE_MESSAGE);
+      expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     } finally {
       spy.mockRestore();
     }

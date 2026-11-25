@@ -1,6 +1,7 @@
 import { ResultType } from '@/config/utils';
 import MapperFactory, { IDataMapper } from '@/config/datamapper';
 import { bitToBoolean } from '@/config/macros/bitconversion';
+import type { CensusDates } from '@/config/censuswindow';
 
 // Types and constants
 export type CensusRDS =
@@ -122,6 +123,31 @@ export class OrgCensusToCensusResultMapper {
 
     const responseJSON = await response.json();
     return responseJSON.createdIDs?.census;
+  }
+}
+
+/**
+ * Body for PATCH /api/fixeddata/census/<schema>/censusID. Both dates are always sent as
+ * 'YYYY-MM-DD' strings: the PATCH handler rewrites every column of the persisted row, and a
+ * persisted DATE it re-serialises from a Date object is rendered in the server's local zone.
+ */
+export function buildCensusDatesPatchBody(censusID: number, dates: CensusDates) {
+  return {
+    oldRow: { censusID },
+    newRow: { censusID, startDate: dates.startDate, endDate: dates.endDate }
+  };
+}
+
+export async function updateCensusDates(schema: string, censusID: number, dates: CensusDates): Promise<void> {
+  const response = await fetch(`/api/fixeddata/census/${schema}/censusID`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildCensusDatesPatchBody(censusID, dates))
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Census date update failed (HTTP ${response.status}): ${errorBody}`);
   }
 }
 

@@ -474,8 +474,7 @@ async function handleDownload(params: FileOperationParams & { filename?: string 
     ailogger.error('Download file error:', error);
     return new NextResponse(
       JSON.stringify({
-        error: 'Failed to download file',
-        details: error.message || 'Unknown error'
+        error: 'Failed to download file'
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
@@ -513,8 +512,7 @@ async function handleDelete(params: FileOperationParams & { filename?: string },
     ailogger.error('Delete file error:', error);
     return new NextResponse(
       JSON.stringify({
-        error: 'Failed to delete file',
-        details: error.message || 'Unknown error'
+        error: 'Failed to delete file'
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
@@ -579,8 +577,7 @@ async function handleList(scope: AuthorizedFileScope) {
     ailogger.error('File listing error:', error);
     return new NextResponse(
       JSON.stringify({
-        error: 'Failed to list files',
-        details: error.message || 'Unknown error'
+        error: 'Failed to list files'
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

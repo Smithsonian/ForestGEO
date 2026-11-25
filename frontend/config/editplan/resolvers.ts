@@ -18,6 +18,8 @@ export interface PlanTreeResult {
   sourceTreeID: number | null;
   sourceTreeRemainingStems: number;
   conflictReason?: string;
+  conflictingTreeID?: number;
+  conflictingSpeciesCode?: string;
 }
 
 export interface PlanStemInput {
@@ -48,6 +50,7 @@ export interface PlanQuadratResult {
 export const CONFLICT_REASON_INACTIVE_STEM = 'matching stem is inactive';
 export const CONFLICT_REASON_DIFFERENT_QUADRAT = 'stem exists in a different quadrat';
 export const CONFLICT_REASON_INACTIVE_TREE = 'matching tree is inactive';
+export const CONFLICT_REASON_SPECIES_CONFLICT = 'tree tag is already recorded under a different species in this census';
 
 export async function resolveSpeciesByCode(
   connectionManager: ConnectionManager,
@@ -94,7 +97,8 @@ export async function planTreeResolution(
   // An inactive tree row with the same TreeTag+SpeciesID+CensusID would
   // collide with the unique constraint ux_trees_treetag_speciesid_censusid,
   // so the planner cannot promise a new insert in that case.
-  const wouldCreate = !hasInactiveMatch && existingTreeID === null;
+  const otherSpeciesTree = existingRows.length === 0 ? await findActiveTreeWithOtherSpecies(connectionManager, schema, input, transactionID) : null;
+  const wouldCreate = !hasInactiveMatch && existingTreeID === null && otherSpeciesTree === null;
 
   let sourceTreeRemainingStems = 0;
   if (input.currentTreeID !== null && input.currentTreeID !== existingTreeID) {
@@ -116,8 +120,38 @@ export async function planTreeResolution(
     wouldCreate,
     sourceTreeID: input.currentTreeID,
     sourceTreeRemainingStems,
-    ...(hasInactiveMatch ? { conflictReason: CONFLICT_REASON_INACTIVE_TREE } : {})
+    ...(hasInactiveMatch ? { conflictReason: CONFLICT_REASON_INACTIVE_TREE } : {}),
+    ...(otherSpeciesTree
+      ? {
+          conflictReason: CONFLICT_REASON_SPECIES_CONFLICT,
+          conflictingTreeID: otherSpeciesTree.treeID,
+          conflictingSpeciesCode: otherSpeciesTree.speciesCode
+        }
+      : {})
   };
+}
+
+async function findActiveTreeWithOtherSpecies(
+  connectionManager: ConnectionManager,
+  schema: string,
+  input: PlanTreeInput,
+  transactionID?: string
+): Promise<{ treeID: number; speciesCode: string } | null> {
+  const rows = await connectionManager.executeQuery(
+    safeFormatQuery(
+      schema,
+      `SELECT t.TreeID, sp.SpeciesCode
+       FROM ??.trees t
+       LEFT JOIN ??.species sp ON sp.SpeciesID = t.SpeciesID
+       WHERE t.TreeTag = ? AND t.CensusID = ? AND t.SpeciesID <> ? AND t.IsActive = 1
+       ORDER BY t.TreeID
+       LIMIT 1`
+    ),
+    [input.TreeTag, input.CensusID, input.SpeciesID],
+    transactionID
+  );
+  if (rows.length === 0) return null;
+  return { treeID: Number(rows[0].TreeID), speciesCode: String(rows[0].SpeciesCode ?? '') };
 }
 
 export async function planStemResolution(

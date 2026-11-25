@@ -23,7 +23,7 @@
 //     inside the active transaction, and throws MissingCensusPlotIDError (no delete, own
 //     transaction rolled back) when that census row does not exist
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Hoist mock factories so vi.mock() closures can reference them.
@@ -39,7 +39,8 @@ vi.mock('@/lib/changelog/ingestion-failure-audit', () => ({
 }));
 
 vi.mock('@/lib/ingestion/temporary-measurements', () => ({
-  deleteCoreMeasurementsInBoundedChunksWithAudit: deleteCoreMeasurementsInBoundedChunksWithAuditMock
+  deleteCoreMeasurementsInBoundedChunksWithAudit: deleteCoreMeasurementsInBoundedChunksWithAuditMock,
+  PLAIN_COREMEASUREMENTS_FROM_SQL: '??.coremeasurements'
 }));
 
 vi.mock('@/lib/db/connectionmanager', () => ({
@@ -62,6 +63,9 @@ import {
   type InvalidRowContext
 } from './record-invalid-rows';
 import { buildSubBatchPattern } from '@/lib/uploads/batch-family';
+import type { FileRow } from '@/config/macros/formdetails';
+import type { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
+import { DEADLOCK_RETRY_MAX_ATTEMPTS, MYSQL_DEADLOCK_ERRNO, MYSQL_DEADLOCK_ERROR_CODE } from '@/lib/db/deadlock-retry';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -583,6 +587,94 @@ describe('deleteUnresolvedRowsForBatchFamily', () => {
       expect(txArg).toBe('caller-tx-9');
       expect(connectionManager.commitTransaction).not.toHaveBeenCalled();
       expect(connectionManager.rollbackTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('own-transaction deadlock retry (#562 U15)', () => {
+    const DELETED_ON_RETRY = 4;
+    const NO_JITTER = 0;
+    const deadlock = () =>
+      Object.assign(new Error('Deadlock found when trying to get lock; try restarting transaction'), {
+        code: MYSQL_DEADLOCK_ERROR_CODE,
+        errno: MYSQL_DEADLOCK_ERRNO
+      });
+    let randomSpy: MockInstance;
+
+    beforeEach(() => {
+      randomSpy = vi.spyOn(Math, 'random').mockReturnValue(NO_JITTER);
+    });
+
+    afterEach(() => {
+      randomSpy.mockRestore();
+    });
+
+    function makeOwnTransactionManager() {
+      const connectionManager = makeConnectionManager();
+      let transactionCounter = 0;
+      connectionManager.beginTransaction = vi.fn(async () => `owned-tx-${++transactionCounter}`);
+      return connectionManager;
+    }
+
+    it('re-runs the whole own transaction after a deadlock and returns the second walk count (catches: no retry)', async () => {
+      const connectionManager = makeOwnTransactionManager();
+      deleteCoreMeasurementsInBoundedChunksWithAuditMock.mockRejectedValueOnce(deadlock()).mockResolvedValueOnce(DELETED_ON_RETRY);
+
+      const deleted = await deleteUnresolvedRowsForBatchFamily(connectionManager, 'forestgeo_test', 'f.csv', 'batch-1', 20, undefined, [], null, 10);
+      console.log(
+        `[U15 own] deleted=${deleted} begin=${connectionManager.beginTransaction.mock.calls.length} ` +
+          `rollback=${JSON.stringify(connectionManager.rollbackTransaction.mock.calls)} commit=${JSON.stringify(connectionManager.commitTransaction.mock.calls)}`
+      );
+      expect(deleted).toBe(DELETED_ON_RETRY);
+      expect(connectionManager.beginTransaction).toHaveBeenCalledTimes(2);
+      expect(connectionManager.rollbackTransaction.mock.calls).toEqual([['owned-tx-1']]);
+      expect(connectionManager.commitTransaction.mock.calls).toEqual([['owned-tx-2']]);
+      expect(
+        deleteCoreMeasurementsInBoundedChunksWithAuditMock.mock.calls.map(call => call[7]),
+        'each attempt walks in its own transaction'
+      ).toEqual(['owned-tx-1', 'owned-tx-2']);
+    });
+
+    it(`stops after ${DEADLOCK_RETRY_MAX_ATTEMPTS} own transactions and propagates the last deadlock (catches: unbounded retry)`, async () => {
+      const connectionManager = makeOwnTransactionManager();
+      const last = deadlock();
+      deleteCoreMeasurementsInBoundedChunksWithAuditMock.mockRejectedValueOnce(deadlock()).mockRejectedValueOnce(deadlock()).mockRejectedValueOnce(last);
+
+      await expect(deleteUnresolvedRowsForBatchFamily(connectionManager, 'forestgeo_test', 'f.csv', 'batch-1', 20, undefined, [], null, 10)).rejects.toBe(last);
+      console.log(
+        `[U15 exhausted] begin=${connectionManager.beginTransaction.mock.calls.length} rollback=${connectionManager.rollbackTransaction.mock.calls.length} ` +
+          `commit=${connectionManager.commitTransaction.mock.calls.length}`
+      );
+      expect(connectionManager.beginTransaction).toHaveBeenCalledTimes(DEADLOCK_RETRY_MAX_ATTEMPTS);
+      expect(connectionManager.rollbackTransaction).toHaveBeenCalledTimes(DEADLOCK_RETRY_MAX_ATTEMPTS);
+      expect(connectionManager.commitTransaction).not.toHaveBeenCalled();
+    });
+
+    it("never retries inside a caller's transaction (catches: retrying a transaction the helper does not own)", async () => {
+      const connectionManager = makeConnectionManager();
+      const failure = deadlock();
+      deleteCoreMeasurementsInBoundedChunksWithAuditMock.mockRejectedValueOnce(failure);
+
+      await expect(deleteUnresolvedRowsForBatchFamily(connectionManager, 'forestgeo_test', 'f.csv', 'batch-1', 20, 'caller-tx', [], null, 10)).rejects.toBe(
+        failure
+      );
+      expect(deleteCoreMeasurementsInBoundedChunksWithAuditMock).toHaveBeenCalledTimes(1);
+      expect(connectionManager.beginTransaction).not.toHaveBeenCalled();
+      expect(connectionManager.rollbackTransaction).not.toHaveBeenCalled();
+    });
+
+    it('leaves recordInvalidRows and recordFailedMeasurementRows without a retry (catches: widening the retry to every own-transaction user)', async () => {
+      const connectionManager = makeConnectionManager();
+      const invalidRowsFailure = deadlock();
+      recordAuditedIngestionFailureRowsMock.mockRejectedValueOnce(invalidRowsFailure);
+      await expect(recordInvalidRows(connectionManager, BASE_CTX, [{ tag: 'T1' } as FileRow])).rejects.toBe(invalidRowsFailure);
+
+      const failedRowsFailure = deadlock();
+      recordAuditedIngestionFailureRowsMock.mockRejectedValueOnce(failedRowsFailure);
+      await expect(
+        recordFailedMeasurementRows(connectionManager, 'forestgeo_test', [{ tag: 'T1' } as FailedMeasurementsRDS], 'test.csv', 'batch-001', 1, 2)
+      ).rejects.toBe(failedRowsFailure);
+      expect(connectionManager.beginTransaction).toHaveBeenCalledTimes(2);
+      expect(recordAuditedIngestionFailureRowsMock).toHaveBeenCalledTimes(2);
     });
   });
 });

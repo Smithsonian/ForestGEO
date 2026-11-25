@@ -39,9 +39,22 @@ describe('Data Viewing and Browsing', () => {
     cy.get('[data-testid="selected-site-name"]').should('contain', 'Luquillo');
     cy.get('[data-testid="selected-plot-name"]').should('contain', 'Luquillo Main Plot');
     cy.get('[data-testid="selected-census-plotcensusnumber"]').should('contain', 'Census: 5');
-    cy.get('input[placeholder="Search All Fields..."]').should('be.visible');
+    cy.contains('h1', 'View Data').should('be.visible');
+    cy.get('input[placeholder="Tree tag, stem tag, species, quadrat or code"]').should('be.visible');
+    cy.contains('button', 'Export CSV').should('be.visible');
+    cy.contains('button', 'More actions').should('be.visible');
+    cy.contains('button', 'Add measurements').should('be.visible');
     cy.contains('[role="row"]', 'TREE101').should('contain', 'RUBI04');
     cy.contains('[role="row"]', 'TREE102').should('contain', 'ANOPKL');
+
+    cy.get('input[placeholder="Tree tag, stem tag, species, quadrat or code"]').type('TREE101{enter}');
+    cy.get('@filterMeasurementsSummaryRows.all').should(requests => {
+      const quickFilterValuesSent = (requests as unknown as Array<{ request: { body: { filterModel?: { quickFilterValues?: string[] } } } }>).map(
+        interception => interception.request.body.filterModel?.quickFilterValues ?? []
+      );
+      console.log(JSON.stringify({ quickFilterValuesSent }));
+      expect(quickFilterValuesSent.some(values => values.includes('TREE101'))).to.equal(true);
+    });
   });
 
   it('loads View All Historical Data with the current toolbar and historical rows', () => {

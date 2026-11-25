@@ -73,7 +73,7 @@ const CENSUS_B_ACTIVE_ROWS = 2;
 const CENSUS_B_AFFECTED_ROWS = 1;
 const CENSUS_B_ERROR_RANK = 1;
 
-const ONE_RAW_ERRORS_QUERY_PER_CENSUS = 1;
+const MESSAGE_COUNT_STATEMENTS_PER_CENSUS_CHUNK = 2; // the error-type catalog and one signature histogram
 const DUPLICATE_TREE_TAG = 'DUPLICATE-TAG';
 const DUPLICATE_STEM_TAG = '1';
 const SAME_BATCH_TREE_TAG = 'SAME-BATCH-TAG';
@@ -112,14 +112,14 @@ vi.mock('@/auth', () => ({
   auth: vi.fn(async () => GLOBAL_SESSION)
 }));
 vi.mock('@/lib/db/primitives', () => ({ getConn: mocks.getConn }));
-vi.mock('@/lib/db/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const { runQueryDispatch } = await vi.importActual<typeof import('../setup/runquerydispatch')>('../setup/runquerydispatch');
   const manager = {
     executeQuery: async (query: string, params?: unknown[]) => {
       shared.executeQueryCalls += 1;
       shared.events.push(FACETS_QUERY_EVENT);
       if (!shared.explorerConnection) throw new Error('Test DB connection not initialized');
-      const [rows] = await shared.explorerConnection.query(query, params as any[]);
-      return rows;
+      return runQueryDispatch(shared.explorerConnection, query, params);
     },
     closeConnection: async () => undefined
   };
@@ -369,7 +369,9 @@ describe('GET /api/censusoverview/summary (#547)', () => {
     expect(countQueryEvents.every(isSnapshotQueryEvent), 'only snapshot queries run inside the transaction').toBe(true);
     expect(events[rollbackIndex + 1], 'the connection is released right after the rollback').toBe(SNAPSHOT_RELEASE_EVENT);
     expect(events.indexOf(FACETS_QUERY_EVENT), 'facets run outside the snapshot').toBeGreaterThan(rollbackIndex);
-    expect(shared.executeQueryCalls, 'one raw-errors query for the one census, and no contradiction queries').toBe(ONE_RAW_ERRORS_QUERY_PER_CENSUS);
+    expect(shared.executeQueryCalls, 'the catalog and one histogram for the one census chunk, and no contradiction queries').toBe(
+      MESSAGE_COUNT_STATEMENTS_PER_CENSUS_CHUNK
+    );
   });
 
   it('reads the publish counts in five statements after the isolation level: one single pass, no NOT IN anti-join (#557)', async () => {
@@ -440,19 +442,19 @@ describe('GET /api/censusoverview/summary (#547)', () => {
       console.log('[#547 contradictions] overview', JSON.stringify(summary.errorOverview));
       console.log(
         '[#547 contradictions] errors page',
-        JSON.stringify({ total: errorsPageFacets.totalMeasurements, contradictions: errorsPageFacets.contradictionCounts })
+        JSON.stringify({ censusTotals: errorsPageFacets.censusTotals, errorTypes: errorsPageFacets.errorTypes })
       );
 
-      expect(errorsPageFacets.contradictionCounts.duplicateTagStem, 'the Errors page must see the duplicate-tag contradiction').toBe(
-        DUPLICATE_TAG_ROW_IDS.length
-      );
-      expect(errorsPageFacets.contradictionCounts.sameBatchConflict, 'the Errors page must see the same-batch contradiction').toBe(SAME_BATCH_ROW_IDS.length);
+      expect(errorsPageFacets.censusTotals.duplicateTagStem, 'the Errors page must see the duplicate-tag contradiction').toBe(DUPLICATE_TAG_ROW_IDS.length);
+      expect(errorsPageFacets.censusTotals.sameBatchConflict, 'the Errors page must see the same-batch contradiction').toBe(SAME_BATCH_ROW_IDS.length);
       expect(response.status).toBe(HTTPResponses.OK);
-      expect(summary.errorOverview.affectedMeasurements).toBe(errorsPageFacets.totalMeasurements);
+      expect(summary.errorOverview.affectedMeasurements).toBe(errorsPageFacets.censusTotals.affectedMeasurements);
       expect(summary.errorOverview.topErrorTypes).toEqual(
-        errorsPageFacets.messages.slice(0, TOP_ERROR_TYPE_LIMIT).map(({ value, count }) => ({ message: value, count }))
+        errorsPageFacets.errorTypes.slice(0, TOP_ERROR_TYPE_LIMIT).map(({ message, count }) => ({ message, count }))
       );
-      expect(overviewQueryCount, 'the overview skips the contradiction queries the Errors page runs').toBe(ONE_RAW_ERRORS_QUERY_PER_CENSUS);
+      expect(overviewQueryCount, 'the overview reads the catalog and the histogram without flags, skipping the contradiction work the Errors page runs').toBe(
+        MESSAGE_COUNT_STATEMENTS_PER_CENSUS_CHUNK
+      );
     } finally {
       await setupConnection.query('UPDATE measurementssummary SET TreeTag = NULL, StemTag = NULL, SpeciesCode = NULL WHERE CoreMeasurementID IN (?)', [
         [...DUPLICATE_TAG_ROW_IDS, ...SAME_BATCH_ROW_IDS]

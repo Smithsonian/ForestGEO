@@ -146,7 +146,7 @@ describe('POST /api/arcgis/commit (#561)', () => {
       HTTPResponses.CONFLICT,
       /newer commit attempt/i
     ],
-    ['an unexpected error', new Error('connection reset'), HTTPResponses.INTERNAL_SERVER_ERROR, /connection reset/]
+    ['an unexpected error without echoing its text (#574)', new Error('connection reset'), HTTPResponses.INTERNAL_SERVER_ERROR, /^ArcGIS commit failed$/]
   ])('maps %s to its status (AC 19)', async (label, error, status, messagePattern) => {
     mocks.commit.mockRejectedValueOnce(error);
     const response = await POST(request(BODY));

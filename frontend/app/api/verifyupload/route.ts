@@ -63,7 +63,6 @@ async function handler(request: NextRequest, _context: RouteContext) {
     return new NextResponse(
       JSON.stringify({
         error: 'Failed to verify upload',
-        details: error.message,
         count: 0,
         verified: false
       }),

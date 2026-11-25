@@ -1,11 +1,15 @@
+import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MeasurementsSummaryViewDataGrid from './msvdatagrid';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 
-const { routerReplaceMock, sessionState } = vi.hoisted(() => ({
+const { routerReplaceMock, sessionState, uploadModalProps, multilineModalProps } = vi.hoisted(() => ({
   routerReplaceMock: vi.fn(),
-  sessionState: { userStatus: 'global' }
+  sessionState: { userStatus: 'global' },
+  uploadModalProps: [] as Array<Record<string, any>>,
+  multilineModalProps: [] as Array<Record<string, any>>
 }));
 
 vi.mock('next-auth/react', () => ({
@@ -41,11 +45,21 @@ vi.mock('@/app/contexts/loadingprovider', () => ({
 }));
 
 vi.mock('@/components/uploadsystemhelpers/uploadparentmodal', () => ({
-  default: () => <div data-testid="upload-parent-modal" />
+  default: (props: Record<string, any>) => {
+    uploadModalProps.push(props);
+    return <div data-testid="upload-parent-modal" />;
+  }
 }));
 
 vi.mock('@/components/datagrids/applications/multiline/multilinemodal', () => ({
-  default: () => <div data-testid="multiline-modal" />
+  default: (props: Record<string, any>) => {
+    multilineModalProps.push(props);
+    return <div data-testid="multiline-modal" />;
+  }
+}));
+
+vi.mock('@/components/client/rendergridformexplanations', () => ({
+  default: () => <div data-testid="form-explanations" />
 }));
 
 vi.mock('@/components/datagrids/measurementscommons', () => ({
@@ -79,6 +93,35 @@ function latestCommonsProps(): Record<string, any> | undefined {
   return mockedMeasurementsCommons.mock.calls.at(-1)?.[0] as Record<string, any> | undefined;
 }
 
+const FAKE_CONTROLS = {
+  stateCounts: {
+    unresolvedLogged: 2,
+    failedNoLog: 0,
+    pending: 1,
+    valid: 5,
+    overridable: 1,
+    revalidatable: 0,
+    firstMeasurementDate: '2024-06-03',
+    lastMeasurementDate: '2024-06-09'
+  },
+  showOption: 'all' as const,
+  onShowOptionChange: vi.fn(),
+  searchText: '',
+  appliedSearchText: '',
+  onSearchTextChange: vi.fn(),
+  onSearchApply: vi.fn(),
+  onSearchClear: vi.fn(),
+  onRunValidations: vi.fn(),
+  onOverrideValidations: vi.fn(),
+  onResetValidations: vi.fn(),
+  onOpenExport: vi.fn()
+};
+
+function renderLatestHeader() {
+  const renderAboveGrid = latestCommonsProps()?.renderAboveGrid as (controls: typeof FAKE_CONTROLS) => React.ReactNode;
+  return render(<>{renderAboveGrid(FAKE_CONTROLS)}</>);
+}
+
 function latestModalProps(): Record<string, any> | undefined {
   return failedMeasurementsModalMock.mock.calls.at(-1)?.[0] as Record<string, any> | undefined;
 }
@@ -87,6 +130,8 @@ describe('MeasurementsSummaryViewDataGrid', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    uploadModalProps.length = 0;
+    multilineModalProps.length = 0;
     sessionState.userStatus = 'global';
     // Default: no failed rows, so pre-existing tests see no recovery button.
     mockFailedRowCount(0);
@@ -112,36 +157,31 @@ describe('MeasurementsSummaryViewDataGrid', () => {
     expect(renderedProps?.initialVisibleFilters).toEqual(['errors']);
   });
 
-  it('offers a Fix Failed Rows button when failed measurements exist, and clicking it opens the modal', async () => {
+  it('offers a "Fix 3 failed uploads" header button when failed measurements exist, and clicking it opens the modal', async () => {
+    const user = userEvent.setup();
     mockFailedRowCount(3);
     render(<MeasurementsSummaryViewDataGrid />);
 
     await waitFor(() => {
-      const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
-      expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(true);
+      renderLatestHeader();
+      expect(screen.queryByRole('button', { name: 'Fix 3 failed uploads' })).toBeInTheDocument();
     });
-
-    const fixButton = (latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>).find(button => button.label === 'Fix Failed Rows');
-    expect(fixButton?.badgeCount).toBe(3);
-    expect(fixButton?.prominentWarning).toBe(true);
     expect(latestModalProps()?.open).toBe(false);
 
-    act(() => {
-      fixButton?.onClick();
-    });
+    await user.click(screen.getByRole('button', { name: 'Fix 3 failed uploads' }));
 
     expect(latestModalProps()?.open).toBe(true);
   });
 
-  it('hides the Fix Failed Rows button when there are no failed measurements', async () => {
+  it('hides the failed-uploads button when there are no failed measurements', async () => {
     render(<MeasurementsSummaryViewDataGrid />);
 
     // Allow the count fetch to settle before asserting absence.
     await waitFor(() => {
       expect(vi.mocked(global.fetch)).toHaveBeenCalled();
     });
-    const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
-    expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(false);
+    renderLatestHeader();
+    expect(screen.queryByRole('button', { name: /^Fix / })).not.toBeInTheDocument();
   });
 
   it('does not offer failed-row recovery to pending users', async () => {
@@ -149,8 +189,8 @@ describe('MeasurementsSummaryViewDataGrid', () => {
     mockFailedRowCount(3);
     render(<MeasurementsSummaryViewDataGrid />);
 
-    const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
-    expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(false);
+    renderLatestHeader();
+    expect(screen.queryByRole('button', { name: /^Fix / })).not.toBeInTheDocument();
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -182,7 +222,105 @@ describe('MeasurementsSummaryViewDataGrid', () => {
     render(<MeasurementsSummaryViewDataGrid />);
 
     await waitFor(() => expect(screen.getByText(/unable to load the failed-measurement count/i)).toBeInTheDocument());
-    const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
-    expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(false);
+    renderLatestHeader();
+    expect(screen.queryByRole('button', { name: /^Fix / })).not.toBeInTheDocument();
+  });
+
+  it('passes the header slot and the empty-census action, and no dynamicButtons', () => {
+    render(<MeasurementsSummaryViewDataGrid />);
+    const props = latestCommonsProps();
+    console.log(JSON.stringify({ propKeys: Object.keys(props ?? {}) }));
+    expect(typeof props?.renderAboveGrid).toBe('function');
+    expect(props?.emptyCensusAction).toBeTruthy();
+    expect(props).not.toHaveProperty('dynamicButtons');
+  });
+
+  it('passes no empty-census action when the toolbar actions are hidden', () => {
+    render(<MeasurementsSummaryViewDataGrid showToolbarActions={false} />);
+    expect(latestCommonsProps()?.emptyCensusAction).toBeNull();
+  });
+
+  it('keeps the empty-census action element identical across re-renders so the grid overlay does not remount', async () => {
+    const { rerender } = render(<MeasurementsSummaryViewDataGrid />);
+    const actionBeforeRerender = latestCommonsProps()?.emptyCensusAction;
+    const callsBeforeRerender = vi.mocked(MeasurementsCommons).mock.calls.length;
+
+    rerender(<MeasurementsSummaryViewDataGrid />);
+    await waitFor(() => expect(vi.mocked(global.fetch)).toHaveBeenCalled());
+
+    console.log(JSON.stringify({ callsBeforeRerender, callsAfterRerender: vi.mocked(MeasurementsCommons).mock.calls.length }));
+    expect(vi.mocked(MeasurementsCommons).mock.calls.length).toBeGreaterThan(callsBeforeRerender);
+    expect(latestCommonsProps()?.emptyCensusAction).toBe(actionBeforeRerender);
+  });
+
+  it('renders the scope line and wires Export CSV and the validation items to the controls', async () => {
+    const user = userEvent.setup();
+    render(<MeasurementsSummaryViewDataGrid />);
+    renderLatestHeader();
+    expect(screen.getByTestId('view-data-scope-line')).toHaveTextContent('Test Site · Test Plot · Census 1');
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(FAKE_CONTROLS.onOpenExport).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Run validations/ }));
+    expect(FAKE_CONTROLS.onRunValidations).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs reloadMSV for "Refresh the view" and opens the Header reference dialog', async () => {
+    const user = userEvent.setup();
+    render(<MeasurementsSummaryViewDataGrid />);
+    renderLatestHeader();
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Refresh the view/ }));
+    await waitFor(() => {
+      const refreshCalls = vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url) === '/api/refreshviews/measurementssummary/testschema');
+      console.log(JSON.stringify({ refreshCalls: refreshCalls.map(([url, init]) => ({ url: String(url), method: init?.method })) }));
+      expect(refreshCalls.some(([, init]) => init?.method === 'POST')).toBe(true);
+    });
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    await user.click(screen.getByRole('menuitem', { name: /Header reference/ }));
+    expect(await screen.findByRole('dialog', { name: 'Header reference' })).toBeInTheDocument();
+  });
+
+  it('opens the manual-entry and ArcGIS modals from the Add measurements menu', async () => {
+    const user = userEvent.setup();
+    render(<MeasurementsSummaryViewDataGrid />);
+    renderLatestHeader();
+
+    await user.click(screen.getByRole('button', { name: 'Add measurements' }));
+    await user.click(screen.getByRole('menuitem', { name: /Manual entry form/ }));
+    await waitFor(() => expect(multilineModalProps.some(props => props.isManualEntryFormOpen === true)).toBe(true));
+
+    await user.click(screen.getByRole('button', { name: 'Add measurements' }));
+    await user.click(screen.getByRole('menuitem', { name: /Import an ArcGIS workbook/ }));
+    await waitFor(() => expect(uploadModalProps.some(props => props.isUploadModalOpen === true && Boolean(props.sourceFormat))).toBe(true));
+  });
+
+  it('opens the upload modal from Add measurements and shows no "Changes detected" snackbar after an upload', async () => {
+    const user = userEvent.setup();
+    render(<MeasurementsSummaryViewDataGrid />);
+    renderLatestHeader();
+    await user.click(screen.getByRole('button', { name: 'Add measurements' }));
+    await user.click(screen.getByRole('menuitem', { name: /Upload a CSV/ }));
+    await waitFor(() => expect(uploadModalProps.some(props => props.isUploadModalOpen === true)).toBe(true));
+    const csvUploadProps = [...uploadModalProps].reverse().find(props => props.isUploadModalOpen === true && !props.sourceFormat);
+    act(() => csvUploadProps?.onUploadComplete());
+    await act(async () => {
+      [...uploadModalProps]
+        .reverse()
+        .find(props => !props.sourceFormat)
+        ?.handleCloseUploadModal();
+    });
+    await waitFor(() =>
+      expect(vi.mocked(global.fetch).mock.calls.some(([url]) => String(url).startsWith('/api/refreshviews/measurementssummary/'))).toBe(true)
+    );
+    expect(screen.queryByText('Changes detected!')).not.toBeInTheDocument();
+    expect(screen.queryByText('CORE CHANGES DETECTED!')).not.toBeInTheDocument();
+  });
+
+  it('appends the read-only line for a pending user', () => {
+    sessionState.userStatus = 'pending';
+    render(<MeasurementsSummaryViewDataGrid />);
+    renderLatestHeader();
+    expect(screen.getByTestId('view-data-facts-line')).toHaveTextContent("Read-only: your role can't edit these rows");
   });
 });

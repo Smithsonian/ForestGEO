@@ -11,10 +11,16 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { auth } from '@/auth';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
+import type { Session } from 'next-auth';
 import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutation';
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { trimReferenceTextFields } from '@/lib/reference-text';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
+import { getCensusDatesError, getCensusOverlapError } from '@/config/censuswindow';
+import { loadNeighbourCensusWindows, reopenValidationOutsideCensusWindow } from '@/lib/census/censusdateedit';
+import { toCalendarDayString, type CalendarDayInput } from '@/config/dateformats';
+import { FOREIGN_KEY_CONFLICT_MESSAGE } from '@/lib/errorhelpers';
 
 // Mapping from dataType to primary key column name
 const PRIMARY_KEY_MAP: Record<string, string> = {
@@ -341,6 +347,16 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
   try {
     assertMutableDataType('PATCH', dataType);
+    if (dataType === 'census') {
+      try {
+        assertSessionMayEdit((await auth()) as Session);
+      } catch (error) {
+        if (error instanceof PendingUserEditForbiddenError) {
+          return NextResponse.json({ error: error.message }, { status: HTTPResponses.FORBIDDEN });
+        }
+        throw error;
+      }
+    }
     const { newRow, oldRow } = await readMutationBody(request, 'PATCH');
     const primaryKeyColumn = PRIMARY_KEY_MAP[dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
     const demappedGridID = primaryKeyColumn;
@@ -391,6 +407,22 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         else if (typeof requestedChanges.Code === 'string' && requestedChanges.Code === '') throw new MutationRequestError('Attribute code cannot be blank');
       }
       const newRowData = { ...persistedBefore, ...requestedChanges };
+      const censusDatesRequested = dataType === 'census' && ('StartDate' in requestedChanges || 'EndDate' in requestedChanges);
+      if (censusDatesRequested) {
+        const dateError = getCensusDatesError(newRowData.StartDate, newRowData.EndDate);
+        if (dateError) throw new MutationRequestError(dateError);
+        // A partial PATCH may leave one date as a mysql2 UTC-midnight Date. Serialize
+        // both as calendar days so SQL formatting cannot shift the untouched date.
+        newRowData.StartDate = toCalendarDayString(newRowData.StartDate as CalendarDayInput);
+        newRowData.EndDate = toCalendarDayString(newRowData.EndDate as CalendarDayInput);
+        const neighbours = await loadNeighbourCensusWindows(tx, schema, {
+          censusID: Number(previousGridIDKey),
+          plotID: Number(persistedBefore.PlotID),
+          plotCensusNumber: Number(persistedBefore.PlotCensusNumber)
+        });
+        const overlapError = getCensusOverlapError({ startDate: newRowData.StartDate as string, endDate: newRowData.EndDate as string | null }, neighbours);
+        if (overlapError) throw new MutationRequestError(overlapError);
+      }
       const { [demappedGridID]: updatedGridIDKey, ...remainingProperties } = newRowData;
 
       let dataToUpdate;
@@ -498,6 +530,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         afterLookup.push({ column: 'IsActive', value: newRowData.IsActive });
       }
       const persistedAfter = await loadSinglePersistedRow(tx, schema, dataType, afterLookup);
+      if (censusDatesRequested) {
+        await reopenValidationOutsideCensusWindow(tx, schema, Number(previousGridIDKey), {
+          startDate: newRowData.StartDate as string | null,
+          endDate: newRowData.EndDate as string | null
+        });
+      }
 
       // A matched re-save is a successful request but not a mutation. Suppress a
       // false UPDATE event by comparing the database snapshots, not request data.
@@ -744,12 +782,21 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
   const connectionManager = ConnectionManager.getInstance();
+  const session = await auth();
+  try {
+    assertSessionMayEdit(session as Session);
+  } catch (error) {
+    if (error instanceof PendingUserEditForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: HTTPResponses.FORBIDDEN });
+    }
+    throw error;
+  }
+  const changedBy = authenticatedSessionIdentity(session?.user);
   try {
     assertMutableDataType('DELETE', params.dataType);
     const { newRow } = await readMutationBody(request, 'DELETE');
     const primaryKeyColumn = PRIMARY_KEY_MAP[params.dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
     const demappedGridID = primaryKeyColumn;
-    const changedBy = await changelogChangedBy();
 
     await connectionManager.withTransaction(async tx => {
       const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
@@ -818,15 +865,7 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
     if (error instanceof MutationRequestError) return mutationErrorResponse(error);
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
       // withTransaction has already rolled back; no manual rollback here.
-      const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
-      const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
-      return NextResponse.json(
-        {
-          message: 'Foreign key conflict detected',
-          referencingTable
-        },
-        { status: HTTPResponses.FOREIGN_KEY_CONFLICT }
-      );
+      return NextResponse.json({ message: FOREIGN_KEY_CONFLICT_MESSAGE }, { status: HTTPResponses.FOREIGN_KEY_CONFLICT });
     } else return handleError(error, connectionManager, undefined);
   }
 }

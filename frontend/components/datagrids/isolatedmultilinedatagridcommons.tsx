@@ -34,18 +34,20 @@ export interface IsolatedDataGridCommonProps {
   refresh: boolean;
   setRefresh: (refresh: boolean) => void;
   setChangesSubmitted: Dispatch<SetStateAction<boolean>>;
+  setIsSubmittingChanges: Dispatch<SetStateAction<boolean>>;
   initialRow?: GridValidRowModel;
   locked?: boolean;
   clusters?: Record<string, string[]>;
 }
 
 export default function IsolatedMultilineDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
-  const { gridColumns, gridType, refresh: _refresh, setRefresh: _setRefresh, initialRow, setChangesSubmitted } = props;
+  const { gridColumns, gridType, refresh: _refresh, setRefresh: _setRefresh, initialRow, setChangesSubmitted, setIsSubmittingChanges } = props;
   const apiRef = useGridApiRef();
 
   const [rows, setRows] = useState<GridRowsProp>([]);
   const [hasUnsavedRows, setHasUnsavedRows] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formMessage, setFormMessage] = useState('');
   const [cellModesModel, setCellModesModel] = useState<GridCellModesModel>({});
 
@@ -294,24 +296,34 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     }
 
     const fileRowSet: FileRowSet = convertRowsToFileRowSet(rows);
-    const response = await fetch(`/api/bulkcrud`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        gridType: gridType,
-        schema: currentSite?.schemaName,
-        plot: currentPlot,
-        census: currentCensus,
-        fileRowSet: fileRowSet
-      })
-    });
-    if (!response.ok) {
-      setFormMessage(await describeBulkcrudSubmitFailure(response));
-      return;
+    markSubmitting(true);
+    try {
+      const response = await fetch(`/api/bulkcrud`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          gridType: gridType,
+          schema: currentSite?.schemaName,
+          plot: currentPlot,
+          census: currentCensus,
+          fileRowSet: fileRowSet
+        })
+      });
+      if (!response.ok) {
+        setFormMessage(await describeBulkcrudSubmitFailure(response));
+        return;
+      }
+      setChangesSubmitted(true);
+    } finally {
+      markSubmitting(false);
     }
-    setChangesSubmitted(true);
+  }
+
+  function markSubmitting(submitting: boolean) {
+    setIsSubmitting(submitting);
+    setIsSubmittingChanges(submitting);
   }
 
   return (
@@ -367,7 +379,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
           getRowHeight={() => 'auto'}
         />
       </Box>
-      <Button sx={{ marginTop: 8 }} onClick={submitChanges} color={'primary'} size={'lg'} disabled={!canFinalize || isSaving}>
+      <Button sx={{ marginTop: 8 }} onClick={submitChanges} color={'primary'} size={'lg'} disabled={!canFinalize || isSaving} loading={isSubmitting}>
         Finalize Changes
       </Button>
     </Box>

@@ -27,15 +27,15 @@ vi.mock('@/auth', () => ({
   }))
 }));
 
-vi.mock('@/lib/db/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const { runQueryDispatch } = await vi.importActual<typeof import('../setup/runquerydispatch')>('../setup/runquerydispatch');
   const manager = {
     executeQuery: async (query: string, params?: unknown[]) => {
       sharedState.executeQueryCalls += 1;
       if (!sharedState.connection) {
         throw new Error('Test DB connection not initialized');
       }
-      const [rows] = await sharedState.connection.query(query, params as any[]);
-      return rows;
+      return runQueryDispatch(sharedState.connection, query, params);
     },
     closeConnection: async () => undefined
   };
@@ -127,6 +127,6 @@ describe('POST /api/errors/explorer/query per-site authz', () => {
     const body = await res.json();
     expect(body).toHaveProperty('rows');
     expect(body).toHaveProperty('totalRows');
-    expect(body).toHaveProperty('summary');
+    expect(body).not.toHaveProperty('summary');
   });
 });

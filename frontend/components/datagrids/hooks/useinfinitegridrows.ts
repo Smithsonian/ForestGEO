@@ -50,6 +50,8 @@ export type UseInfiniteGridRowsResult<R> = {
   refresh: (options?: RefreshOptions) => Promise<void>;
   retry: () => void;
   error: Error | null;
+  /** Counts reads that landed in the list; a caller keeping its own stale flag clears it when this moves. */
+  successfulReadCount: number;
   softCapExceeded: boolean;
   upsertRow: (row: R) => void;
   removeRow: (id: R[keyof R]) => void;
@@ -87,6 +89,7 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
   const [failedPage, setFailedPage] = useState<number | null>(null);
+  const [successfulReadCount, setSuccessfulReadCount] = useState<number>(0);
 
   const abortRef = useRef<AbortController | null>(null);
   const tokenRef = useRef<number>(0);
@@ -114,6 +117,7 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
         setInfiniteTotal(res.totalRows);
         setPage(targetPage);
         setFailedPage(null);
+        setSuccessfulReadCount(count => count + 1);
         return GRID_READ_COMPLETED;
       } catch (e) {
         if (isSuperseded() || (e as { name?: string } | null)?.name === 'AbortError') return GRID_READ_CANCELLED;
@@ -260,6 +264,7 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
         refresh,
         retry,
         error: null,
+        successfulReadCount: 0,
         softCapExceeded: false,
         upsertRow: () => {},
         removeRow: () => {}
@@ -277,9 +282,25 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
       refresh,
       retry,
       error,
+      successfulReadCount,
       softCapExceeded: accumulator.length > INFINITE_SOFT_CAP,
       upsertRow,
       removeRow
     };
-  }, [mode, setMode, paginated, accumulator, infiniteTotal, isLoadingMore, hasMore, loadMore, refresh, retry, error, upsertRow, removeRow]);
+  }, [
+    mode,
+    setMode,
+    paginated,
+    accumulator,
+    infiniteTotal,
+    isLoadingMore,
+    hasMore,
+    loadMore,
+    refresh,
+    retry,
+    error,
+    successfulReadCount,
+    upsertRow,
+    removeRow
+  ]);
 }

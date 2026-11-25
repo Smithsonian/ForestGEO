@@ -18,16 +18,17 @@ import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/
  * since 2025-05-12.
  *
  * Exclusions:
- * - Bulk census deletions (would flood the log with thousands of entries)
  * - Raw-SQL changes made outside the app, which only a trigger or the binlog
  *   could catch
  *
  * Test Coverage:
  * 1. Single-row UPDATE operations create ONE changelog entry
  * 2. Single-row DELETE operations create ONE changelog entry
- * 3. Census deletions do NOT create changelog entries
- * 4. File uploads create ONE changelog entry per file (not per batch)
- * 5. Multiple batches from same file UPDATE the same changelog entry
+ * 3. File uploads create ONE changelog entry per file (not per batch)
+ * 4. Multiple batches from same file UPDATE the same changelog entry
+ *
+ * Census deletions are covered against real MySQL in
+ * tests/integration/recent-changes-admin-routes-audit.integration.test.ts.
  */
 
 // ========== Mocks ==========
@@ -146,7 +147,6 @@ vi.mock('@/config/uploadsessiontracker', () => ({
 
 // Import handlers AFTER mocks
 import { PATCH, DELETE } from '@/config/macros/coreapifunctions';
-import { POST as CLEARCENSUS_POST } from '../clearcensus/route';
 import { POST as SQLPACKETLOAD_POST } from '../sqlpacketload/route';
 
 // ========== Helpers ==========
@@ -325,68 +325,7 @@ describe('Unified Changelog Tracking System', () => {
     });
   });
 
-  describe('3. Census Deletion Exclusion', () => {
-    it('should NOT create changelog entries during full census deletion', async () => {
-      const cm = (ConnectionManager as any).getInstance();
-
-      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-4');
-      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
-      // clearcensus flow: resolve target plot, latest-census guard, destructive CALL
-      const exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ PlotID: 1 }])
-        .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
-        .mockResolvedValueOnce({});
-
-      const req = makeRequest('http://localhost/api/clearcensus', 'POST', { schema: 'testschema', censusID: 5, type: 'full' });
-
-      const res = await CLEARCENSUS_POST(req);
-
-      expect(res.status).toBe(HTTPResponses.OK);
-      const body = await res.json();
-      expect(body).toEqual({ message: 'Census cleared successfully' });
-
-      // Verify the stored procedure is called with correct parameters
-      const [sql, params] = exec.mock.calls[2];
-      expect(String(sql)).toMatch(/CALL testschema\.clearcensusfull\((5|\?)\);?/i);
-      expect(params).toEqual([]);
-
-      // The stored procedure sets @disable_triggers = 1
-      // This prevents changelog entries from being created during bulk deletion
-      expect(_commit).toHaveBeenCalledWith('tx-4');
-    });
-
-    it('should NOT create changelog entries during partial census deletion (measurements only)', async () => {
-      const cm = (ConnectionManager as any).getInstance();
-
-      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-5');
-      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
-      // clearcensus flow: resolve target plot, latest-census guard, destructive CALL
-      const exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ PlotID: 1 }])
-        .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
-        .mockResolvedValueOnce({});
-
-      const req = makeRequest('http://localhost/api/clearcensus', 'POST', { schema: 'testschema', censusID: 7, type: 'msmts' });
-
-      const res = await CLEARCENSUS_POST(req);
-
-      expect(res.status).toBe(HTTPResponses.OK);
-
-      // Verify the stored procedure is called
-      const [sql, params] = exec.mock.calls[2];
-      expect(String(sql)).toMatch(/CALL testschema\.clearcensusmsmts\((7|\?)\);?/i);
-      expect(params).toEqual([]);
-
-      // The stored procedure sets @disable_triggers = 1
-      expect(_commit).toHaveBeenCalledWith('tx-5');
-    });
-  });
-
-  describe('4. File Upload Tracking - Single Row Per File', () => {
+  describe('3. File Upload Tracking - Single Row Per File', () => {
     it('should create ONE changelog entry for measurements file upload (first batch)', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
@@ -667,7 +606,7 @@ describe('Unified Changelog Tracking System', () => {
     });
   });
 
-  describe('5. Additional Intent-Based Test Cases', () => {
+  describe('4. Additional Intent-Based Test Cases', () => {
     it('should handle concurrent edits from multiple users without conflicts', async () => {
       // Test that multiple users editing different rows doesn't cause conflicts
       const cm = (ConnectionManager as any).getInstance();

@@ -66,6 +66,8 @@ import { CENSUS_REPLACEMENT_MARKER_COLUMN, ensureUploadSessionReplacementMarkerC
 
 const SETUP_TIMEOUT_MS = 120_000;
 const MYSQL_DEADLOCK_CODE = 'ER_LOCK_DEADLOCK';
+/** withTransaction applies its session timeouts through the transaction (#563); they are not part of a unit's own work. */
+const SESSION_SETTING_STATEMENT = /^\s*SET SESSION\b/i;
 const SUITE_TABLES = [
   'temporarymeasurements',
   'measurement_error_log',
@@ -392,7 +394,7 @@ describe('ArcGIS commit: two attempts of one import on the real ConnectionManage
 
         const guardOnlyTransactions = new Map<string, string[]>();
         for (const statement of statementLog) {
-          if (statement.transactionID === undefined) continue;
+          if (statement.transactionID === undefined || SESSION_SETTING_STATEMENT.test(statement.sql)) continue;
           guardOnlyTransactions.set(statement.transactionID, [...(guardOnlyTransactions.get(statement.transactionID) ?? []), statement.sql]);
         }
         const refusedUnits = [...guardOnlyTransactions.entries()].filter(

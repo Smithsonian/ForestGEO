@@ -39,6 +39,7 @@ import {
 } from '@/lib/provisioning/quadrat-collection-validation';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import { CENSUS_REPLACEMENT_STATEMENT, CENSUS_REPLACEMENT_WRITE_PATTERNS } from '@/tests/setup/census-replacement-statement-patterns';
+import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 /**
  * Matches the chunk LIMIT only when it terminates the whole statement — i.e. it
@@ -1521,9 +1522,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // insertOrUpdate writes the row AND its changelog audit inside the same transaction.
     // A failure must roll the whole packet back -- a row-level catch-and-continue would
     // let the commit below write an unaudited mutation (#507). Non-retryable, so no retry
-    // and the request surfaces the error rather than phantom-succeeding.
+    // and the request reports the failure rather than phantom-succeeding.
     expect(res?.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.SERVICE_UNAVAILABLE);
-    expect(body.error).toBe('simulated row failure');
+    expect(body.error).toBe(INTERNAL_SERVER_ERROR_MESSAGE);
     expect(body.failingRows).toEqual([]);
     expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
     expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledTimes(1);

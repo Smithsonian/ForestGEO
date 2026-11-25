@@ -20,6 +20,7 @@ function openStatusEditor() {
 
 const MANUAL_ATTRIBUTES_FORM = '[role="alertdialog"]';
 const UNSPECIFIED_STATUS_OPTION = 'Unspecified (blank)';
+const POST_FINALIZE_SETTLE_MS = 2000;
 
 /**
  * Opens the manual form's first-row Status cell editor (cell edit mode opens the select at once), picks an option and commits it
@@ -297,6 +298,31 @@ describe('Fixed Data Management', () => {
 
     cy.wait('@finalizeAttributeRows');
     cy.contains('[role="alertdialog"]', 'Manual Input Form - Attributes').should('not.exist');
+  });
+
+  it('refetches the Stem Codes grid after Finalize Changes and then stops, instead of looping (#511)', () => {
+    mockIsolatedGridApi({ gridType: 'attributes', rows: [] });
+    cy.intercept('POST', '**/api/bulkcrud', { statusCode: 200, body: { success: true } }).as('finalizeLoopCheckRows');
+
+    openFixedDataGrid('Stem Codes');
+    startManualStemCodeRow('ATTR104');
+    cy.get('@fetchIsolatedGridRows.all').then(requestsBeforeFinalize => {
+      const countBeforeFinalize = requestsBeforeFinalize.length;
+      saveAndFinalizeManualForm();
+      cy.wait('@finalizeLoopCheckRows');
+      cy.contains(MANUAL_ATTRIBUTES_FORM, 'Manual Input Form - Attributes').should('not.exist');
+
+      cy.wait(POST_FINALIZE_SETTLE_MS);
+      cy.get('@fetchIsolatedGridRows.all').then(settledRequests => {
+        const settledCount = settledRequests.length;
+        cy.task('log', `[#511 grid fetches] beforeFinalize=${countBeforeFinalize} afterFirstSettleWindow=${settledCount}`);
+        expect(settledCount, 'finalize never refreshed the grid').to.be.greaterThan(countBeforeFinalize);
+        cy.wait(POST_FINALIZE_SETTLE_MS);
+        cy.get('@fetchIsolatedGridRows.all').should(laterRequests => {
+          expect(laterRequests.length, `grid GETs kept firing after finalize (was ${settledCount} after the first window)`).to.equal(settledCount);
+        });
+      });
+    });
   });
 
   it('submits omitted when it is chosen in the manual form Status select (#524 item 9)', () => {

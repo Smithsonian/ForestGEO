@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { formatCensusWindowDuration, getCensusStatus, getCensusWindow, getCensusWindowBounds, getMeasurementBounds, getMeasurementSpan } from './censuswindow';
+import {
+  formatCensusWindowDuration,
+  getCensusStatus,
+  getCensusWindow,
+  getCensusWindowBounds,
+  getMeasurementBounds,
+  getMeasurementSpan,
+  isCensusEndBeforeStart,
+  getCensusDatesError,
+  getCensusOverlapError,
+  formatCensusOverlapMessage,
+  type NeighbourCensusWindow,
+  CENSUS_INVALID_DATE_MESSAGE
+} from './censuswindow';
 import type { CalendarDay } from './dateformats';
 
 const TODAY: CalendarDay = { year: 2026, month: 10, day: 20 };
@@ -168,5 +181,57 @@ describe('open ranges (R5)', () => {
     const empty = [{ censusStartDate: null, censusEndDate: null, firstMeasurementDate: null, lastMeasurementDate: null }];
     expect(getCensusWindowBounds(empty)).toEqual({ start: undefined, end: undefined, endIsOpen: false });
     expect(getMeasurementBounds(empty)).toEqual({ first: undefined, last: undefined });
+  });
+});
+
+describe('isCensusEndBeforeStart', () => {
+  it('is true only when the end day precedes the start day', () => {
+    expect(isCensusEndBeforeStart('2026-03-10', '2026-03-09')).toBe(true);
+    expect(isCensusEndBeforeStart('2026-03-10', '2026-03-10')).toBe(false);
+    expect(isCensusEndBeforeStart('2026-03-10', '2026-03-11')).toBe(false);
+  });
+
+  it('is false when either day is missing, so an open-ended census is allowed', () => {
+    expect(isCensusEndBeforeStart('2026-03-10', null)).toBe(false);
+    expect(isCensusEndBeforeStart('2026-03-10', '')).toBe(false);
+    expect(isCensusEndBeforeStart(null, '2026-03-10')).toBe(false);
+  });
+
+  it('reads database DATE values (UTC-midnight Dates) by calendar day in every zone', () => {
+    // A persisted StartDate arrives from mysql2 as a UTC-midnight Date; the request's EndDate is a string.
+    const persistedStart = new Date('2026-01-01T00:00:00.000Z');
+    expect(isCensusEndBeforeStart(persistedStart, '2025-12-31')).toBe(true);
+    expect(isCensusEndBeforeStart(persistedStart, '2026-01-01')).toBe(false);
+  });
+});
+
+describe('getCensusDatesError', () => {
+  it('accepts leap days, MySQL DATE year bounds, and an open end', () => {
+    expect(getCensusDatesError('2024-02-29', null)).toBeNull();
+    expect(getCensusDatesError('1000-01-01', '9999-12-31')).toBeNull();
+    expect(getCensusDatesError(new Date('2024-02-29T00:00:00.000Z'), '2024-03-01')).toBeNull();
+  });
+
+  it('rejects invalid calendar days and Date objects instead of treating them as absent', () => {
+    expect(getCensusDatesError('2023-02-29', null)).toBe(CENSUS_INVALID_DATE_MESSAGE);
+    expect(getCensusDatesError('2024-02-29', new Date(Number.NaN))).toBe(CENSUS_INVALID_DATE_MESSAGE);
+  });
+});
+
+const CENSUS_1: NeighbourCensusWindow = { plotCensusNumber: 1, start: '2020-01-01', end: '2020-12-31' };
+const CENSUS_3_OPEN: NeighbourCensusWindow = { plotCensusNumber: 3, start: '2024-01-01', end: null };
+const CENSUS_WITHOUT_START: NeighbourCensusWindow = { plotCensusNumber: 4, start: null, end: null };
+
+describe('getCensusOverlapError', () => {
+  it.each([
+    ['ends the day before a neighbour starts', { startDate: '2022-01-01', endDate: '2023-12-31' }, null],
+    ['starts the day after a neighbour ends', { startDate: '2021-01-01', endDate: '2021-06-30' }, null],
+    ['shares its first day with a neighbour last day', { startDate: '2020-12-31', endDate: '2021-06-30' }, formatCensusOverlapMessage(1)],
+    ['is open-ended and starts before an open neighbour', { startDate: '2022-01-01', endDate: null }, formatCensusOverlapMessage(3)],
+    ['starts inside an open-ended neighbour', { startDate: '2025-01-01', endDate: '2025-02-01' }, formatCensusOverlapMessage(3)]
+  ])('a window that %s', (_name, dates, expected) => {
+    const result = getCensusOverlapError(dates, [CENSUS_1, CENSUS_3_OPEN, CENSUS_WITHOUT_START]);
+    console.log(`[census overlap] ${JSON.stringify(dates)} -> ${result}`);
+    expect(result).toBe(expected);
   });
 });

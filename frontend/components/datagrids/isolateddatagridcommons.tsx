@@ -68,6 +68,7 @@ import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS, getPersistedGridPageSi
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
 import { NEW_ROW_ADDED_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
+import { FOREIGN_KEY_CONFLICT_MESSAGE } from '@/lib/errorhelpers';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
   if (value === undefined || value === null || value === '') {
@@ -1128,7 +1129,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           const error = await response.json();
           if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
             setSnackbar({
-              children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`,
+              children: `Error: ${FOREIGN_KEY_CONFLICT_MESSAGE}`,
               severity: 'error'
             });
           } else {
