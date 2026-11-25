@@ -147,7 +147,6 @@ describe('CLEAN_REUPLOAD leftover stems and trees (#489) — integration', () =>
   async function cleanReupload(rows: MeasurementRow[], targetCensusID = censusID): Promise<void> {
     const incomingBatchID = `batch-${batchCounter + 1}`;
     const transactionID = await connectionManager.beginTransaction();
-    const uploadSessionID = `leftover-stems-session-${incomingBatchID}`;
     await cleanupPreviousFileUploads(
       connectionManager,
       schema,
@@ -156,9 +155,8 @@ describe('CLEAN_REUPLOAD leftover stems and trees (#489) — integration', () =>
       plotID,
       targetCensusID,
       {
-        recordID: buildFileUploadChangelogRecordID(REPLACEMENT_FILE, uploadSessionID),
+        recordID: buildFileUploadChangelogRecordID(REPLACEMENT_FILE, incomingBatchID),
         fileName: REPLACEMENT_FILE,
-        uploadSessionID,
         batchID: incomingBatchID,
         changedBy: TEST_CHANGED_BY
       },

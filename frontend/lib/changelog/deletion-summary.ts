@@ -20,10 +20,12 @@ export const CENSUS_REPLACEMENT_TABLE_NAME = 'census_replacement';
 export type DeletedRowCounts = Record<string, number>;
 
 export interface CensusReplacementSummaryIdentity {
-  /** Shared with the upload's file_upload row (buildFileUploadChangelogRecordID), so the two read as one upload. */
+  /**
+   * buildFileUploadChangelogRecordID(fileName, batchID). The incoming batch, not the upload session: a worker
+   * retry runs under a new session but keeps its batch, so a retried upload adds to the same row.
+   */
   recordID: string;
   fileName: string;
-  uploadSessionID: string;
   batchID: string;
   changedBy: string | null;
 }
@@ -31,7 +33,6 @@ export interface CensusReplacementSummaryIdentity {
 export interface CensusReplacementSummaryState {
   summaryKind: typeof DELETION_SUMMARY_KIND.censusReplacement;
   fileName: string;
-  uploadSessionID: string;
   batchID: string;
   deletedRowCounts: DeletedRowCounts;
 }
@@ -45,8 +46,11 @@ function parseRowState(value: unknown): CensusReplacementSummaryState {
 /**
  * Adds one replacement window's deletes to the upload's summary row, creating it on the first
  * window. Call it in the window's own transaction so the count and the deletes commit together:
- * a replacement commits window by window, and one interrupted and resumed later keeps adding to
- * the same row. Windows of one upload never run concurrently; each holds the upload session lock.
+ * a replacement commits window by window, and one interrupted and resumed later, or retried by the
+ * worker, keeps adding to the same row. A window that deletes nothing writes nothing, so a first
+ * upload into an empty census leaves no replacement entry. Windows of one attempt never run
+ * concurrently (each holds the upload session lock), and the worker retries an upload only after
+ * the previous attempt has ended.
  */
 export async function addToCensusReplacementSummary(params: {
   tx: Pick<TxExecutor, 'query'>;
@@ -74,7 +78,6 @@ export async function addToCensusReplacementSummary(params: {
       const state: CensusReplacementSummaryState = {
         summaryKind: DELETION_SUMMARY_KIND.censusReplacement,
         fileName: identity.fileName,
-        uploadSessionID: identity.uploadSessionID,
         batchID: identity.batchID,
         deletedRowCounts: { [COREMEASUREMENTS_TABLE_NAME]: deletedMeasurements }
       };

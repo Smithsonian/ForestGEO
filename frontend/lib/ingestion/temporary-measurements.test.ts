@@ -261,9 +261,8 @@ describe('cleanupPreviousFileUploads bounded-delete loop control', () => {
   const TEST_CHANGED_BY = 'audit-test-user';
   const TEST_TRANSACTION_ID = 'tx-test';
   const TEST_SUMMARY: CensusReplacementSummaryIdentity = {
-    recordID: 'replacement.csv::session-1',
+    recordID: `${TEST_FILE_NAME}::${TEST_BATCH_ID}`,
     fileName: TEST_FILE_NAME,
-    uploadSessionID: 'session-1',
     batchID: TEST_BATCH_ID,
     changedBy: TEST_CHANGED_BY
   };
@@ -451,7 +450,6 @@ describe('cleanupPreviousFileUploads bounded-delete loop control', () => {
     expect(readSummary()).toEqual({
       summaryKind: DELETION_SUMMARY_KIND.censusReplacement,
       fileName: TEST_FILE_NAME,
-      uploadSessionID: TEST_SUMMARY.uploadSessionID,
       batchID: TEST_BATCH_ID,
       deletedRowCounts: { coremeasurements: 2 }
     });
@@ -464,9 +462,8 @@ describe('deleteCensusReplacementChunk — one measurement window (#555)', () =>
   const PLOT_ID = 22;
   const CENSUS_ID = 32;
   const SUMMARY: CensusReplacementSummaryIdentity = {
-    recordID: 'replacement.csv::session-u1',
+    recordID: `replacement.csv::${BATCH_ID}`,
     fileName: 'replacement.csv',
-    uploadSessionID: 'session-u1',
     batchID: BATCH_ID,
     changedBy: 'window-test-user'
   };

@@ -712,9 +712,8 @@ async function deleteMeasurementWindows(
   progress: CensusReplacementProgress
 ): Promise<CensusReplacementLoopEnd> {
   const summary: CensusReplacementSummaryIdentity = {
-    recordID: buildFileUploadChangelogRecordID(params.fileName, scope.uploadSessionID),
+    recordID: buildFileUploadChangelogRecordID(params.fileName, params.batchID),
     fileName: params.fileName,
-    uploadSessionID: scope.uploadSessionID,
     batchID: params.batchID,
     changedBy: params.changedBy ?? null
   };

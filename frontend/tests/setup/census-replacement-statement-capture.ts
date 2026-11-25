@@ -28,7 +28,6 @@ export interface CensusReplacementWindowScope {
 
 const CAPTURE_TRANSACTION_ID = 'statement-capture';
 const CAPTURE_FILE_NAME = 'statement-capture.csv';
-const CAPTURE_UPLOAD_SESSION_ID = 'statement-capture-session';
 const WINDOW_STATEMENT_COUNT = 5;
 const DESCRIBED_STATEMENT_LENGTH = 80;
 
@@ -50,9 +49,8 @@ export async function captureCensusReplacementWindowStatements(
     }
   } as unknown as ConnectionManager;
   const summary: CensusReplacementSummaryIdentity = {
-    recordID: `${CAPTURE_FILE_NAME}::${CAPTURE_UPLOAD_SESSION_ID}`,
+    recordID: `${CAPTURE_FILE_NAME}::${scope.incomingBatchID}`,
     fileName: CAPTURE_FILE_NAME,
-    uploadSessionID: CAPTURE_UPLOAD_SESSION_ID,
     batchID: scope.incomingBatchID,
     changedBy: scope.changedBy
   };

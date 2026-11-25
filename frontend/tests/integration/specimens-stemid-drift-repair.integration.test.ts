@@ -807,7 +807,6 @@ describe('Mpala-shaped specimens drift: incident, gate, repair, recovery (#552)'
     async () => {
       const transactionID = await connectionManager.beginTransaction();
       try {
-        const uploadSessionID = 'specimens-drift-replacement-session';
         await cleanupPreviousFileUploads(
           connectionManager,
           schema,
@@ -816,9 +815,8 @@ describe('Mpala-shaped specimens drift: incident, gate, repair, recovery (#552)'
           plotID,
           censusID,
           {
-            recordID: buildFileUploadChangelogRecordID(FILE.REPLACEMENT, uploadSessionID),
+            recordID: buildFileUploadChangelogRecordID(FILE.REPLACEMENT, BATCH.REPLACEMENT),
             fileName: FILE.REPLACEMENT,
-            uploadSessionID,
             batchID: BATCH.REPLACEMENT,
             changedBy: TEST_CHANGED_BY
           },

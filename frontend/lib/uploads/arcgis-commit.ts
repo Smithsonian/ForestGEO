@@ -150,7 +150,7 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
         batchID,
         plotID,
         censusID,
-        { recordID: buildFileUploadChangelogRecordID(fileName, uploadSessionID), fileName, uploadSessionID, batchID, changedBy: userId },
+        { recordID: buildFileUploadChangelogRecordID(fileName, batchID), fileName, batchID, changedBy: userId },
         transactionID
       );
     }

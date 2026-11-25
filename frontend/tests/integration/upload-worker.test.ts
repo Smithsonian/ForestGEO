@@ -2090,7 +2090,7 @@ describe('runJobIfClaimable — integration', () => {
     }
 
     /**
-     * The replacement's Recent Changes record: one census_replacement summary row per upload attempt,
+     * The replacement's Recent Changes record: one census_replacement summary row per upload, retries included,
      * the measurements they count, and any per-row DELETE audit of a prior-batch row (there must be none).
      */
     async function readReplacementRecord(): Promise<{ summaryRows: number; summarizedDeletes: number; perRowAudits: number }> {
@@ -2199,8 +2199,8 @@ describe('runJobIfClaimable — integration', () => {
       );
       expect(completed!.status).toBe(JOB_STATUS_COMPLETED);
       expect(await countPriorRows()).toBe(0);
-      expect(auditsAfterRetry, 'one summary per upload attempt, every row counted once across them').toEqual({
-        summaryRows: 2,
+      expect(auditsAfterRetry, 'the retry keeps its batch, so it adds to the same summary row; every row counted once').toEqual({
+        summaryRows: 1,
         summarizedDeletes: PRIOR_ROW_COUNT,
         perRowAudits: 0
       });

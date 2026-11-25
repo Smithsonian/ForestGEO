@@ -94,6 +94,7 @@ import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { CENSUS_REPLACEMENT_STATEMENT } from '../setup/census-replacement-statement-patterns';
 import { CENSUS_REPLACEMENT_TABLE_NAME, DELETION_SUMMARY_KIND } from '@/lib/changelog/deletion-summary';
+import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { buildFileUploadChangelogRecordID } from '@/lib/uploads/file-names';
 import { startFreshUploadSession } from '../setup/upload-session-fixtures';
 
@@ -149,11 +150,11 @@ const WINDOW_SIZE = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE;
 const SESSION_ID = {
   I2: 'clean-reupload-i2-session',
   I3: 'clean-reupload-i3-session',
+  I3S: 'clean-reupload-i3s-session',
   I4: 'clean-reupload-i4-session',
   I5: 'clean-reupload-i5-session',
   I5B: 'clean-reupload-i5b-session',
-  I8: 'clean-reupload-i8-session',
-  ONE_TRANSACTION: 'clean-reupload-one-transaction-session'
+  I8: 'clean-reupload-i8-session'
 } as const;
 
 const REPLACEMENT_CSV_HEADERS = ['treetag', 'stemtag', 'speciescode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes'];
@@ -573,9 +574,8 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
       plotID,
       targetCensusID,
       {
-        recordID: buildFileUploadChangelogRecordID(INCOMING_FILE, SESSION_ID.ONE_TRANSACTION),
+        recordID: buildFileUploadChangelogRecordID(INCOMING_FILE, INCOMING_BATCH),
         fileName: INCOMING_FILE,
-        uploadSessionID: SESSION_ID.ONE_TRANSACTION,
         batchID: INCOMING_BATCH,
         changedBy: TEST_CHANGED_BY
       },
@@ -949,7 +949,9 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
         plotID,
         targetCensusID
       ]);
-      expect(String(summary.RecordID).startsWith(`${INCOMING_FILE}::`), 'shares its RecordID with the upload’s file_upload row').toBe(true);
+      expect(summary.RecordID, 'keyed by file and incoming batch, which a worker retry keeps').toBe(
+        buildFileUploadChangelogRecordID(INCOMING_FILE, INCOMING_BATCH)
+      );
       expect(rowState(summary.OldRowState)).toMatchObject({
         summaryKind: DELETION_SUMMARY_KIND.censusReplacement,
         fileName: INCOMING_FILE,
@@ -1165,6 +1167,37 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
       expect(await perRowDeleteAuditCount(targetCensusID)).toBe(0);
       expect(await countRows(targetCensusID, 'all')).toBe(0);
       expect(await sessionMarker(SESSION_ID.I3)).not.toBeNull();
+    },
+    BARRIER_TEST_TIMEOUT_MS
+  );
+
+  it(
+    "I3s: a failed summary write rolls back its window's deletes, so the summary never undercounts what was removed (catches: the summary written outside the window's transaction)",
+    async () => {
+      const seededRowCount = WINDOW_SIZE + SURVIVING_WINDOW_REMAINDER;
+      await seedBulkPriorRows(seededRowCount, 'I3S');
+      const seededIDs = await targetCensusMeasurementIDs();
+      await startSession(SESSION_ID.I3S);
+      const params = buildReplacementParams(SESSION_ID.I3S);
+
+      const injection = failOnOccurrenceOfStatement(CENSUS_REPLACEMENT_STATEMENT.REPLACEMENT_SUMMARY_WRITE, SECOND_WINDOW);
+      let replacementError: unknown;
+      try {
+        await replaceCensusForCleanReupload(connectionManager, params);
+      } catch (error) {
+        replacementError = error;
+      } finally {
+        injection.restore();
+      }
+      expect(replacementError, 'the summary write surfaces as a changelog failure').toBeInstanceOf(ChangelogWriteError);
+      expect((replacementError as ChangelogWriteError).cause, 'caused by the injected summary failure').toBeInstanceOf(InjectedWindowFailure);
+
+      const survivingIDs = await targetCensusMeasurementIDs();
+      const summarized = await summarizedDeletedMeasurements(targetCensusID);
+      console.log(`[I3s after summary failure] seeded=${seededRowCount} surviving=${survivingIDs.length} summarized=${summarized}`);
+      expect(survivingIDs, "window 2's deletes rolled back with its summary write").toEqual(seededIDs.slice(WINDOW_SIZE));
+      expect(summarized, 'the summary holds window 1 only').toBe(WINDOW_SIZE);
+      expect(await sessionMarker(SESSION_ID.I3S)).toBeNull();
     },
     BARRIER_TEST_TIMEOUT_MS
   );
