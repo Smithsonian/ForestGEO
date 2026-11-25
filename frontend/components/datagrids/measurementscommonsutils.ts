@@ -207,12 +207,6 @@ export async function runMeasurementEditSave(args: RunMeasurementEditSaveArgs): 
   return restorePersistedEditableFields(newRow, oldRow, 'measurementssummary', Object.keys(decision.diff));
 }
 
-export interface FormattedQueryRequest {
-  query: string;
-  params: Array<string | number>;
-  format: true;
-}
-
 export function buildMeasurementVisibleFilters(showErrorRows: boolean, showValidRows: boolean, showPendingRows: boolean): VisibleFilter[] {
   return [
     ...(showErrorRows ? (['errors'] as VisibleFilter[]) : []),
@@ -316,35 +310,6 @@ export function shouldRefreshMeasurementsAfterValidationTransition(
   nextStatus: 'idle' | 'running' | 'completed' | 'failed'
 ): boolean {
   return previousStatus === 'running' && (nextStatus === 'completed' || nextStatus === 'failed');
-}
-
-export function createResetValidationErrorsQuery(schema: string, plotID: number, censusID: number): FormattedQueryRequest {
-  return {
-    query: `UPDATE ??.measurement_error_log mel
-            JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
-            JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
-            JOIN ??.census c ON c.CensusID = cm.CensusID
-            SET mel.IsResolved = TRUE,
-                mel.ResolvedAt = NOW()
-            WHERE c.CensusID = ?
-              AND c.PlotID = ?
-              AND me.ErrorSource = 'validation'
-              AND mel.IsResolved = FALSE`,
-    params: [schema, schema, schema, schema, censusID, plotID],
-    format: true
-  };
-}
-
-export function createResetValidationStatesQuery(schema: string, plotID: number, censusID: number): FormattedQueryRequest {
-  return {
-    query: `UPDATE ??.coremeasurements cm
-            JOIN ??.census c ON c.CensusID = cm.CensusID
-            SET cm.IsValidated = NULL
-            WHERE c.CensusID = ?
-              AND c.PlotID = ?`,
-    params: [schema, schema, censusID, plotID],
-    format: true
-  };
 }
 
 export const UNRESOLVED_ERRORS_SNACKBAR_MESSAGE = (count: number) => `${count} row(s) with unresolved errors — open View Errors to resolve them.`;

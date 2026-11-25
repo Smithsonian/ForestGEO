@@ -45,8 +45,8 @@ export function buildMeasurementHasUnresolvedIngestionErrorsSql(schema: string, 
 }
 
 /**
- * THE override-eligibility predicate, shared by CountOverridable, the override modal's pre-count, its
- * validation-log DELETE and its IsValidated UPDATE so they can never disagree. A row is eligible when
+ * THE override-eligibility predicate, shared by CountOverridable and every statement of the override route
+ * (lib/validations/override.ts) so they can never disagree. A row is eligible when
  * it is a resolved, linked measurement (real StemGUID), has not already passed (IsValidated FALSE or
  * NULL) and carries no unresolved ingestion-source error. Ingestion failures (StemGUID NULL, or an
  * unresolved ingestion log even when a StemGUID is present) are never overridable.
@@ -55,59 +55,6 @@ export function buildMeasurementOverrideEligibleSql(schema: string, alias: strin
   return `(${alias}.IsValidated = FALSE OR ${alias}.IsValidated IS NULL)
         AND ${alias}.StemGUID IS NOT NULL
         AND NOT (${buildMeasurementHasUnresolvedIngestionErrorsSql(schema, alias)})`;
-}
-
-export interface ValidationOverrideStatement {
-  query: string;
-  params: Array<number>;
-}
-
-export interface ValidationOverrideStatements {
-  count: ValidationOverrideStatement;
-  clearValidationLogs: ValidationOverrideStatement;
-  markValidated: ValidationOverrideStatement;
-}
-
-/**
- * Builds the override modal's three statements from the single eligibility predicate. Every
- * statement carries the same plot/census scope (bound as ? params, in the order plotID,
- * plotCensusNumber, plotID) and the same eligibility fragment. The DELETE only ever touches
- * validation-source logs, never ingestion logs.
- */
-export function buildValidationOverrideStatements(schema: string, plotID: number, plotCensusNumber: number): ValidationOverrideStatements {
-  const eligible = buildMeasurementOverrideEligibleSql(schema, 'cm');
-  const scope = `c.CensusID IN (SELECT CensusID FROM ${schema}.census WHERE PlotID = ? AND PlotCensusNumber = ?)
-        AND c.PlotID = ?`;
-  const params = [plotID, plotCensusNumber, plotID];
-  return {
-    count: {
-      query: `SELECT COUNT(*) AS EligibleCount
-      FROM ${schema}.coremeasurements AS cm
-      JOIN ${schema}.census AS c ON c.CensusID = cm.CensusID
-      WHERE ${scope}
-        AND ${eligible}`,
-      params
-    },
-    clearValidationLogs: {
-      query: `DELETE mel
-      FROM ${schema}.measurement_error_log AS mel
-      JOIN ${schema}.measurement_errors AS me ON me.ErrorID = mel.ErrorID
-      JOIN ${schema}.coremeasurements AS cm ON mel.MeasurementID = cm.CoreMeasurementID
-      JOIN ${schema}.census AS c ON c.CensusID = cm.CensusID
-      WHERE ${scope}
-        AND me.ErrorSource = 'validation'
-        AND ${eligible}`,
-      params
-    },
-    markValidated: {
-      query: `UPDATE ${schema}.coremeasurements AS cm
-      JOIN ${schema}.census AS c ON c.CensusID = cm.CensusID
-      SET cm.IsValidated = TRUE
-      WHERE ${scope}
-        AND ${eligible}`,
-      params
-    }
-  };
 }
 
 export type MeasurementRowStatus = 'ingestion-unresolved' | 'pending' | 'valid' | 'failed' | 'unknown';
@@ -136,7 +83,7 @@ export function getMeasurementRowStatus(row: { stemGUID?: number | null; isValid
  * - CountValid: real stem, IsValidated = TRUE, no unresolved log entry
  *
  * CountOverridable is intentionally NOT disjoint from the buckets above: it uses the shared
- * buildMeasurementOverrideEligibleSql predicate (also used by the override modal's DELETE/UPDATE),
+ * buildMeasurementOverrideEligibleSql predicate (also used by the override route's DELETE/UPDATE),
  * so it overlaps CountFailedNoLog, CountPending, and the FALSE/NULL portion of CountUnresolvedLogged,
  * but excludes ingestion failures (StemGUID NULL or an unresolved ingestion-source log).
  *
