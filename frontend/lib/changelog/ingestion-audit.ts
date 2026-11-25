@@ -570,24 +570,6 @@ export async function auditCoreMeasurementsKeyedDiff(params: AuditCoreMeasuremen
   return { insertedCount, updatedCount, unchangedCount, after };
 }
 
-/** The census-wide form of recordDeletedCoreMeasurementsAudit, for a whole-census clear. */
-export async function recordDeletedCensusCoreMeasurementsAudit(params: {
-  tx: Pick<BulkIngestionExecutor, 'query'>;
-  schema: string;
-  censusID: number;
-  changedBy: string | null;
-  plotID: number;
-}): Promise<number> {
-  const { tx, schema, censusID, changedBy, plotID } = params;
-  const sql = safeFormatQuery(schema, buildDeleteAuditRowsSQL('cm.CensusID = ?'));
-  try {
-    const result = await tx.query(sql, [changedBy, plotID, censusID, censusID]);
-    return Number((result as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
-  } catch (error: unknown) {
-    throw new ChangelogWriteError(ChangelogOperation.DELETE, COREMEASUREMENTS_TABLE_NAME, `census:${censusID}`, error);
-  }
-}
-
 /**
  * Columns reconciliation rewrites that the ingestion snapshot deliberately leaves out of
  * the image (the #592 export tells upload rows apart by the absence of UserDefinedFields).

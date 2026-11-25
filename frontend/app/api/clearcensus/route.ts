@@ -8,7 +8,7 @@ import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
-import { CLEAR_CENSUS_TYPES, ClearCensusAuditMismatchError, clearCensusWithAudit, isClearCensusType } from '@/lib/census/clear-census-audit';
+import { CLEAR_CENSUS_TYPES, clearCensusWithAudit, isClearCensusType } from '@/lib/census/clear-census-audit';
 import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -161,12 +161,6 @@ export async function POST(request: NextRequest) {
     ailogger.error('Census clear failed:', e);
     if (transactionID) {
       await connectionManager.rollbackTransaction(transactionID);
-    }
-    if (e instanceof ClearCensusAuditMismatchError) {
-      return NextResponse.json(
-        { error: 'Data changed while the census was being cleared. Nothing was deleted; please retry.' },
-        { status: HTTPResponses.CONFLICT }
-      );
     }
     return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
