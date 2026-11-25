@@ -89,7 +89,13 @@ const sharedState = vi.hoisted(() => ({
   // point inside the worker's pipeline. Reset to null in beforeEach.
   onSchemaQuery: null as null | ((query: string, params: unknown[]) => Promise<void> | void),
   // Every schema-side statement in issue order, with the transaction it ran in (null = autocommit).
-  statementLog: [] as Array<{ transactionID: string | null; sql: string }>
+  statementLog: [] as Array<{ transactionID: string | null; sql: string }>,
+  // Transaction starts a test parks before BEGIN (see parkNextTransactionStart); checked by withTransaction.
+  parkedStarts: [] as import('../setup/single-connection-manager-mock').ParkedTransactionStart[],
+  // Workers whose lease heartbeat is held back: the tick neither touches the catalog nor ever learns of a lost lease.
+  suppressedHeartbeatWorkers: new Set<string>(),
+  // Every ailogger call in order, so a test can prove what a worker did and did not do after a point in time.
+  logEntries: [] as Array<{ level: string; message: string; details: unknown[] }>
 }));
 
 // ConnectionManager mock — mirrors the ingest-batch/collapse-census pattern.
@@ -134,6 +140,12 @@ vi.mock('@/lib/db/connectionmanager', () => {
       sharedState.activeTransactionID = null;
     },
     withTransaction: async <T>(fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<any>; readonly id: string }) => Promise<T>): Promise<T> => {
+      const parked = sharedState.parkedStarts.find(candidate => !candidate.consumed && candidate.when());
+      if (parked) {
+        parked.consumed = true;
+        parked.markReached();
+        await parked.gate;
+      }
       const id = await manager.beginTransaction();
       try {
         const tx = {
@@ -186,11 +198,32 @@ vi.mock('@/lib/db/poolmonitorsingleton', () => ({
 
 vi.mock('@/ailogger', () => ({
   default: {
-    info: (msg: string) => console.log(`[ailogger.info] ${msg}`),
-    warn: (msg: string) => console.log(`[ailogger.warn] ${msg}`),
-    error: (msg: string, ...rest: unknown[]) => console.log(`[ailogger.error] ${msg}`, ...rest)
+    info: (msg: string, ...rest: unknown[]) => {
+      sharedState.logEntries.push({ level: 'info', message: msg, details: rest });
+      console.log(`[ailogger.info] ${msg}`);
+    },
+    warn: (msg: string, ...rest: unknown[]) => {
+      sharedState.logEntries.push({ level: 'warn', message: msg, details: rest });
+      console.log(`[ailogger.warn] ${msg}`);
+    },
+    error: (msg: string, ...rest: unknown[]) => {
+      sharedState.logEntries.push({ level: 'error', message: msg, details: rest });
+      console.log(`[ailogger.error] ${msg}`, ...rest);
+    }
   }
 }));
+
+// Pass-through repository: every function is the real one except the heartbeat, which a test can hold back per worker.
+vi.mock('@/lib/background-jobs/repository', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/background-jobs/repository')>();
+  return {
+    ...actual,
+    heartbeatBackgroundJob: (...args: Parameters<typeof actual.heartbeatBackgroundJob>) => {
+      const [, , workerID] = args;
+      return sharedState.suppressedHeartbeatWorkers.has(workerID) ? Promise.resolve(true) : actual.heartbeatBackgroundJob(...args);
+    }
+  };
+});
 
 import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
 import { seedCatalogTables } from './admin-provision/_shared';
@@ -214,6 +247,19 @@ import { buildSubBatchID, buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib
 import { testDbServerOptions } from '../setup/test-db-connection';
 import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE } from '@/lib/ingestion/temporary-measurements';
 import { CENSUS_REPLACEMENT_STATEMENT, CENSUS_REPLACEMENT_WRITE_PATTERNS } from '../setup/census-replacement-statement-patterns';
+import { parkNextTransactionStart, type ParkedTransactionStart, type SingleConnectionState } from '../setup/single-connection-manager-mock';
+import { ARCGIS_COMMIT_STATEMENT } from '../setup/arcgis-commit-statement-patterns';
+import {
+  countCensusRowsOutsideFamily,
+  deleteAuditRows,
+  readImportRow,
+  seedArcgisImport,
+  type ArcgisImportScope,
+  type SeededArcgisImport
+} from '../setup/arcgis-commit-fixtures';
+import { ARCGIS_IMPORT_SESSION_STATE, ensureArcgisImportTables } from '@/lib/arcgis/import-session';
+import { ARCGIS_COMMIT_COMPLETED_EVENT } from '@/lib/uploads/arcgis-commit';
+import { sanitizeUploadFileName } from '@/lib/uploads/file-names';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -323,6 +369,9 @@ describe('runJobIfClaimable — integration', () => {
   beforeEach(async () => {
     sharedState.onSchemaQuery = null;
     sharedState.statementLog = [];
+    sharedState.parkedStarts.length = 0;
+    sharedState.suppressedHeartbeatWorkers.clear();
+    sharedState.logEntries.length = 0;
     if (sharedState.activeTransactionID) {
       await connection.rollback();
       sharedState.activeTransactionID = null;
@@ -2186,5 +2235,399 @@ describe('runJobIfClaimable — integration', () => {
       expect(auditsAfterRetry).toEqual({ audits: PRIOR_ROW_COUNT, distinctRecords: PRIOR_ROW_COUNT });
       expect(controlAfter).toEqual(controlBefore);
     }, 180000);
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #561 — ArcGIS jobs commit as restartable units and a stale worker never touches the winner's session
+  // -------------------------------------------------------------------------
+
+  describe('ArcGIS jobs (#561)', () => {
+    const ARCGIS_FILE_NAME = 'worker-arcgis-import.xlsx';
+    const ARCGIS_TAG_PREFIX = 'wa-';
+    const ARCGIS_IMPORT_ROW_COUNT = 4;
+    const ARCGIS_PRIOR_TAGS = ['WA-PRIOR-1', 'WA-PRIOR-2', 'WA-PRIOR-3'];
+    const PRIOR_STEM_TAG = '1';
+    const PRIOR_DBH = 12.5;
+    const PRIOR_HOM = 1.3;
+    const PRIOR_X = 2.5;
+    const PRIOR_Y = 3.5;
+    const SESSION_STATE_COMPLETED = 'completed';
+    const SESSION_STATE_FAILED = 'failed';
+    const SESSION_STATE_ACTIVE_STATES = ['initialized', 'uploading', 'uploaded', 'processing', 'collapsing'];
+    const JOB_STATUS_RUNNING = 'running';
+    const JOB_STATUS_COMPLETED = 'completed';
+    const JOB_STATUS_WAITING_RETRY = 'waiting_retry';
+    const SWEEPER_REASON = 'sweeper: heartbeat expired';
+    const WORKER_FINISHED_EVENT = 'upload.worker.finished';
+    const SESSION_STATE_WRITE_LOG = /^\[UploadSessionTracker\] Updated session /;
+    const PARK_REACHED_TIMEOUT_MS = 60_000;
+    const WORKER_SETTLED_TIMEOUT_MS = 120_000;
+    const TEST_TIMEOUT_MS = 240_000;
+    const INJECTED_FINALIZE_FAULT_MESSAGE = 'injected fault at the commit finalization changelog insert';
+
+    class InjectedFinalizeFault extends Error {
+      constructor() {
+        super(INJECTED_FINALIZE_FAULT_MESSAGE);
+        this.name = 'InjectedFinalizeFault';
+      }
+    }
+
+    interface JobRowSnapshot {
+      status: string;
+      workerID: string | null;
+      retryCount: number;
+      lastError: string | null;
+      phase: string;
+    }
+
+    interface SessionRowSnapshot {
+      sessionID: string;
+      state: string;
+      errorMessage: string | null;
+    }
+
+    let arcgisScope: ArcgisImportScope;
+    let inFlightRuns: Array<Promise<void>> = [];
+
+    beforeAll(async () => {
+      arcgisScope = {
+        schema,
+        plotID,
+        censusID,
+        speciesCode: testData.species[0].SpeciesCode,
+        quadratName: testData.quadrats[0].QuadratName
+      };
+      await ensureArcgisImportTables(schema);
+    });
+
+    beforeEach(async () => {
+      inFlightRuns = [];
+      await connection.query('DELETE FROM arcgis_import_rows');
+      await connection.query('DELETE FROM arcgis_import_sessions');
+    });
+
+    afterEach(async () => {
+      for (const parked of sharedState.parkedStarts) parked.release();
+      sharedState.parkedStarts.length = 0;
+      await Promise.allSettled(inFlightRuns);
+    });
+
+    function parkWorkerTransactionStart(when: () => boolean): ParkedTransactionStart {
+      // parkNextTransactionStart only reads parkedStarts; this suite's state object carries just the fields the worker mock needs.
+      return parkNextTransactionStart({ parkedStarts: sharedState.parkedStarts } as unknown as SingleConnectionState, when);
+    }
+
+    function countLoggedStatements(pattern: RegExp): number {
+      return sharedState.statementLog.filter(entry => pattern.test(entry.sql)).length;
+    }
+
+    async function awaitWithin<T>(promise: Promise<T>, timeoutMs: number, description: string): Promise<T> {
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs} ms waiting for ${description}`)), timeoutMs);
+      });
+      try {
+        return await Promise.race([promise, timeout]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    function startWorker(jobID: number): Promise<void> {
+      const run = runJobIfClaimable(jobID, {
+        fetchFileText: async file => {
+          throw new Error(`[test deps] an ArcGIS job must not download or parse ${file.fileName}`);
+        }
+      });
+      inFlightRuns.push(run);
+      return run;
+    }
+
+    async function createArcgisJob(seeded: SeededArcgisImport, uploadMode: UploadMode): Promise<number> {
+      const job = await createUploadBackgroundJob(
+        catalogPool,
+        {
+          schema,
+          plotID,
+          censusID,
+          uploadMode,
+          sourceFormat: SourceFormat.arcgis_xlsx,
+          formType: FormType.measurements,
+          payload: { arcgisImportSession: { importSessionId: seeded.importSessionId, fileName: seeded.fileName, rowCount: seeded.rowCount } },
+          files: [
+            {
+              fileName: sanitizeUploadFileName(seeded.fileName),
+              blobContainer: BLOB_CONTAINER,
+              blobName: `uploads/${seeded.fileName}`,
+              expectedRows: seeded.rowCount
+            }
+          ]
+        },
+        TEST_USER
+      );
+      console.log(`[#561 helper] created ArcGIS jobID=${job.jobID} importSession=${seeded.importSessionId} derivedBatch=${seeded.batchID} mode=${uploadMode}`);
+      return job.jobID;
+    }
+
+    async function snapshotJob(jobID: number): Promise<JobRowSnapshot> {
+      const job = await getBackgroundJob(catalogPool, jobID);
+      if (!job) throw new Error(`job ${jobID} vanished`);
+      return { status: job.status, workerID: job.workerID ?? null, retryCount: job.retryCount, lastError: job.lastError ?? null, phase: job.phase };
+    }
+
+    async function snapshotWorkerSession(jobID: number): Promise<SessionRowSnapshot> {
+      const [rows] = await connection.query<RowDataPacket[]>(`SELECT session_id, state, error_message FROM upload_sessions WHERE file_id = ?`, [
+        `async-job-${jobID}`
+      ]);
+      if (rows.length !== 1) throw new Error(`expected exactly one upload session for job ${jobID}, found ${rows.length}`);
+      return { sessionID: String(rows[0].session_id), state: String(rows[0].state), errorMessage: rows[0].error_message ?? null };
+    }
+
+    async function countRealImportRows(): Promise<number> {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS total FROM coremeasurements WHERE CensusID = ? AND UploadFileID = ? AND StemGUID IS NOT NULL`,
+        [censusID, sanitizeUploadFileName(ARCGIS_FILE_NAME)]
+      );
+      return Number(rows[0].total);
+    }
+
+    async function logWorkerState(label: string, jobID: number): Promise<void> {
+      const job = await snapshotJob(jobID);
+      const session = await snapshotWorkerSession(jobID).catch(error => `no unique session: ${error instanceof Error ? error.message : String(error)}`);
+      const lastStatements = sharedState.statementLog.slice(-8).map(entry => `${entry.transactionID ?? '-'} ${entry.sql.replace(/\s+/g, ' ').slice(0, 100)}`);
+      console.log(`[#561 ${label}] job=${JSON.stringify(job)} session=${JSON.stringify(session)} lastStatements=\n${lastStatements.join('\n')}`);
+    }
+
+    /** Runs W1 until it is parked before its first staging-window transaction, with its heartbeat held back; returns its worker id. */
+    async function parkFirstWorkerBeforeStaging(jobID: number): Promise<{ workerID: string; stagingStart: ParkedTransactionStart; settled: Promise<void> }> {
+      const stagingStart = parkWorkerTransactionStart(() => countLoggedStatements(ARCGIS_COMMIT_STATEMENT.FAMILY_ID_SELECT) === 1);
+      const settled = startWorker(jobID);
+      await awaitWithin(stagingStart.reached, PARK_REACHED_TIMEOUT_MS, 'W1 to reach its first staging-window transaction');
+      const claimed = await snapshotJob(jobID);
+      expect(claimed.status).toBe(JOB_STATUS_RUNNING);
+      expect(claimed.workerID, 'W1 holds the lease while parked').not.toBeNull();
+      const workerID = claimed.workerID!;
+      sharedState.suppressedHeartbeatWorkers.add(workerID);
+      console.log(`[#561 W1] parked before its first staging window; workerID=${workerID} heartbeat suppressed`);
+      return { workerID, stagingStart, settled };
+    }
+
+    async function sweepLeaseAwayAndMakeDue(jobID: number): Promise<void> {
+      const reclaimed = await finalizeJobAsSystem(catalogPool, jobID, JOB_STATUS_WAITING_RETRY, SWEEPER_REASON);
+      expect(reclaimed, 'the sweeper must reclaim the running job').toBe(true);
+      await setNextAttemptPast(jobID);
+    }
+
+    function workerFinishedEntries(workerID: string) {
+      return sharedState.logEntries.filter(
+        entry => entry.message === WORKER_FINISHED_EVENT && (entry.details[0] as { workerID?: string } | undefined)?.workerID === workerID
+      );
+    }
+
+    function sessionStateWritesSince(logIndex: number): string[] {
+      return sharedState.logEntries
+        .slice(logIndex)
+        .filter(entry => SESSION_STATE_WRITE_LOG.test(entry.message))
+        .map(entry => entry.message);
+    }
+
+    it(
+      'WA1: an ArcGIS job that fails at the finalization retries, and the retry finishes without a second replacement (catches: restart redoing the replacement; batch not the derived one; double audit)',
+      async () => {
+        const prior = await insertDirectMeasurements(
+          connection,
+          testData,
+          censusID,
+          ARCGIS_PRIOR_TAGS.map(treeTag => ({
+            treeTag,
+            stemTag: PRIOR_STEM_TAG,
+            speciesCode: arcgisScope.speciesCode,
+            quadratName: arcgisScope.quadratName,
+            x: PRIOR_X,
+            y: PRIOR_Y,
+            dbh: PRIOR_DBH,
+            hom: PRIOR_HOM,
+            date: MEASUREMENT_DATE
+          }))
+        );
+        const priorRowCount = prior.coreMeasurementIDs.length;
+        const seeded = await seedArcgisImport(arcgisScope, ARCGIS_FILE_NAME, ARCGIS_IMPORT_ROW_COUNT, ARCGIS_TAG_PREFIX, TEST_USER);
+        const jobID = await createArcgisJob(seeded, UploadMode.CLEAN_REUPLOAD);
+        expect(await countCensusRowsOutsideFamily(connection, censusID, seeded.batchID), 'prior rows seeded').toBe(priorRowCount);
+
+        let finalizeFaultsInjected = 0;
+        sharedState.onSchemaQuery = query => {
+          if (!ARCGIS_COMMIT_STATEMENT.FILE_UPLOAD_CHANGELOG_INSERT.test(query) || finalizeFaultsInjected > 0) return;
+          finalizeFaultsInjected += 1;
+          throw new InjectedFinalizeFault();
+        };
+        await startWorker(jobID);
+        sharedState.onSchemaQuery = null;
+
+        const parked = await getBackgroundJobWithDetails(catalogPool, jobID);
+        const batchAfterFailure = await batchIDForFile(jobID, sanitizeUploadFileName(ARCGIS_FILE_NAME));
+        const auditAfterFailure = await deleteAuditRows(connection, censusID);
+        const importAfterFailure = await readImportRow(connection, seeded.importSessionId);
+        console.log(
+          `[#561 WA1] after attempt 1: job=${parked?.status} lastError=${parked?.lastError} faultsInjected=${finalizeFaultsInjected} fileBatch=${batchAfterFailure} ` +
+            `derivedBatch=${seeded.batchID} priorRowsLeft=${await countCensusRowsOutsideFamily(connection, censusID, seeded.batchID)} ` +
+            `audit=${JSON.stringify(auditAfterFailure)} importState=${importAfterFailure.state} cursor=${importAfterFailure.staging_next_row_index} ` +
+            `marker=${importAfterFailure.census_replacement_completed_at}`
+        );
+        expect(finalizeFaultsInjected).toBe(1);
+        expect(parked!.status).toBe(JOB_STATUS_WAITING_RETRY);
+        expect(parked!.lastError).toContain(INJECTED_FINALIZE_FAULT_MESSAGE);
+        expect(batchAfterFailure).toBe(seeded.batchID);
+        expect(await countCensusRowsOutsideFamily(connection, censusID, seeded.batchID), 'the census was replaced before the finalization failed').toBe(0);
+        expect(auditAfterFailure).toEqual({ total: priorRowCount, distinctRecordIDs: priorRowCount });
+        expect(importAfterFailure.state, 'the import is not committed until the finalization succeeds').toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTING);
+
+        await setNextAttemptPast(jobID);
+        await startWorker(jobID);
+
+        const completed = await getBackgroundJob(catalogPool, jobID);
+        const auditAfterRetry = await deleteAuditRows(connection, censusID);
+        const importAfterRetry = await readImportRow(connection, seeded.importSessionId);
+        const realRows = await countRealImportRows();
+        console.log(
+          `[#561 WA1] after attempt 2: job=${completed?.status} audit=${JSON.stringify(auditAfterRetry)} importState=${importAfterRetry.state} ` +
+            `committedBatch=${importAfterRetry.committed_batch_id} realImportRows=${realRows} stagedLeft=${await countTempRows(sanitizeUploadFileName(ARCGIS_FILE_NAME))}`
+        );
+        expect(completed!.status).toBe(JOB_STATUS_COMPLETED);
+        expect(importAfterRetry.state).toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTED);
+        expect(importAfterRetry.committed_batch_id).toBe(seeded.batchID);
+        expect(auditAfterRetry, 'the retry must not audit the replaced rows a second time').toEqual({ total: priorRowCount, distinctRecordIDs: priorRowCount });
+        expect(realRows).toBe(ARCGIS_IMPORT_ROW_COUNT);
+        expect(await countTempRows(sanitizeUploadFileName(ARCGIS_FILE_NAME))).toBe(0);
+        expect(await batchIDForFile(jobID, sanitizeUploadFileName(ARCGIS_FILE_NAME))).toBe(seeded.batchID);
+      },
+      TEST_TIMEOUT_MS
+    );
+
+    it(
+      'WA2: a worker that lost the job to a newer attempt is superseded and leaves the winner upload session alone (catches: a superseded worker releasing the reused session as failed)',
+      async () => {
+        const seeded = await seedArcgisImport(arcgisScope, ARCGIS_FILE_NAME, ARCGIS_IMPORT_ROW_COUNT, ARCGIS_TAG_PREFIX, TEST_USER);
+        const jobID = await createArcgisJob(seeded, UploadMode.REVISIONS);
+        sharedState.statementLog = [];
+
+        const w1 = await parkFirstWorkerBeforeStaging(jobID);
+        await sweepLeaseAwayAndMakeDue(jobID);
+
+        const finalizeStart = parkWorkerTransactionStart(() => countLoggedStatements(ARCGIS_COMMIT_STATEMENT.CURSOR_CAS) === 1);
+        const w2Settled = startWorker(jobID);
+        await awaitWithin(finalizeStart.reached, PARK_REACHED_TIMEOUT_MS, 'W2 to reach its finalization transaction');
+        const w2Job = await snapshotJob(jobID);
+        const sessionBeforeRelease = await snapshotWorkerSession(jobID);
+        console.log(`[#561 WA2] W2 parked before its finalization; job=${JSON.stringify(w2Job)} session=${JSON.stringify(sessionBeforeRelease)}`);
+        expect(w2Job.status).toBe(JOB_STATUS_RUNNING);
+        expect(w2Job.workerID, 'W2 took the lease').not.toBe(w1.workerID);
+        expect(SESSION_STATE_ACTIVE_STATES, 'W2 reused the active upload session').toContain(sessionBeforeRelease.state);
+
+        const logIndexAtRelease = sharedState.logEntries.length;
+        w1.stagingStart.release();
+        try {
+          await awaitWithin(w1.settled, WORKER_SETTLED_TIMEOUT_MS, 'the superseded W1 to finish');
+        } catch (error) {
+          await logWorkerState('WA2 W1 did not settle', jobID);
+          throw error;
+        }
+
+        const w1Finished = workerFinishedEntries(w1.workerID);
+        const jobAfterW1 = await snapshotJob(jobID);
+        const sessionAfterW1 = await snapshotWorkerSession(jobID);
+        const w1SessionWrites = sessionStateWritesSince(logIndexAtRelease);
+        console.log(
+          `[#561 WA2] after W1 settled: w1Finished=${JSON.stringify(w1Finished.map(entry => entry.details[0]))} job=${JSON.stringify(jobAfterW1)} ` +
+            `session=${JSON.stringify(sessionAfterW1)} sessionStateWritesSinceRelease=${JSON.stringify(w1SessionWrites)}`
+        );
+        expect(w1Finished).toHaveLength(1);
+        expect(w1Finished[0].details[0]).toMatchObject({ completed: false, leaseLost: true });
+        expect(jobAfterW1, 'W1 wrote nothing to the job row').toEqual(w2Job);
+        expect(w1SessionWrites, 'W1 wrote nothing to any upload session').toEqual([]);
+        expect(sessionAfterW1, 'the winner session is untouched').toEqual(sessionBeforeRelease);
+        expect(sessionAfterW1.errorMessage ?? '').not.toContain(`Released by worker ${w1.workerID}`);
+
+        finalizeStart.release();
+        try {
+          await awaitWithin(w2Settled, WORKER_SETTLED_TIMEOUT_MS, 'W2 to finish');
+        } catch (error) {
+          await logWorkerState('WA2 W2 did not settle', jobID);
+          throw error;
+        }
+
+        const finalJob = await snapshotJob(jobID);
+        const finalSession = await snapshotWorkerSession(jobID);
+        const importRow = await readImportRow(connection, seeded.importSessionId);
+        console.log(
+          `[#561 WA2] final: job=${JSON.stringify(finalJob)} session=${JSON.stringify(finalSession)} importState=${importRow.state} realImportRows=${await countRealImportRows()}`
+        );
+        expect(finalJob.status).toBe(JOB_STATUS_COMPLETED);
+        expect(finalSession.state).toBe(SESSION_STATE_COMPLETED);
+        expect(importRow.state).toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTED);
+        expect(await countRealImportRows()).toBe(ARCGIS_IMPORT_ROW_COUNT);
+      },
+      TEST_TIMEOUT_MS
+    );
+
+    it(
+      'WA2 variant: a worker that wakes after the winner committed sees the commit, fails its fenced write as a lost lease and leaves the completed session alone (catches: a stale worker re-failing the winner session)',
+      async () => {
+        const seeded = await seedArcgisImport(arcgisScope, ARCGIS_FILE_NAME, ARCGIS_IMPORT_ROW_COUNT, ARCGIS_TAG_PREFIX, TEST_USER);
+        const jobID = await createArcgisJob(seeded, UploadMode.REVISIONS);
+        sharedState.statementLog = [];
+
+        const w1 = await parkFirstWorkerBeforeStaging(jobID);
+        await sweepLeaseAwayAndMakeDue(jobID);
+
+        try {
+          await awaitWithin(startWorker(jobID), WORKER_SETTLED_TIMEOUT_MS, 'W2 to run the job to completion');
+        } catch (error) {
+          await logWorkerState('WA2 variant W2 did not settle', jobID);
+          throw error;
+        }
+        const jobAfterW2 = await snapshotJob(jobID);
+        const sessionAfterW2 = await snapshotWorkerSession(jobID);
+        const importAfterW2 = await readImportRow(connection, seeded.importSessionId);
+        const rowsAfterW2 = await countRealImportRows();
+        console.log(
+          `[#561 WA2 variant] W2 done: job=${JSON.stringify(jobAfterW2)} session=${JSON.stringify(sessionAfterW2)} importState=${importAfterW2.state} realImportRows=${rowsAfterW2}`
+        );
+        expect(jobAfterW2.status).toBe(JOB_STATUS_COMPLETED);
+        expect(sessionAfterW2.state).toBe(SESSION_STATE_COMPLETED);
+        expect(importAfterW2.state).toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTED);
+
+        const logIndexAtRelease = sharedState.logEntries.length;
+        w1.stagingStart.release();
+        try {
+          await awaitWithin(w1.settled, WORKER_SETTLED_TIMEOUT_MS, 'the stale W1 to finish');
+        } catch (error) {
+          await logWorkerState('WA2 variant W1 did not settle', jobID);
+          throw error;
+        }
+
+        const w1Finished = workerFinishedEntries(w1.workerID);
+        const w1CommitEvents = sharedState.logEntries
+          .slice(logIndexAtRelease)
+          .filter(entry => entry.message === ARCGIS_COMMIT_COMPLETED_EVENT)
+          .map(entry => entry.details[0]);
+        const w1SessionWrites = sessionStateWritesSince(logIndexAtRelease);
+        const jobAfterW1 = await snapshotJob(jobID);
+        const sessionAfterW1 = await snapshotWorkerSession(jobID);
+        console.log(
+          `[#561 WA2 variant] after W1 settled: w1Finished=${JSON.stringify(w1Finished.map(entry => entry.details[0]))} w1CommitEvents=${JSON.stringify(w1CommitEvents)} ` +
+            `job=${JSON.stringify(jobAfterW1)} session=${JSON.stringify(sessionAfterW1)} sessionStateWritesSinceRelease=${JSON.stringify(w1SessionWrites)}`
+        );
+        expect(w1CommitEvents, 'the stale commit must report the already-committed import').toEqual([expect.objectContaining({ alreadyCommitted: true })]);
+        expect(w1Finished).toHaveLength(1);
+        expect(w1Finished[0].details[0]).toMatchObject({ completed: false, leaseLost: true });
+        expect(w1SessionWrites, 'W1 made zero session writes').toEqual([]);
+        expect(sessionAfterW1).toEqual(sessionAfterW2);
+        expect(sessionAfterW1.state).not.toBe(SESSION_STATE_FAILED);
+        expect(jobAfterW1, 'W1 wrote nothing to the job row').toEqual(jobAfterW2);
+        expect(await countRealImportRows(), 'W1 added no rows').toBe(rowsAfterW2);
+      },
+      TEST_TIMEOUT_MS
+    );
   });
 });

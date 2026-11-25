@@ -88,12 +88,14 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE, cleanupPreviousFileUploads } from '@/lib/ingestion/temporary-measurements';
 import { completeCensusReplacement, replaceCensusForCleanReupload, type CensusReplacementParams } from '@/lib/uploads/stage-measurements';
+import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 import { CENSUS_REPLACEMENT_MARKER_COLUMN, resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { CENSUS_REPLACEMENT_STATEMENT } from '../setup/census-replacement-statement-patterns';
 import { startFreshUploadSession } from '../setup/upload-session-fixtures';
+import { seedArcgisImport, type ArcgisImportScope } from '../setup/arcgis-commit-fixtures';
 
 // ---------------------------------------------------------------------------
 // Fixture vocabulary
@@ -150,8 +152,14 @@ const SESSION_ID = {
   I4: 'clean-reupload-i4-session',
   I5: 'clean-reupload-i5-session',
   I5B: 'clean-reupload-i5b-session',
-  I8: 'clean-reupload-i8-session'
+  I8: 'clean-reupload-i8-session',
+  ARCGIS: 'clean-reupload-arcgis-session'
 } as const;
+
+const ARCGIS_IMPORT_FILE = 'replacement.xlsx';
+const ARCGIS_IMPORT_ROW_COUNT = 3;
+const ARCGIS_IMPORT_TAG_PREFIX = 'arcgis-incoming-';
+const CSV_FAMILY_ONLY_SKIP_REASON = '[CSV family only: the ArcGIS family is derived from its import session; see AI5/AI17(b)]';
 
 const REPLACEMENT_CSV_HEADERS = ['treetag', 'stemtag', 'speciescode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes'];
 const REPLACEMENT_RAW_ROW = {
@@ -340,9 +348,15 @@ async function runBarrierScenario(harness: SessionLockHarness, scenario: () => P
   }
 }
 
+/**
+ * `sparesIncomingCsvFamily` is true for the runners whose incoming batch is the caller-chosen INCOMING_BATCH. The ArcGIS commit
+ * derives its batch from its import session, so it can never equal INCOMING_BATCH and the tests that seed rows under that
+ * batch cannot describe it.
+ */
 const REPLACEMENT_IMPLEMENTATIONS = [
-  { label: 'cleanupPreviousFileUploads (ArcGIS, one caller transaction)', run: 'one_transaction' },
-  { label: 'replaceCensusForCleanReupload (bounded, one transaction per window)', run: 'bounded' }
+  { label: 'cleanupPreviousFileUploads (ArcGIS, one caller transaction)', run: 'one_transaction', sparesIncomingCsvFamily: true },
+  { label: 'replaceCensusForCleanReupload (bounded, one transaction per window)', run: 'bounded', sparesIncomingCsvFamily: true },
+  { label: 'commitArcgisImport (resumable, CLEAN_REUPLOAD)', run: 'arcgis_commit', sparesIncomingCsvFamily: false }
 ] as const;
 
 describe('CLEAN_REUPLOAD census replacement — integration', () => {
@@ -595,9 +609,35 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     expect(result.outcome).toBe(REPLACEMENT_OUTCOME.REPLACED);
   }
 
+  async function runArcgisCommit(): Promise<void> {
+    await startSession(SESSION_ID.ARCGIS);
+    const scope: ArcgisImportScope = {
+      schema,
+      plotID,
+      censusID: targetCensusID,
+      speciesCode: testData.species[0].SpeciesCode,
+      quadratName: testData.quadrats[0].QuadratName
+    };
+    const seeded = await seedArcgisImport(scope, ARCGIS_IMPORT_FILE, ARCGIS_IMPORT_ROW_COUNT, ARCGIS_IMPORT_TAG_PREFIX, TEST_CHANGED_BY);
+    const result = await commitArcgisImport(connectionManager, {
+      schema,
+      plotID,
+      censusID: targetCensusID,
+      importSessionId: seeded.importSessionId,
+      fileName: ARCGIS_IMPORT_FILE,
+      uploadMode: UploadMode.CLEAN_REUPLOAD,
+      userId: TEST_CHANGED_BY,
+      uploadSessionID: SESSION_ID.ARCGIS
+    });
+    console.log(`[arcgis commit] batch=${result.batchID} rowCount=${result.rowCount} alreadyCommitted=${result.alreadyCommitted}`);
+    expect(result.alreadyCommitted).toBe(false);
+    expect(result.rowCount).toBe(ARCGIS_IMPORT_ROW_COUNT);
+  }
+
   const REPLACEMENT_RUNNERS = {
     one_transaction: runCleanupInOneTransaction,
-    bounded: runBoundedReplacement
+    bounded: runBoundedReplacement,
+    arcgis_commit: runArcgisCommit
   } as const;
 
   /** The DELETE-audit rows #507 adds for the coremeasurements deletes this suite's cleanup runs. */
@@ -638,8 +678,10 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     sharedState.statements.length = 0;
   });
 
-  describe.each(REPLACEMENT_IMPLEMENTATIONS)('$label', ({ run: runnerKey }) => {
+  describe.each(REPLACEMENT_IMPLEMENTATIONS)('$label', ({ run: runnerKey, sparesIncomingCsvFamily }) => {
     const run = REPLACEMENT_RUNNERS[runnerKey];
+    const itCsvFamilyOnly = (name: string, body: () => Promise<void>, timeoutMs: number) =>
+      it.skipIf(!sparesIncomingCsvFamily)(`${name} ${CSV_FAMILY_ONLY_SKIP_REASON}`, body, timeoutMs);
     // -------------------------------------------------------------------------
     // 1. The core contract
     // -------------------------------------------------------------------------
@@ -740,33 +782,37 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
      * this test, the arm was pinned only by textual SQL assertions — no DB row
      * ever exercised it.
      */
-    it('spares coremeasurements already written under the INCOMING batch family', async () => {
-      await seedFixture();
+    itCsvFamilyOnly(
+      'spares coremeasurements already written under the INCOMING batch family',
+      async () => {
+        await seedFixture();
 
-      await seedParkedRows(INCOMING_FILE, INCOMING_BATCH, targetCensusID, INCOMING_OWN_PARKED_ROWS);
-      await seedParkedRows(INCOMING_FILE, INCOMING_OWN_SUB_BATCH, targetCensusID, INCOMING_OWN_SUB_BATCH_PARKED_ROWS);
-      const incomingIngestedID = await seedIngestedRow(INCOMING_FILE, INCOMING_OWN_INGESTED_SUB_BATCH, targetCensusID, plotID, 'INCOMING-INGESTED');
-      await seedErrorLink(incomingIngestedID);
+        await seedParkedRows(INCOMING_FILE, INCOMING_BATCH, targetCensusID, INCOMING_OWN_PARKED_ROWS);
+        await seedParkedRows(INCOMING_FILE, INCOMING_OWN_SUB_BATCH, targetCensusID, INCOMING_OWN_SUB_BATCH_PARKED_ROWS);
+        const incomingIngestedID = await seedIngestedRow(INCOMING_FILE, INCOMING_OWN_INGESTED_SUB_BATCH, targetCensusID, plotID, 'INCOMING-INGESTED');
+        await seedErrorLink(incomingIngestedID);
 
-      const expectedSurvivors = INCOMING_OWN_PARKED_ROWS + INCOMING_OWN_SUB_BATCH_PARKED_ROWS + 1;
+        const expectedSurvivors = INCOMING_OWN_PARKED_ROWS + INCOMING_OWN_SUB_BATCH_PARKED_ROWS + 1;
 
-      await run();
+        await run();
 
-      const [survivors] = await connection.query<RowDataPacket[]>(
-        `SELECT UploadBatchID, COUNT(*) AS count FROM coremeasurements WHERE CensusID = ? GROUP BY UploadBatchID ORDER BY UploadBatchID`,
-        [targetCensusID]
-      );
-      console.log(`[incoming-family] survivors: ${JSON.stringify(survivors)}`);
+        const [survivors] = await connection.query<RowDataPacket[]>(
+          `SELECT UploadBatchID, COUNT(*) AS count FROM coremeasurements WHERE CensusID = ? GROUP BY UploadBatchID ORDER BY UploadBatchID`,
+          [targetCensusID]
+        );
+        console.log(`[incoming-family] survivors: ${JSON.stringify(survivors)}`);
 
-      expect(survivors.map(row => [String(row.UploadBatchID), Number(row.count)])).toEqual([
-        [INCOMING_BATCH, INCOMING_OWN_PARKED_ROWS],
-        [INCOMING_OWN_SUB_BATCH, INCOMING_OWN_SUB_BATCH_PARKED_ROWS],
-        [INCOMING_OWN_INGESTED_SUB_BATCH, 1]
-      ]);
-      expect(await countRows(targetCensusID, 'all')).toBe(expectedSurvivors);
-      // The incoming row's error link rides along with the row it belongs to.
-      expect(await errorLinkCount(targetCensusID)).toBe(1);
-    }, 120000);
+        expect(survivors.map(row => [String(row.UploadBatchID), Number(row.count)])).toEqual([
+          [INCOMING_BATCH, INCOMING_OWN_PARKED_ROWS],
+          [INCOMING_OWN_SUB_BATCH, INCOMING_OWN_SUB_BATCH_PARKED_ROWS],
+          [INCOMING_OWN_INGESTED_SUB_BATCH, 1]
+        ]);
+        expect(await countRows(targetCensusID, 'all')).toBe(expectedSurvivors);
+        // The incoming row's error link rides along with the row it belongs to.
+        expect(await errorLinkCount(targetCensusID)).toBe(1);
+      },
+      120000
+    );
 
     /**
      * The deletes are issued as `DELETE ... LIMIT n` in a loop so no single
@@ -821,22 +867,26 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     // 2. uploadmetrics: prior scope cleared, incoming upload's own metric kept
     // -------------------------------------------------------------------------
 
-    it('clears every PRIOR target-scope metric row while leaving the incoming upload its own', async () => {
-      await seedFixture();
-      const before = await metricBatches(targetCensusID);
-      console.log(`[metrics] before: ${JSON.stringify(before)}`);
-      expect(before).toContain(PRIOR_BATCH_WITH_METRICS);
-      expect(before).toContain(INCOMING_BATCH);
+    itCsvFamilyOnly(
+      'clears every PRIOR target-scope metric row while leaving the incoming upload its own',
+      async () => {
+        await seedFixture();
+        const before = await metricBatches(targetCensusID);
+        console.log(`[metrics] before: ${JSON.stringify(before)}`);
+        expect(before).toContain(PRIOR_BATCH_WITH_METRICS);
+        expect(before).toContain(INCOMING_BATCH);
 
-      await run();
+        await run();
 
-      const after = await metricBatches(targetCensusID);
-      console.log(`[metrics] after: ${JSON.stringify(after)}`);
-      // Not "empty": the replacement upload legitimately owns metric rows. Only
-      // the PRIOR ones must be gone.
-      expect(after).toEqual([INCOMING_BATCH]);
-      expect(after).not.toContain(PRIOR_BATCH_WITH_METRICS);
-    }, 120000);
+        const after = await metricBatches(targetCensusID);
+        console.log(`[metrics] after: ${JSON.stringify(after)}`);
+        // Not "empty": the replacement upload legitimately owns metric rows. Only
+        // the PRIOR ones must be gone.
+        expect(after).toEqual([INCOMING_BATCH]);
+        expect(after).not.toContain(PRIOR_BATCH_WITH_METRICS);
+      },
+      120000
+    );
 
     // -------------------------------------------------------------------------
     // 3. Isolation controls

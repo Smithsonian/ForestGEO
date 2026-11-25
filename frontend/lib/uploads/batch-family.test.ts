@@ -1,19 +1,29 @@
+import crypto from 'crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { generateShortBatchID } from '@/config/utils';
+
 import {
+  ARCGIS_COMMIT_BATCH_ID_BODY_LENGTH,
+  ARCGIS_COMMIT_BATCH_ID_PREFIX,
+  assertCallerBatchIDAllowed,
   BatchFamilyScopeError,
   buildSubBatchID,
   buildSubBatchPattern,
+  deriveArcgisCommitBatchID,
   discoverBatchFamily,
   FAMILY_SCAN_INDEX,
   escapeLikePattern,
   familyRootOf,
   getIngestionBatchSize,
   highestSubBatchOrdinal,
+  InvalidArcgisImportSessionIDError,
+  isArcgisCommitBatchShape,
   isSubBatchOf,
   MAX_ORIGINAL_BATCH_ID_LENGTH,
   MAX_SUB_BATCH_ORDINAL,
   OriginalBatchIDTooLongError,
+  ReservedBatchIDError,
   selectNewestFamilyPerFile,
   STAGED_BATCH_ID_MAX_LENGTH,
   SUB_BATCH_SEPARATOR,
@@ -217,5 +227,133 @@ describe('selectNewestFamilyPerFile', () => {
       { FileID: 'a.csv', BatchID: 'higher', maxRowID: '9007199254740994' }
     ];
     expect(selectNewestFamilyPerFile(rows)[0].batchID).toBe('higher');
+  });
+});
+
+const RANDOM_SAMPLE_SIZE = 1_000;
+const ALL_ZERO_UUID = '00000000-0000-0000-0000-000000000000';
+const ALL_F_UUID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+const BASE36_RADIX = 36;
+const HEX_RADIX = 16;
+const UUID_HEX_DIGITS = 32;
+
+function decodeDerivedBody(batchID: string): string {
+  const body = batchID.slice(ARCGIS_COMMIT_BATCH_ID_PREFIX.length);
+  return [...body]
+    .reduce((value, digit) => value * BigInt(BASE36_RADIX) + BigInt(parseInt(digit, BASE36_RADIX)), BigInt(0))
+    .toString(HEX_RADIX)
+    .padStart(UUID_HEX_DIGITS, '0');
+}
+
+describe('deriveArcgisCommitBatchID (#561 N1)', () => {
+  it('fits the original-batch limit exactly: arc + 25 base-36 digits = MAX_ORIGINAL_BATCH_ID_LENGTH', () => {
+    const derived = deriveArcgisCommitBatchID(crypto.randomUUID());
+    console.log(`[derive] ${derived} length=${derived.length} limit=${MAX_ORIGINAL_BATCH_ID_LENGTH}`);
+    expect(derived).toHaveLength(ARCGIS_COMMIT_BATCH_ID_PREFIX.length + ARCGIS_COMMIT_BATCH_ID_BODY_LENGTH);
+    expect(derived).toHaveLength(MAX_ORIGINAL_BATCH_ID_LENGTH);
+    expect(derived).toMatch(/^arc[0-9a-z]{25}$/);
+    expect(derived).not.toContain('-');
+    expect(derived).not.toContain(SUB_BATCH_SEPARATOR);
+  });
+
+  it('is deterministic for one id and injective: the body decodes back to the UUID hex (catches: a hash or a truncating encoding)', () => {
+    const samples = [ALL_ZERO_UUID, ALL_F_UUID, ...Array.from({ length: RANDOM_SAMPLE_SIZE }, () => crypto.randomUUID())];
+    const derivedIDs = new Set<string>();
+    for (const uuid of samples) {
+      const derived = deriveArcgisCommitBatchID(uuid);
+      expect(deriveArcgisCommitBatchID(uuid)).toBe(derived);
+      expect(decodeDerivedBody(derived), `round trip of ${uuid} via ${derived}`).toBe(uuid.replace(/-/g, '').toLowerCase());
+      derivedIDs.add(derived);
+    }
+    console.log(
+      `[derive] ${samples.length} UUIDs -> ${derivedIDs.size} distinct batch ids; zero=${deriveArcgisCommitBatchID(ALL_ZERO_UUID)} f=${deriveArcgisCommitBatchID(ALL_F_UUID)}`
+    );
+    expect(derivedIDs.size).toBe(samples.length);
+  });
+
+  it.each(['import-session-1', '', 'not-a-uuid-at-all-0000000000000000', `${ALL_F_UUID}0`])('throws InvalidArcgisImportSessionIDError for %j', value => {
+    expect(() => deriveArcgisCommitBatchID(value)).toThrow(InvalidArcgisImportSessionIDError);
+  });
+
+  it('leaves room for every nameable sub-batch: the last one still fits temporarymeasurements.BatchID', () => {
+    const derived = deriveArcgisCommitBatchID(ALL_F_UUID);
+    const lastSubBatch = subBatchIDForRowOrdinal(derived, getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL - 1);
+    console.log(`[derive] last sub-batch ${lastSubBatch} (${lastSubBatch.length} <= ${STAGED_BATCH_ID_MAX_LENGTH})`);
+    expect(lastSubBatch.length).toBeLessThanOrEqual(STAGED_BATCH_ID_MAX_LENGTH);
+  });
+});
+
+describe('isArcgisCommitBatchShape (#561 N1)', () => {
+  it('never matches a batch the CSV generators produce, nor a UUID (catches: a reserved shape a CSV upload can hit)', () => {
+    const csvBatches = Array.from({ length: RANDOM_SAMPLE_SIZE }, () => generateShortBatchID());
+    const matches = csvBatches.filter(isArcgisCommitBatchShape);
+    console.log(`[shape] sample CSV batch ${csvBatches[0]}; ${matches.length} of ${csvBatches.length} matched`);
+    expect(matches).toEqual([]);
+    expect(isArcgisCommitBatchShape(crypto.randomUUID())).toBe(false);
+  });
+
+  it('matches every derived id and nothing that only resembles one', () => {
+    const derived = deriveArcgisCommitBatchID(crypto.randomUUID());
+    expect(isArcgisCommitBatchShape(derived)).toBe(true);
+    expect(isArcgisCommitBatchShape(`${derived}x`)).toBe(false);
+    expect(isArcgisCommitBatchShape(derived.slice(0, -1))).toBe(false);
+    expect(isArcgisCommitBatchShape(`${derived}${SUB_BATCH_SEPARATOR}001`)).toBe(false);
+  });
+
+  it('ReservedBatchIDError carries a code and names the batch', () => {
+    const derived = deriveArcgisCommitBatchID(crypto.randomUUID());
+    const error = new ReservedBatchIDError(derived, 'has the shape reserved for ArcGIS commit batches');
+    expect(error.code).toBe('RESERVED_BATCH_ID');
+    expect(error.message).toContain(derived);
+  });
+});
+
+describe('assertCallerBatchIDAllowed (#561 H2: the batch columns compare case- and accent-insensitively)', () => {
+  const derived = deriveArcgisCommitBatchID('6f1c2d3e-4a5b-4c6d-8e7f-901234567890');
+  const FULL_WIDTH_OFFSET = 0xfee0;
+  const toFullWidth = (value: string) => [...value].map(character => String.fromCharCode(character.charCodeAt(0) + FULL_WIDTH_OFFSET)).join('');
+  const collationAliases: Array<[string, string]> = [
+    ['the derived id itself', derived],
+    ['all uppercase', derived.toUpperCase()],
+    ['mixed-case prefix', `Arc${derived.slice(3)}`],
+    ['uppercase body letter', `${derived.slice(0, 5)}${derived.charAt(5).toUpperCase()}${derived.slice(6)}`],
+    ['accented prefix', `àrc${derived.slice(3)}`],
+    ['full-width prefix', `${toFullWidth('arc')}${derived.slice(3)}`],
+    ['full-width body', `arc${toFullWidth(derived.slice(3))}`]
+  ];
+
+  it.each(collationAliases)('refuses %s (catches: a shape check a collation alias slips past)', (_label, batchID) => {
+    let thrown: unknown;
+    try {
+      assertCallerBatchIDAllowed(batchID);
+    } catch (error) {
+      thrown = error;
+    }
+    console.log(`[H2] ${JSON.stringify(batchID)} -> ${thrown instanceof Error ? thrown.message : 'accepted'}`);
+    expect(thrown).toBeInstanceOf(ReservedBatchIDError);
+  });
+
+  it.each([
+    ['an underscore', 'cross_batch_original'],
+    ['a space', 'batch 1'],
+    ['an uppercase letter', 'Batch-1']
+  ])('refuses a batch with %s', (_label, batchID) => {
+    expect(() => assertCallerBatchIDAllowed(batchID)).toThrow(ReservedBatchIDError);
+  });
+
+  it('accepts every batch the server generators emit, and lowercase-hyphen test batches', () => {
+    const generated = Array.from({ length: RANDOM_SAMPLE_SIZE }, () => generateShortBatchID());
+    const refused = generated.filter(batchID => {
+      try {
+        assertCallerBatchIDAllowed(batchID);
+        return false;
+      } catch (error) {
+        if (error instanceof ReservedBatchIDError) return true;
+        throw error;
+      }
+    });
+    console.log(`[H2] refused ${refused.length} of ${generated.length} generated batches; sample ${generated[0]}`);
+    expect(refused).toEqual([]);
+    expect(() => assertCallerBatchIDAllowed('incoming-batch-0001')).not.toThrow();
   });
 });

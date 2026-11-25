@@ -770,7 +770,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   const submitArcgisImportSession = useCallback(
-    async (file: File, batchID?: string) => {
+    async (file: File) => {
       if (!arcgisImportSession) {
         throw new Error(`ArcGIS submit failed: no import session found for ${file.name}. Re-run the pre-flight step.`);
       }
@@ -797,7 +797,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             censusID: currentCensus?.dateRanges?.[0]?.censusID,
             importSessionId: arcgisImportSession.importSessionId,
             fileName: file.name,
-            batchID,
             uploadMode
           })
         },
@@ -806,7 +805,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       if (!response.ok) {
         throw await buildClientResponseError(response, `committing ArcGIS import for ${file.name}`);
       }
-      const payload = (await response.json()) as { rowCount?: number; alreadyCommitted?: boolean };
+      const payload = (await response.json()) as { rowCount?: number; alreadyCommitted?: boolean; batchID?: string };
+      // The server derives the commit's batch from the import session (#561) and refuses any other batch a page sends,
+      // so verification and ingestion must use the batch it returns.
+      if (typeof payload.batchID !== 'string' || payload.batchID.length === 0) {
+        throw new Error(`ArcGIS commit for ${file.name} returned no batch ID. Reload the page and run the import again.`);
+      }
+      measurementBatchIDs.current.set(file.name, payload.batchID);
       const committedTemporaryRows = Number.isFinite(Number(payload.rowCount)) ? Number(payload.rowCount) : stagedRowCount;
       expectedTemporaryRowCounts.current.set(file.name, committedTemporaryRows);
       // Rows the commit dropped (INSERT IGNORE duplicates) were persisted by the server as
@@ -841,7 +846,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     async (file: File, delimiter: string, estimatedChunkCount: number, fileBatchID?: string) => {
       queue.clear();
       if (sourceFormat === SourceFormat.arcgis_xlsx) {
-        await submitArcgisImportSession(file, fileBatchID);
+        await submitArcgisImportSession(file);
         return;
       }
       const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);

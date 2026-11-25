@@ -325,7 +325,9 @@ The measurements grid has a separate **Import ArcGIS** button that accepts the w
 
 Like a CSV upload, an ArcGIS import asks you to choose a mode first — and Clean Re-Upload here
 means the same thing it means everywhere else: the census's existing measurements are deleted
-before the workbook is inserted.
+before the workbook is inserted. If a Clean Re-Upload through ArcGIS is interrupted, part or all of
+the old census may already have been removed; re-running the import (or the background job's
+automatic retry) finishes it.
 
 ---
 

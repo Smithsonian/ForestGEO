@@ -33,8 +33,8 @@ const BENCH_TIMEOUT_MS = 30 * 60 * 1000;
 const SETUP_HOOK_TIMEOUT_MS = 120_000;
 
 const FAMILIES = {
-  prepartitioned: { label: 'pre-partitioned', fileID: 'setup_bench_prepartitioned.csv', batchID: 'bench_prepartitioned', treeTagPrefix: 'P' },
-  legacy: { label: 'legacy (fallback split)', fileID: 'setup_bench_legacy.csv', batchID: 'bench_legacy', treeTagPrefix: 'L' }
+  prepartitioned: { label: 'pre-partitioned', fileID: 'setup_bench_prepartitioned.csv', batchID: 'bench-prepartitioned', treeTagPrefix: 'P' },
+  legacy: { label: 'legacy (fallback split)', fileID: 'setup_bench_legacy.csv', batchID: 'bench-legacy', treeTagPrefix: 'L' }
 } as const;
 type Family = (typeof FAMILIES)[keyof typeof FAMILIES];
 

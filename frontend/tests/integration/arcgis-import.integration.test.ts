@@ -44,7 +44,7 @@ const sharedState = vi.hoisted(() => ({
 // file_upload changelog row to that one identity regardless of which attempt
 // actually ran, making buildFileUploadChangelogRecordID lookups for a test's
 // OWN uploadSessionId miss entirely (#507).
-const uploadSessionState = vi.hoisted((): { requireOwnership: (...args: unknown[]) => Promise<{ sessionId: string }> } => ({
+const uploadSessionState = vi.hoisted((): { requireOwnership: (options: { sessionId?: string | null }) => Promise<{ sessionId: string }> } => ({
   requireOwnership: async (options: { sessionId?: string | null }) => ({ sessionId: options?.sessionId ?? 'mock-upload-session' })
 }));
 
@@ -107,7 +107,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
       const txID = `${TRANSACTION_ID_PREFIX}${sharedState.transactionCounter}`;
       sharedState.activeTransactionID = txID;
       try {
-        const result = await fn({ id: txID, query: (sql, params) => manager.executeQuery(sql, params, txID) });
+        const result = await fn({ id: txID, query: <R = unknown>(sql: string, params?: unknown[]) => manager.executeQuery(sql, params, txID) as Promise<R> });
         await sharedState.connection.commit();
         sharedState.activeTransactionID = null;
         return result;
@@ -149,7 +149,7 @@ vi.mock('@/config/uploadsessiontracker', async () => {
   const actual = await vi.importActual<typeof import('@/config/uploadsessiontracker')>('@/config/uploadsessiontracker');
   return {
     ...actual,
-    requireUploadSessionOwnership: (...args: unknown[]) => uploadSessionState.requireOwnership(...args)
+    requireUploadSessionOwnership: (options: { sessionId?: string | null }) => uploadSessionState.requireOwnership(options)
   };
 });
 
@@ -158,16 +158,25 @@ import { POST as commitPOST } from '@/app/api/arcgis/commit/route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 import { buildFileUploadChangelogRecordID, MAX_MEASUREMENT_FILE_ID_LENGTH } from '@/lib/uploads/file-names';
-import { createArcgisImportSession } from '@/lib/arcgis/import-session';
+import { ARCGIS_IMPORT_SESSION_STATE, ArcgisImportSessionError, ArcgisStagingAccountingError, createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { UploadMode } from '@/config/uploadmodes';
 import { HTTPResponses } from '@/config/macros';
 import { UploadSessionOwnershipError } from '@/config/uploadsessiontracker';
-import { buildSubBatchID, buildSubBatchPattern, LIKE_ESCAPE_CLAUSE, MAX_ORIGINAL_BATCH_ID_LENGTH } from '@/lib/uploads/batch-family';
+import { buildSubBatchID, buildSubBatchPattern, deriveArcgisCommitBatchID, LIKE_ESCAPE_CLAUSE, MAX_ORIGINAL_BATCH_ID_LENGTH } from '@/lib/uploads/batch-family';
 
 /** A commit this small fits in one sub-batch, so every row stages under the first member. */
 const FIRST_SUB_BATCH_ORDINAL = 1;
 const STAGED_ROW_COUNT_SQL = /SELECT\s+COUNT\(\*\)[\s\S]*FROM\s+\S*temporarymeasurements\b/i;
-import { TEMPORARY_MEASUREMENT_INSERT_COLUMNS } from '@/lib/ingestion/temporary-measurements';
+import {
+  buildArcgisImportRows,
+  countCensusRowsOutsideFamily,
+  countFamilyFailureRows,
+  dropStagingTupleWithTreeTag,
+  readImportRow,
+  seedPriorCensusRows,
+  startActiveUploadSession,
+  type ArcgisImportScope
+} from '../setup/arcgis-commit-fixtures';
 
 async function buildWorkbook(sheets: Record<string, unknown[][]>): Promise<ArrayBuffer> {
   const wb = new ExcelJS.Workbook();
@@ -321,8 +330,9 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     });
     expect(importReference.rowCount).toBe(stagedRowCount);
 
-    const batchID = `arc_commit_${Date.now()}`;
+    const batchID = deriveArcgisCommitBatchID(importReference.importSessionId);
     const uploadSessionId = 'upload-session-arcgis-commit';
+    await startUploadSession(uploadSessionId);
 
     const response = await commitPOST(
       buildCommitRequest(
@@ -332,7 +342,6 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
           censusID,
           importSessionId: importReference.importSessionId,
           fileName,
-          batchID,
           uploadMode: UploadMode.REVISIONS
         },
         uploadSessionId
@@ -340,9 +349,10 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     );
 
     expect(response.status).toBe(HTTPResponses.OK);
-    const payload = (await response.json()) as { rowCount: number; fileName: string };
+    const payload = (await response.json()) as { rowCount: number; fileName: string; batchID: string };
     expect(payload.fileName).toBe(fileName);
     expect(payload.rowCount).toBe(stagedRowCount);
+    expect(payload.batchID, 'the server derives the batch from the import session; the client sent none').toBe(batchID);
 
     // The staged rows must physically land in temporarymeasurements under the
     // committed FileID's batch family with the arcgis_xlsx provenance tag, each
@@ -357,7 +367,10 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     const stagedRowCountQueries = sharedState.executedQueries.filter(query => STAGED_ROW_COUNT_SQL.test(query));
     console.log(`[arcgis-commit] staged members=${JSON.stringify(stagedMembers)} countQueries=${JSON.stringify(stagedRowCountQueries)}`);
     expect(stagedMembers).toEqual([{ batchID: buildSubBatchID(batchID, FIRST_SUB_BATCH_ORDINAL), sourceFormat: 'arcgis_xlsx', total: stagedRowCount }]);
-    expect(stagedRowCountQueries, 'the commit must count inserts from INSERT results, not COUNT(*) over temporarymeasurements').toEqual([]);
+    expect(
+      stagedRowCountQueries,
+      'staging windows count inserts from INSERT results; only the finalize unit reads COUNT(*) over temporarymeasurements, once, to verify the import'
+    ).toHaveLength(1);
 
     // Audit-trail parity with the CSV measurements path: the commit must write a
     // single file_upload row into unifiedchangelog so the upload appears in the
@@ -403,8 +416,8 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
       fileName,
       result
     });
-    const secondBatchID = `arcgis_second_${Date.now()}`;
     const secondUploadSessionId = 'upload-session-arcgis-commit-second';
+    await startUploadSession(secondUploadSessionId);
     const secondResponse = await commitPOST(
       buildCommitRequest(
         {
@@ -413,13 +426,13 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
           censusID,
           importSessionId: secondImportReference.importSessionId,
           fileName,
-          batchID: secondBatchID,
           uploadMode: UploadMode.REVISIONS
         },
         secondUploadSessionId
       )
     );
     expect(secondResponse.status).toBe(HTTPResponses.OK);
+    expect(((await secondResponse.json()) as { batchID: string }).batchID).toBe(deriveArcgisCommitBatchID(secondImportReference.importSessionId));
 
     const secondFileUploadRecordID = buildFileUploadChangelogRecordID(fileName, secondUploadSessionId);
     const [firstAttemptRowsAfterSecond] = await connection.query<RowDataPacket[]>(
@@ -502,25 +515,50 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     return rows[0];
   }
 
+  function importScope(): ArcgisImportScope {
+    return {
+      schema: config.database,
+      plotID: testData.plots[0].plotID,
+      censusID: testData.census[0].censusID,
+      speciesCode: testData.species[0].SpeciesCode,
+      quadratName: testData.quadrats[0].QuadratName
+    };
+  }
+
+  /** The commit's units read this row to prove their upload session is still live, so every committing test needs one. */
+  function startUploadSession(uploadSessionID: string): Promise<void> {
+    return startActiveUploadSession(connection, importScope(), uploadSessionID);
+  }
+
+  async function startedUploadSession(uploadSessionID: string): Promise<string> {
+    await startUploadSession(uploadSessionID);
+    return uploadSessionID;
+  }
+
+  /** The body the UI now sends: no batchID, the server derives it. */
+  function buildCommitBody(
+    seeded: { importSessionId: string; fileName: string; plotID: number; censusID: number; schema: string },
+    uploadMode = UploadMode.REVISIONS
+  ) {
+    return {
+      schema: seeded.schema,
+      plotID: seeded.plotID,
+      censusID: seeded.censusID,
+      importSessionId: seeded.importSessionId,
+      fileName: seeded.fileName,
+      uploadMode
+    };
+  }
+
   it('commits ArcGIS rows through the normal bulk ingestion procedure after server-side staging', async () => {
     const seeded = await seedValidStagedSession({ fileName: `arcgis-process-${Date.now()}.xlsx` });
-    const batchID = `arcgis_process_${Date.now()}`;
+    const batchID = deriveArcgisCommitBatchID(seeded.importSessionId);
+    const uploadSessionId = 'upload-session-arcgis-process';
+    await startUploadSession(uploadSessionId);
 
-    const response = await commitPOST(
-      buildCommitRequest(
-        {
-          schema: seeded.schema,
-          plotID: seeded.plotID,
-          censusID: seeded.censusID,
-          importSessionId: seeded.importSessionId,
-          fileName: seeded.fileName,
-          batchID,
-          uploadMode: UploadMode.REVISIONS
-        },
-        'upload-session-arcgis-process'
-      )
-    );
+    const response = await commitPOST(buildCommitRequest(buildCommitBody(seeded), uploadSessionId));
     expect(response.status).toBe(HTTPResponses.OK);
+    expect(((await response.json()) as { batchID: string }).batchID).toBe(batchID);
     expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
 
     const memberBatchID = buildSubBatchID(batchID, FIRST_SUB_BATCH_ORDINAL);
@@ -576,12 +614,14 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     // Keep the generated name within the canonical FileID width.
     const fileName = `arcgis-psid-${Date.now()}.xlsx`;
     const importReference = await createArcgisImportSession({ schema, plotID, censusID, userId: AUTH_USER_EMAIL, fileName, result });
-    const batchID = `arcgis_psid_${Date.now()}`;
+    const batchID = deriveArcgisCommitBatchID(importReference.importSessionId);
+    const uploadSessionId = 'upload-session-arcgis-publishedstemid';
+    await startUploadSession(uploadSessionId);
 
     const response = await commitPOST(
       buildCommitRequest(
-        { schema, plotID, censusID, importSessionId: importReference.importSessionId, fileName, batchID, uploadMode: UploadMode.REVISIONS },
-        'upload-session-arcgis-publishedstemid'
+        { schema, plotID, censusID, importSessionId: importReference.importSessionId, fileName, uploadMode: UploadMode.REVISIONS },
+        uploadSessionId
       )
     );
     expect(response.status).toBe(HTTPResponses.OK);
@@ -605,26 +645,20 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
 
   it('treats an exact same-batch commit replay as idempotent and does not duplicate rows or changelog metadata', async () => {
     const seeded = await seedValidStagedSession({ fileName: `arcgis-idempotent-${Date.now()}.xlsx` });
-    const batchID = `arc_idempotent_${Date.now()}`;
-    const body = {
-      schema: seeded.schema,
-      plotID: seeded.plotID,
-      censusID: seeded.censusID,
-      importSessionId: seeded.importSessionId,
-      fileName: seeded.fileName,
-      batchID,
-      uploadMode: UploadMode.REVISIONS
-    };
+    const batchID = deriveArcgisCommitBatchID(seeded.importSessionId);
+    const body = buildCommitBody(seeded);
+    await startUploadSession('upload-session-arcgis-idem-1');
 
     const first = await commitPOST(buildCommitRequest(body, 'upload-session-arcgis-idem-1'));
     expect(first.status).toBe(HTTPResponses.OK);
-    expect((await first.json()) as { alreadyCommitted?: boolean }).toMatchObject({ alreadyCommitted: false });
+    expect((await first.json()) as { alreadyCommitted?: boolean }).toMatchObject({ alreadyCommitted: false, batchID });
     expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
 
+    await startUploadSession('upload-session-arcgis-idem-2');
     const second = await commitPOST(buildCommitRequest(body, 'upload-session-arcgis-idem-2'));
     expect(second.status).toBe(HTTPResponses.OK);
-    const replayPayload = (await second.json()) as { rowCount: number; alreadyCommitted: boolean };
-    expect(replayPayload).toMatchObject({ rowCount: seeded.stagedRowCount, alreadyCommitted: true });
+    const replayPayload = (await second.json()) as { rowCount: number; alreadyCommitted: boolean; batchID: string };
+    expect(replayPayload).toMatchObject({ rowCount: seeded.stagedRowCount, alreadyCommitted: true, batchID });
     expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
 
     const sessionRow = await getImportSession(seeded.importSessionId);
@@ -633,7 +667,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     expect(Number(sessionRow.committed_row_count)).toBe(seeded.stagedRowCount);
     expect(sessionRow.committed_at).toBeTruthy();
 
-    // The replay's `alreadyCommitted` short-circuit (claimArcgisImportSessionForCommit)
+    // The replay's `alreadyCommitted` short-circuit (the claim)
     // returns before the file_upload changelog block runs at all, so only the FIRST
     // call's uploadSessionID ever produces a RecordID (#507: buildFileUploadChangelogRecordID
     // keys by attempt, not by fileName alone — a plain-filename lookup silently matches 0 rows).
@@ -657,23 +691,23 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     // Keep the fixture name within temporarymeasurements.FileID's canonical width
     // or INSERT IGNORE silently truncates it and count-by-FileID finds nothing.
     const seeded = await seedValidStagedSession({ fileName: `arc-direct-${Date.now()}.xlsx` });
-    const batchID = `arc_direct_${Date.now()}`;
+    const batchID = deriveArcgisCommitBatchID(seeded.importSessionId);
     const connectionManager = ConnectionManager.getInstance();
     const uploadSessionID = 'worker-session-direct-idem';
+    await startUploadSession(uploadSessionID);
     const params = {
       schema: seeded.schema,
       plotID: seeded.plotID,
       censusID: seeded.censusID,
       importSessionId: seeded.importSessionId,
       fileName: seeded.fileName,
-      batchID,
       uploadMode: UploadMode.REVISIONS,
       userId: AUTH_USER_EMAIL,
       uploadSessionID
     };
 
     const first = await commitArcgisImport(connectionManager, params);
-    expect(first).toEqual({ rowCount: seeded.stagedRowCount, fileName: seeded.fileName, alreadyCommitted: false });
+    expect(first).toEqual({ rowCount: seeded.stagedRowCount, fileName: seeded.fileName, alreadyCommitted: false, batchID });
     expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
 
     const [coreCountBefore] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM coremeasurements WHERE UploadFileID = ?', [
@@ -690,12 +724,12 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     const metadataBefore = typeof changelogBefore[0].NewRowState === 'string' ? JSON.parse(changelogBefore[0].NewRowState) : changelogBefore[0].NewRowState;
 
     const second = await commitArcgisImport(connectionManager, params);
-    expect(second).toEqual({ rowCount: seeded.stagedRowCount, fileName: seeded.fileName, alreadyCommitted: true });
+    expect(second).toEqual({ rowCount: seeded.stagedRowCount, fileName: seeded.fileName, alreadyCommitted: true, batchID });
 
     // The retry must NOT have inserted any additional temporarymeasurements rows.
     expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
 
-    // #507: claimArcgisImportSessionForCommit's alreadyCommitted short-circuit
+    // #507: the claim's alreadyCommitted short-circuit
     // must prevent the dropped-row diff/audit AND the file_upload changelog
     // merge code paths from running at all on replay — proven by exact counts
     // and byte-identical metadata, not merely asserted.
@@ -734,55 +768,44 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
   // failure-row persistence, and its audit) still runs for real.
   // -------------------------------------------------------------------------
 
-  function spyOnTemporaryMeasurementsDrop(connectionManager: ConnectionManager, droppedTreeTag: string) {
-    const columnCount = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.length;
-    const treeTagColumnIndex = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.indexOf('TreeTag');
+  const AUDIT_FAILURE_MESSAGE = 'Simulated unifiedchangelog write failure for an ArcGIS dropped row';
+  const PRIOR_CENSUS_ROW_COUNT = 3;
+  const DUPLICATE_SOURCE_ROW_COUNT = 3;
+
+  /**
+   * Strips the dropped tag's tuple from every staging INSERT before it reaches the server — what a duplicate-key
+   * collision does to the statement's effect — so the count diff, candidate detection, failure-row persistence and its
+   * audit all still run for real. `shouldFailAudit` makes the failure-row audit INSERT throw while it returns true.
+   */
+  function spyOnStagingWindow(connectionManager: ConnectionManager, droppedTreeTag: string, shouldFailAudit: () => boolean = () => false) {
     const realExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
     return vi.spyOn(connectionManager, 'executeQuery').mockImplementation(async (query: string, params?: unknown[], transactionId?: string) => {
-      if (typeof query === 'string' && query.includes('INSERT IGNORE INTO') && query.includes('.temporarymeasurements') && Array.isArray(params)) {
-        const rowCount = params.length / columnCount;
-        let dropRowIndex = -1;
-        for (let i = 0; i < rowCount; i++) {
-          if (params[i * columnCount + treeTagColumnIndex] === droppedTreeTag) {
-            dropRowIndex = i;
-            break;
-          }
-        }
-        if (dropRowIndex !== -1) {
-          const [beforeValues, afterValues] = query.split(' VALUES ');
-          const tuples = afterValues.match(/\([^()]*\)/g) ?? [];
-          tuples.splice(dropRowIndex, 1);
-          const newQuery = `${beforeValues} VALUES ${tuples.join(', ')}`;
-          const newParams = [...params.slice(0, dropRowIndex * columnCount), ...params.slice((dropRowIndex + 1) * columnCount)];
-          return realExecuteQuery(newQuery, newParams, transactionId);
-        }
-      }
+      // recordAuditedIngestionFailureRows writes its INSERT audit row via recordSnapshotRowsAudit
+      // (lib/changelog/ingestion-audit.ts); OldRowState and NewRowState together are unique to that statement among
+      // every other unifiedchangelog write a commit issues.
+      const isFailureRowAudit = query.includes('.unifiedchangelog') && query.includes('OldRowState') && query.includes('NewRowState');
+      if (isFailureRowAudit && shouldFailAudit()) throw new Error(AUDIT_FAILURE_MESSAGE);
+      const withoutDroppedTuple = dropStagingTupleWithTreeTag(query, params ?? [], droppedTreeTag);
+      if (withoutDroppedTuple) return realExecuteQuery(withoutDroppedTuple.sql, withoutDroppedTuple.params, transactionId);
       return realExecuteQuery(query, params, transactionId);
     });
+  }
+
+  function buildDirectCommitParams(seeded: Awaited<ReturnType<typeof seedValidStagedSession>>, uploadSessionID: string, uploadMode = UploadMode.REVISIONS) {
+    return { ...buildCommitBody(seeded, uploadMode), userId: AUTH_USER_EMAIL, uploadSessionID };
   }
 
   it('persists a dropped ArcGIS row as an unresolved ingestion error and audits it as a real INSERT (#507)', async () => {
     const DROPPED_TREE_TAG = 'N300'; // seedValidStagedSession's tree row
     const seeded = await seedValidStagedSession({ fileName: `arc-dropped-${Date.now()}.xlsx` });
-    const batchID = `arcgis_dropped_${Date.now()}`;
+    const uploadSessionID = 'worker-session-dropped';
+    await startUploadSession(uploadSessionID);
     const connectionManager = ConnectionManager.getInstance();
-    const executeQuerySpy = spyOnTemporaryMeasurementsDrop(connectionManager, DROPPED_TREE_TAG);
+    const executeQuerySpy = spyOnStagingWindow(connectionManager, DROPPED_TREE_TAG);
 
     try {
-      const params = {
-        schema: seeded.schema,
-        plotID: seeded.plotID,
-        censusID: seeded.censusID,
-        importSessionId: seeded.importSessionId,
-        fileName: seeded.fileName,
-        batchID,
-        uploadMode: UploadMode.REVISIONS,
-        userId: AUTH_USER_EMAIL,
-        uploadSessionID: 'worker-session-dropped'
-      };
-
-      const result = await commitArcgisImport(connectionManager, params);
-      console.log(`[arcgis-dropped] rowCount=${result.rowCount} alreadyCommitted=${result.alreadyCommitted}`);
+      const result = await commitArcgisImport(connectionManager, buildDirectCommitParams(seeded, uploadSessionID));
+      console.log(`[arcgis-dropped] rowCount=${result.rowCount} alreadyCommitted=${result.alreadyCommitted} batchID=${result.batchID}`);
       expect(result.alreadyCommitted).toBe(false);
       expect(result.rowCount).toBe(seeded.stagedRowCount - 1);
 
@@ -807,250 +830,338 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     }
   });
 
-  it('rolls back the ENTIRE commit — staging insert and dropped-row persistence included — when the late audit of a dropped row fails (#507)', async () => {
+  it('rolls back that staging window when the late audit of a dropped row fails, leaves the census whole, and a retry completes (#507, #561 AI13)', async () => {
     const DROPPED_TREE_TAG = 'N300';
     const seeded = await seedValidStagedSession({ fileName: `arc-late-audit-fail-${Date.now()}.xlsx` });
-    const batchID = `arcgis_audit_${Date.now()}`;
+    const batchID = deriveArcgisCommitBatchID(seeded.importSessionId);
+    const uploadSessionID = 'worker-session-late-audit-fail';
+    await startUploadSession(uploadSessionID);
+    await seedPriorCensusRows(connection, importScope(), PRIOR_CENSUS_ROW_COUNT);
     const connectionManager = ConnectionManager.getInstance();
-    const AUDIT_FAILURE_MESSAGE = 'Simulated unifiedchangelog write failure for an ArcGIS dropped row';
-
-    const columnCount = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.length;
-    const treeTagColumnIndex = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.indexOf('TreeTag');
-    const realExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
-    const auditFailureSpy = vi
-      .spyOn(connectionManager, 'executeQuery')
-      .mockImplementation(async (query: string, params?: unknown[], transactionId?: string) => {
-        // recordAuditedIngestionFailureRows' keyed diff writes its INSERT audit
-        // row via recordSnapshotRowsAudit (lib/changelog/ingestion-audit.ts),
-        // which serializes the caller-supplied before/after snapshots directly
-        // rather than the old whole-scope `INSERT ... SELECT ... NOT EXISTS`
-        // shape — match THAT statement's distinctive column list (both
-        // OldRowState and NewRowState together is unique to it among every
-        // other unifiedchangelog write this commit issues).
-        if (typeof query === 'string' && query.includes('.unifiedchangelog') && query.includes('OldRowState') && query.includes('NewRowState')) {
-          throw new Error(AUDIT_FAILURE_MESSAGE);
-        }
-        if (typeof query === 'string' && query.includes('INSERT IGNORE INTO') && query.includes('.temporarymeasurements') && Array.isArray(params)) {
-          const rowCount = params.length / columnCount;
-          let dropRowIndex = -1;
-          for (let i = 0; i < rowCount; i++) {
-            if (params[i * columnCount + treeTagColumnIndex] === DROPPED_TREE_TAG) {
-              dropRowIndex = i;
-              break;
-            }
-          }
-          if (dropRowIndex !== -1) {
-            const [beforeValues, afterValues] = query.split(' VALUES ');
-            const tuples = afterValues.match(/\([^()]*\)/g) ?? [];
-            tuples.splice(dropRowIndex, 1);
-            const newQuery = `${beforeValues} VALUES ${tuples.join(', ')}`;
-            const newParams = [...params.slice(0, dropRowIndex * columnCount), ...params.slice((dropRowIndex + 1) * columnCount)];
-            return realExecuteQuery(newQuery, newParams, transactionId);
-          }
-        }
-        return realExecuteQuery(query, params, transactionId);
-      });
+    let auditShouldFail = true;
+    const executeQuerySpy = spyOnStagingWindow(connectionManager, DROPPED_TREE_TAG, () => auditShouldFail);
+    const params = buildDirectCommitParams(seeded, uploadSessionID, UploadMode.CLEAN_REUPLOAD);
 
     try {
-      const params = {
-        schema: seeded.schema,
-        plotID: seeded.plotID,
-        censusID: seeded.censusID,
-        importSessionId: seeded.importSessionId,
-        fileName: seeded.fileName,
-        batchID,
-        uploadMode: UploadMode.REVISIONS,
-        userId: AUTH_USER_EMAIL,
-        uploadSessionID: 'worker-session-late-audit-fail'
-      };
-
       await expect(commitArcgisImport(connectionManager, params)).rejects.toThrow(AUDIT_FAILURE_MESSAGE);
 
-      expect(await countStagedRows(seeded.fileName, batchID), 'the commit is all-or-nothing: a failed late audit must roll back the staging insert too').toBe(
-        0
+      const afterFailure = await getImportSession(seeded.importSessionId);
+      const cursorAfterFailure = Number((await readImportRow(connection, seeded.importSessionId)).staging_next_row_index);
+      console.log(`[arcgis-late-audit] after failure: state=${afterFailure.state} cursor=${cursorAfterFailure}`);
+      expect(await countStagedRows(seeded.fileName, batchID), 'a failed late audit must roll back the whole staging window').toBe(0);
+      expect(
+        await countFamilyFailureRows(connection, seeded.fileName, batchID, seeded.censusID),
+        'the dropped-row failure row rolled back with its audit'
+      ).toBe(0);
+      expect(cursorAfterFailure, 'the cursor moves only with a window that fully committed').toBe(0);
+      expect(await countCensusRowsOutsideFamily(connection, seeded.censusID, batchID), 'staging fails before the census is replaced').toBe(
+        PRIOR_CENSUS_ROW_COUNT
       );
-      const [coreRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS total FROM coremeasurements WHERE UploadFileID = ?`, [seeded.fileName]);
-      expect(Number(coreRows[0].total), 'the dropped-row insert must have rolled back together with its failed audit').toBe(0);
+      expect(afterFailure.state, 'the claim committed on its own, so the import stays resumable').toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTING);
 
-      const sessionRow = await getImportSession(seeded.importSessionId);
-      expect(sessionRow.state, 'the import session must not be marked committed when the commit rolled back').not.toBe('committed');
+      auditShouldFail = false;
+      const retry = await commitArcgisImport(connectionManager, params);
+      console.log(`[arcgis-late-audit] retry: ${JSON.stringify(retry)}`);
+      expect(retry).toEqual({ rowCount: seeded.stagedRowCount - 1, fileName: seeded.fileName, alreadyCommitted: false, batchID });
+      expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount - 1);
+      expect(await countFamilyFailureRows(connection, seeded.fileName, batchID, seeded.censusID)).toBe(1);
+      expect(await countCensusRowsOutsideFamily(connection, seeded.censusID, batchID), 'the finished clean re-upload replaced the prior census').toBe(0);
+      expect((await getImportSession(seeded.importSessionId)).state).toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTED);
     } finally {
-      auditFailureSpy.mockRestore();
+      executeQuerySpy.mockRestore();
     }
   });
+
+  it('refuses a window whose dropped row is identical to an earlier staged row with 422, rolling the window back and leaving the census whole (#561 AI13)', async () => {
+    const DUPLICATED_TREE_TAG = 'DUP0';
+    const scope = importScope();
+    const sourceRows = buildArcgisImportRows(scope, DUPLICATE_SOURCE_ROW_COUNT, 'DUP');
+    sourceRows[1] = { ...sourceRows[0] };
+    const fileName = `arc-identical-drop-${Date.now()}.xlsx`;
+    const importReference = await createArcgisImportSession({
+      schema: scope.schema,
+      plotID: scope.plotID,
+      censusID: scope.censusID,
+      userId: AUTH_USER_EMAIL,
+      fileName,
+      result: {
+        rows: sourceRows,
+        warnings: [],
+        summary: {
+          treesTransformed: DUPLICATE_SOURCE_ROW_COUNT,
+          stemsJoined: 0,
+          blankQuadratCount: 0,
+          tagMismatchCount: 0,
+          orphanStemsEmitted: 0,
+          duplicateTreeTags: 0,
+          duplicateGlobalIds: 0,
+          missingRequired: 0,
+          totalRows: DUPLICATE_SOURCE_ROW_COUNT
+        }
+      }
+    });
+    const batchID = deriveArcgisCommitBatchID(importReference.importSessionId);
+    const uploadSessionID = 'upload-session-arcgis-identical-drop';
+    await startUploadSession(uploadSessionID);
+    await seedPriorCensusRows(connection, scope, PRIOR_CENSUS_ROW_COUNT);
+    const connectionManager = ConnectionManager.getInstance();
+    // Two source rows share every matched column, so dropping either leaves a staged twin and the dropped one has no candidate.
+    const executeQuerySpy = spyOnStagingWindow(connectionManager, DUPLICATED_TREE_TAG);
+
+    try {
+      const response = await commitPOST(
+        buildCommitRequest(
+          {
+            schema: scope.schema,
+            plotID: scope.plotID,
+            censusID: scope.censusID,
+            importSessionId: importReference.importSessionId,
+            fileName,
+            uploadMode: UploadMode.CLEAN_REUPLOAD
+          },
+          uploadSessionID
+        )
+      );
+      const payload = (await response.json()) as { error: string };
+      const cursor = Number((await readImportRow(connection, importReference.importSessionId)).staging_next_row_index);
+      console.log(`[arcgis-identical-drop] status=${response.status} error=${payload.error} cursor=${cursor}`);
+
+      expect(response.status).toBe(HTTPResponses.UNPROCESSABLE_ENTITY);
+      expect(payload.error).toContain(
+        new ArcgisStagingAccountingError({
+          importSessionId: importReference.importSessionId,
+          firstRowIndex: 0,
+          sourceRows: DUPLICATE_SOURCE_ROW_COUNT,
+          insertedRows: DUPLICATE_SOURCE_ROW_COUNT - 1,
+          droppedCandidates: 0,
+          persistedFailureRows: 0
+        }).message
+      );
+      expect(await countStagedRows(fileName, batchID), 'the unaccounted window rolled back').toBe(0);
+      expect(await countFamilyFailureRows(connection, fileName, batchID, scope.censusID)).toBe(0);
+      expect(cursor).toBe(0);
+      expect(await countCensusRowsOutsideFamily(connection, scope.censusID, batchID), 'staging fails before the census is replaced').toBe(
+        PRIOR_CENSUS_ROW_COUNT
+      );
+      expect((await getImportSession(importReference.importSessionId)).state).toBe(ARCGIS_IMPORT_SESSION_STATE.COMMITTING);
+    } finally {
+      executeQuerySpy.mockRestore();
+    }
+  });
+
+  /** Everything a rejected commit must leave exactly as it found it (AI12): staged rows, the prior census, the import's state. */
+  async function expectCommitLeftNothingBehind(seeded: { importSessionId: string; fileName: string; censusID: number }, priorCensusRowCount: number) {
+    const stagedRows = await countAllStagedRows(seeded.fileName);
+    const priorRowsRemaining = await countCensusRowsOutsideFamily(connection, seeded.censusID, deriveArcgisCommitBatchID(seeded.importSessionId));
+    const importRow = await readImportRow(connection, seeded.importSessionId);
+    console.log(
+      `[arcgis-rejected] stagedRows=${stagedRows} priorCensusRows=${priorRowsRemaining} state=${importRow.state} cursor=${importRow.staging_next_row_index}`
+    );
+    expect(stagedRows, 'a rejected commit must stage nothing').toBe(0);
+    expect(priorRowsRemaining, 'a rejected commit must leave the prior census rows untouched').toBe(priorCensusRowCount);
+    expect(importRow.state, 'a rejected commit must leave the import at preflight').toBe(ARCGIS_IMPORT_SESSION_STATE.PREFLIGHT);
+    expect(Number(importRow.staging_next_row_index)).toBe(0);
+  }
+
+  async function countAllStagedRows(fileName: string): Promise<number> {
+    const [rows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ?`, [fileName]);
+    return Number(rows[0].total);
+  }
 
   // arcgis_import_sessions.file_id is varchar(255), wider than the varchar(50)
   // FileID chain the commit stages into. A session captured before the length
   // contract existed must fail with a readable error at the write boundary
-  // rather than ER_DATA_TOO_LONG part-way through the commit transaction.
+  // rather than ER_DATA_TOO_LONG part-way through the commit.
   it('commitArcgisImport refuses a stored session whose file name exceeds the FileID contract, staging nothing', async () => {
     const overLengthName = `${'a'.repeat(47)}.xlsx`;
     expect(overLengthName.length).toBeGreaterThan(MAX_MEASUREMENT_FILE_ID_LENGTH);
 
     const seeded = await seedValidStagedSession({ fileName: overLengthName });
-    const batchID = `arc_too_long_${Date.now()}`;
-    const connectionManager = ConnectionManager.getInstance();
+    const batchID = deriveArcgisCommitBatchID(seeded.importSessionId);
+    const uploadSessionID = 'worker-session-too-long';
+    await startUploadSession(uploadSessionID);
+    await seedPriorCensusRows(connection, importScope(), PRIOR_CENSUS_ROW_COUNT);
 
     await expect(
-      commitArcgisImport(connectionManager, {
-        schema: seeded.schema,
-        plotID: seeded.plotID,
-        censusID: seeded.censusID,
-        importSessionId: seeded.importSessionId,
-        fileName: seeded.fileName,
-        batchID,
-        uploadMode: UploadMode.REVISIONS,
-        userId: AUTH_USER_EMAIL,
-        uploadSessionID: 'worker-session-too-long'
-      })
+      commitArcgisImport(ConnectionManager.getInstance(), buildDirectCommitParams(seeded, uploadSessionID, UploadMode.CLEAN_REUPLOAD))
     ).rejects.toThrow(/50 characters or fewer/);
 
-    // The refusal must leave no partially staged rows behind.
     expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
-
-    // ...and the transaction rollback must leave the session uploadable so the
-    // user can run a fresh preflight after renaming the file.
-    const sessionRow = await getImportSession(seeded.importSessionId);
-    expect(sessionRow.state).toBe('preflight');
+    // ...and the refusal must leave the session uploadable so the user can run a
+    // fresh preflight after renaming the file.
+    await expectCommitLeftNothingBehind(seeded, PRIOR_CENSUS_ROW_COUNT);
   });
 
-  // Each row stages under `<batchID>__subNNN`, and BatchID is varchar(36). An
-  // original ID with no room for the suffix would be truncated by INSERT IGNORE
-  // into a mangled ID, so the commit refuses it as a client error up front.
-  it('rejects a batch ID too long for a sub-batch suffix with 400 INVALID_REQUEST and stages nothing', async () => {
+  // Since #561 the route takes no batch from the UI; the library still shape-checks a batch the worker's pre-deploy
+  // catalog entries may carry. Each row stages under `<batchID>__subNNN` and BatchID is varchar(36), so an original
+  // ID with no room for the suffix is refused as a client error up front.
+  it('commitArcgisImport rejects a sent batch ID too long for a sub-batch suffix with 400 INVALID_REQUEST and stages nothing', async () => {
     const seeded = await seedValidStagedSession({ fileName: `arc-longbatch-${Date.now()}.xlsx` });
     const overLongBatchID = 'b'.repeat(MAX_ORIGINAL_BATCH_ID_LENGTH + 1);
+    const uploadSessionID = 'worker-session-long-batch';
+    await startUploadSession(uploadSessionID);
+    await seedPriorCensusRows(connection, importScope(), PRIOR_CENSUS_ROW_COUNT);
 
-    const response = await commitPOST(
-      buildCommitRequest(
-        {
-          schema: seeded.schema,
-          plotID: seeded.plotID,
-          censusID: seeded.censusID,
-          importSessionId: seeded.importSessionId,
-          fileName: seeded.fileName,
-          batchID: overLongBatchID,
-          uploadMode: UploadMode.REVISIONS
-        },
-        'upload-session-arcgis-long-batch'
-      )
+    const refusal = await commitArcgisImport(ConnectionManager.getInstance(), {
+      ...buildDirectCommitParams(seeded, uploadSessionID, UploadMode.CLEAN_REUPLOAD),
+      batchID: overLongBatchID
+    }).then(
+      () => null,
+      (error: unknown) => error
     );
-    const payload = (await response.json()) as { error: string };
-    const stagedRows = await countStagedRows(seeded.fileName, overLongBatchID);
-    const sessionRow = await getImportSession(seeded.importSessionId);
-    console.log(`[arcgis-long-batch] status=${response.status} error=${payload.error} stagedRows=${stagedRows} sessionState=${sessionRow.state}`);
+    console.log(`[arcgis-long-batch] refusal=${refusal instanceof Error ? `${refusal.name}: ${refusal.message}` : String(refusal)}`);
 
-    expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
-    expect(payload.error).toContain(`at most ${MAX_ORIGINAL_BATCH_ID_LENGTH}`);
-    expect(stagedRows).toBe(0);
-    expect(sessionRow.state, 'the rolled-back commit must leave the session committable').toBe('preflight');
+    expect(refusal).toBeInstanceOf(ArcgisImportSessionError);
+    expect((refusal as ArcgisImportSessionError).status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect((refusal as ArcgisImportSessionError).message).toContain(`at most ${MAX_ORIGINAL_BATCH_ID_LENGTH}`);
+    expect(await countStagedRows(seeded.fileName, overLongBatchID)).toBe(0);
+    await expectCommitLeftNothingBehind(seeded, PRIOR_CENSUS_ROW_COUNT);
   });
 
-  it('rejects a committed ArcGIS import session when replayed with a different BatchID', async () => {
+  it('refuses a stale page that sends a random batch ID with 409, writing nothing and leaving the import at preflight (#561 M4)', async () => {
+    const seeded = await seedValidStagedSession({ fileName: `arcgis-stale-batch-${Date.now()}.xlsx` });
+    const staleBatchID = `arc_stale_${Date.now()}`;
+    const uploadSessionID = 'upload-session-arcgis-stale-batch';
+    await startUploadSession(uploadSessionID);
+    await seedPriorCensusRows(connection, importScope(), PRIOR_CENSUS_ROW_COUNT);
+
+    const response = await commitPOST(buildCommitRequest({ ...buildCommitBody(seeded, UploadMode.CLEAN_REUPLOAD), batchID: staleBatchID }, uploadSessionID));
+    const payload = (await response.json()) as { error: string };
+    console.log(`[arcgis-stale-batch] status=${response.status} error=${payload.error}`);
+
+    expect(response.status).toBe(HTTPResponses.CONFLICT);
+    expect(payload.error).toContain('Reload the page');
+    expect(await countStagedRows(seeded.fileName, staleBatchID)).toBe(0);
+    await expectCommitLeftNothingBehind(seeded, PRIOR_CENSUS_ROW_COUNT);
+  });
+
+  it('replays a committed session with any batch as alreadyCommitted under its stored derived batch, staging nothing new (#561 AI14)', async () => {
     const seeded = await seedValidStagedSession({ fileName: `arcgis-replay-${Date.now()}.xlsx` });
-    const firstBatchID = `arc_replay_1_${Date.now()}`;
-    const secondBatchID = `arc_replay_2_${Date.now()}`;
+    const batchID = deriveArcgisCommitBatchID(seeded.importSessionId);
+    const firstUploadSessionID = 'upload-session-arcgis-replay-1';
+    await startUploadSession(firstUploadSessionID);
 
-    const first = await commitPOST(
-      buildCommitRequest(
-        {
-          schema: seeded.schema,
-          plotID: seeded.plotID,
-          censusID: seeded.censusID,
-          importSessionId: seeded.importSessionId,
-          fileName: seeded.fileName,
-          batchID: firstBatchID,
-          uploadMode: UploadMode.REVISIONS
-        },
-        'upload-session-arcgis-replay-1'
-      )
-    );
+    const first = await commitPOST(buildCommitRequest(buildCommitBody(seeded), firstUploadSessionID));
     expect(first.status).toBe(HTTPResponses.OK);
-    expect(await countStagedRows(seeded.fileName, firstBatchID)).toBe(seeded.stagedRowCount);
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
 
-    const second = await commitPOST(
-      buildCommitRequest(
-        {
-          schema: seeded.schema,
-          plotID: seeded.plotID,
-          censusID: seeded.censusID,
-          importSessionId: seeded.importSessionId,
-          fileName: seeded.fileName,
-          batchID: secondBatchID,
-          uploadMode: UploadMode.REVISIONS
-        },
-        'upload-session-arcgis-replay-2'
-      )
-    );
+    const replaySession = async (uploadSessionID: string, body: Record<string, unknown>) => {
+      await startUploadSession(uploadSessionID);
+      const response = await commitPOST(buildCommitRequest(body, uploadSessionID));
+      return { status: response.status, payload: (await response.json()) as { alreadyCommitted: boolean; batchID: string; rowCount: number } };
+    };
+    const withoutBatch = await replaySession('upload-session-arcgis-replay-2', buildCommitBody(seeded));
+    const withDerivedBatch = await replaySession('upload-session-arcgis-replay-3', { ...buildCommitBody(seeded), batchID });
+    console.log(`[arcgis-replay] withoutBatch=${JSON.stringify(withoutBatch)} withDerivedBatch=${JSON.stringify(withDerivedBatch)}`);
+    for (const replay of [withoutBatch, withDerivedBatch]) {
+      expect(replay.status).toBe(HTTPResponses.OK);
+      expect(replay.payload).toMatchObject({ alreadyCommitted: true, batchID, rowCount: seeded.stagedRowCount });
+    }
+
+    // The library keeps no opinion on a sent batch once the session is committed with a recorded mode: the worker's
+    // pre-deploy catalog entries may carry any batch, and all of them replay.
+    const otherBatchID = `arc_rp_other_${Date.now()}`;
+    const workerReplay = await commitArcgisImport(ConnectionManager.getInstance(), {
+      ...buildDirectCommitParams(seeded, 'upload-session-arcgis-replay-4'),
+      batchID: otherBatchID
+    });
+    expect(workerReplay).toEqual({ rowCount: seeded.stagedRowCount, fileName: seeded.fileName, alreadyCommitted: true, batchID });
+
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
+    expect(await countStagedRows(seeded.fileName, otherBatchID)).toBe(0);
+    const sessionRow = await getImportSession(seeded.importSessionId);
+    expect(sessionRow.committed_batch_id).toBe(batchID);
+    expect(Number(sessionRow.committed_row_count)).toBe(seeded.stagedRowCount);
+  });
+
+  it('keeps a stale page from replaying a committed session with a random batch (409), without disturbing the commit (#561 M4)', async () => {
+    const seeded = await seedValidStagedSession({ fileName: `arcgis-replay-stale-${Date.now()}.xlsx` });
+    const batchID = deriveArcgisCommitBatchID(seeded.importSessionId);
+    await startUploadSession('upload-session-arcgis-replay-stale-1');
+    const first = await commitPOST(buildCommitRequest(buildCommitBody(seeded), 'upload-session-arcgis-replay-stale-1'));
+    expect(first.status).toBe(HTTPResponses.OK);
+
+    const staleBatchID = `arc_replay_stale_${Date.now()}`;
+    await startUploadSession('upload-session-arcgis-replay-stale-2');
+    const second = await commitPOST(buildCommitRequest({ ...buildCommitBody(seeded), batchID: staleBatchID }, 'upload-session-arcgis-replay-stale-2'));
 
     expect(second.status).toBe(HTTPResponses.CONFLICT);
-    const payload = (await second.json()) as { error: string };
-    expect(payload.error).toContain('already been committed');
-    expect(await countStagedRows(seeded.fileName, secondBatchID)).toBe(0);
-    expect((await getImportSession(seeded.importSessionId)).committed_batch_id).toBe(firstBatchID);
+    expect(await countStagedRows(seeded.fileName, staleBatchID)).toBe(0);
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
+    expect((await getImportSession(seeded.importSessionId)).committed_batch_id).toBe(batchID);
+  });
+
+  it('replays a session committed before #561 (no recorded mode) only with its stored client batch, through the route (#561 AI14 legacy)', async () => {
+    const seeded = await seedValidStagedSession({ fileName: `arcgis-legacy-${Date.now()}.xlsx` });
+    const derivedBatchID = deriveArcgisCommitBatchID(seeded.importSessionId);
+    await startUploadSession('upload-session-arcgis-legacy-1');
+    const first = await commitPOST(buildCommitRequest(buildCommitBody(seeded), 'upload-session-arcgis-legacy-1'));
+    expect(first.status).toBe(HTTPResponses.OK);
+
+    const legacyClientBatchID = `arc_legacy_${Date.now()}`;
+    await connection.query(`UPDATE arcgis_import_sessions SET committed_upload_mode = NULL, committed_batch_id = ? WHERE import_session_id = ?`, [
+      legacyClientBatchID,
+      seeded.importSessionId
+    ]);
+
+    const replayStoredBatch = await commitPOST(
+      buildCommitRequest({ ...buildCommitBody(seeded), batchID: legacyClientBatchID }, await startedUploadSession('upload-session-arcgis-legacy-2'))
+    );
+    const replayPayload = (await replayStoredBatch.json()) as { alreadyCommitted: boolean; batchID: string; rowCount: number };
+    console.log(`[arcgis-legacy] storedBatchReplay=${replayStoredBatch.status} ${JSON.stringify(replayPayload)}`);
+    expect(replayStoredBatch.status).toBe(HTTPResponses.OK);
+    expect(replayPayload).toMatchObject({ alreadyCommitted: true, batchID: legacyClientBatchID, rowCount: seeded.stagedRowCount });
+
+    const otherBatchID = `arc_legacy_other_${Date.now()}`;
+    const replayOtherBatch = await commitPOST(
+      buildCommitRequest({ ...buildCommitBody(seeded), batchID: otherBatchID }, await startedUploadSession('upload-session-arcgis-legacy-3'))
+    );
+    expect(replayOtherBatch.status, 'a batch that is neither the derived id nor the stored legacy batch is a stale page').toBe(HTTPResponses.CONFLICT);
+
+    const replayWithoutBatch = await commitPOST(buildCommitRequest(buildCommitBody(seeded), await startedUploadSession('upload-session-arcgis-legacy-4')));
+    expect(replayWithoutBatch.status, 'a legacy commit has no derived batch to fall back to').toBe(HTTPResponses.CONFLICT);
+
+    expect(await countStagedRows(seeded.fileName, otherBatchID)).toBe(0);
+    expect(await countStagedRows(seeded.fileName, derivedBatchID)).toBe(seeded.stagedRowCount);
+    expect((await getImportSession(seeded.importSessionId)).committed_batch_id).toBe(legacyClientBatchID);
   });
 
   it('rejects a commit when the upload-session guard fails and stages no rows', async () => {
     const seeded = await seedValidStagedSession({ fileName: `arcgis-upload-session-${Date.now()}.xlsx` });
-    const batchID = `arcgis_guard_${Date.now()}`;
+    await seedPriorCensusRows(connection, importScope(), PRIOR_CENSUS_ROW_COUNT);
     uploadSessionState.requireOwnership = async () => {
       throw new UploadSessionOwnershipError('Upload session does not own this ArcGIS commit', HTTPResponses.CONFLICT);
     };
 
     const response = await commitPOST(
-      buildCommitRequest(
-        {
-          schema: seeded.schema,
-          plotID: seeded.plotID,
-          censusID: seeded.censusID,
-          importSessionId: seeded.importSessionId,
-          fileName: seeded.fileName,
-          batchID,
-          uploadMode: UploadMode.REVISIONS
-        },
-        'upload-session-arcgis-guard-fail'
-      )
+      buildCommitRequest(buildCommitBody(seeded, UploadMode.CLEAN_REUPLOAD), await startedUploadSession('upload-session-arcgis-guard-fail'))
     );
 
     expect(response.status).toBe(HTTPResponses.CONFLICT);
-    expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
-    expect((await getImportSession(seeded.importSessionId)).state).toBe('preflight');
+    await expectCommitLeftNothingBehind(seeded, PRIOR_CENSUS_ROW_COUNT);
   });
 
   it('rejects a commit when the staged session belongs to a DIFFERENT user (403 FORBIDDEN) and stages no rows', async () => {
     // The auth mock authenticates as AUTH_USER_EMAIL, so the resolved scope.userId
-    // is AUTH_USER_EMAIL. Seed the session under a foreign owner so
-    // assertUploadableArcgisSession's `session.user_id !== scope.userId` check trips.
+    // is AUTH_USER_EMAIL. Seed the session under a foreign owner so the claim's
+    // `session.user_id !== input.userId` check trips.
     const foreignOwner = 'someone-else@example.com';
     const seeded = await seedValidStagedSession({ userId: foreignOwner });
-    const batchID = `arc_neg_user_${Date.now()}`;
+    await seedPriorCensusRows(connection, importScope(), PRIOR_CENSUS_ROW_COUNT);
 
     const response = await commitPOST(
-      buildCommitRequest(
-        {
-          schema: seeded.schema,
-          plotID: seeded.plotID,
-          censusID: seeded.censusID,
-          importSessionId: seeded.importSessionId,
-          fileName: seeded.fileName,
-          batchID,
-          uploadMode: UploadMode.REVISIONS
-        },
-        'upload-session-arcgis-neg-wronguser'
-      )
+      buildCommitRequest(buildCommitBody(seeded, UploadMode.CLEAN_REUPLOAD), await startedUploadSession('upload-session-arcgis-neg-wronguser'))
     );
 
     expect(response.status).toBe(HTTPResponses.FORBIDDEN);
     const payload = (await response.json()) as { error: string };
     expect(payload.error).toContain('does not belong to the authenticated user');
-
-    // Safety property: a rejected ownership check must NOT have staged anything.
-    expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
+    await expectCommitLeftNothingBehind(seeded, PRIOR_CENSUS_ROW_COUNT);
   });
 
   it('rejects a commit when the body plot/census scope does NOT match the staged session (409 CONFLICT) and stages no rows', async () => {
     const seeded = await seedValidStagedSession();
-    const batchID = `arc_neg_scope_${Date.now()}`;
+    await seedPriorCensusRows(connection, importScope(), PRIOR_CENSUS_ROW_COUNT);
 
     // The scope guard (assertCanEditMeasurementScope) runs BEFORE the staged-session
     // scope check and rejects a non-existent census with 403, so to reach the
@@ -1065,46 +1176,28 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     ]);
     const mismatchedCensusID = Number(secondCensusRows[0].CensusID);
     expect(mismatchedCensusID).not.toBe(seeded.censusID);
+    const uploadSessionID = 'upload-session-arcgis-neg-scope';
+    await startActiveUploadSession(connection, { ...importScope(), censusID: mismatchedCensusID }, uploadSessionID);
 
     const response = await commitPOST(
-      buildCommitRequest(
-        {
-          schema: seeded.schema,
-          plotID: seeded.plotID,
-          censusID: mismatchedCensusID,
-          importSessionId: seeded.importSessionId,
-          fileName: seeded.fileName,
-          batchID,
-          uploadMode: UploadMode.REVISIONS
-        },
-        'upload-session-arcgis-neg-scope'
-      )
+      buildCommitRequest({ ...buildCommitBody(seeded, UploadMode.CLEAN_REUPLOAD), censusID: mismatchedCensusID }, uploadSessionID)
     );
 
     expect(response.status).toBe(HTTPResponses.CONFLICT);
     const payload = (await response.json()) as { error: string };
     expect(payload.error).toContain('scope does not match');
-
-    expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
+    await expectCommitLeftNothingBehind(seeded, PRIOR_CENSUS_ROW_COUNT);
   });
 
   it('rejects a commit when the body fileName does NOT match the staged session file (409 CONFLICT) and stages no rows', async () => {
     const seeded = await seedValidStagedSession();
-    const batchID = `arc_neg_file_${Date.now()}`;
+    await seedPriorCensusRows(connection, importScope(), PRIOR_CENSUS_ROW_COUNT);
     const mismatchedFileName = `not-the-staged-file-${Date.now()}.xlsx`;
 
     const response = await commitPOST(
       buildCommitRequest(
-        {
-          schema: seeded.schema,
-          plotID: seeded.plotID,
-          censusID: seeded.censusID,
-          importSessionId: seeded.importSessionId,
-          fileName: mismatchedFileName,
-          batchID,
-          uploadMode: UploadMode.REVISIONS
-        },
-        'upload-session-arcgis-neg-file'
+        { ...buildCommitBody(seeded, UploadMode.CLEAN_REUPLOAD), fileName: mismatchedFileName },
+        await startedUploadSession('upload-session-arcgis-neg-file')
       )
     );
 
@@ -1113,8 +1206,8 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     expect(payload.error).toContain('file does not match');
 
     // Nothing staged under EITHER the staged file or the mismatched body file.
-    expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
-    expect(await countStagedRows(mismatchedFileName, batchID)).toBe(0);
+    expect(await countAllStagedRows(mismatchedFileName)).toBe(0);
+    await expectCommitLeftNothingBehind(seeded, PRIOR_CENSUS_ROW_COUNT);
   });
 
   it('rejects a commit for a session with ZERO staged rows (422 UNPROCESSABLE_ENTITY) and stages no rows', async () => {
@@ -1150,27 +1243,16 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
       result: emptyResult
     });
     expect(importReference.rowCount).toBe(0);
+    await seedPriorCensusRows(connection, importScope(), PRIOR_CENSUS_ROW_COUNT);
+    const emptySession = { importSessionId: importReference.importSessionId, fileName, plotID, censusID, schema };
 
-    const batchID = `arc_neg_empty_${Date.now()}`;
     const response = await commitPOST(
-      buildCommitRequest(
-        {
-          schema,
-          plotID,
-          censusID,
-          importSessionId: importReference.importSessionId,
-          fileName,
-          batchID,
-          uploadMode: UploadMode.REVISIONS
-        },
-        'upload-session-arcgis-neg-empty'
-      )
+      buildCommitRequest(buildCommitBody(emptySession, UploadMode.CLEAN_REUPLOAD), await startedUploadSession('upload-session-arcgis-neg-empty'))
     );
 
     expect(response.status).toBe(HTTPResponses.UNPROCESSABLE_ENTITY);
     const payload = (await response.json()) as { error: string };
     expect(payload.error).toContain('contains no rows');
-
-    expect(await countStagedRows(fileName, batchID)).toBe(0);
+    await expectCommitLeftNothingBehind(emptySession, PRIOR_CENSUS_ROW_COUNT);
   });
 });
