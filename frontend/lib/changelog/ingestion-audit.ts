@@ -160,9 +160,10 @@ export interface RecordDeletedCoreMeasurementsAuditParams {
 
 /**
  * Inserts one DELETE-operation `unifiedchangelog` row per coremeasurements
- * row about to be removed by Clean Re-Upload's census-replacement cleanup
- * (lib/ingestion/temporary-measurements.ts cleanupPreviousFileUploads,
- * issue #507) — set-based over an explicit ID list, not a per-row loop.
+ * row about to be removed by a failed-row cleanup or a revision's duplicate
+ * removal (issue #507) — set-based over an explicit ID list, not a per-row
+ * loop. Clean Re-Upload's census replacement records a single summary row
+ * instead (lib/changelog/deletion-summary.ts).
  *
  * Callers MUST run this in the SAME transaction as, and BEFORE, the DELETE
  * that removes `coreMeasurementIDs`: the SELECT that produced the ID list and

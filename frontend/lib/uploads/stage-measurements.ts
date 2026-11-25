@@ -45,6 +45,7 @@ import {
 } from '@/lib/ingestion/temporary-measurements';
 import { buildFileUploadChangelogRecordID, measurementFileIDValidationError, mergeFileUploadChunkIntoMetadata } from '@/lib/uploads/file-names';
 import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
+import type { CensusReplacementSummaryIdentity } from '@/lib/changelog/deletion-summary';
 import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
 import {
@@ -710,20 +711,18 @@ async function deleteMeasurementWindows(
   scope: CensusReplacementSessionScope,
   progress: CensusReplacementProgress
 ): Promise<CensusReplacementLoopEnd> {
+  const summary: CensusReplacementSummaryIdentity = {
+    recordID: buildFileUploadChangelogRecordID(params.fileName, scope.uploadSessionID),
+    fileName: params.fileName,
+    uploadSessionID: scope.uploadSessionID,
+    batchID: params.batchID,
+    changedBy: params.changedBy ?? null
+  };
   let cursor: number | null = 0;
   while (cursor !== null) {
     const windowCursor: number = cursor;
     const unit = await runCensusReplacementUnit(connectionManager, scope, progress, transactionID =>
-      deleteCensusReplacementChunk(
-        connectionManager,
-        scope.schema,
-        params.batchID,
-        scope.plotID,
-        scope.censusID,
-        windowCursor,
-        params.changedBy ?? null,
-        transactionID
-      )
+      deleteCensusReplacementChunk(connectionManager, scope.schema, params.batchID, scope.plotID, scope.censusID, windowCursor, summary, transactionID)
     );
     if (unit.completedByPeer) return 'completed_by_peer';
     progress.windowCount += 1;

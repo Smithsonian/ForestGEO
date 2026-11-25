@@ -93,6 +93,8 @@ import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { CENSUS_REPLACEMENT_STATEMENT } from '../setup/census-replacement-statement-patterns';
+import { CENSUS_REPLACEMENT_TABLE_NAME, DELETION_SUMMARY_KIND } from '@/lib/changelog/deletion-summary';
+import { buildFileUploadChangelogRecordID } from '@/lib/uploads/file-names';
 import { startFreshUploadSession } from '../setup/upload-session-fixtures';
 
 // ---------------------------------------------------------------------------
@@ -123,7 +125,7 @@ const LEGACY_MIGRATED_FILE = 'ctfs-migration';
 
 const CONTROL_FILE = 'control.csv';
 
-/** Attributes every DELETE-audit row this suite's cleanup runs write (#507). */
+/** Attributes the census-replacement summary row this suite's cleanup runs write. */
 const TEST_CHANGED_BY = 'clean-reupload-integration-test';
 
 /** NULL-UploadBatchID legacy rows seeded into each CONTROL census. */
@@ -150,7 +152,8 @@ const SESSION_ID = {
   I4: 'clean-reupload-i4-session',
   I5: 'clean-reupload-i5-session',
   I5B: 'clean-reupload-i5b-session',
-  I8: 'clean-reupload-i8-session'
+  I8: 'clean-reupload-i8-session',
+  ONE_TRANSACTION: 'clean-reupload-one-transaction-session'
 } as const;
 
 const REPLACEMENT_CSV_HEADERS = ['treetag', 'stemtag', 'speciescode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes'];
@@ -562,7 +565,22 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
 
   async function runCleanupInOneTransaction(): Promise<void> {
     const transactionID = await connectionManager.beginTransaction();
-    await cleanupPreviousFileUploads(connectionManager, schema, INCOMING_FILE, INCOMING_BATCH, plotID, targetCensusID, TEST_CHANGED_BY, transactionID);
+    await cleanupPreviousFileUploads(
+      connectionManager,
+      schema,
+      INCOMING_FILE,
+      INCOMING_BATCH,
+      plotID,
+      targetCensusID,
+      {
+        recordID: buildFileUploadChangelogRecordID(INCOMING_FILE, SESSION_ID.ONE_TRANSACTION),
+        fileName: INCOMING_FILE,
+        uploadSessionID: SESSION_ID.ONE_TRANSACTION,
+        batchID: INCOMING_BATCH,
+        changedBy: TEST_CHANGED_BY
+      },
+      transactionID
+    );
     await connectionManager.commitTransaction(transactionID);
   }
 
@@ -600,15 +618,33 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     bounded: runBoundedReplacement
   } as const;
 
-  /** The DELETE-audit rows #507 adds for the coremeasurements deletes this suite's cleanup runs. */
-  async function deleteAuditRows(censusID: number): Promise<RowDataPacket[]> {
+  /** The Recent Changes summary rows a census replacement records for `censusID`: one per upload. */
+  async function replacementSummaryRows(censusID: number): Promise<RowDataPacket[]> {
     const [rows] = await connection.query<RowDataPacket[]>(
-      `SELECT RecordID, OldRowState, ChangedBy FROM unifiedchangelog
-       WHERE TableName = 'coremeasurements' AND Operation = 'DELETE' AND CensusID = ?
-       ORDER BY RecordID`,
-      [censusID]
+      `SELECT RecordID, Operation, OldRowState, NewRowState, ChangedBy, PlotID, CensusID FROM unifiedchangelog
+       WHERE TableName = ? AND CensusID = ?
+       ORDER BY ChangeID`,
+      [CENSUS_REPLACEMENT_TABLE_NAME, censusID]
     );
     return rows;
+  }
+
+  /** The measurements the census's replacement summary rows say were removed. */
+  async function summarizedDeletedMeasurements(censusID: number): Promise<number> {
+    const rows = await replacementSummaryRows(censusID);
+    return rows.reduce((total, row) => {
+      const deletedRowCounts = rowState(row.OldRowState).deletedRowCounts as Record<string, number> | undefined;
+      return total + Number(deletedRowCounts?.coremeasurements ?? 0);
+    }, 0);
+  }
+
+  /** Per-row coremeasurements DELETE audits; a census replacement writes none. */
+  async function perRowDeleteAuditCount(censusID: number): Promise<number> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND Operation = 'DELETE' AND CensusID = ?`,
+      [censusID]
+    );
+    return Number(rows[0].total);
   }
 
   /** The mysql2 driver may hand back a JSON column already parsed, or as text. */
@@ -626,12 +662,10 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     await connection.query(`DELETE FROM stems`);
     await connection.query(`DELETE FROM trees`);
     await connection.query(`DELETE FROM uploadmetrics`);
-    // Every DELETE-audit test below reads unifiedchangelog scoped only by
-    // CensusID (#507) — this census id is reused across every `it()` in this
-    // file, so without clearing it here, an earlier test's audit rows for the
-    // SAME census silently inflate a later test's count (the data they
-    // describe is already gone via the DELETE above, but the audit rows
-    // describing it were never cleared).
+    // Every summary test below reads unifiedchangelog scoped only by CensusID —
+    // this census id is reused across every `it()` in this file, so without
+    // clearing it here, an earlier test's summary rows for the SAME census
+    // silently inflate a later test's count.
     await connection.query(`DELETE FROM unifiedchangelog`);
     await connection.query(`DELETE FROM upload_sessions`);
     rowIndexCounter = 0;
@@ -893,61 +927,51 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     }, 120000);
 
     // -------------------------------------------------------------------------
-    // 5. DELETE-audit trail (#507) — cleanupPreviousFileUploads' own
-    //    deleteCoreMeasurementsInBoundedChunksWithAudit must leave Recent
-    //    Changes a record of every row it removed, not just remove the row.
+    // 5. Recent Changes summary — one row for the replacement, holding the
+    //    count of measurements it removed, not one row per removed measurement.
     // -------------------------------------------------------------------------
 
-    it("writes one DELETE-audit row per deleted coremeasurements row, with the row's actual prior state (#507)", async () => {
+    it('records one census-replacement summary row whose count is exactly the rows removed, and no per-row audits', async () => {
       await seedFixture();
       const before = await countRows(targetCensusID, 'all'); // 17 — see test #1 above
       expect(before).toBeGreaterThan(0);
 
       await run();
 
-      const auditRows = await deleteAuditRows(targetCensusID);
-      console.log(`[delete-audit] target census: ${auditRows.length} audit row(s) for ${before} deleted coremeasurements row(s)`);
-      // One audit row per deleted row — not fewer (a dropped row) and not more
-      // (a duplicate audit for the same physical delete).
-      expect(auditRows).toHaveLength(before);
-
-      const recordIDs = new Set(auditRows.map(row => Number(row.RecordID)));
-      expect(recordIDs.size).toBe(before); // every RecordID distinct — no duplicate CoreMeasurementID
-
-      for (const row of auditRows) {
-        expect(row.ChangedBy).toBe(TEST_CHANGED_BY);
-        const state = rowState(row.OldRowState);
-        // OldRowState is the row's OWN last state, not a placeholder: its
-        // CoreMeasurementID must match the RecordID it was filed under, and
-        // its CensusID must be the census this cleanup actually targeted.
-        expect(Number(state.CoreMeasurementID)).toBe(Number(row.RecordID));
-        expect(Number(state.CensusID)).toBe(targetCensusID);
-      }
-
-      // The one seeded row that was fully ingested (seedIngestedRow) has a
-      // non-null StemGUID; its audit entry must carry that forward, proving
-      // OldRowState was read from the live row and not synthesized generically.
-      const ingestedAudit = auditRows.find(row => rowState(row.OldRowState).StemGUID !== null);
-      expect(ingestedAudit).toBeDefined();
-      // And at least one parked (failed-ingestion) row's RawTreeTag survives
-      // into the audit trail — the parked-row shape, not just the ingested shape.
-      const parkedAudit = auditRows.find(row => rowState(row.OldRowState).RawTreeTag !== null);
-      expect(parkedAudit).toBeDefined();
+      const summaries = await replacementSummaryRows(targetCensusID);
+      console.log(`[replacement summary] target census: ${JSON.stringify(summaries)} for ${before} deleted coremeasurements row(s)`);
+      expect(summaries, 'one summary row for the whole replacement').toHaveLength(1);
+      const [summary] = summaries;
+      expect([summary.Operation, summary.NewRowState, summary.ChangedBy, summary.PlotID, summary.CensusID]).toEqual([
+        'DELETE',
+        null,
+        TEST_CHANGED_BY,
+        plotID,
+        targetCensusID
+      ]);
+      expect(String(summary.RecordID).startsWith(`${INCOMING_FILE}::`), 'shares its RecordID with the upload’s file_upload row').toBe(true);
+      expect(rowState(summary.OldRowState)).toMatchObject({
+        summaryKind: DELETION_SUMMARY_KIND.censusReplacement,
+        fileName: INCOMING_FILE,
+        batchID: INCOMING_BATCH,
+        deletedRowCounts: { coremeasurements: before }
+      });
+      expect(await perRowDeleteAuditCount(targetCensusID)).toBe(0);
     }, 120000);
 
-    it('writes NO DELETE-audit rows for censuses this cleanup did not touch (#507 isolation)', async () => {
+    it('records NO summary for censuses this replacement did not touch', async () => {
       await seedFixture();
 
       await run();
 
-      const sameplotAudit = await deleteAuditRows(samePlotOtherCensusID);
-      const otherPlotAudit = await deleteAuditRows(otherPlotCensusID);
-      console.log(`[delete-audit isolation] samePlotOtherCensus=${sameplotAudit.length} otherPlotCensus=${otherPlotAudit.length}`);
-      expect(sameplotAudit).toHaveLength(0);
-      expect(otherPlotAudit).toHaveLength(0);
+      const samePlot = await replacementSummaryRows(samePlotOtherCensusID);
+      const otherPlot = await replacementSummaryRows(otherPlotCensusID);
+      console.log(`[replacement summary isolation] samePlotOtherCensus=${samePlot.length} otherPlotCensus=${otherPlot.length}`);
+      expect(samePlot).toHaveLength(0);
+      expect(otherPlot).toHaveLength(0);
     }, 120000);
 
-    it('audits deletes past a single chunk window, not just the first (#507)', async () => {
+    it('counts deletes past a single chunk window into the same summary row', async () => {
       const overOneChunk = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE + 137;
       await connection.query(`SET SESSION cte_max_recursion_depth = ?`, [overOneChunk + 1]);
       await connection.query(
@@ -961,11 +985,10 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
 
       await run();
 
-      const auditRows = await deleteAuditRows(targetCensusID);
-      console.log(`[delete-audit chunking] seeded=${overOneChunk} chunk=${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE} audited=${auditRows.length}`);
-      // Every row across BOTH chunk windows got audited — not just the first
-      // CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE-row window the loop processes first.
-      expect(auditRows).toHaveLength(overOneChunk);
+      const summaries = await replacementSummaryRows(targetCensusID);
+      console.log(`[replacement summary chunking] seeded=${overOneChunk} chunk=${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE} summaries=${JSON.stringify(summaries)}`);
+      expect(summaries).toHaveLength(1);
+      expect(await summarizedDeletedMeasurements(targetCensusID)).toBe(overOneChunk);
       expect(await countRows(targetCensusID, 'all')).toBe(0);
     }, 180000);
   });
@@ -1102,7 +1125,7 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
   }
 
   it(
-    'I3: interrupted at window 2 commits window 1 with its audits; a retry finishes without a double audit (catches: one transaction for everything; double audit on resume)',
+    'I3: interrupted at window 2 commits window 1 with its count; a retry finishes without counting a row twice (catches: one transaction for everything; double count on resume)',
     async () => {
       const seededRowCount = WINDOW_SIZE + SURVIVING_WINDOW_REMAINDER;
       await seedBulkPriorRows(seededRowCount, 'I3T');
@@ -1121,27 +1144,25 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
       }
 
       const survivingIDs = await targetCensusMeasurementIDs();
-      const auditedAfterFailure = (await deleteAuditRows(targetCensusID)).map(row => Number(row.RecordID));
+      const summarizedAfterFailure = await summarizedDeletedMeasurements(targetCensusID);
       console.log(
-        `[I3 after failure] seeded=${seededRowCount} surviving=${survivingIDs.length} audited=${auditedAfterFailure.length} ` +
+        `[I3 after failure] seeded=${seededRowCount} surviving=${survivingIDs.length} summarized=${summarizedAfterFailure} ` +
           `survivorsWithoutLink=${await countSurvivorsWithoutErrorLink()} priorMetrics=${await countPriorMetrics()} marker=${await sessionMarker(SESSION_ID.I3)}`
       );
       expect(survivingIDs, 'window 1 committed, window 2 rolled back').toHaveLength(SURVIVING_WINDOW_REMAINDER);
-      expect(auditedAfterFailure, 'audit rows are exactly the W lowest seeded ids').toEqual(seededIDs.slice(0, WINDOW_SIZE));
-      expect(
-        auditedAfterFailure.filter(recordID => survivingIDs.includes(recordID)),
-        'no audit row for a surviving id'
-      ).toEqual([]);
+      expect(survivingIDs, 'window 1 removed exactly the W lowest seeded ids').toEqual(seededIDs.slice(WINDOW_SIZE));
+      expect(summarizedAfterFailure, 'the summary counts the committed window and nothing of the rolled-back one').toBe(WINDOW_SIZE);
       expect(await countSurvivorsWithoutErrorLink(), 'every survivor keeps its error link').toBe(0);
       expect(await countPriorMetrics(), 'the metric is intact until the metrics unit').toBe(1);
       expect(await sessionMarker(SESSION_ID.I3), 'marker stays unset after an interrupted replacement').toBeNull();
 
       const retry = await replaceCensusForCleanReupload(connectionManager, params);
-      const auditedAfterRetry = (await deleteAuditRows(targetCensusID)).map(row => Number(row.RecordID));
-      console.log(`[I3 after retry] outcome=${retry.outcome} audited=${auditedAfterRetry.length} distinct=${new Set(auditedAfterRetry).size}`);
+      const summariesAfterRetry = await replacementSummaryRows(targetCensusID);
+      console.log(`[I3 after retry] outcome=${retry.outcome} summaries=${JSON.stringify(summariesAfterRetry)}`);
       expect(retry.outcome).toBe(REPLACEMENT_OUTCOME.REPLACED);
-      expect(auditedAfterRetry, 'one audit row per deleted row, no double audit on resume').toHaveLength(seededRowCount);
-      expect(new Set(auditedAfterRetry).size).toBe(seededRowCount);
+      expect(summariesAfterRetry, 'the resumed replacement adds to the same summary row').toHaveLength(1);
+      expect(await summarizedDeletedMeasurements(targetCensusID), 'every deleted row counted once, none twice on resume').toBe(seededRowCount);
+      expect(await perRowDeleteAuditCount(targetCensusID)).toBe(0);
       expect(await countRows(targetCensusID, 'all')).toBe(0);
       expect(await sessionMarker(SESSION_ID.I3)).not.toBeNull();
     },
@@ -1259,17 +1280,17 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
           const measurementDeletes = harness.recordedStatements.filter(({ sql }) => CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE.test(sql));
           const priorRows = await countRowsInBatch(BULK_PRIOR_BATCH);
           const failureRows = await countRowsInBatch(SECOND_FILE_FAILURE.batchID);
-          const auditRows = await deleteAuditRows(targetCensusID);
+          const summarized = await summarizedDeletedMeasurements(targetCensusID);
           console.log(
             `[I4] runner=${JSON.stringify(settled)} measurementDeletes=${measurementDeletes.length} priorRows=${priorRows} failureRows=${failureRows} ` +
-              `auditRows=${auditRows.length}\n${harness.renderStatementLog()}`
+              `summarized=${summarized}\n${harness.renderStatementLog()}`
           );
           expect(settled.status).toBe('fulfilled');
           expect(settled.status === 'fulfilled' && settled.value.outcome).toBe(REPLACEMENT_OUTCOME.COMPLETED_BY_PEER);
           expect(measurementDeletes, 'no measurement DELETE once the marker is set').toHaveLength(0);
           expect(priorRows).toBe(seededRowCount);
           expect(failureRows, "the other file's failure row survives").toBe(1);
-          expect(auditRows).toHaveLength(0);
+          expect(summarized).toBe(0);
         });
       },
       BARRIER_TEST_TIMEOUT_MS
@@ -1319,9 +1340,9 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
 
           const priorRows = await countRowsInBatch(BULK_PRIOR_BATCH);
           const failureRows = await countRowsInBatch(SECOND_FILE_FAILURE.batchID);
-          const auditRows = await deleteAuditRows(targetCensusID);
+          const summarized = await summarizedDeletedMeasurements(targetCensusID);
           console.log(
-            `[I5] runner=${JSON.stringify(runnerOutcome)} priorRows=${priorRows} failureRows=${failureRows} auditRows=${auditRows.length}\n` +
+            `[I5] runner=${JSON.stringify(runnerOutcome)} priorRows=${priorRows} failureRows=${failureRows} summarized=${summarized}\n` +
               harness.renderStatementLog()
           );
           const rejectionMessages = [peerOutcome, runnerOutcome].flatMap(outcome => (outcome.status === 'rejected' ? [String(outcome.reason)] : []));
@@ -1330,14 +1351,14 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
           expect(runnerOutcome.status === 'fulfilled' && runnerOutcome.value.outcome).toBe(REPLACEMENT_OUTCOME.COMPLETED_BY_PEER);
           expect(failureRows, "the other file's failure row survives").toBe(1);
           expect(priorRows, 'only the first window deleted').toBe(I4_EXTRA_PRIOR_ROWS);
-          expect(auditRows).toHaveLength(WINDOW_SIZE);
+          expect(summarized).toBe(WINDOW_SIZE);
         });
       },
       BARRIER_TEST_TIMEOUT_MS
     );
 
     it(
-      'I5b: two unbarriered runners of one session end with one replacer, one that yields, exact audits and the marker set (end-to-end regression only: it does not force the overlap, which I5 does, and cannot isolate the window FOR UPDATE, which U1/U2 pin)',
+      'I5b: two unbarriered runners of one session end with one replacer, one that yields, an exact count and the marker set (end-to-end regression only: it does not force the overlap, which I5 does, and cannot isolate the window FOR UPDATE, which U1/U2 pin)',
       async () => {
         const seededRowCount = 2 * WINDOW_SIZE + I5B_EXTRA_PRIOR_ROWS;
         await seedBulkPriorRows(seededRowCount, 'I5BT');
@@ -1345,10 +1366,11 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
         const params = buildReplacementParams(SESSION_ID.I5B);
 
         const settled = await Promise.allSettled([replaceCensusForCleanReupload(realManager, params), replaceCensusForCleanReupload(realManager, params)]);
-        const auditRecordIDs = (await deleteAuditRows(targetCensusID)).map(row => Number(row.RecordID));
+        const summaries = await replacementSummaryRows(targetCensusID);
+        const summarized = await summarizedDeletedMeasurements(targetCensusID);
         const outcomes = settled.map(result => (result.status === 'fulfilled' ? result.value.outcome : `rejected: ${String(result.reason)}`));
         console.log(
-          `[I5b] outcomes=${JSON.stringify(outcomes)} audited=${auditRecordIDs.length} distinct=${new Set(auditRecordIDs).size} ` +
+          `[I5b] outcomes=${JSON.stringify(outcomes)} summaryRows=${summaries.length} summarized=${summarized} ` +
             `remaining=${await countRows(targetCensusID, 'all')} marker=${await sessionMarker(SESSION_ID.I5B)}`
         );
         expect(settled.map(result => result.status)).toEqual(['fulfilled', 'fulfilled']);
@@ -1358,8 +1380,8 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
         ).toHaveLength(1);
         const otherOutcome = outcomes.find(outcome => outcome !== REPLACEMENT_OUTCOME.REPLACED);
         expect(NON_REPLACING_OUTCOMES, `the other runner must yield, not replace again or reject (got ${otherOutcome})`).toContain(otherOutcome);
-        expect(auditRecordIDs).toHaveLength(seededRowCount);
-        expect(new Set(auditRecordIDs).size).toBe(seededRowCount);
+        expect(summaries, 'both runners share the session, so one summary row').toHaveLength(1);
+        expect(summarized, 'every row counted once across both runners').toBe(seededRowCount);
         expect(await countRows(targetCensusID, 'all')).toBe(0);
         expect(await sessionMarker(SESSION_ID.I5B)).not.toBeNull();
       },

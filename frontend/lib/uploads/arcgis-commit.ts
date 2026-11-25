@@ -143,7 +143,16 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
     const rowBatchIDs = assignArcgisRowBatchIDs(batchID, staged.rows.length);
 
     if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-      await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, userId, transactionID);
+      await cleanupPreviousFileUploads(
+        connectionManager,
+        schema,
+        fileName,
+        batchID,
+        plotID,
+        censusID,
+        { recordID: buildFileUploadChangelogRecordID(fileName, uploadSessionID), fileName, uploadSessionID, batchID, changedBy: userId },
+        transactionID
+      );
     }
     await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
 

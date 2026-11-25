@@ -95,6 +95,7 @@ vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: v
 
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { cleanupPreviousFileUploads } from '@/lib/ingestion/temporary-measurements';
+import { buildFileUploadChangelogRecordID } from '@/lib/uploads/file-names';
 
 const TEST_DB_HOST = process.env.TEST_DB_HOST || 'localhost';
 if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
@@ -806,7 +807,23 @@ describe('Mpala-shaped specimens drift: incident, gate, repair, recovery (#552)'
     async () => {
       const transactionID = await connectionManager.beginTransaction();
       try {
-        await cleanupPreviousFileUploads(connectionManager, schema, FILE.REPLACEMENT, BATCH.REPLACEMENT, plotID, censusID, TEST_CHANGED_BY, transactionID);
+        const uploadSessionID = 'specimens-drift-replacement-session';
+        await cleanupPreviousFileUploads(
+          connectionManager,
+          schema,
+          FILE.REPLACEMENT,
+          BATCH.REPLACEMENT,
+          plotID,
+          censusID,
+          {
+            recordID: buildFileUploadChangelogRecordID(FILE.REPLACEMENT, uploadSessionID),
+            fileName: FILE.REPLACEMENT,
+            uploadSessionID,
+            batchID: BATCH.REPLACEMENT,
+            changedBy: TEST_CHANGED_BY
+          },
+          transactionID
+        );
         await connectionManager.commitTransaction(transactionID);
       } catch (error) {
         await connectionManager.rollbackTransaction(transactionID);

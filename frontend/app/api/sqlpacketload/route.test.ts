@@ -325,7 +325,7 @@ function primeMeasurementQueries(manager: any, session: FakeUploadSession = fres
       priorIDsStillToServe = [];
       return servedIDs.map(id => ({ CoreMeasurementID: id }));
     }
-    if (CENSUS_REPLACEMENT_STATEMENT.DELETE_AUDIT.test(text) || CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE.test(text)) {
+    if (CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE.test(text)) {
       return { affectedRows: priorCoreMeasurementIDs.length };
     }
     // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
@@ -770,8 +770,8 @@ describe('sqlpacketload measurement scope validation', () => {
     const PRIOR_CORE_MEASUREMENT_IDS = [501, 502];
     const REPLACEMENT_STATEMENT_KINDS = [
       ['error-link delete', CENSUS_REPLACEMENT_STATEMENT.ERROR_LINK_DELETE],
-      ['delete audit', CENSUS_REPLACEMENT_STATEMENT.DELETE_AUDIT],
       ['measurement delete', CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE],
+      ['census-replacement summary write', CENSUS_REPLACEMENT_STATEMENT.REPLACEMENT_SUMMARY_WRITE],
       ['legacy failedmeasurements delete', CENSUS_REPLACEMENT_STATEMENT.LEGACY_DELETE],
       ['uploadmetrics delete', CENSUS_REPLACEMENT_STATEMENT.METRICS_DELETE],
       ['session marker update', CENSUS_REPLACEMENT_STATEMENT.MARKER_UPDATE]
@@ -960,11 +960,9 @@ describe('sqlpacketload measurement scope validation', () => {
   });
 
   it('cleans up previous census upload data by census scope, not by filename or uploadmetrics', async () => {
-    // Coremeasurements deletes are audited (#507): the row set is first SELECTed
-    // by CoreMeasurementID so the audit write and the DELETE operate on the exact
-    // same ids, then each id is written to unifiedchangelog, then the DELETE
-    // itself removes that exact id list -- never a broad `WHERE CensusID = ?`
-    // DELETE, which would have no fixed row set to audit against.
+    // The row set is first SELECTed by CoreMeasurementID under lock, the DELETE
+    // removes that exact id list -- never a broad `WHERE CensusID = ?` DELETE --
+    // and the count goes into the upload's one census-replacement summary row.
     const priorCoreMeasurementIDs = [501, 502];
     const session = freshUploadSession();
     let windowSelectsAnswered = 0;
@@ -980,9 +978,6 @@ describe('sqlpacketload measurement scope validation', () => {
       if (CORE_MEASUREMENT_WINDOW_SELECT_PATTERN.test(text) && text.includes('.coremeasurements')) {
         windowSelectsAnswered += 1;
         return windowSelectsAnswered === 1 ? priorCoreMeasurementIDs.map(id => ({ CoreMeasurementID: id })) : [];
-      }
-      if (text.includes('INSERT INTO') && text.includes('unifiedchangelog') && text.includes('.coremeasurements cm')) {
-        return { affectedRows: priorCoreMeasurementIDs.length };
       }
       if (text.includes('DELETE FROM') && text.includes('.coremeasurements') && text.includes('CoreMeasurementID IN')) {
         return { affectedRows: priorCoreMeasurementIDs.length };
@@ -1035,23 +1030,27 @@ describe('sqlpacketload measurement scope validation', () => {
     // And never a batch id list sourced from metrics.
     expect(selectCmIdsCall).not.toContain('UploadBatchID IN');
 
-    // The DELETE itself is bounded to exactly the ids the SELECT (and the audit
-    // write below) already fixed -- never a second broad `WHERE CensusID = ?`
-    // that could pick up a different row set than what was audited.
+    // The DELETE itself is bounded to exactly the ids the SELECT already fixed --
+    // never a second broad `WHERE CensusID = ?` that could pick up a different
+    // row set than the one counted.
     const deleteCmCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.coremeasurements'));
     expect(deleteCmCall).toBeDefined();
     expect(deleteCmCall).toContain('CoreMeasurementID IN');
     expect(deleteCmCall).not.toContain('CensusID');
 
-    // Every deleted coremeasurements row gets its own DELETE audit row in
-    // unifiedchangelog, written BEFORE the DELETE in the same transaction (#507).
-    const deleteCmAuditCall = executedSql.find(
-      (sql: string) => sql.includes('INSERT INTO') && sql.includes('unifiedchangelog') && sql.includes('.coremeasurements cm')
-    );
-    expect(deleteCmAuditCall, 'every coremeasurements delete must be audited in unifiedchangelog').toBeDefined();
-    expect(mockConnectionManager.executeQuery.mock.calls.findIndex((call: any[]) => String(call[0]) === deleteCmAuditCall)).toBeLessThan(
-      mockConnectionManager.executeQuery.mock.calls.findIndex((call: any[]) => String(call[0]) === deleteCmCall)
-    );
+    // Recent Changes gets one summary row for the replacement, written after the
+    // DELETE in the same transaction, and no row per deleted measurement.
+    const calls = mockConnectionManager.executeQuery.mock.calls as any[][];
+    const summaryWriteIndex = calls.findIndex(call => CENSUS_REPLACEMENT_STATEMENT.REPLACEMENT_SUMMARY_WRITE.test(String(call[0])));
+    const deleteCmIndex = calls.findIndex(call => String(call[0]) === deleteCmCall);
+    expect(summaryWriteIndex, 'the replacement must record its summary row').toBeGreaterThanOrEqual(0);
+    expect(summaryWriteIndex).toBeGreaterThan(deleteCmIndex);
+    expect(calls[summaryWriteIndex][2], 'the summary commits with the deletes').toBe(calls[deleteCmIndex][2]);
+    expect(JSON.parse(String(calls[summaryWriteIndex][1][1])).deletedRowCounts).toEqual({ coremeasurements: priorCoreMeasurementIDs.length });
+    expect(
+      executedSql.some((sql: string) => CENSUS_REPLACEMENT_STATEMENT.DELETE_AUDIT.test(sql)),
+      'no per-row DELETE audit'
+    ).toBe(false);
 
     const deleteValidationErrorsCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
       String(call[0]).includes('DELETE FROM `forestgeo_testing`.measurement_error_log')

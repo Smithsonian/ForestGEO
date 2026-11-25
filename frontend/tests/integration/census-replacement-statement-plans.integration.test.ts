@@ -22,6 +22,7 @@ import { createAdditionalCensus, setupTestDatabase, teardownTestDatabase, type T
 import {
   captureCensusReplacementWindowStatements,
   captureCoreMeasurementWindowLockStatement,
+  captureDeleteAuditStatement,
   type CapturedStatement,
   type CensusReplacementWindowScope
 } from '../setup/census-replacement-statement-capture';
@@ -150,10 +151,12 @@ describe('census replacement window statement plans (I1)', () => {
     return targetCensusIDs.slice(0, CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
   }
 
+  /** The replacement window's DELETE, and the per-row audit INSERT the failed-row cleanups issue over the same ids. */
   async function explainWindowDeleteAndAudit(ids: number[], retarget: (sql: string) => string = sql => sql) {
     const statements = await captureCensusReplacementWindowStatements(scope, ids);
+    const auditStatement = await captureDeleteAuditStatement(scope.schema, ids, scope.plotID, scope.censusID);
     const coreMeasurementDelete = await explainWithWarnings({ ...statements.coreMeasurementDelete, sql: retarget(statements.coreMeasurementDelete.sql) });
-    const deleteAudit = await explainWithWarnings({ ...statements.deleteAudit, sql: retarget(statements.deleteAudit.sql) });
+    const deleteAudit = await explainWithWarnings({ ...auditStatement, sql: retarget(auditStatement.sql) });
     return { coreMeasurementDelete, deleteAudit };
   }
 

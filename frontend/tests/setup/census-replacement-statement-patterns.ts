@@ -11,6 +11,9 @@ export const CENSUS_REPLACEMENT_STATEMENT = {
   ERROR_LINK_DELETE: /^\s*DELETE FROM\s+\S+\.(measurement_error_log|cmverrors)\b/,
   DELETE_AUDIT: /^\s*INSERT INTO\s+\S+\.unifiedchangelog[\s\S]*FROM\s+\S+\.coremeasurements cm\b/,
   MEASUREMENT_DELETE: /^\s*DELETE FROM\s+\S+\.coremeasurements WHERE CoreMeasurementID IN/,
+  REPLACEMENT_SUMMARY_READ: /^\s*SELECT ChangeID, OldRowState FROM\s+\S+\.unifiedchangelog\s+WHERE TableName = 'census_replacement'/,
+  REPLACEMENT_SUMMARY_WRITE:
+    /^\s*(INSERT INTO\s+\S+\.unifiedchangelog[\s\S]*VALUES \('census_replacement'|UPDATE\s+\S+\.unifiedchangelog SET OldRowState[\s\S]*TableName = 'census_replacement')/,
   LEGACY_DELETE: /^\s*DELETE FROM\s+\S+\.failedmeasurements\b/,
   METRICS_DELETE: /^\s*DELETE FROM\s+\S+\.uploadmetrics\b/
 } as const;
@@ -23,6 +26,7 @@ export const CENSUS_REPLACEMENT_WRITE_PATTERNS: readonly RegExp[] = [
   CENSUS_REPLACEMENT_STATEMENT.ERROR_LINK_DELETE,
   CENSUS_REPLACEMENT_STATEMENT.DELETE_AUDIT,
   CENSUS_REPLACEMENT_STATEMENT.MEASUREMENT_DELETE,
+  CENSUS_REPLACEMENT_STATEMENT.REPLACEMENT_SUMMARY_WRITE,
   CENSUS_REPLACEMENT_STATEMENT.LEGACY_DELETE,
   CENSUS_REPLACEMENT_STATEMENT.METRICS_DELETE,
   CENSUS_REPLACEMENT_STATEMENT.MARKER_UPDATE

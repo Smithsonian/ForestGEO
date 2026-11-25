@@ -74,6 +74,7 @@ vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: v
 
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { cleanupPreviousFileUploads } from '@/lib/ingestion/temporary-measurements';
+import { buildFileUploadChangelogRecordID } from '@/lib/uploads/file-names';
 
 type MeasurementRow = Parameters<typeof insertTestMeasurements>[2][number];
 
@@ -146,7 +147,23 @@ describe('CLEAN_REUPLOAD leftover stems and trees (#489) — integration', () =>
   async function cleanReupload(rows: MeasurementRow[], targetCensusID = censusID): Promise<void> {
     const incomingBatchID = `batch-${batchCounter + 1}`;
     const transactionID = await connectionManager.beginTransaction();
-    await cleanupPreviousFileUploads(connectionManager, schema, REPLACEMENT_FILE, incomingBatchID, plotID, targetCensusID, TEST_CHANGED_BY, transactionID);
+    const uploadSessionID = `leftover-stems-session-${incomingBatchID}`;
+    await cleanupPreviousFileUploads(
+      connectionManager,
+      schema,
+      REPLACEMENT_FILE,
+      incomingBatchID,
+      plotID,
+      targetCensusID,
+      {
+        recordID: buildFileUploadChangelogRecordID(REPLACEMENT_FILE, uploadSessionID),
+        fileName: REPLACEMENT_FILE,
+        uploadSessionID,
+        batchID: incomingBatchID,
+        changedBy: TEST_CHANGED_BY
+      },
+      transactionID
+    );
     await connectionManager.commitTransaction(transactionID);
     await ingest(REPLACEMENT_FILE, rows, targetCensusID);
   }
