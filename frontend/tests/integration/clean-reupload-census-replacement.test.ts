@@ -93,9 +93,13 @@ import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { CENSUS_REPLACEMENT_STATEMENT } from '../setup/census-replacement-statement-patterns';
-import { CENSUS_REPLACEMENT_TABLE_NAME, DELETION_SUMMARY_KIND } from '@/lib/changelog/deletion-summary';
+import {
+  buildCensusReplacementSummaryRecordID,
+  CENSUS_REPLACEMENT_TABLE_NAME,
+  CENSUS_REPLACEMENT_UPLOAD_SCOPE,
+  DELETION_SUMMARY_KIND
+} from '@/lib/changelog/deletion-summary';
 import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
-import { buildFileUploadChangelogRecordID } from '@/lib/uploads/file-names';
 import { startFreshUploadSession } from '../setup/upload-session-fixtures';
 
 // ---------------------------------------------------------------------------
@@ -344,6 +348,13 @@ async function runBarrierScenario(harness: SessionLockHarness, scenario: () => P
   }
 }
 
+/** The ArcGIS arm keys its summary by import session; the bounded arm by upload session (SESSION_ID.I2, see runBoundedReplacement). */
+const ONE_TRANSACTION_SUMMARY_RECORD_ID = buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.arcgisImport, 'clean-reupload-arcgis-import');
+const EXPECTED_SUMMARY_RECORD_ID = {
+  one_transaction: ONE_TRANSACTION_SUMMARY_RECORD_ID,
+  bounded: buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.uploadSession, SESSION_ID.I2)
+} as const;
+
 const REPLACEMENT_IMPLEMENTATIONS = [
   { label: 'cleanupPreviousFileUploads (ArcGIS, one caller transaction)', run: 'one_transaction' },
   { label: 'replaceCensusForCleanReupload (bounded, one transaction per window)', run: 'bounded' }
@@ -574,7 +585,7 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
       plotID,
       targetCensusID,
       {
-        recordID: buildFileUploadChangelogRecordID(INCOMING_FILE, INCOMING_BATCH),
+        recordID: ONE_TRANSACTION_SUMMARY_RECORD_ID,
         fileName: INCOMING_FILE,
         batchID: INCOMING_BATCH,
         changedBy: TEST_CHANGED_BY
@@ -949,9 +960,7 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
         plotID,
         targetCensusID
       ]);
-      expect(summary.RecordID, 'keyed by file and incoming batch, which a worker retry keeps').toBe(
-        buildFileUploadChangelogRecordID(INCOMING_FILE, INCOMING_BATCH)
-      );
+      expect(summary.RecordID, 'keyed by the upload, not by a batch id a caller may reuse').toBe(EXPECTED_SUMMARY_RECORD_ID[runnerKey]);
       expect(rowState(summary.OldRowState)).toMatchObject({
         summaryKind: DELETION_SUMMARY_KIND.censusReplacement,
         fileName: INCOMING_FILE,

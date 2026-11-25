@@ -380,7 +380,7 @@ describe('RecentChangesExplorer deletion summaries', () => {
   it('renders a Clean Re-Upload census replacement with its file name and measurement count', async () => {
     await renderSingleDeleteEntry({
       tableName: CENSUS_REPLACEMENT_TABLE_NAME,
-      recordID: 'census3.csv::batch-1',
+      recordID: 'upload-session:session-1',
       oldRowState: {
         summaryKind: DELETION_SUMMARY_KIND.censusReplacement,
         fileName: 'census3.csv',

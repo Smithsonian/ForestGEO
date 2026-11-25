@@ -34,6 +34,7 @@ import {
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 import { buildFileUploadChangelogRecordID, measurementFileIDValidationError, mergeFileUploadChunkIntoMetadata } from '@/lib/uploads/file-names';
+import { buildCensusReplacementSummaryRecordID, CENSUS_REPLACEMENT_UPLOAD_SCOPE } from '@/lib/changelog/deletion-summary';
 import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
 import {
   BatchIDContainsSubBatchSeparatorError,
@@ -150,7 +151,12 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
         batchID,
         plotID,
         censusID,
-        { recordID: buildFileUploadChangelogRecordID(fileName, batchID), fileName, batchID, changedBy: userId },
+        {
+          recordID: buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.arcgisImport, importSessionId),
+          fileName,
+          batchID,
+          changedBy: userId
+        },
         transactionID
       );
     }

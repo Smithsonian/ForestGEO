@@ -45,7 +45,11 @@ import {
 } from '@/lib/ingestion/temporary-measurements';
 import { buildFileUploadChangelogRecordID, measurementFileIDValidationError, mergeFileUploadChunkIntoMetadata } from '@/lib/uploads/file-names';
 import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
-import type { CensusReplacementSummaryIdentity } from '@/lib/changelog/deletion-summary';
+import {
+  buildCensusReplacementSummaryRecordID,
+  CENSUS_REPLACEMENT_UPLOAD_SCOPE,
+  type CensusReplacementSummaryIdentity
+} from '@/lib/changelog/deletion-summary';
 import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
 import {
@@ -278,7 +282,10 @@ function buildIngestionFailurePayload(droppedRows: DroppedMeasurementRow[], plot
   }));
 }
 
-export type CensusReplacementParams = Omit<StageMeasurementChunkParams, 'transactionID'>;
+export type CensusReplacementParams = Omit<StageMeasurementChunkParams, 'transactionID'> & {
+  /** Names the upload's Recent Changes summary row; defaults to the upload session (buildCensusReplacementSummaryRecordID). */
+  censusReplacementSummaryRecordID?: string;
+};
 export type { CensusReplacementSessionScope };
 
 export interface PreparedMeasurementChunk {
@@ -712,7 +719,8 @@ async function deleteMeasurementWindows(
   progress: CensusReplacementProgress
 ): Promise<CensusReplacementLoopEnd> {
   const summary: CensusReplacementSummaryIdentity = {
-    recordID: buildFileUploadChangelogRecordID(params.fileName, params.batchID),
+    recordID:
+      params.censusReplacementSummaryRecordID ?? buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.uploadSession, scope.uploadSessionID),
     fileName: params.fileName,
     batchID: params.batchID,
     changedBy: params.changedBy ?? null

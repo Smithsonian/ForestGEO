@@ -16,13 +16,29 @@ export type DeletionSummaryKind = (typeof DELETION_SUMMARY_KIND)[keyof typeof DE
 /** A pseudo-table like file_upload: the summary is not a row of any real table. */
 export const CENSUS_REPLACEMENT_TABLE_NAME = 'census_replacement';
 
+/** What a census-replacement summary row is keyed by: the upload as the user started it, which survives retries. */
+export const CENSUS_REPLACEMENT_UPLOAD_SCOPE = {
+  uploadSession: 'upload-session',
+  backgroundJobFile: 'background-job-file',
+  arcgisImport: 'arcgis-import'
+} as const;
+export type CensusReplacementUploadScope = (typeof CENSUS_REPLACEMENT_UPLOAD_SCOPE)[keyof typeof CENSUS_REPLACEMENT_UPLOAD_SCOPE];
+
+const CHANGELOG_RECORD_ID_MAX_LENGTH = 255;
+
+/** The summary row's RecordID; the scope prefix keeps ids from different upload paths apart. */
+export function buildCensusReplacementSummaryRecordID(scope: CensusReplacementUploadScope, uploadID: string | number): string {
+  return `${scope}:${uploadID}`.slice(0, CHANGELOG_RECORD_ID_MAX_LENGTH);
+}
+
 /** Table name to the number of its rows the delete removed. */
 export type DeletedRowCounts = Record<string, number>;
 
 export interface CensusReplacementSummaryIdentity {
   /**
-   * buildFileUploadChangelogRecordID(fileName, batchID). The incoming batch, not the upload session: a worker
-   * retry runs under a new session but keeps its batch, so a retried upload adds to the same row.
+   * buildCensusReplacementSummaryRecordID for the upload: the synchronous route's upload session, the worker's job
+   * file (a worker retry runs under a new session), or the ArcGIS import session. Not the batch id, which callers
+   * may supply and reuse.
    */
   recordID: string;
   fileName: string;

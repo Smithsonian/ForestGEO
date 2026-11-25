@@ -19,7 +19,13 @@ import { SourceFormat } from '@/config/macros/formdetails';
 import type ConnectionManager from '@/lib/db/connectionmanager';
 import type { FileRow } from '@/config/macros/formdetails';
 import { buildSubBatchPattern } from '@/lib/uploads/batch-family';
-import { CENSUS_REPLACEMENT_TABLE_NAME, DELETION_SUMMARY_KIND, type CensusReplacementSummaryIdentity } from '@/lib/changelog/deletion-summary';
+import {
+  buildCensusReplacementSummaryRecordID,
+  CENSUS_REPLACEMENT_TABLE_NAME,
+  CENSUS_REPLACEMENT_UPLOAD_SCOPE,
+  DELETION_SUMMARY_KIND,
+  type CensusReplacementSummaryIdentity
+} from '@/lib/changelog/deletion-summary';
 
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
@@ -261,7 +267,7 @@ describe('cleanupPreviousFileUploads bounded-delete loop control', () => {
   const TEST_CHANGED_BY = 'audit-test-user';
   const TEST_TRANSACTION_ID = 'tx-test';
   const TEST_SUMMARY: CensusReplacementSummaryIdentity = {
-    recordID: `${TEST_FILE_NAME}::${TEST_BATCH_ID}`,
+    recordID: buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.arcgisImport, 'loop-control-import'),
     fileName: TEST_FILE_NAME,
     batchID: TEST_BATCH_ID,
     changedBy: TEST_CHANGED_BY
@@ -462,7 +468,7 @@ describe('deleteCensusReplacementChunk — one measurement window (#555)', () =>
   const PLOT_ID = 22;
   const CENSUS_ID = 32;
   const SUMMARY: CensusReplacementSummaryIdentity = {
-    recordID: `replacement.csv::${BATCH_ID}`,
+    recordID: buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.uploadSession, 'window-session'),
     fileName: 'replacement.csv',
     batchID: BATCH_ID,
     changedBy: 'window-test-user'

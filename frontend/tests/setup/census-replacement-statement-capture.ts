@@ -2,7 +2,11 @@ import type ConnectionManager from '@/lib/db/connectionmanager';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
 import { deleteCensusReplacementChunk, lockAuditAndDeleteCoreMeasurementWindow, type CoreMeasurementDeleteScope } from '@/lib/ingestion/temporary-measurements';
 import { recordDeletedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
-import type { CensusReplacementSummaryIdentity } from '@/lib/changelog/deletion-summary';
+import {
+  buildCensusReplacementSummaryRecordID,
+  CENSUS_REPLACEMENT_UPLOAD_SCOPE,
+  type CensusReplacementSummaryIdentity
+} from '@/lib/changelog/deletion-summary';
 
 export interface CapturedStatement {
   sql: string;
@@ -49,7 +53,7 @@ export async function captureCensusReplacementWindowStatements(
     }
   } as unknown as ConnectionManager;
   const summary: CensusReplacementSummaryIdentity = {
-    recordID: `${CAPTURE_FILE_NAME}::${scope.incomingBatchID}`,
+    recordID: buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.uploadSession, CAPTURE_TRANSACTION_ID),
     fileName: CAPTURE_FILE_NAME,
     batchID: scope.incomingBatchID,
     changedBy: scope.changedBy

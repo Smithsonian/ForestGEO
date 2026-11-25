@@ -95,7 +95,7 @@ vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: v
 
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { cleanupPreviousFileUploads } from '@/lib/ingestion/temporary-measurements';
-import { buildFileUploadChangelogRecordID } from '@/lib/uploads/file-names';
+import { buildCensusReplacementSummaryRecordID, CENSUS_REPLACEMENT_UPLOAD_SCOPE } from '@/lib/changelog/deletion-summary';
 
 const TEST_DB_HOST = process.env.TEST_DB_HOST || 'localhost';
 if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
@@ -815,7 +815,7 @@ describe('Mpala-shaped specimens drift: incident, gate, repair, recovery (#552)'
           plotID,
           censusID,
           {
-            recordID: buildFileUploadChangelogRecordID(FILE.REPLACEMENT, BATCH.REPLACEMENT),
+            recordID: buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.arcgisImport, `import-${BATCH.REPLACEMENT}`),
             fileName: FILE.REPLACEMENT,
             batchID: BATCH.REPLACEMENT,
             changedBy: TEST_CHANGED_BY

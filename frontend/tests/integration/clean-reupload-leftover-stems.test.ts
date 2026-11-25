@@ -74,7 +74,7 @@ vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: v
 
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { cleanupPreviousFileUploads } from '@/lib/ingestion/temporary-measurements';
-import { buildFileUploadChangelogRecordID } from '@/lib/uploads/file-names';
+import { buildCensusReplacementSummaryRecordID, CENSUS_REPLACEMENT_UPLOAD_SCOPE } from '@/lib/changelog/deletion-summary';
 
 type MeasurementRow = Parameters<typeof insertTestMeasurements>[2][number];
 
@@ -155,7 +155,7 @@ describe('CLEAN_REUPLOAD leftover stems and trees (#489) — integration', () =>
       plotID,
       targetCensusID,
       {
-        recordID: buildFileUploadChangelogRecordID(REPLACEMENT_FILE, incomingBatchID),
+        recordID: buildCensusReplacementSummaryRecordID(CENSUS_REPLACEMENT_UPLOAD_SCOPE.arcgisImport, `import-${incomingBatchID}`),
         fileName: REPLACEMENT_FILE,
         batchID: incomingBatchID,
         changedBy: TEST_CHANGED_BY
