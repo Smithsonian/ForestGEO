@@ -188,15 +188,15 @@ Most of your supporting data does not need copying at all. Species, stem codes a
 **not census-scoped** — they belong to the site and plot, so once defined they are available to
 every census automatically.
 
-That leaves personnel, which is recorded per census. The census creation form asks only for a
-description and dates; there is no rollover step or record picker in it.
+That leaves personnel, whose **Census Active** flag is recorded per census. When you start a new
+census, everyone marked Census Active in the previous census (the highest earlier census number for
+the plot) is marked Census Active in the new one. Personnel marked inactive are not carried
+forward. Review the list under **Stem & Plot Details → Personnel** after creating the census and
+adjust it for this season's team.
 
-:::caution
-**Personnel do not currently carry forward on their own.** If you want the same field team
-recorded against a new census, add them under **Stem & Plot Details → Personnel** after creating
-it. Any older instructions describing a rollover section with a **Customize** button in the
-creation popup are describing a feature that is not currently working — do not wait for it to
-populate your personnel list.
+:::note
+Species DBH limits are also set per census and are **not** copied. Re-enter them for the new census
+if you rely on the species min/max DBH check.
 :::
 
 ---
