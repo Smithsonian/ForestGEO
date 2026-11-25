@@ -20,6 +20,7 @@ import {
 } from '@/config/recentchangesexplorer';
 import { computeDiff, DiffEntry } from '@/config/changelogdiff';
 import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
+import { CENSUS_REPLACEMENT_TABLE_NAME, DELETION_SUMMARY_KIND, type DeletedRowCounts } from '@/lib/changelog/deletion-summary';
 import moment from 'moment';
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -76,6 +77,10 @@ export function summarizeChange(entry: Pick<ChangelogEntry, 'operation' | 'table
   // bulk-revision-apply rows are summaries (see projectBulkRevisionRow), not a real table.
   if (entry.tableName === 'bulk-revision-apply') return 'Applied a bulk revision';
   if (entry.operation === 'INSERT' && entry.tableName === 'file_upload') return filename ? `Uploaded ${filename}` : 'Uploaded a file';
+  if (entry.tableName === CENSUS_REPLACEMENT_TABLE_NAME) {
+    const replacementFileName = entry.oldRowState?.fileName;
+    return replacementFileName ? `Replaced the census for a Clean Re-Upload of ${replacementFileName}` : 'Replaced the census for a Clean Re-Upload';
+  }
   if (entry.operation === 'UPDATE' && /measurement/i.test(entry.tableName)) return 'Updated a measurement record';
   if (entry.operation === 'DELETE') return `Deleted a ${objectLabel}`;
   if (entry.operation === 'INSERT') return `Added a ${objectLabel}`;
@@ -295,12 +300,33 @@ function BatchInsertCard({ batch }: { batch: BatchInsertGroup }) {
   );
 }
 
+const DELETION_SUMMARY_KINDS: ReadonlySet<unknown> = new Set(Object.values(DELETION_SUMMARY_KIND));
+
+/** "1,204 coremeasurements, 3 species"; tables with nothing removed are left out. */
+export function describeDeletedRowCounts(counts: DeletedRowCounts | undefined): string {
+  const removed = Object.entries(counts ?? {}).filter(([, count]) => typeof count === 'number' && count > 0);
+  if (removed.length === 0) return 'No rows removed';
+  return `Removed ${removed.map(([tableName, count]) => `${count.toLocaleString()} ${tableName}`).join(', ')}`;
+}
+
+/** OldRowState holds delete counts, not every removed row (lib/changelog/deletion-summary.ts). */
+function DeletionSummary({ entry }: { entry: ChangelogEntry }) {
+  return (
+    <Box sx={{ backgroundColor: 'neutral.900', borderRadius: '6px', p: 1.5, fontFamily: 'monospace', fontSize: '12px' }}>
+      <Typography sx={{ color: '#f87171', fontFamily: 'inherit', fontSize: 'inherit' }}>
+        {describeDeletedRowCounts(entry.oldRowState?.deletedRowCounts as DeletedRowCounts | undefined)}
+      </Typography>
+    </Box>
+  );
+}
+
 function DeleteCard({ entry }: { entry: ChangelogEntry }) {
+  const isDeletionSummary = DELETION_SUMMARY_KINDS.has(entry.oldRowState?.summaryKind);
   return (
     <Sheet variant="outlined" sx={{ p: 1.75, borderRadius: 'md', borderLeft: '3px solid', borderLeftColor: 'danger.500' }}>
       <Stack spacing={1.25}>
         <CardHeader entry={entry} />
-        <DeleteSummary entry={entry} />
+        {isDeletionSummary ? <DeletionSummary entry={entry} /> : <DeleteSummary entry={entry} />}
       </Stack>
     </Sheet>
   );
