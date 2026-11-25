@@ -34,12 +34,16 @@ import {
 } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
 import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
+import { LOCK_WAIT_POLL_INTERVAL_MS } from '../setup/core-measurement-window-harness';
 
 const AUTH_USER_EMAIL = 'admin-audit-runner@forestgeo.test';
 const SIMULATED_AUDIT_FAILURE = 'SIMULATED_AUDIT_WRITE_FAILURE_507';
 const CENSUS_DELETE_BLOCKED_MESSAGE = 'SIMULATED_CENSUS_DELETE_FAILURE_507';
 const CENSUS_DELETE_BLOCKER_TRIGGER = 'test_507_block_census_delete';
 const FORGED_VALIDATION_ID = 987654;
+const LOCK_WAIT_DEADLINE_MS = 5000;
+const MYSQL_NO_REFERENCED_ROW = 'ER_NO_REFERENCED_ROW_2';
+const MYSQL_LOCK_DEADLOCK = 'ER_LOCK_DEADLOCK';
 const FULL_CLEAR_REFERENCE_TABLES = ['attributes', 'personnel', 'roles', 'quadrats', 'species', 'specieslimits', 'genus', 'family', 'reference'] as const;
 
 const sharedState = vi.hoisted(() => ({
@@ -173,6 +177,20 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       [tableName]
     );
     return rows as AuditRow[];
+  }
+
+  /** Resolves once InnoDB reports `threadID`'s transaction waiting on a row lock; fails the test otherwise. */
+  async function waitUntilSessionIsBlocked(threadID: number): Promise<void> {
+    const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+    while (Date.now() < deadline) {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        "SELECT COUNT(*) AS total FROM information_schema.innodb_trx WHERE trx_mysql_thread_id = ? AND trx_state = 'LOCK WAIT'",
+        [threadID]
+      );
+      if (Number(rows[0].total) > 0) return;
+      await new Promise(resolve => setTimeout(resolve, LOCK_WAIT_POLL_INTERVAL_MS));
+    }
+    throw new Error(`Session ${threadID} never waited on a lock within ${LOCK_WAIT_DEADLINE_MS} ms: the row it references was not locked by the clear.`);
   }
 
   async function countRows(sql: string, params: unknown[] = []): Promise<number> {
@@ -492,15 +510,51 @@ describe('Recent Changes audit for admin mutation routes (#507)', () => {
       expect(await countRows('SELECT COUNT(*) AS total FROM unifiedchangelog')).toBe(0);
     });
 
-    it('records one summary row with the count of every reference table the procedure emptied, alongside the measurements', async () => {
+    it('refuses with 409 and deletes nothing when a fixed-data row is added after the lock', async () => {
+      const censusID = await prepareLastCensusWithEveryReferenceTable();
+      sharedState.beforeProcedureCall = async () => {
+        await concurrentSession.query("INSERT INTO attributes (Code, Description, IsActive) VALUES ('LATE7', 'added mid-clear', 1)");
+      };
+
+      const response = await clearCensusPost(clearCensusRequest(censusID, 'full'));
+      await connection.query("DELETE FROM attributes WHERE Code = 'LATE7'");
+
+      expect(response.status, await response.clone().text()).toBe(HTTPResponses.CONFLICT);
+      expect(await countRows('SELECT COUNT(*) AS total FROM census WHERE CensusID = ?', [censusID])).toBe(1);
+      for (const table of FULL_CLEAR_REFERENCE_TABLES) {
+        expect(await countRows(`SELECT COUNT(*) AS total FROM ${table}`), `${table} must be untouched`).toBeGreaterThan(0);
+      }
+      expect(await countRows('SELECT COUNT(*) AS total FROM unifiedchangelog')).toBe(0);
+    });
+
+    // One test, because a committed full clear empties the census and every fixed-data table for the rest of the file.
+    it('records one summary row with every count it emptied, and holds a species insert naming an existing genus until it fails', async () => {
       const censusID = await prepareLastCensusWithEveryReferenceTable();
       const measurementIDs = await seedMeasurementsInCensus(censusID, 2, 'FULL');
       const expectedCounts: Record<string, number> = { coremeasurements: measurementIDs.length };
       for (const table of FULL_CLEAR_REFERENCE_TABLES) expectedCounts[table] = await countRows(`SELECT COUNT(*) AS total FROM ${table}`);
+      const [[{ GenusID: genusID }]] = await connection.query<RowDataPacket[]>('SELECT GenusID FROM genus LIMIT 1');
+      // The procedure deletes species before genus with foreign_key_checks off. Without the genus row
+      // locked, this insert could land between those deletes and leave a species without its genus.
+      let concurrentInsert: Promise<unknown> | undefined;
+      sharedState.beforeProcedureCall = async () => {
+        concurrentInsert = concurrentSession
+          .query("INSERT INTO species (GenusID, SpeciesCode, SpeciesName) VALUES (?, 'LATESP', 'added mid-clear')", [genusID])
+          .then(
+            () => 'inserted',
+            (error: { code?: string }) => error.code
+          );
+        await waitUntilSessionIsBlocked(concurrentSession.threadId);
+      };
 
       const response = await clearCensusPost(clearCensusRequest(censusID, 'full'));
       expect(response.status, await response.clone().text()).toBe(HTTPResponses.OK);
 
+      const insertOutcome = await concurrentInsert;
+      console.log(`[full clear] concurrent species insert outcome: ${String(insertOutcome)}`);
+      // InnoDB either lets the insert finish waiting and fail its foreign-key check, or picks it as the victim of a
+      // deadlock with the clear's species DELETE. Both refuse it; what must never happen is a committed species.
+      expect([MYSQL_NO_REFERENCED_ROW, MYSQL_LOCK_DEADLOCK], 'the insert waited on the locked genus and was refused').toContain(insertOutcome);
       for (const table of FULL_CLEAR_REFERENCE_TABLES) {
         expect(await countRows(`SELECT COUNT(*) AS total FROM ${table}`), `${table} should be empty`).toBe(0);
       }
