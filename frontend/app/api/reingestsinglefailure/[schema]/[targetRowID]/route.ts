@@ -8,6 +8,9 @@ import { generateShortBatchID } from '@/config/utils';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { auth } from '@/auth';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { auditCoreMeasurementsIDDiff, snapshotCoreMeasurementsByIDs } from '@/lib/changelog/ingestion-audit';
 import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -39,6 +42,7 @@ async function handler(_request: NextRequest, context: RouteContext) {
 
   // Validate schema to prevent SQL injection
   let shiftQuery: string;
+  let targetScopeSQL: string;
   let resolveIngestionSQL: string,
     transferErrorSQL: string,
     snapshotResultSQL: string,
@@ -82,6 +86,13 @@ async function handler(_request: NextRequest, context: RouteContext) {
            WHERE mel.MeasurementID = cm.CoreMeasurementID
              AND me.ErrorSource = ?
          )`
+    );
+    targetScopeSQL = safeFormatQuery(
+      schema,
+      `SELECT c.PlotID, cm.CensusID
+       FROM ??.coremeasurements cm
+       JOIN ??.census c ON c.CensusID = cm.CensusID
+       WHERE cm.CoreMeasurementID = ?`
     );
     resolveIngestionSQL = safeFormatQuery(
       schema,
@@ -184,10 +195,23 @@ async function handler(_request: NextRequest, context: RouteContext) {
   }
 
   const batchID = generateShortBatchID();
+  const changedBy = authenticatedSessionIdentity((await auth())?.user);
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
   try {
     transactionID = await connectionManager.beginTransaction();
+
+    // Lock and capture the original row before staging it: it is rewritten in place below
+    // from the staged copy, and this image is the before-side of its Recent Changes UPDATE
+    // row (issue #507).
+    const auditTx = transactionExecutorFor(connectionManager, transactionID);
+    const originalRowBefore = await snapshotCoreMeasurementsByIDs(auditTx, schema, [targetMeasurementID]);
+    if (!originalRowBefore.has(targetMeasurementID)) {
+      await connectionManager.rollbackTransaction(transactionID);
+      return new NextResponse(JSON.stringify({ error: `No failed measurement row found for CoreMeasurementID ${targetMeasurementID}` }), {
+        status: HTTPResponses.NOT_FOUND
+      });
+    }
 
     const shiftResult: any = await connectionManager.executeQuery(
       shiftQuery,
@@ -210,7 +234,17 @@ async function handler(_request: NextRequest, context: RouteContext) {
       throw new Error('Single-row reingestion staging insert did not return a usable insertId');
     }
 
-    await callBulkIngestionInCallerTransaction(transactionExecutorFor(connectionManager, transactionID), schema, SINGLE_ROW_FILE_ID, batchID);
+    const targetScopeRows: Array<{ PlotID: number; CensusID: number }> = await connectionManager.executeQuery(
+      targetScopeSQL,
+      [targetMeasurementID],
+      transactionID
+    );
+    const targetScope = targetScopeRows[0];
+    if (!targetScope) {
+      throw new Error(`Failed measurement ${targetMeasurementID} has no census to scope its audit row to`);
+    }
+
+    await callBulkIngestionInCallerTransaction(auditTx, schema, SINGLE_ROW_FILE_ID, batchID);
 
     const snapshotRows: any[] = await connectionManager.executeQuery(snapshotResultSQL, [SINGLE_ROW_FILE_ID, batchID, temporaryRowID], transactionID);
     const snapshot = snapshotRows[0];
@@ -259,6 +293,14 @@ async function handler(_request: NextRequest, context: RouteContext) {
       const attributeValues = attributeRows.map(row => [targetMeasurementID, row.Code]);
       await connectionManager.executeQuery(restoreOriginalAttributesSQL, [attributeValues], transactionID);
     }
+    await auditCoreMeasurementsIDDiff({
+      tx: auditTx,
+      schema,
+      before: originalRowBefore,
+      changedBy,
+      plotID: Number(targetScope.PlotID),
+      censusID: Number(targetScope.CensusID)
+    });
 
     await connectionManager.commitTransaction(transactionID);
     return NextResponse.json({ message: 'Success' }, { status: HTTPResponses.OK });

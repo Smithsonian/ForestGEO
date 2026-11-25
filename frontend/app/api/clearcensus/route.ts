@@ -6,25 +6,24 @@ import { format } from 'mysql2/promise';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { CLEAR_CENSUS_TYPES, ClearCensusAuditMismatchError, clearCensusWithAudit, isClearCensusType } from '@/lib/census/clear-census-audit';
 import { INTERNAL_SERVER_ERROR_MESSAGE } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-// Valid census clear types - must match actual stored procedure names
-const VALID_CENSUS_TYPES = ['msmts', 'full', 'measurements', 'attributes', 'personnel', 'quadrats'] as const;
-type CensusType = (typeof VALID_CENSUS_TYPES)[number];
-
-// Census clear procedures manage (START/COMMIT) their own transactions. A
-// row-level lock acquired by this route would be released when the procedure
-// starts its transaction, so serialize clears with a connection-scoped MySQL
-// advisory lock instead. A second admin can retry immediately rather than
-// waiting behind a potentially long destructive operation.
+// Clears are serialized per site with a MySQL advisory lock held until commit.
+// Site scope, not plot scope: clearcensusfull decides whether it removes the
+// site's last census by counting every plot's censuses, so two plots' clears
+// must not decide at once (issue #507). A second admin can retry immediately
+// rather than waiting behind a potentially long destructive operation.
 const CLEAR_CENSUS_LOCK_TIMEOUT_MS = 0;
 
-function buildClearCensusLockName(schema: string, plotID: number): string {
-  return `clear-census:${schema}:${plotID}`;
+function buildClearCensusLockName(schema: string): string {
+  return `clear-census:${schema}`;
 }
 
 interface ClearCensusRequestBody {
@@ -83,12 +82,12 @@ export async function POST(request: NextRequest) {
   }
 
   // Validate type to prevent SQL injection
-  if (!VALID_CENSUS_TYPES.includes(type as CensusType)) {
+  if (!isClearCensusType(type)) {
     ailogger.error(`Invalid census type in clearcensus: ${type}`);
     return new NextResponse(
       JSON.stringify({
         error: 'Invalid census type',
-        validTypes: VALID_CENSUS_TYPES
+        validTypes: CLEAR_CENSUS_TYPES
       }),
       { status: HTTPResponses.INVALID_REQUEST }
     );
@@ -99,7 +98,7 @@ export async function POST(request: NextRequest) {
   try {
     transactionID = await connectionManager.beginTransaction();
 
-    // Resolve the plot before taking its lock. This read is deliberately
+    // Check the census exists before taking the lock. This read is deliberately
     // non-locking: a concurrent clear can delete the target before we acquire
     // the advisory lock, so the authoritative latest-census check below always
     // runs again AFTER the lock is held.
@@ -112,22 +111,18 @@ export async function POST(request: NextRequest) {
       return new NextResponse(JSON.stringify({ error: 'Census not found' }), { status: HTTPResponses.NOT_FOUND });
     }
 
-    const clearLockName = buildClearCensusLockName(schema, Number(targetCensus.PlotID));
+    const clearLockName = buildClearCensusLockName(schema);
     const clearLockAcquired = await connectionManager.acquireApplicationLock(clearLockName, transactionID, CLEAR_CENSUS_LOCK_TIMEOUT_MS);
     if (!clearLockAcquired) {
       await connectionManager.rollbackTransaction(transactionID);
       transactionID = '';
-      return new NextResponse(JSON.stringify({ error: 'A census clear is already in progress for this plot. Please retry when it completes.' }), {
+      return new NextResponse(JSON.stringify({ error: 'A census clear is already in progress for this site. Please retry when it completes.' }), {
         status: HTTPResponses.CONFLICT
       });
     }
 
-    // The procedures called below issue START TRANSACTION/COMMIT themselves,
-    // which implicitly ends this route transaction and releases any FOR UPDATE
-    // row locks. GET_LOCK is connection-scoped and survives those boundaries,
-    // so it serializes every clear for this plot through the destructive CALL.
-    // Re-check after acquiring it so a waiter observes the previous clear's
-    // committed state rather than acting on its pre-wait snapshot.
+    // Re-check after acquiring the lock so a waiter observes the previous
+    // clear's committed state rather than acting on its pre-wait snapshot.
     const latestCensusSQL = format(
       `SELECT c.PlotID, c.PlotCensusNumber, latest.MaxPlotCensusNumber
        FROM ??.census c
@@ -156,18 +151,22 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Construct safe procedure name and call
-    const procedureName = `clearcensus${type}`;
-    const callSQL = format('CALL ??.??(?)', [schema, procedureName, censusID]);
-
-    await connectionManager.executeQuery(callSQL, [], transactionID);
+    const tx = transactionExecutorFor(connectionManager, transactionID);
+    const changedBy = authenticatedSessionIdentity(session?.user);
+    await clearCensusWithAudit({ tx, schema, type, censusID, plotID: Number(censusRow.PlotID), changedBy });
     await connectionManager.commitTransaction(transactionID);
-    ailogger.info(`Census cleared successfully: ${schema}.${procedureName}(${censusID})`);
+    ailogger.info(`Census cleared successfully: ${schema}.clearcensus${type}(${censusID})`);
     return NextResponse.json({ message: 'Census cleared successfully' }, { status: HTTPResponses.OK });
   } catch (e: any) {
     ailogger.error('Census clear failed:', e);
     if (transactionID) {
       await connectionManager.rollbackTransaction(transactionID);
+    }
+    if (e instanceof ClearCensusAuditMismatchError) {
+      return NextResponse.json(
+        { error: 'Data changed while the census was being cleared. Nothing was deleted; please retry.' },
+        { status: HTTPResponses.CONFLICT }
+      );
     }
     return new NextResponse(JSON.stringify({ error: INTERNAL_SERVER_ERROR_MESSAGE }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {

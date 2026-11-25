@@ -21,6 +21,15 @@ export enum ChangelogOperation {
 
 export type ChangelogRowState = Record<string, unknown>;
 
+/**
+ * mysql2 returns a BIT(1) column as a one-byte Buffer, which JSON.stringify writes as
+ * `{"type":"Buffer","data":[1]}` and Recent Changes would show as an object. Callers that
+ * capture images with `SELECT *` pass them through this to record 0/1 instead.
+ */
+export function normalizeBitColumns(row: ChangelogRowState): ChangelogRowState {
+  return Object.fromEntries(Object.entries(row).map(([column, value]) => [column, value instanceof Uint8Array && value.length === 1 ? value[0] : value]));
+}
+
 interface RecordMutationBase {
   /**
    * The mutation's own transaction executor. The changelog write MUST share the
@@ -28,7 +37,7 @@ interface RecordMutationBase {
    * edit must leave no log row, and a log row must always correspond to a
    * committed change.
    */
-  tx: TxExecutor;
+  tx: Pick<TxExecutor, 'query'>;
   schema: string;
   /** The table actually mutated — never a view name, never a stand-in. */
   tableName: string;

@@ -8,6 +8,9 @@ import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { COREMEASUREMENTS_JOIN_ALIAS, deleteCoreMeasurementsInBoundedChunksWithAudit } from '@/lib/ingestion/temporary-measurements';
+import { retryWholeTransactionOnDeadlock } from '@/lib/db/deadlock-retry';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -22,6 +25,24 @@ const VALID_TABLE_TYPES = {
 } as const;
 
 type TableType = keyof typeof VALID_TABLE_TYPES;
+
+const ADMIN_CLEAR_TRANSACTION = 'admin_clear';
+
+/** Staging rows are not data of record and are not audited. */
+async function deleteStagingRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  tableName: string,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  const deleteSQL = format('DELETE FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+  const deleteResult = await connectionManager.executeQuery(deleteSQL, [plotID, censusID], transactionID);
+  return Number(deleteResult?.affectedRows ?? 0);
+}
+
+const FAILED_MEASUREMENTS_SCOPE_FROM_SQL = '??.coremeasurements cm JOIN ??.census c ON c.CensusID = cm.CensusID';
 
 function buildFailedMeasurementsScopeWhereClause(schema: string) {
   return `c.PlotID = ?
@@ -52,7 +73,8 @@ export async function DELETE(
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
-  const authError = requireAdmin(await auth());
+  const session = await auth();
+  const authError = requireAdmin(session);
   if (authError) return authError;
 
   const { tableType, schema: schemaParam, plotID: plotIDParam, censusID: censusIDParam } = await props.params;
@@ -116,43 +138,40 @@ export async function DELETE(
   }
 
   const connectionManager = ConnectionManager.getInstance();
-  let transactionID = '';
+  const changedBy = authenticatedSessionIdentity(session?.user);
+
+  // One complete transaction per attempt. The failed-row walk can lock ids out of order
+  // against an overlapping cleanup, so a deadlock re-runs the whole attempt (issue #507).
+  const clearOnce = async (): Promise<number> => {
+    const transactionID = await connectionManager.beginTransaction();
+    try {
+      const clearedRecords =
+        tableType === 'failedmeasurements'
+          ? await deleteCoreMeasurementsInBoundedChunksWithAudit(
+              connectionManager,
+              schema,
+              buildFailedMeasurementsScopeWhereClause(schema),
+              buildFailedMeasurementsScopeParams(plotID, censusID),
+              changedBy,
+              plotID,
+              censusID,
+              transactionID,
+              FAILED_MEASUREMENTS_SCOPE_FROM_SQL,
+              [COREMEASUREMENTS_JOIN_ALIAS]
+            )
+          : await deleteStagingRows(connectionManager, schema, VALID_TABLE_TYPES[tableType as TableType], plotID, censusID, transactionID);
+      await connectionManager.commitTransaction(transactionID);
+      return clearedRecords;
+    } catch (attemptError: unknown) {
+      await connectionManager.rollbackTransaction(transactionID);
+      throw attemptError;
+    }
+  };
 
   try {
-    transactionID = await connectionManager.beginTransaction();
-
-    let countSQL = '';
-    let countParams: any[] = [];
-    let deleteSQL = '';
-    let deleteParams: any[] = [];
-
-    if (tableType === 'failedmeasurements') {
-      // Schema is validated above via validateSchemaOrThrow — safe to interpolate as identifier
-      countSQL = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
-         FROM ${schema}.coremeasurements cm
-         JOIN ${schema}.census c ON c.CensusID = cm.CensusID
-         WHERE ${buildFailedMeasurementsScopeWhereClause(schema)}`;
-      countParams = buildFailedMeasurementsScopeParams(plotID, censusID);
-
-      deleteSQL = `DELETE cm
-         FROM ${schema}.coremeasurements cm
-         JOIN ${schema}.census c ON c.CensusID = cm.CensusID
-         WHERE ${buildFailedMeasurementsScopeWhereClause(schema)}`;
-      deleteParams = buildFailedMeasurementsScopeParams(plotID, censusID);
-    } else {
-      const tableName = VALID_TABLE_TYPES[tableType as TableType];
-      countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
-      deleteSQL = format('DELETE FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
-      countParams = [plotID, censusID];
-      deleteParams = [plotID, censusID];
-    }
-
-    // First, get count of records that will be deleted for confirmation
-    const countResult = await connectionManager.executeQuery(countSQL, countParams, transactionID);
-    const totalRecords = countResult[0]?.total || 0;
+    const totalRecords = await retryWholeTransactionOnDeadlock(ADMIN_CLEAR_TRANSACTION, clearOnce);
 
     if (totalRecords === 0) {
-      await connectionManager.commitTransaction(transactionID);
       return new NextResponse(
         JSON.stringify({
           message: `No ${tableType} found to clear`,
@@ -161,11 +180,6 @@ export async function DELETE(
         { status: HTTPResponses.OK }
       );
     }
-
-    // Delete all records for this plot/census from the specified table
-    await connectionManager.executeQuery(deleteSQL, deleteParams, transactionID);
-
-    await connectionManager.commitTransaction(transactionID);
 
     ailogger.info(`Cleared ${totalRecords} ${tableType} for schema: ${schema}, plotID: ${plotID}, censusID: ${censusID}`);
 
@@ -177,10 +191,6 @@ export async function DELETE(
       { status: HTTPResponses.OK }
     );
   } catch (error: any) {
-    if (transactionID) {
-      await connectionManager.rollbackTransaction(transactionID);
-    }
-
     ailogger.error(`Error clearing ${tableType} for ${schema}/${plotID}/${censusID}:`, error);
     return new NextResponse(
       JSON.stringify({

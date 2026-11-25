@@ -11,7 +11,7 @@ const RECONCILIATION_MAP_TABLE = 'reingestion_map';
 
 function expectCallBracketedByFlag(calls: any[][]) {
   const statements = calls.map(call => String(call[0]));
-  const callIndex = statements.findIndex(sql => sql.includes('bulkingestionprocess'));
+  const callIndex = statements.findIndex((sql: string) => sql.includes('bulkingestionprocess'));
   expect(callIndex, 'bulkingestionprocess must be called').toBeGreaterThan(0);
   expect(statements[callIndex - 1]).toBe(CALLER_OWNS_TRANSACTION_SQL);
   expect(statements[callIndex + 1]).toBe(CLEAR_CALLER_TRANSACTION_SQL);
@@ -250,6 +250,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(10)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 10, insertId: 501 }) // move: insert temp rows
+        .mockResolvedValueOnce([]) // audit: snapshot original rows before the CALL
         .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 8 records', batch_failed: false, records_failed: 0 }]]) // call bulkingestionprocess
         .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
@@ -302,6 +303,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(3)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 3, insertId: 41 }) // move: insert temp rows
+        .mockResolvedValueOnce([]) // audit: snapshot original rows before the CALL
         .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed: 2 valid, 1 failed', batch_failed: false, records_failed: 1 }]]) // call bulkingestionprocess
         .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
@@ -357,6 +359,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 1, insertId: 11 }) // move: insert temp rows
+        .mockResolvedValueOnce([]) // audit: snapshot original rows before the CALL
         .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockRejectedValueOnce(new Error('Bulk ingestion failed')) // call bulkingestionprocess
         .mockResolvedValueOnce(undefined); // helper: CLEAR caller-owns-transaction flag
@@ -389,6 +392,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 1, insertId: 11 }) // move: insert temp rows
+        .mockResolvedValueOnce([]) // audit: snapshot original rows before the CALL
         .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 1 records', batch_failed: false }]]) // call bulkingestionprocess
         .mockRejectedValueOnce(clearError); // helper: CLEAR caller-owns-transaction flag
@@ -472,6 +476,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
         .mockResolvedValueOnce({ affectedRows: 1, insertId: 601 }) // move: insert temp rows
+        .mockResolvedValueOnce([]) // audit: snapshot original rows before the CALL
         .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
         .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 1 records', batch_failed: false, records_failed: 0 }]]) // call bulkingestionprocess
         .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag

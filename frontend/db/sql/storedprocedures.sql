@@ -424,6 +424,17 @@ BEGIN
     declare vCountCensus int;
     declare vPrevForeignKeyChecks int;
     declare vPrevDisableTriggers int default null;
+    declare vCallerOwnsTransaction boolean default false;
+    declare vDeletedMeasurements int default 0;
+    declare vDeletedAttributes int default 0;
+    declare vDeletedPersonnel int default 0;
+    declare vDeletedRoles int default 0;
+    declare vDeletedQuadrats int default 0;
+    declare vDeletedSpecies int default 0;
+    declare vDeletedSpecieslimits int default 0;
+    declare vDeletedGenus int default 0;
+    declare vDeletedFamily int default 0;
+    declare vDeletedReference int default 0;
 
     -- Issue #509: restore the caller's EXACT prior foreign_key_checks /
     -- @disable_triggers on every exit path (a caller may invoke this from
@@ -432,17 +443,28 @@ BEGIN
     -- can't leave the pooled connection poisoned for the next caller.
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        ROLLBACK;
+        -- A caller-owned transaction is rolled back by the caller (issue #507).
+        IF NOT vCallerOwnsTransaction THEN
+            ROLLBACK;
+        END IF;
         SET foreign_key_checks = vPrevForeignKeyChecks;
         SET @disable_triggers = vPrevDisableTriggers;
         RESIGNAL;
     END;
 
+    -- Issue #507: with @clearcensus_caller_owns_transaction = 1 the caller holds the
+    -- transaction (and writes the Recent Changes audit in it), so this procedure must
+    -- neither start nor commit one. The flag is read once and cleared at once so it
+    -- can never leak into the next CALL on a pooled connection.
+    SET vCallerOwnsTransaction = COALESCE(@clearcensus_caller_owns_transaction, 0) = 1;
+    SET @clearcensus_caller_owns_transaction = NULL;
     SET vPrevForeignKeyChecks = @@foreign_key_checks;
     SET vPrevDisableTriggers = @disable_triggers;
     set @disable_triggers = 1;
     set foreign_key_checks = 0;
-    START TRANSACTION;
+    IF NOT vCallerOwnsTransaction THEN
+        START TRANSACTION;
+    END IF;
     DELETE
     FROM temporarymeasurements
     WHERE CensusID = targetCensusID;
@@ -469,6 +491,7 @@ BEGIN
     WHERE CensusID = targetCensusID;
 
     delete from coremeasurements where CensusID = targetCensusID;
+    SET vDeletedMeasurements = ROW_COUNT();
     delete from stems where CensusID = targetCensusID;
 
     delete from trees where CensusID = targetCensusID;
@@ -480,14 +503,23 @@ BEGIN
         -- Issue #509: DELETE (not TRUNCATE) keeps this inside the transaction
         -- above so the EXIT HANDLER's ROLLBACK actually reverts it.
         delete from attributes;
+        SET vDeletedAttributes = ROW_COUNT();
         delete from personnel;
+        SET vDeletedPersonnel = ROW_COUNT();
         delete from roles;
+        SET vDeletedRoles = ROW_COUNT();
         delete from quadrats;
+        SET vDeletedQuadrats = ROW_COUNT();
         delete from species;
+        SET vDeletedSpecies = ROW_COUNT();
         delete from specieslimits;
+        SET vDeletedSpecieslimits = ROW_COUNT();
         delete from genus;
+        SET vDeletedGenus = ROW_COUNT();
         delete from family;
+        SET vDeletedFamily = ROW_COUNT();
         delete from reference;
+        SET vDeletedReference = ROW_COUNT();
         -- Issue #509: unifiedchangelog is audit history, not census data —
         -- intentionally NOT cleared here (previously destroyed by TRUNCATE).
     end if;
@@ -497,9 +529,25 @@ BEGIN
     WHERE CensusID = targetCensusID;
 
     -- Historical (viewfulltable) and source deletes above are complete; commit now.
-    COMMIT;
+    IF NOT vCallerOwnsTransaction THEN
+        COMMIT;
+    END IF;
     SET foreign_key_checks = vPrevForeignKeyChecks;
     SET @disable_triggers = vPrevDisableTriggers;
+    -- Issue #507: a caller-owned clear reports what it deleted so the caller can
+    -- refuse to commit unless every deleted row was audited.
+    IF vCallerOwnsTransaction THEN
+        SELECT vDeletedMeasurements AS DeletedMeasurements,
+               vDeletedAttributes AS DeletedAttributes,
+               vDeletedPersonnel AS DeletedPersonnel,
+               vDeletedRoles AS DeletedRoles,
+               vDeletedQuadrats AS DeletedQuadrats,
+               vDeletedSpecies AS DeletedSpecies,
+               vDeletedSpecieslimits AS DeletedSpecieslimits,
+               vDeletedGenus AS DeletedGenus,
+               vDeletedFamily AS DeletedFamily,
+               vDeletedReference AS DeletedReference;
+    END IF;
 END $$
 
 create procedure clearcensusmsmts(IN targetCensusID int)
@@ -507,6 +555,8 @@ SQL SECURITY DEFINER
 BEGIN
     declare vPrevForeignKeyChecks int;
     declare vPrevDisableTriggers int default null;
+    declare vCallerOwnsTransaction boolean default false;
+    declare vDeletedMeasurements int default 0;
 
     -- Issue #509: restore the caller's EXACT prior foreign_key_checks /
     -- @disable_triggers on every exit path (a caller may invoke this from
@@ -515,17 +565,24 @@ BEGIN
     -- can't leave the pooled connection poisoned for the next caller.
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        ROLLBACK;
+        IF NOT vCallerOwnsTransaction THEN
+            ROLLBACK;
+        END IF;
         SET foreign_key_checks = vPrevForeignKeyChecks;
         SET @disable_triggers = vPrevDisableTriggers;
         RESIGNAL;
     END;
 
+    -- Issue #507: caller-owned mode, as in clearcensusfull above.
+    SET vCallerOwnsTransaction = COALESCE(@clearcensus_caller_owns_transaction, 0) = 1;
+    SET @clearcensus_caller_owns_transaction = NULL;
     SET vPrevForeignKeyChecks = @@foreign_key_checks;
     SET vPrevDisableTriggers = @disable_triggers;
     set @disable_triggers = 1;
     set foreign_key_checks = 0;
-    START TRANSACTION;
+    IF NOT vCallerOwnsTransaction THEN
+        START TRANSACTION;
+    END IF;
 
     DELETE
     FROM temporarymeasurements
@@ -555,6 +612,7 @@ BEGIN
 
     -- Delete core measurements, stems, and trees for this census
     delete from coremeasurements where CensusID = targetCensusID;
+    SET vDeletedMeasurements = ROW_COUNT();
     delete from stems where CensusID = targetCensusID;
     delete from trees where CensusID = targetCensusID;
 
@@ -563,9 +621,14 @@ BEGIN
     WHERE CensusID = targetCensusID;
 
     -- Historical (viewfulltable) and source deletes above are complete; commit now.
-    COMMIT;
+    IF NOT vCallerOwnsTransaction THEN
+        COMMIT;
+    END IF;
     SET foreign_key_checks = vPrevForeignKeyChecks;
     SET @disable_triggers = vPrevDisableTriggers;
+    IF vCallerOwnsTransaction THEN
+        SELECT vDeletedMeasurements AS DeletedMeasurements;
+    END IF;
 END $$
 
 -- reingestfailedrows removed: operated on legacy failedmeasurements table.

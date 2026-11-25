@@ -12,7 +12,6 @@
  * - app/api/reingest/[schema]/[plotID]/[censusID]/route.ts
  * - app/api/reingestsinglefailure/[schema]/[targetRowID]/route.ts
  * - app/api/bulkcrud/route.ts
- * - app/api/resettableview/[gridType]/[plotID]/[censusID]/route.ts
  * - app/api/admin/clear/[tableType]/[schema]/[plotID]/[censusID]/route.ts
  * - app/api/clearcensus/route.ts
  */
