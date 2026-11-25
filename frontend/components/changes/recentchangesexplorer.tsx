@@ -79,7 +79,8 @@ export function summarizeChange(entry: Pick<ChangelogEntry, 'operation' | 'table
   if (entry.operation === 'INSERT' && entry.tableName === 'file_upload') return filename ? `Uploaded ${filename}` : 'Uploaded a file';
   if (entry.tableName === CENSUS_REPLACEMENT_TABLE_NAME) {
     const replacementFileName = entry.oldRowState?.fileName;
-    return replacementFileName ? `Replaced the census for a Clean Re-Upload of ${replacementFileName}` : 'Replaced the census for a Clean Re-Upload';
+    // The row is written by the first committed window, before the replacement finishes; its count says how far it got.
+    return replacementFileName ? `Clean Re-Upload of ${replacementFileName}` : 'Clean Re-Upload';
   }
   if (entry.operation === 'UPDATE' && /measurement/i.test(entry.tableName)) return 'Updated a measurement record';
   if (entry.operation === 'DELETE') return `Deleted a ${objectLabel}`;
@@ -302,10 +303,10 @@ function BatchInsertCard({ batch }: { batch: BatchInsertGroup }) {
 
 const DELETION_SUMMARY_KINDS: ReadonlySet<unknown> = new Set(Object.values(DELETION_SUMMARY_KIND));
 
-/** "1,204 coremeasurements, 3 species"; tables with nothing removed are left out. */
+/** "Removed 1,204 coremeasurements, 3 species"; tables with nothing removed are left out. */
 export function describeDeletedRowCounts(counts: DeletedRowCounts | undefined): string {
   const removed = Object.entries(counts ?? {}).filter(([, count]) => typeof count === 'number' && count > 0);
-  if (removed.length === 0) return 'No rows removed';
+  if (removed.length === 0) return 'No measurements removed';
   return `Removed ${removed.map(([tableName, count]) => `${count.toLocaleString()} ${tableName}`).join(', ')}`;
 }
 

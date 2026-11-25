@@ -380,17 +380,16 @@ describe('RecentChangesExplorer deletion summaries', () => {
   it('renders a Clean Re-Upload census replacement with its file name and measurement count', async () => {
     await renderSingleDeleteEntry({
       tableName: CENSUS_REPLACEMENT_TABLE_NAME,
-      recordID: 'census3.csv::session-1',
+      recordID: 'census3.csv::batch-1',
       oldRowState: {
         summaryKind: DELETION_SUMMARY_KIND.censusReplacement,
         fileName: 'census3.csv',
-        uploadSessionID: 'session-1',
         batchID: 'batch-1',
         deletedRowCounts: { coremeasurements: 52000 }
       }
     });
 
-    expect(await screen.findByText('Replaced the census for a Clean Re-Upload of census3.csv')).toBeInTheDocument();
+    expect(await screen.findByText('Clean Re-Upload of census3.csv')).toBeInTheDocument();
     expect(screen.getByText('Removed 52,000 coremeasurements')).toBeInTheDocument();
   });
 
@@ -408,8 +407,8 @@ describe('describeDeletedRowCounts', () => {
   });
 
   it('says so when nothing was removed, rather than rendering an empty line', () => {
-    expect(describeDeletedRowCounts({ coremeasurements: 0 })).toBe('No rows removed');
-    expect(describeDeletedRowCounts(undefined)).toBe('No rows removed');
+    expect(describeDeletedRowCounts({ coremeasurements: 0 })).toBe('No measurements removed');
+    expect(describeDeletedRowCounts(undefined)).toBe('No measurements removed');
   });
 });
 
