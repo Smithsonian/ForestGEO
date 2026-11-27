@@ -127,7 +127,17 @@ describe('selection dispatch hooks', () => {
       rerender();
 
       await waitFor(() => expect(cookieWrites()).toContain('censusID=71'));
-      expect(cookieWrites()).toEqual(expect.arrayContaining(['schema=a', 'plotID=1', 'censusID=71', 'quadratID=']));
+      expect(cookieWrites().sort(), 'only the selected values are written back; no quadrat is selected').toEqual(['censusID=71', 'plotID=1', 'schema=a']);
+    });
+
+    it('writes nothing when nothing is selected, so no server action races the redirect to /dashboard', async () => {
+      useAppStore.setState({ hasHydrated: true, currentSite: undefined, currentPlot: undefined, currentCensus: undefined, currentQuadrat: undefined });
+
+      renderHook(() => useRestoreSelectionCookies());
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      console.log(`[#516] cookie writes with an empty selection: ${JSON.stringify(cookieWrites())}`);
+      expect(cookieWrites()).toEqual([]);
     });
 
     it('lets a census picked right after the reload win over the restored one', async () => {
