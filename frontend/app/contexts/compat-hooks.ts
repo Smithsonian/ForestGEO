@@ -11,7 +11,7 @@
  * - Once all components are migrated, these hooks can be removed
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useAppStore } from '@/config/store/appstore';
 import { Plot, Quadrat, Site, PlotRDS, QuadratRDS, SitesRDS } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
@@ -126,6 +126,29 @@ async function syncClearedCookies(before: ReturnType<typeof useAppStore.getState
   if (before.currentCensus && !after.currentCensus) writes.push(writeCookieLatest('censusID', ''));
   if (before.currentQuadrat && !after.currentQuadrat) writes.push(writeCookieLatest('quadratID', ''));
   await Promise.all(writes);
+}
+
+/**
+ * The selection survives a reload in localStorage, but ClearCookiesOnUnload deletes its cookies on every
+ * beforeunload, F5 included. Once the store has rehydrated, write the restored selection back to the cookies
+ * so server-side reads (e.g. the personnel Census Active toggle) see the census the sidebar shows (#516).
+ * Only selected values are written: the beacon already removed the cookies, and each write is a server action
+ * that refreshes the route, which stalls the hub layout's redirect to /dashboard when nothing is selected.
+ */
+export function useRestoreSelectionCookies(): void {
+  const hasHydrated = useAppStore(state => state.hasHydrated);
+  useEffect(() => {
+    if (!hasHydrated) return;
+    const { currentSite, currentPlot, currentCensus, currentQuadrat } = useAppStore.getState();
+    const restoredCookies: Array<[string, string | undefined]> = [
+      ['schema', currentSite?.schemaName],
+      ['plotID', currentPlot?.plotID?.toString()],
+      ['censusID', currentCensus?.dateRanges?.[0]?.censusID?.toString()],
+      ['quadratID', currentQuadrat?.quadratID?.toString()]
+    ];
+    const selectedCookies = restoredCookies.filter((cookie): cookie is [string, string] => Boolean(cookie[1]));
+    void Promise.all(selectedCookies.map(([name, value]) => writeCookieLatest(name, value)));
+  }, [hasHydrated]);
 }
 
 /**
