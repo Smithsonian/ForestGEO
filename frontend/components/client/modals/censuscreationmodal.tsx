@@ -76,8 +76,8 @@ export default function CensusCreationModal({ open, censusNumber, plotName, isCr
         <DialogContent>
           <Stack spacing={2}>
             <Typography level="body-sm">
-              This will create a new census{plotName ? ` for ${plotName}` : ''} and copy the current census reference data. No census is created until you
-              confirm.
+              This will create a new census{plotName ? ` for ${plotName}` : ''} and mark the previous census&apos;s active personnel as active in it. Species
+              DBH limits are not copied. No census is created until you confirm.
             </Typography>
             <FormControl required error={Boolean(dateError)}>
               <FormLabel id="census-start-date-label" htmlFor="census-start-date-input">

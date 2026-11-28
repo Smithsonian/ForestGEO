@@ -19,6 +19,7 @@ import { trimReferenceTextFields } from '@/lib/reference-text';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
 import { getCensusDatesError, getCensusOverlapError } from '@/config/censuswindow';
 import { loadNeighbourCensusWindows, reopenValidationOutsideCensusWindow } from '@/lib/census/censusdateedit';
+import { copyActivePersonnelFromPreviousCensus } from '@/lib/census/censuspersonnelrollover';
 import { toCalendarDayString, type CalendarDayInput } from '@/config/dateformats';
 import { FOREIGN_KEY_CONFLICT_MESSAGE } from '@/lib/errorhelpers';
 
@@ -745,6 +746,18 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
             lookup: [{ column: demappedGridID, value: results.insertId }],
             recordIDColumns: [demappedGridID]
           });
+          const newCensusPlotID = Number(newRowData.PlotID);
+          const newCensusNumber = Number(newRowData.PlotCensusNumber);
+          if (params.dataType === 'census' && Number.isInteger(newCensusPlotID) && Number.isInteger(newCensusNumber)) {
+            const copiedCAPIDs = await copyActivePersonnelFromPreviousCensus(tx, schema, {
+              censusID: results.insertId,
+              plotID: newCensusPlotID,
+              plotCensusNumber: newCensusNumber
+            });
+            for (const capID of copiedCAPIDs) {
+              createdRows.push({ tableName: 'censusactivepersonnel', lookup: [{ column: 'CAPID', value: capID }], recordIDColumns: ['CAPID'] });
+            }
+          }
         }
       }
 

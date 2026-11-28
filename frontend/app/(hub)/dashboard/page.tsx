@@ -570,22 +570,7 @@ export default function DashboardPage() {
         }
         console.log('New census created with ID:', newCensusID);
 
-        // Rollover data from current census to new census (only if we have a valid source census)
-        const sourceCensusID = currentCensus?.dateRanges?.[0]?.censusID;
-        if (sourceCensusID !== undefined && sourceCensusID !== null) {
-          await Promise.all(
-            ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-              const rolloverResponse = await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`);
-              if (!rolloverResponse.ok) {
-                throw new Error(`Failed to rollover ${key}: ${rolloverResponse.status}`);
-              }
-            })
-          );
-        } else {
-          ailogger.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
-        }
-
-        // The census and its rollover have committed; a refresh failure must not read as a failed create.
+        // The census and its copied personnel have committed; a refresh failure must not read as a failed create.
         setOpenCreateCensusModal(false);
         try {
           await refreshCensusList();
@@ -612,7 +597,7 @@ export default function DashboardPage() {
         }, 1000);
       }
     },
-    [currentCensus, currentSite, currentPlot, nextCensusNumber, refreshCensusList, setLoading]
+    [currentSite, currentPlot, nextCensusNumber, refreshCensusList, setLoading]
   );
 
   // Handle manual reset after successful plot edit
