@@ -96,6 +96,10 @@ function saveFilters(censusID: number, exactMessages: string[]): void {
   window.localStorage.setItem(key, JSON.stringify({ ...DEFAULT_ERROR_EXPLORER_FILTERS, exactMessages }));
 }
 
+function storedFilters(censusID: number): string | null {
+  return window.localStorage.getItem(getFilterStorageKey(TEST_SCHEMA, TEST_PLOT_ID, censusID) as string);
+}
+
 function savedFilters(censusID: number): ErrorExplorerFilters {
   const stored = window.localStorage.getItem(getFilterStorageKey(TEST_SCHEMA, TEST_PLOT_ID, censusID) as string);
   if (!stored) throw new Error(`Nothing saved for census ${censusID}`);
@@ -310,6 +314,44 @@ describe('ErrorsExplorer deep links (#547)', () => {
     await expectOneFacetsRequestThenOneTopGroupQuery([SECOND_CENSUS_SAVED_MESSAGE]);
     expect(requestBodies(QUERY_ENDPOINT)[0].censusID).toBe(SECOND_CENSUS_ID);
     expect(requestBodies(FACETS_ENDPOINT)[0].censusID).toBe(SECOND_CENSUS_ID);
+  });
+
+  it('opens a census with nothing saved on the default filters, not the previous census filter, and saves nothing for it (#573)', async () => {
+    saveFilters(FIRST_CENSUS_ID, [SAVED_MESSAGE]);
+    const { rerender } = render(<ErrorsExplorer />);
+    await expectOneFacetsRequestThenOneTopGroupQuery([SAVED_MESSAGE]);
+    fetchMock.mockClear();
+
+    explorerState.census = { dateRanges: [{ censusID: SECOND_CENSUS_ID }] };
+    rerender(<ErrorsExplorer />);
+
+    await expectOneFacetsRequestThenOneTopGroupQuery(DEFAULT_ERROR_EXPLORER_FILTERS.exactMessages);
+    const facets = requestBodies(FACETS_ENDPOINT)[0];
+    const query = requestBodies(QUERY_ENDPOINT)[0];
+    console.log(`[#573] census ${SECOND_CENSUS_ID} facets filters ${JSON.stringify(facets.filters)}, query filters ${JSON.stringify(query.filters)}`);
+    expect(facets.censusID).toBe(SECOND_CENSUS_ID);
+    expect(facets.filters).toEqual(DEFAULT_ERROR_EXPLORER_FILTERS);
+    expect(query.filters).toEqual(DEFAULT_ERROR_EXPLORER_FILTERS);
+    expect(storedFilters(SECOND_CENSUS_ID), 'nothing is saved for a census the user has not filtered').toBeNull();
+    expect(savedFilters(FIRST_CENSUS_ID).exactMessages, 'the previous census keeps its own filter').toEqual([SAVED_MESSAGE]);
+
+    await userEvent.type(screen.getByRole('textbox', { name: VIEW_ERRORS_TEXT.searchLabel }), 'A');
+    await waitFor(() => expect(storedFilters(SECOND_CENSUS_ID), 'a filter change is saved for the new census').not.toBeNull());
+    expect(savedFilters(SECOND_CENSUS_ID).quickSearch).toBe('A');
+  });
+
+  it('opens a census with nothing saved on the default filters after a ?message= landing on another census (#573)', async () => {
+    explorerState.search = new URLSearchParams({ [ERRORS_EXPLORER_MESSAGE_PARAM]: LINKED_MESSAGE }).toString();
+    const { rerender } = render(<ErrorsExplorer />);
+    await expectOneFacetsRequestThenOneTopGroupQuery([LINKED_MESSAGE]);
+    fetchMock.mockClear();
+
+    explorerState.census = { dateRanges: [{ censusID: SECOND_CENSUS_ID }] };
+    rerender(<ErrorsExplorer />);
+
+    await expectOneFacetsRequestThenOneTopGroupQuery(DEFAULT_ERROR_EXPLORER_FILTERS.exactMessages);
+    expect(requestBodies(FACETS_ENDPOINT)[0].filters).toEqual(DEFAULT_ERROR_EXPLORER_FILTERS);
+    expect(storedFilters(SECOND_CENSUS_ID), "the linked census's message is not saved under the new census").toBeNull();
   });
 
   it('never mounts the empty state while a new census scope restores its saved filter (#544 P10-1)', async () => {

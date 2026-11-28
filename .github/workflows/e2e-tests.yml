@@ -116,6 +116,14 @@ jobs:
           DEV_SERVER_URL: http://localhost:3000
           DEV_SERVER_READY_TIMEOUT_SECONDS: "120"
 
+      # Cypress 14.5.4 crashes on Chrome 158 ("* is not a valid URL") when it moves to the
+      # second spec, so the rest never run. Pinned until Cypress supports Chrome 158.
+      - name: Install Chrome 157
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: 157
+
       - name: Run E2E tests
         uses: cypress-io/github-action@v6
         with:
@@ -123,7 +131,7 @@ jobs:
           # Dependencies are installed above; the action's own `npm ci` would replace
           # node_modules under the running dev server.
           install: false
-          browser: chrome
+          browser: ${{ steps.setup-chrome.outputs.chrome-path }}
           headed: false
           # census-creation drives the REAL app against the seeded MySQL service
           # (above). The remaining specs are self-contained: setupForestGEOUser
