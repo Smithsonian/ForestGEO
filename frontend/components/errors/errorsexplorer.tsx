@@ -70,6 +70,7 @@ export { extractFilenameFromContentDisposition } from '@/lib/errorsexplorer/expl
 const FLAT_GRID_KEY = 'flat';
 const PAGE_EXPORT_KEY = 'page';
 const FILTER_STORAGE_PREFIX = 'errors-explorer-filters';
+const DEFAULT_STORED_FILTERS = serializeStoredErrorExplorerFilters(DEFAULT_ERROR_EXPLORER_FILTERS);
 
 export function getFilterStorageKey(schema?: string, plotID?: number, censusID?: number) {
   if (!schema || !plotID || !censusID) return null;
@@ -282,7 +283,10 @@ export default function ErrorsExplorer() {
   }, [storageKey]);
 
   useEffect(() => {
-    if (storageKey && filtersRestored) writeStoredFilters(storageKey, serializeStoredErrorExplorerFilters(filters));
+    if (!storageKey || !filtersRestored) return;
+    const serialized = serializeStoredErrorExplorerFilters(filters);
+    const isUnfilteredCensus = readStoredFilters(storageKey) === null && serialized === DEFAULT_STORED_FILTERS;
+    if (!isUnfilteredCensus) writeStoredFilters(storageKey, serialized);
   }, [filters, filtersRestored, storageKey]);
 
   useEffect(() => {
