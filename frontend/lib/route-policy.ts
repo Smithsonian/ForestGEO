@@ -134,6 +134,9 @@ export const ROUTE_POLICIES = {
   'validations/procedures/shared-cross-census-location': 'site-scoped',
   'validations/procedures/shared-dbh': 'site-scoped',
   'validations/clearmeasurementerrors': 'site-scoped',
+  // Census-wide override/reset: site-scoped for the quarantine gate; the handler also requires an admin session.
+  'validations/override': 'site-scoped',
+  'validations/reset': 'site-scoped',
   'validations/run': 'site-scoped',
   'validations/updatepassedvalidations': 'site-scoped',
   'validations/validate-query': 'site-scoped',

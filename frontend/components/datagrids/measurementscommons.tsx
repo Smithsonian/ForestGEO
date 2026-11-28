@@ -90,14 +90,14 @@ import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast, { UndoRevertOutcome } from '@/components/editplan/undotoast';
 import { isFieldEditableByRole, isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
+import { describeValidationScopeActionProblem, requestValidationReset } from '@/lib/validations/request-validation-scope-action';
+import { VALIDATION_RESET_FAILED_MESSAGE, VALIDATION_RESET_SUCCESS_MESSAGE } from '@/config/validationscopeactions';
 import {
   areExtendedFilterModelsEqual,
   areGridSortModelsEqual,
   arePaginationModelsEqual,
   MeasurementEditValidationError,
   runMeasurementEditSave,
-  createResetValidationErrorsQuery,
-  createResetValidationStatesQuery,
   findPlotCensusNumberForCensusID,
   NEW_ROW_ADDED_MESSAGE,
   revertMeasurementEdit,
@@ -1510,32 +1510,11 @@ function MeasurementsCommonsInner(props: Readonly<ViewDataMeasurementsCommonsPro
       // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, 'Resetting validation states...');
 
-      const resolveErrorsRequest = createResetValidationErrorsQuery(currentSite.schemaName, currentPlot.plotID, activeCensusID);
-      const resetStateRequest = createResetValidationStatesQuery(currentSite.schemaName, currentPlot.plotID, activeCensusID);
-
-      const clearCMVResponse = await fetch(`/api/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resolveErrorsRequest)
-      });
-      if (!clearCMVResponse.ok) {
-        const errorData = await clearCMVResponse.json().catch(() => ({ error: 'Unknown error', details: '' }));
-        ailogger.error('Resolve validation errors query failed:', errorData);
-        throw new Error(errorData.details || errorData.error || 'Failed to resolve validation errors');
-      }
-      const response = await fetch(`/api/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resetStateRequest)
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error', details: '' }));
-        ailogger.error('Validation reset query failed:', errorData);
-        throw new Error(errorData.details || errorData.error || 'Failed to reset validation states');
-      }
+      const outcome = await requestValidationReset({ schema: currentSite.schemaName, plotID: currentPlot.plotID, censusID: activeCensusID });
+      if (outcome.status !== 'done') throw new Error(describeValidationScopeActionProblem(outcome, VALIDATION_RESET_FAILED_MESSAGE));
 
       setSnackbar({
-        children: 'Validation states reset. Rows are pending validation.',
+        children: VALIDATION_RESET_SUCCESS_MESSAGE,
         severity: 'success'
       });
     } catch (error: unknown) {

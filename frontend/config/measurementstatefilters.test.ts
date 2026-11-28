@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMeasurementOverrideEligibleSql,
-  buildValidationOverrideStatements,
   getMeasurementRowStatus,
   buildMeasurementHasUnresolvedErrorsSql,
   buildMeasurementStateCountsSql,
@@ -64,31 +63,6 @@ describe('measurementstatefilters', () => {
       expect(sql).toContain('ing.MeasurementID = cm.CoreMeasurementID');
       // DISTINCT derived table keeps the fragment legal inside a DELETE on measurement_error_log (MySQL 1093).
       expect(sql).toContain('SELECT DISTINCT ilog.MeasurementID');
-    });
-
-    it('uses the identical eligibility fragment in the count, clear, and update statements', () => {
-      const eligible = buildMeasurementOverrideEligibleSql('myschema', 'cm');
-      const statements = buildValidationOverrideStatements('myschema', 7, 3);
-      expect(statements.count.query).toContain(eligible);
-      expect(statements.clearValidationLogs.query).toContain(eligible);
-      expect(statements.markValidated.query).toContain(eligible);
-    });
-
-    it('binds the plot/census scope as params on every statement, so another census never matches', () => {
-      const statements = buildValidationOverrideStatements('myschema', 7, 3);
-      for (const statement of [statements.count, statements.clearValidationLogs, statements.markValidated]) {
-        expect(statement.params).toEqual([7, 3, 7]);
-        expect(statement.query).toContain('PlotID = ? AND PlotCensusNumber = ?');
-        expect(statement.query).toContain('c.PlotID = ?');
-        expect(statement.query).not.toContain('7');
-      }
-    });
-
-    it('only deletes validation-source logs and never clears ingestion logs', () => {
-      const { query } = buildValidationOverrideStatements('myschema', 7, 3).clearValidationLogs;
-      expect(query).toContain("me.ErrorSource = 'validation'");
-      expect(query).not.toContain("ErrorSource = 'ingestion' AND me");
-      expect(query.startsWith('DELETE mel')).toBe(true);
     });
   });
 

@@ -14,6 +14,12 @@ import { INFINITE_DEFAULT_CHUNK } from './hooks/useinfinitegridrows';
 import type { ViewDataRowDetailsProps } from '@/components/viewdata/viewdatarowdetails';
 import { HTTPResponses } from '@/config/macros';
 import { MUI_ROW_EDIT_CANCELLED_MESSAGE } from '@/lib/muirowedit';
+import {
+  VALIDATION_RESET_ENDPOINT,
+  VALIDATION_RESET_SUCCESS_MESSAGE,
+  VALIDATION_SCOPE_ACTION_CODES,
+  VALIDATION_SCOPE_BUSY_MESSAGE
+} from '@/config/validationscopeactions';
 
 const ctx = vi.hoisted(() => {
   const noop = () => undefined;
@@ -275,6 +281,54 @@ describe('MeasurementsCommons View Data page controls', () => {
     expect(await screen.findByTestId('validation-override-modal')).toBeInTheDocument();
     act(() => latestControls().onResetValidations());
     expect(await screen.findByText('Reset Validation States?')).toBeInTheDocument();
+  });
+
+  const resetRequests = () =>
+    fetchMock.mock.calls
+      .filter(([url]) => String(url) === VALIDATION_RESET_ENDPOINT)
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
+  const queryWrites = () =>
+    fetchMock.mock.calls.filter(([url, init]) => String(url) === QUERY_URL && /UPDATE|DELETE/i.test(String((init as RequestInit | undefined)?.body ?? '')));
+
+  async function confirmReset() {
+    render(<MeasurementsGridHarness initialRows={[ROW]} gridColumns={GRID_COLUMNS} renderAboveGrid={renderAboveGrid} />);
+    await waitFor(() => expect(latestControls()?.stateCounts).not.toBeNull());
+    act(() => latestControls().onResetValidations());
+    const yesButton = await screen.findByRole('button', { name: 'Yes' });
+    const countReadsBeforeReset = countRequests().length;
+    await userEvent.click(yesButton);
+    return countReadsBeforeReset;
+  }
+
+  it('resets through the scoped reset route with the active census, then rebuilds the summary and re-reads the counts', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === VALIDATION_RESET_ENDPOINT ? Promise.resolve(respond({ resetMeasurementCount: 3, resolvedValidationErrorCount: 2 })) : route(input, init)
+    );
+    const countReadsBeforeReset = await confirmReset();
+    expect(await screen.findByText(VALIDATION_RESET_SUCCESS_MESSAGE)).toBeInTheDocument();
+    console.log('[page controls] reset', JSON.stringify(resetRequests()), 'rebuilds', viewRebuildRequests().length);
+    expect(resetRequests()).toEqual([{ schema: 'testschema', plotID: PLOT_ID, censusID: ctx.census.dateRanges[0].censusID }]);
+    expect(queryWrites(), 'no SQL is sent from the browser').toEqual([]);
+    await waitFor(() => expect(viewRebuildRequests().length).toBeGreaterThan(0));
+    await waitFor(() => expect(countRequests().length, 'the counts are read again after the reset').toBeGreaterThan(countReadsBeforeReset));
+  });
+
+  it('tells the user the census is busy when the reset route answers 423, and rebuilds nothing', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === VALIDATION_RESET_ENDPOINT
+        ? Promise.resolve({
+            ok: false,
+            status: HTTPResponses.LOCKED,
+            json: async () => ({ error: VALIDATION_SCOPE_BUSY_MESSAGE, code: VALIDATION_SCOPE_ACTION_CODES.scopeBusy })
+          } as Response)
+        : route(input, init)
+    );
+    await confirmReset();
+    expect(await screen.findByText(new RegExp(VALIDATION_SCOPE_BUSY_MESSAGE.replace(/[.;]/g, '\\$&')))).toBeInTheDocument();
+    console.log('[page controls] reset busy', JSON.stringify(resetRequests()), 'rebuilds', viewRebuildRequests().length);
+    expect(resetRequests()).toHaveLength(1);
+    expect(viewRebuildRequests()).toEqual([]);
+    expect(screen.getByText('Reset Validation States?'), 'the dialog stays open so the user can retry').toBeInTheDocument();
   });
 
   it('uses the View Data grid toolbar slot and cycles density into the grid', async () => {
