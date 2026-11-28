@@ -633,6 +633,15 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const gridRows = isInfiniteOn ? infinite.rows : rows;
   const gridRowCount = isInfiniteOn ? infinite.rows.length : rowCount;
 
+  // A refetch that returns the page SWR already holds leaves gridData unchanged, so the load
+  // effect never runs again and a row committed locally after the server dropped it would stay.
+  const refetchAndReplaceRows = useCallback(async () => {
+    const refreshedPage = await refetch({ strict: true });
+    if (!refreshedPage) return;
+    setRows(refreshedPage.output);
+    setRowCount(refreshedPage.totalCount);
+  }, [refetch]);
+
   const handleRefresh = useCallback(async () => {
     if (isInfiniteOn) {
       await infinite.refresh();
@@ -1029,13 +1038,13 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         if (isInfiniteOn) await infinite.refresh();
         if (onDataUpdate) await onDataUpdate(updatedRow, oldRow);
         triggerRefresh([gridType as keyof UnifiedValidityFlags]);
-        await refetch();
+        await refetchAndReplaceRows();
       } catch (error: unknown) {
         return asError(error);
       }
       return undefined;
     },
-    [isInfiniteOn, infinite, setRows, onDataUpdate, triggerRefresh, gridType, refetch]
+    [isInfiniteOn, infinite, setRows, onDataUpdate, triggerRefresh, gridType, refetchAndReplaceRows]
   );
 
   const performSaveAction = useCallback(

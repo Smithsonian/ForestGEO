@@ -222,6 +222,14 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
   }
 }
 
+// Failed rows are addressed by CoreMeasurementID everywhere else (edit preview/apply, reingest), so key
+// them by it too: a page index is handed to a different row when a refetch drops a promoted row.
+export class FailedMeasurementsMapper extends GenericMapper<FailedMeasurementsRDS, FailedMeasurementsResult> {
+  mapData(results: FailedMeasurementsResult[], indexOffset = 1): FailedMeasurementsRDS[] {
+    return super.mapData(results, indexOffset).map(row => (row.failedMeasurementID ? { ...row, id: row.failedMeasurementID } : row));
+  }
+}
+
 class MapperFactory {
   static getMapper<RDS, Result>(type: string): IDataMapper<RDS, Result> {
     switch (type) {
@@ -241,7 +249,7 @@ class MapperFactory {
       case 'cmattributes':
         return new GenericMapper<CMAttributesRDS, CMAttributesResult>() as unknown as IDataMapper<RDS, Result>;
       case 'failedmeasurements':
-        return new GenericMapper<FailedMeasurementsRDS, FailedMeasurementsResult>() as unknown as IDataMapper<RDS, Result>;
+        return new FailedMeasurementsMapper() as unknown as IDataMapper<RDS, Result>;
       case 'measurementssummary':
       case 'measurementssummaryview':
         return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;

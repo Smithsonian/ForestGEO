@@ -6,6 +6,9 @@ import {
   DETAILS_SHEET_TEXT,
   EDIT_LOCK_TOOLTIPS,
   ERRORS_FLAT_GRID_PAGE_SIZE,
+  formatErrorTypeLabel,
+  formatGroupRowCount,
+  formatViewErrorsFactsLine,
   VIEW_ERRORS_ALERTS,
   VIEW_ERRORS_TEXT,
   type ErrorExplorerRow,
@@ -20,6 +23,7 @@ import {
   installMemoryStorage,
   installPageFetch,
   jsonResponse,
+  PAGE_ACTIVE_MEASUREMENTS,
   ROUTES,
   SECOND_CENSUS_ID,
   type FetchRoute,
@@ -49,6 +53,7 @@ vi.mock('@/components/client/clientmacros', () => ({ loadSelectableOptions: vi.f
 vi.mock('@/ailogger', () => ({ default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), event: vi.fn() } }));
 
 import ErrorsExplorer from './errorsexplorer';
+import { loadSelectableOptions } from '@/components/client/clientmacros';
 
 const VALIDATION_ROW = explorerRow(101, {
   errorCodes: ['14'],
@@ -1488,5 +1493,98 @@ describe('the flat grid in infinite mode', () => {
         expect(staleWarning(), 'the old census rows are gone, so is the warning').toBeNull();
       });
     });
+  });
+});
+
+describe('a code correction that resolves its row (#514)', () => {
+  const INVALID_CODE = 'XQ';
+  const CORRECTED_CODE = 'M';
+  const INVALID_CODE_MESSAGE = 'Attribute code does not exist in attributes table';
+  const INVALID_CODE_GRID_LABEL = `${formatErrorTypeLabel(INVALID_CODE_MESSAGE)} rows`;
+  const FIRST_INVALID_CODE_ROW_ID = 401;
+  const INVALID_CODE_ROW_COUNT = 7;
+  const CORRECTED_ROW_ID = 403;
+  const INVALID_CODE_ROWS = Array.from({ length: INVALID_CODE_ROW_COUNT }, (_, index) =>
+    explorerRow(FIRST_INVALID_CODE_ROW_ID + index, {
+      attributes: INVALID_CODE,
+      rawCodes: INVALID_CODE,
+      errorCodes: ['14'],
+      primaryErrorMessage: INVALID_CODE_MESSAGE,
+      errorMessages: [INVALID_CODE_MESSAGE],
+      errorFields: ['attributes']
+    })
+  );
+
+  function codesInput(grid: HTMLElement, rowID: number): HTMLInputElement | null {
+    return grid.querySelector(`[data-id="${rowID}"] [data-field="attributes"] input`);
+  }
+
+  // One object for every load: the page reloads its options on each render here, and a new
+  // object each time would re-render it forever.
+  const CODE_OPTIONS = { codes: [CORRECTED_CODE, INVALID_CODE] };
+
+  beforeEach(() => {
+    vi.mocked(loadSelectableOptions).mockImplementation(async (_site, _plot, _census, setSelectableOpts) => {
+      setSelectableOpts(CODE_OPTIONS);
+    });
+  });
+
+  afterEach(() => {
+    vi.mocked(loadSelectableOptions).mockImplementation(async () => undefined);
+  });
+
+  it('lists the same rows in the grid as the group count and the facts line report once the save has refreshed', async () => {
+    const user = userEvent.setup();
+    const resolvedIDs = new Set<number>();
+    let previewedID: number | null = null;
+    const unresolvedRows = () => INVALID_CODE_ROWS.filter(row => !resolvedIDs.has(Number(row.coreMeasurementID)));
+    const network = installPageFetch(
+      defaultRoutes({
+        facets: () => {
+          const remaining = unresolvedRows().length;
+          return jsonResponse(facetsResponse([facetOf(INVALID_CODE_ROWS[0], remaining)], { affectedMeasurements: remaining, errorTypeCount: 1 }));
+        },
+        query: () => {
+          const rows = unresolvedRows();
+          return jsonResponse({ rows, totalRows: rows.length });
+        },
+        preview: request => {
+          previewedID = Number(request.body?.targetID);
+          return jsonResponse({ ...INFO_PLAN, targetID: previewedID, fieldChanges: [{ field: 'Attributes', from: INVALID_CODE, to: CORRECTED_CODE }] });
+        },
+        apply: () => {
+          if (previewedID !== null) resolvedIDs.add(previewedID);
+          return jsonResponse({ ...APPLY_RESULT, updatedIDs: { coremeasurements: previewedID } });
+        }
+      })
+    );
+    render(<ErrorsExplorer />);
+    const grid = await findLoadedGrid(INVALID_CODE_GRID_LABEL);
+    await waitFor(() => expect(grid.querySelectorAll('[role="row"][data-id]')).toHaveLength(INVALID_CODE_ROW_COUNT));
+
+    await startEdit(user, grid, CORRECTED_ROW_ID);
+    await waitFor(() => expect(codesInput(grid, CORRECTED_ROW_ID), 'the Codes editor is revealed while the row is open').not.toBeNull());
+    const input = codesInput(grid, CORRECTED_ROW_ID) as HTMLInputElement;
+    await user.click(input);
+    await user.keyboard('{Backspace}');
+    await user.click(await screen.findByRole('option', { name: CORRECTED_CODE }));
+    await user.click(rowAction(grid, CORRECTED_ROW_ID, 'Save'));
+    await waitFor(() => expect(network.bodiesFor(ROUTES.apply)).toHaveLength(1));
+    await waitFor(() => expect(showButtons()[0], 'every read after the save has settled').toBeEnabled());
+
+    const remainingCount = INVALID_CODE_ROW_COUNT - 1;
+    const gridRowIDs = Array.from(grid.querySelectorAll('[role="row"][data-id]'), row => Number(row.getAttribute('data-id')));
+    const groupHeading = screen.getByRole('heading', { level: 2, name: new RegExp(formatErrorTypeLabel(INVALID_CODE_MESSAGE)) }).textContent ?? '';
+    const factsLine = screen.getByTestId('errors-explorer-facts').textContent ?? '';
+    console.log(
+      '[#514 view errors after code correction]',
+      JSON.stringify({ previewBody: network.bodiesFor(ROUTES.preview)[0], resolvedIDs: Array.from(resolvedIDs), gridRowIDs, groupHeading, factsLine })
+    );
+    expect(network.bodiesFor(ROUTES.preview)[0]?.newRow, 'the save was a codes correction').toEqual({ Attributes: CORRECTED_CODE });
+    expect(gridRowIDs, 'the corrected row left the grid').not.toContain(CORRECTED_ROW_ID);
+    expect(gridRowIDs, 'the grid lists every row still matching').toEqual(unresolvedRows().map(row => row.coreMeasurementID));
+    expect(groupHeading, 'the group count matches the grid').toContain(formatGroupRowCount(remainingCount, PAGE_ACTIVE_MEASUREMENTS));
+    expect(gridRowIDs).toHaveLength(remainingCount);
+    expect(factsLine, 'the facts line matches the grid').toContain(formatViewErrorsFactsLine(remainingCount, PAGE_ACTIVE_MEASUREMENTS, 1));
   });
 });
